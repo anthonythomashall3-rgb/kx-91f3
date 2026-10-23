@@ -5,21 +5,21 @@
    3. writes each protected quiz's LOCKqz password into Brightspace (and removes released ones)
    4. shows a panel to choose which quizzes LOCKqz protects */
 (async function () {
-  if (window.__lqzSync) return;
-  window.__lqzSync = true;
+  if (document.getElementById("lqz-sync")) return;   // already open on screen
   var SRC = (document.currentScript && document.currentScript.src) || "";
   var KEY = SRC ? new URL(SRC).searchParams.get("k") : "";
   var API = SRC ? new URL(SRC).origin + "/api" : "";
   var DASH = SRC ? new URL(SRC).origin + "/dashboard" : "";
 
   var box = document.createElement("div");
+  box.id = "lqz-sync";
   box.style.cssText = "position:fixed;top:16px;right:16px;z-index:2147483647;width:440px;max-height:85vh;overflow:auto;background:#fff;" +
     "border:2px solid #990000;border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,.3);font:14px -apple-system,Segoe UI,sans-serif;color:#111;text-align:left";
   box.innerHTML = '<div style="position:sticky;top:0;background:#990000;color:#fff;padding:10px 14px;font-weight:700;display:flex;justify-content:space-between">' +
     'LOCKqz Sync<span id="lqz-x" style="cursor:pointer;padding:0 4px">&#10005;</span></div><div id="lqz-b" style="padding:12px 14px">Starting...</div>';
   document.body.appendChild(box);
   var B = box.querySelector("#lqz-b");
-  box.querySelector("#lqz-x").onclick = function () { box.remove(); window.__lqzSync = false; };
+  box.querySelector("#lqz-x").onclick = function () { box.remove(); };
   var say = function (h) { B.innerHTML = h; };
   var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
   var day = function (t) { return t ? new Date(t).toLocaleDateString([], { month: "short", day: "numeric" }) : ""; };
