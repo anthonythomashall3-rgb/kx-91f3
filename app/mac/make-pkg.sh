@@ -19,6 +19,7 @@ DESTREL="Library/Application Support/LOCKqz"
 mkdir -p "$ROOT/$DESTREL"
 cp "$APP/lockqz.sh" "$APP/lockqzd.py" "$APP/lockqz-agent.py" "$APP/browser-policy.py" "$APP/blocklist.txt" "$APP/com.lockqz.pf.conf" "$ROOT/$DESTREL/"
 [ -f "$APP/lockqz-core.sh" ] && cp "$APP/lockqz-core.sh" "$ROOT/$DESTREL/" || true
+cp "$APP/extra-block.sh" "$ROOT/$DESTREL/"   # VPN/VM/remote/overlay/model/Apple Intelligence blockers (sourced by lockqz.sh)
 /usr/bin/python3 - "$ROOT/$DESTREL/config.json" "$TOKEN" "$API" <<'PY'
 import json,sys
 json.dump({"port":8787,"token":sys.argv[2],"api_base":sys.argv[3],

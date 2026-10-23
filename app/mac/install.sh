@@ -31,7 +31,7 @@ DEVICE="mac-$(/usr/bin/uuidgen | tr 'A-Z' 'a-z')"
 echo "== installing LOCKqz helper =="
 
 mkdir -p "$DEST"
-cp "$APP/lockqz.sh" "$APP/lockqz-core.sh" "$APP/lockqzd.py" "$APP/lockqz-agent.py" "$APP/browser-policy.py" \
+cp "$APP/lockqz.sh" "$APP/lockqz-core.sh" "$APP/extra-block.sh" "$APP/lockqzd.py" "$APP/lockqz-agent.py" "$APP/browser-policy.py" \
    "$APP/blocklist.txt" "$APP/com.lockqz.pf.conf" "$DEST/"
 chmod +x "$DEST/lockqz.sh" 2>/dev/null || true
 

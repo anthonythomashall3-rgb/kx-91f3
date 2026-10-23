@@ -89,6 +89,23 @@ $Key = Get-DeviceKey
 
 function Engine([string]$c) { & powershell -ExecutionPolicy Bypass -File $Engine $c | Out-Null }
 function EngineLocked { (& powershell -ExecutionPolicy Bypass -File $Engine status) -match "LOCKED" }
+# Active-lock record (SYSTEM/admins only). Brightspace checks access only when a quiz is LAUNCHED, so the
+# lock must survive this service being killed: on restart we resume an unexpired lock instead of unlocking.
+$LockFile = if ($env:LOCKQZ_LOCKFILE) { $env:LOCKQZ_LOCKFILE } else { "$env:ProgramData\LOCKqz\active_lock.json" }
+function Save-Lock {
+  New-Item -ItemType Directory -Force -Path (Split-Path $LockFile) | Out-Null
+  @{ quiz_id=$State.quiz_id; student=$State.student; locked_since=$State.locked_since; max_minutes=$State.max_minutes } | ConvertTo-Json -Compress | Set-Content -Path $LockFile -Encoding UTF8
+  try { icacls $LockFile /inheritance:r /grant:r "SYSTEM:F" "Administrators:F" | Out-Null } catch {}
+}
+function Clear-Lock { Remove-Item -Path $LockFile -Force -ErrorAction SilentlyContinue }
+function Load-Lock {
+  try {
+    $r = Get-Content $LockFile -Raw | ConvertFrom-Json
+    $now = [int][double]::Parse((Get-Date -UFormat %s)); $mx = if ($r.max_minutes) { [int]$r.max_minutes } else { $MaxMin }
+    if ($r.quiz_id -and $r.locked_since -gt 0 -and ($now - [int]$r.locked_since) -ge 0 -and ($now - [int]$r.locked_since) -lt ($mx * 60)) { return $r }
+  } catch {}
+  Clear-Lock; return $null
+}
 function Lock-Id($u) {
   # Same rule as the agent and the server: "<ou>-<qi>" from the quiz URL.
   $qi = if ($u -match "qi=(\d+)") { $Matches[1] } else { "x" }
@@ -126,6 +143,8 @@ $watcher.AddScript({
         WReport "auto_unlock" "max_minutes" $null
         $State.state = "unlocked"; $State.quiz_id = $null; $State.locked_since = 0
         & powershell -ExecutionPolicy Bypass -File $Engine unlock | Out-Null
+        $lf = if ($env:LOCKQZ_LOCKFILE) { $env:LOCKQZ_LOCKFILE } else { "$env:ProgramData\LOCKqz\active_lock.json" }
+        Remove-Item -Path $lf -Force -ErrorAction SilentlyContinue
       } else {
         if (-not (ELocked)) { WReport "tamper" "hosts_block_removed" $null }
         & powershell -ExecutionPolicy Bypass -File $Engine lock | Out-Null
@@ -140,7 +159,13 @@ $watcher.AddScript({
 $watcher.BeginInvoke() | Out-Null
 
 # Fail safe on start: never leave a machine locked across a restart.
-Engine "unlock"
+$saved = Load-Lock
+if ($saved) {
+  # Service was killed or the PC rebooted mid-quiz: stay locked and report it. Hard max still unlocks on time.
+  $State.state="locked"; $State.quiz_id=$saved.quiz_id; if ($saved.student) { $State.student=$saved.student }
+  $State.locked_since=[int]$saved.locked_since; $State.max_minutes=[int]$saved.max_minutes
+  Engine "lock"; Report "tamper" @{ detail="helper_restarted_mid_quiz" } $null $saved.quiz_id
+} else { Engine "unlock" }
 LQ-Register $Api $Device $Key $State | Out-Null
 
 $listener = New-Object System.Net.HttpListener
@@ -160,8 +185,8 @@ while ($listener.IsListening) {
   if ($req.HasEntityBody) { $body = (New-Object IO.StreamReader($req.InputStream)).ReadToEnd() | ConvertFrom-Json }
   $out = @{ ok = $true }
   switch ($path) {
-    "/lock"      { $State.state="locked"; $State.quiz_id=$body.quiz_id; if($body.student){$State.student=$body.student}; if($body.max_minutes){$State.max_minutes=[int]$body.max_minutes}; $State.locked_since=[int][double]::Parse((Get-Date -UFormat %s)); Engine "lock"; Report "lock" $null; $out.state="locked" }
-    "/unlock"    { $q = if ($State.quiz_id) { $State.quiz_id } else { $body.quiz_id }; $State.state="unlocked"; $State.quiz_id=$null; Engine "unlock"; Report "unlock" $null $null $q; $out.state="unlocked" }
+    "/lock"      { $State.state="locked"; $State.quiz_id=$body.quiz_id; if($body.student){$State.student=$body.student}; if($body.max_minutes){$State.max_minutes=[int]$body.max_minutes}; $State.locked_since=[int][double]::Parse((Get-Date -UFormat %s)); Engine "lock"; Save-Lock; Report "lock" $null; $out.state="locked" }
+    "/unlock"    { $q = if ($State.quiz_id) { $State.quiz_id } else { $body.quiz_id }; $State.state="unlocked"; $State.quiz_id=$null; Engine "unlock"; Clear-Lock; Report "unlock" $null $null $q; $out.state="unlocked" }
     "/student"   { if($body.student){$State.student=$body.student}; Report "install" @{ platform="windows"; version="0.2.0" }; $out.student=$State.student }
     "/heartbeat" { Report "heartbeat" $body "agent" }
     "/password"  {

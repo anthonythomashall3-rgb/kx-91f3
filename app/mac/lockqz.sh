@@ -25,7 +25,8 @@ DEV_KEY_HASH="4695a520432e105e967dd2703366c24c039fe0a850fe35db03b73b6b9506aecd"
 
 # Shared, unit-tested block/unblock core (see tests/test_engine.sh).
 source "$HERE/lockqz-core.sh"
-source "$HERE/extra-block.sh"   # VPN/VM/remote-desktop/overlay/local-model/Apple Intelligence blockers
+if [ -f "$HERE/extra-block.sh" ]; then source "$HERE/extra-block.sh"   # VPN/VM/remote-desktop/overlay/local-model/Apple Intelligence blockers
+else extra_lock(){ :; }; extra_unlock(){ :; }; fi   # core lock still works if the file is missing
 
 AI_APPS=("ChatGPT" "Claude" "Copilot" "Perplexity" "Ollama" "LM Studio" \
          "GPT4All" "Msty" "Cluely" "Google Gemini" "Jan" "Pieces" "MacGPT" \

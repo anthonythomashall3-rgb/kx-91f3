@@ -13,7 +13,7 @@ bash make-pkg.sh --token "$TOK" --api https://lockqz.pages.dev/api --out /tmp/lo
 check "pkg built" "[ -s /tmp/lockqz-mac.pkg ]"
 sudo installer -pkg /tmp/lockqz-mac.pkg -target / >/tmp/install.log 2>&1
 check "installer succeeded" "grep -q 'successful' /tmp/install.log"
-for f in lockqz.sh lockqz-core.sh lockqzd.py lockqz-agent.py browser-policy.py blocklist.txt config.json; do
+for f in lockqz.sh lockqz-core.sh extra-block.sh lockqzd.py lockqz-agent.py browser-policy.py blocklist.txt config.json; do
   check "installed $f" "[ -f \"$DEST/$f\" ]"
 done
 check "device id set" "grep -q '\"mac-' \"$DEST/config.json\""

@@ -55,11 +55,41 @@ DRYRUN  = os.environ.get("LOCKQZ_DRYRUN", "0")
 DEV_KEY_HASH = "4695a520432e105e967dd2703366c24c039fe0a850fe35db03b73b6b9506aecd"
 
 KEY_PATH = os.environ.get("LOCKQZ_KEY_PATH") or "/Library/Application Support/LOCKqz/device.key"
+# Active-lock record (root-only). Brightspace checks access only when a quiz is LAUNCHED, so the lock
+# must survive the helper being killed: on restart we resume an unexpired lock instead of unlocking.
+LOCKFILE = os.environ.get("LOCKQZ_LOCKFILE") or "/Library/Application Support/LOCKqz/active_lock.json"
 NET = {"skew": 0.0, "registered": False}   # skew: server clock minus ours, learned from a 401
 
 STATE = {"state": "unlocked", "quiz_id": None, "student": CONF.get("student"),
          "locked_at": None, "locked_since": 0.0, "max_minutes": MAX_MIN}
 LOCK = threading.Lock()
+
+def save_lock():
+    try:
+        os.makedirs(os.path.dirname(LOCKFILE), exist_ok=True)
+        rec = {k: STATE[k] for k in ("quiz_id", "student", "locked_at", "locked_since", "max_minutes")}
+        fd = os.open(LOCKFILE + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f: json.dump(rec, f)
+        os.replace(LOCKFILE + ".tmp", LOCKFILE)
+    except Exception as e:
+        log("could not save lock record: %s" % e)
+
+def clear_lock():
+    try: os.remove(LOCKFILE)
+    except FileNotFoundError: pass
+    except Exception as e: log("could not clear lock record: %s" % e)
+
+def load_lock():
+    """An unexpired saved lock, or None. Expired/corrupt records are discarded."""
+    try:
+        with open(LOCKFILE) as f: rec = json.load(f)
+        since, mx = float(rec.get("locked_since") or 0), int(rec.get("max_minutes") or MAX_MIN)
+        if rec.get("quiz_id") and since and 0 <= time.time() - since < mx * 60:
+            return rec
+    except Exception:
+        pass
+    clear_lock()
+    return None
 
 def engine(cmd):
     try:
@@ -234,7 +264,7 @@ def watcher():
                 if STATE["state"] != "developer":
                     log("developer mode ON — not locking on this Mac")
                     STATE.update(state="developer", quiz_id=None, locked_at=None, locked_since=0.0)
-                    engine("unlock")
+                    engine("unlock"); clear_lock()
             elif STATE["state"] == "developer":
                 STATE.update(state="unlocked", quiz_id=None)
             if STATE["state"] == "locked":
@@ -243,7 +273,7 @@ def watcher():
                 if STATE["locked_since"] and (time.time() - STATE["locked_since"] > STATE["max_minutes"] * 60):
                     log("hard-max reached — auto-unlocking")
                     STATE.update(state="unlocked", quiz_id=None, locked_at=None, locked_since=0.0)
-                    engine("unlock"); do_auto = True
+                    engine("unlock"); clear_lock(); do_auto = True
                 else:
                     do_tamper = not engine_locked()
                     if do_tamper:
@@ -302,14 +332,14 @@ class H(BaseHTTPRequestHandler):
                              max_minutes=int(body.get("max_minutes", MAX_MIN)),
                              locked_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                              locked_since=time.time())
-                engine("lock")
+                engine("lock"); save_lock()
             report("lock")
             return self._send(200, {"ok": True, "state": "locked"})
         if self.path == "/unlock":
             with LOCK:
                 qid = STATE["quiz_id"] or body.get("quiz_id")   # report WHICH quiz ended (live monitor "done")
                 STATE.update(state="unlocked", quiz_id=None, locked_at=None, locked_since=0.0)
-                engine("unlock")
+                engine("unlock"); clear_lock()
             report("unlock", {"quiz_id": qid})
             return self._send(200, {"ok": True, "state": "unlocked"})
         if self.path == "/student":
@@ -351,7 +381,18 @@ def startup_network():
     refresh_blocklist()
 
 def main():
-    engine("unlock")  # fail safe: never locked across a restart
+    rec = None if developer_mode() else load_lock()
+    if rec:
+        # Helper was killed or the Mac rebooted mid-quiz: stay locked, report it. The hard max still
+        # auto-unlocks on time, so nobody is ever left locked.
+        STATE.update(state="locked", quiz_id=rec["quiz_id"], student=rec.get("student") or STATE["student"],
+                      locked_at=rec.get("locked_at"), locked_since=float(rec["locked_since"]),
+                      max_minutes=int(rec.get("max_minutes") or MAX_MIN))
+        engine("lock")
+        log("resumed lock for %s after restart (tamper)" % rec["quiz_id"])
+        threading.Thread(target=lambda: report("tamper", {"quiz_id": rec["quiz_id"], "detail": "helper_restarted_mid_quiz"}), daemon=True).start()
+    else:
+        engine("unlock")  # no live quiz: never stay locked across a restart
     threading.Thread(target=startup_network, daemon=True).start()
     threading.Thread(target=watcher, daemon=True).start()
     log("listening on 127.0.0.1:%d (v%s, dryrun=%s)" % (PORT, VERSION, DRYRUN))
