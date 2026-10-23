@@ -87,7 +87,7 @@ async function suite(label, oldSchema) {
   const env = { DB: d1real(sqlite), TEACHER_KEY: ADMIN, REQUIRE_SIGNED: "1" };
 
   // First account becomes admin; make it so the teacher under test is a normal teacher.
-  await call(env, "/signup", { email: "admin@usc.edu", password: "adminpass1" });
+  const ADMIN_TOK = (await call(env, "/signup", { email: "admin@usc.edu", password: "adminpass1" })).data.token;
 
   console.log("T1 open signup, no invite needed, new teacher is UNVERIFIED");
   let r = await call(env, "/signup", { email: "prof@usc.edu", password: "profpass1", name: "Prof" });
@@ -105,9 +105,18 @@ async function suite(label, oldSchema) {
   r = await call(env, "/gate", { ou: OU, qi: QI, on: true }, { teacher: TOK });
   check("unverified /gate refused (403)", r.status === 403, `got ${r.status}`);
 
-  console.log("T3 syncing a staff course auto-verifies (no email, no admin step)");
+  console.log("T3a a forged sync before the course is trusted does NOT verify (browser role claims are not trusted)");
+  r = await call(env, "/sync", { courses: [ { ou: "11111", name: "Fake", role: "Instructor", classlist: [ { id: "9", name: "Prof", email: "prof@usc.edu", role: "Instructor" } ], quizzes: [] } ] }, { sync: SYNC });
+  check("self-claimed staff role in an untrusted course does not verify", (await getc(env, "/me", { teacher: TOK })).data?.verified === false);
+  console.log("T3 once a trusted account (admin) has synced the real course, its listed professor verifies on their own sync");
+  await call(env, "/sync", { courses: [ { ou: OU, name: "ECON 203", code: "ECON-203", role: "Teaching Assistant",
+      classlist: [ { id: "4000", name: "Prof", email: "prof@usc.edu", role: "Instructor" },
+                   { id: "4001", name: "Al Student", email: "al@usc.edu", role: "Student" },
+                   { id: "4002", name: "Bo Student", email: "bo@usc.edu", role: "Student" } ],
+      quizzes: [] } ] }, { teacher: ADMIN_TOK });
   r = await call(env, "/sync", { courses: [ { ou: OU, name: "ECON 203", code: "ECON-203", role: "Instructor",
-      classlist: [ { id: "4001", name: "Al Student", email: "al@usc.edu", role: "Student" },
+      classlist: [ { id: "4000", name: "Prof", email: "prof@usc.edu", role: "Instructor" },
+                   { id: "4001", name: "Al Student", email: "al@usc.edu", role: "Student" },
                    { id: "4002", name: "Bo Student", email: "bo@usc.edu", role: "Student" } ],
       quizzes: [ { qi: QI, name: "Midterm", active: true } ] } ] }, { sync: SYNC });
   check("sync accepted", r.status === 200, JSON.stringify(r.data));
