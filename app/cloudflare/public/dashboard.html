@@ -120,9 +120,9 @@
   </div>
 
   <div id="invitecard" class="card hide">
-    <h2>Invite a teacher</h2>
+    <h2>Invite a professor</h2>
     <div class="bar">
-      <input id="iemail" type="email" placeholder="Teacher's email" size="28">
+      <input id="iemail" type="email" placeholder="Professor's email" size="28">
       <span class="muted">active until</span> <input id="iuntil" type="date">
       <button onclick="makeInvite()">Create invite</button>
     </div>
@@ -131,7 +131,7 @@
   </div>
 
   <div id="admin" class="card hide">
-    <h2>Admin — teachers</h2>
+    <h2>Admin — professors</h2>
     <table id="teachers"><thead><tr><th>Email</th><th>Name</th><th>Joined</th><th>Active until</th><th></th></tr></thead><tbody></tbody></table>
     <div class="muted" style="margin-top:6px">Activate after payment. Pick the semester end date; the account turns off by itself after that.</div>
   </div>
@@ -297,7 +297,7 @@ async function protectQ(ou, qi, on){
 let INVITE = "";
 const inviteLink = code => location.origin + "/?invite=" + code;
 function inviteMail(email, link){
-  const s = "Your LOCKqz teacher account";
+  const s = "Your LOCKqz professor account";
   const b = "Hi,\n\nYou're invited to LOCKqz. It blocks AI on students' computers during your Brightspace quizzes, then turns AI back on when the quiz ends.\n\n"
     + "1. Create your account (this link works once):\n   " + link + "\n\n"
     + "2. On your LOCKqz dashboard, drag the LOCKqz Sync button to your bookmarks bar.\n\n"
@@ -329,7 +329,7 @@ async function cancelInvite(code){ if(confirm("Cancel this invite?")){ await pos
   const d = await get("/invite-check?code="+encodeURIComponent(INVITE));
   if(!d.ok){ INVITE=""; $("lerr").textContent="This invite link is invalid or was already used. Ask the LOCKqz admin for a new one."; return; }
   if(!signup) toggle();
-  $("ltitle").textContent="Create your teacher account";
+  $("ltitle").textContent="Create your professor account";
   $("signuprow").classList.remove("hide");
   if(d.email){ $("email").value=d.email; $("email").readOnly=true; }
 })();

@@ -11,7 +11,7 @@ Chromium, Vivaldi, Arc, Safari via Apple Events; Firefox via its session file) a
     any Google/Bing/DDG/... search tab onto Google "Web" results (no AI answer) —
     the backstop for Safari, which has no policy layer
   * when the quiz page is gone (submitted / left) -> tells the helper to UNLOCK
-First run asks the student's name once so the teacher's roster shows who is locked.
+First run asks the student's name once so the professor's roster shows who is locked.
 """
 import hashlib, json, os, re, subprocess, threading, time, urllib.request, urllib.parse, glob
 

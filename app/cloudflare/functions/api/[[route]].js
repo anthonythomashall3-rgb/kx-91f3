@@ -281,13 +281,13 @@ export async function onRequest(context) {
       const email = String(body.email||"").trim().toLowerCase();
       const until = body.until ? String(body.until).slice(0,10) : null;   // "YYYY-MM-DD" or null = off
       const r = await db.prepare("UPDATE teachers SET active_until=? WHERE email=?").bind(until, email).run();
-      return r.meta.changes ? json({ email, active_until: until }) : json({ error:"no such teacher" }, 404);
+      return r.meta.changes ? json({ email, active_until: until }) : json({ error:"no such professor" }, 404);
     }
     if (p === "/reset" && request.method === "POST") {
       if (!me?.admin) return json({ error:"admin only" }, 401);
       const email = String(body.email||"").trim().toLowerCase(), salt = rid(16), pw = body.password || ("LQ-"+rid(8));
       const r = await db.prepare("UPDATE teachers SET pw_hash=?,salt=?,token=NULL WHERE email=?").bind(await hashPw(pw,salt), salt, email).run();
-      return r.meta.changes ? json({ email, password: pw }) : json({ error:"no such teacher" }, 404);
+      return r.meta.changes ? json({ email, password: pw }) : json({ error:"no such professor" }, 404);
     }
     // Admin only: invite a teacher (one-time code; optional email lock; account active until a date).
     if (p === "/invite" && request.method === "POST") {
@@ -337,7 +337,7 @@ export async function onRequest(context) {
       const ou = (u.match(/ou=(\d+)/) || u.match(/\/home\/(\d+)/) || u.match(/\/(\d+)(?:\/|$)/) || [])[1];
       if (!ou) return json({ error: "could not find the course id (ou=) in that link" }, 400);
       const ex = await db.prepare("SELECT teacher_id FROM courses WHERE ou=?").bind(ou).first();
-      if (ex && ex.teacher_id && ex.teacher_id !== me.id && !me.admin) return json({ error:"that course is already protected by another teacher" }, 409);
+      if (ex && ex.teacher_id && ex.teacher_id !== me.id && !me.admin) return json({ error:"that course is already protected by another professor" }, 409);
       const password = "LQ-" + rid(8);
       await db.prepare("INSERT INTO courses (ou,title,password,created_at,teacher_id) VALUES (?,?,?,?,?) ON CONFLICT(ou) DO UPDATE SET password=excluded.password,title=excluded.title,teacher_id=excluded.teacher_id")
         .bind(ou, body.title||null, password, now(), me.id).run();
@@ -363,7 +363,7 @@ export async function onRequest(context) {
 
     // ---------- Brightspace connector: runs on the teacher's own Brightspace login (LOCKqz Sync bookmark) ----------
     if (p === "/synckey") {
-      if (me.id === "admin") return json({ error:"log in with your teacher account" }, 400);
+      if (me.id === "admin") return json({ error:"log in with your professor account" }, 400);
       let k = (await db.prepare("SELECT sync_key FROM teachers WHERE id=?").bind(me.id).first())?.sync_key;
       if (!k || request.method === "POST") {
         k = "lqs_" + hex(crypto.getRandomValues(new Uint8Array(20)));

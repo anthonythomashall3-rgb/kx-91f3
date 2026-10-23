@@ -43,7 +43,7 @@ begin
     begin
       SetupFailed := True;
       SuppressibleMsgBox('LOCKqz could not finish setting up (code ' + IntToStr(R) + '). ' +
-        'Please run the installer again. If it keeps failing, tell your teacher.', mbError, MB_OK, IDOK);
+        'Please run the installer again. If it keeps failing, tell your professor.', mbError, MB_OK, IDOK);
     end;
   end;
 end;

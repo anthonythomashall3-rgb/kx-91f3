@@ -1,5 +1,5 @@
-/* LOCKqz Sync - the Brightspace connector. Loaded by the teacher's "LOCKqz Sync" bookmark and
-   run inside Brightspace on the teacher's OWN login (it can only see what they can see).
+/* LOCKqz Sync - the Brightspace connector. Loaded by the professor's "LOCKqz Sync" bookmark and
+   run inside Brightspace on the professor's OWN login (it can only see what they can see).
    1. reads every course where they are an instructor / TA: class list + quizzes
    2. saves them to LOCKqz
    3. writes each protected quiz's LOCKqz password into Brightspace (and removes released ones)
@@ -108,7 +108,7 @@
       if (cur.Password === pw) return "already";
       await writePw(ou, qi, pw); return "set";
     }
-    async function release(ou, qi, oldPw) {      // remove ONLY our password (never a teacher's own)
+    async function release(ou, qi, oldPw) {      // remove ONLY our password (never a professor's own)
       var cur = await get(quizUrl(ou, qi));
       if (cur.Password === oldPw) await writePw(ou, qi, null);
       return "cleared";
