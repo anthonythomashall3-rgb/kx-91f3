@@ -1,0 +1,292 @@
+// LOCKqz API (Cloudflare Pages Function). Bindings: env.DB (D1), env.TEACHER_KEY (admin key).
+// Routes are under /api/*.  Teachers sign up / log in with email + password; each sees only
+// their own quizzes, courses, students and activity. The TEACHER_KEY is the admin master key
+// (sees everything, can reset a teacher's password).
+const AI_DOMAINS = [
+  "openai.com","chatgpt.com","chat.openai.com","oaiusercontent.com","anthropic.com","claude.ai",
+  "gemini.google.com","bard.google.com","aistudio.google.com","generativelanguage.googleapis.com",
+  "copilot.microsoft.com","perplexity.ai","pplx.ai","poe.com","character.ai","you.com","phind.com",
+  "deepseek.com","mistral.ai","meta.ai","grok.com","x.ai","groq.com","cluely.com",
+  "api.openai.com","api.anthropic.com","api.perplexity.ai","api.mistral.ai"
+];
+const now = () => new Date().toISOString();
+const rid = (n=6) => Array.from(crypto.getRandomValues(new Uint8Array(n))).map(b=>"ABCDEFGHJKMNPQRSTUVWXYZ23456789"[b%30]).join("");
+const hex = a => Array.from(new Uint8Array(a)).map(b=>b.toString(16).padStart(2,"0")).join("");
+const json = (o, s=200) => new Response(JSON.stringify(o), { status: s, headers: { "Content-Type":"application/json","Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"Content-Type, X-LOCKqz-Teacher" } });
+
+// Password hashing: PBKDF2-SHA256, 100k rounds, per-user salt.
+async function hashPw(pw, salt) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name:"PBKDF2", hash:"SHA-256", salt:new TextEncoder().encode(salt), iterations:100000 }, key, 256);
+  return hex(bits);
+}
+const ids = u => ({ qi: (u.match(/qi=(\d+)/) || u.match(/quizId=(\d+)/) || [])[1] || null,
+                    ou: (u.match(/ou=(\d+)/) || u.match(/\/home\/(\d+)/) || [])[1] || null });
+
+export async function onRequest(context) {
+  const { request, env } = context;
+  const url = new URL(request.url);
+  const p = url.pathname.replace(/^\/api/, "") || "/";
+  const db = env.DB;
+  if (request.method === "OPTIONS") return json({}, 204);
+  const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
+
+  // ---- who is calling? admin (master key) | teacher (session token) | nobody ----
+  const hdr = (request.headers.get("X-LOCKqz-Teacher") || "").trim();
+  const adminKey = (env.TEACHER_KEY || "").trim();
+  let me = null;                                   // { id, email, name, admin }
+  if (hdr && adminKey && hdr === adminKey) me = { id:"admin", email:"admin", name:"Admin", admin:true };
+  else if (hdr) {
+    const t = await db.prepare("SELECT id,email,name,role,active_until FROM teachers WHERE token=?").bind(hdr).first().catch(()=>null);
+    if (t) me = { id:t.id, email:t.email, name:t.name, admin: t.role === "admin", active: t.role === "admin" || (!!t.active_until && t.active_until >= now().slice(0,10)), active_until: t.active_until||null };
+  }
+  const teacher = () => !!me;
+  const mine = (col="teacher_id") => me.admin ? { sql:"1=1", args:[] } : { sql:`${col}=?`, args:[me.id] };
+
+  try {
+    // ---- device + extension endpoints (no auth) ----
+    if (p === "/blocklist") return json({ domains: AI_DOMAINS });
+
+    if (p === "/install" && request.method === "POST") {
+      await db.prepare("INSERT INTO devices (device_id,student,platform,version,installed_at,last_seen) VALUES (?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET platform=excluded.platform,version=excluded.version,last_seen=excluded.last_seen")
+        .bind(body.device_id, body.student||null, body.platform||null, body.version||null, now(), now()).run();
+      return json({ ok: true });
+    }
+
+    if (p === "/report" && request.method === "POST") {
+      const { device_id, event, quiz_id, student, detail } = body;
+      const ev = event || "heartbeat";
+      if (ev !== "heartbeat")
+        await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)")
+          .bind(device_id||null, student||null, quiz_id||null, ev, detail?JSON.stringify(detail):null, now()).run();
+      if (device_id) await db.prepare("INSERT OR IGNORE INTO devices (device_id,installed_at) VALUES (?,?)").bind(device_id, now()).run();
+      await db.prepare("UPDATE devices SET last_seen=?, student=COALESCE(?,student) WHERE device_id=?").bind(now(), student||null, device_id||null).run();
+      if (ev === "lock")
+        await db.prepare("INSERT INTO locks (device_id,quiz_id,last_lock,helper_seen) VALUES (?,?,?,?) ON CONFLICT(device_id,quiz_id) DO UPDATE SET last_lock=excluded.last_lock,helper_seen=excluded.helper_seen").bind(device_id, quiz_id, now(), now()).run();
+      if (ev === "unlock")
+        await db.prepare("DELETE FROM locks WHERE device_id=? AND quiz_id=?").bind(device_id, quiz_id).run();
+      if (ev === "heartbeat" && quiz_id) {
+        const col = /^(ext|agent)/.test(String(body.source || body.from || "helper")) ? "ext_seen" : "helper_seen";
+        await db.prepare(`UPDATE locks SET last_lock=?, ${col}=? WHERE device_id=? AND quiz_id=?`).bind(now(), now(), device_id, quiz_id).run();
+      }
+      return json({ ok: true });
+    }
+
+    // Release the quiz/course password ONLY while this device is locked for this page.
+    if (p === "/password" && request.method === "POST") {
+      const { qi, ou } = ids(String(body.url || ""));
+      const lockId = `${ou || "x"}-${qi || "x"}`;
+      const lk = await db.prepare("SELECT last_lock FROM locks WHERE device_id=? AND quiz_id=?").bind(body.device_id, lockId).first();
+      const fresh = lk && (Date.now() - Date.parse(lk.last_lock) < 60000);
+      if (!fresh) return json({ password: null, reason: "not locked" }, 403);
+      let pw = null;
+      if (qi) { const q = await db.prepare("SELECT password FROM quizzes WHERE qi=?").bind(qi).first(); if (q) pw = q.password; }
+      if (!pw && ou) { const c = await db.prepare("SELECT password FROM courses WHERE ou=?").bind(ou).first(); if (c) pw = c.password; }
+      return json({ password: pw, lockId });
+    }
+
+    if (p === "/match" && request.method === "POST") {
+      const { qi, ou } = ids(String(body.url || ""));
+      if (qi) { const q = await db.prepare("SELECT quiz_id FROM quizzes WHERE qi=?").bind(qi).first(); if (q) return json({ match:true, quiz_id:q.quiz_id }); }
+      if (ou) { const c = await db.prepare("SELECT ou FROM courses WHERE ou=?").bind(ou).first(); if (c) return json({ match:true, quiz_id:`${ou}-${qi||"x"}` }); }
+      return json({ match: false });
+    }
+
+    // ---- teacher accounts ----
+    if (p === "/signup" && request.method === "POST") {
+      const email = String(body.email||"").trim().toLowerCase(), pw = String(body.password||"");
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"enter a valid email" }, 400);
+      if (pw.length < 8) return json({ error:"password must be at least 8 characters" }, 400);
+      const dup = await db.prepare("SELECT id FROM teachers WHERE email=?").bind(email).first();
+      if (dup) return json({ error:"that email already has an account — log in instead" }, 409);
+      // The very first account on the site is the admin. Every account after that is
+      // INVITE-ONLY: it needs an unused invite code the admin created (students can't sign up).
+      const n = (await db.prepare("SELECT COUNT(*) AS n FROM teachers").first()).n;
+      let inv = null;
+      if (n > 0) {
+        const code = String(body.invite||"").trim().toUpperCase();
+        inv = code ? await db.prepare("SELECT code,email,active_until,used_at FROM invites WHERE code=?").bind(code).first() : null;
+        if (!inv || inv.used_at) return json({ error:"Teacher accounts are invite-only. Use the link from your invite (each link works once)." }, 403);
+        if (inv.email && inv.email !== email) return json({ error:"This invite is for " + inv.email + "." }, 403);
+        const claim = await db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE code=? AND used_at IS NULL").bind(now(), email, inv.code).run();
+        if (!claim.meta.changes) return json({ error:"This invite was already used." }, 403);
+      }
+      const id = rid(10), salt = rid(16), token = hex(crypto.getRandomValues(new Uint8Array(24)));
+      await db.prepare("INSERT INTO teachers (id,email,name,pw_hash,salt,token,created_at,role,active_until) VALUES (?,?,?,?,?,?,?,?,?)")
+        .bind(id, email, String(body.name||"").trim()||null, await hashPw(pw,salt), salt, token, now(), n===0?"admin":"teacher", inv ? inv.active_until : null).run();
+      return json({ token, email, name: body.name||null });
+    }
+    if (p === "/login" && request.method === "POST") {
+      const email = String(body.email||"").trim().toLowerCase(), pw = String(body.password||"");
+      const t = await db.prepare("SELECT id,email,name,pw_hash,salt,token FROM teachers WHERE email=?").bind(email).first();
+      if (!t || (await hashPw(pw, t.salt)) !== t.pw_hash) return json({ error:"wrong email or password" }, 401);
+      let token = t.token;
+      if (!token) { token = hex(crypto.getRandomValues(new Uint8Array(24))); await db.prepare("UPDATE teachers SET token=? WHERE id=?").bind(token, t.id).run(); }
+      return json({ token, email: t.email, name: t.name });
+    }
+    if (p === "/forgot" && request.method === "POST") {
+      const email = String(body.email||"").trim().toLowerCase();
+      const t = await db.prepare("SELECT id FROM teachers WHERE email=?").bind(email).first().catch(()=>null);
+      if (t) await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)")
+        .bind(null,null,null,"reset_request",email,now()).run();
+      return json({ ok:true });   // always ok — never reveal whether the email exists
+    }
+    // Public: is this invite link valid? (lets the sign-up form open and prefill the email)
+    if (p === "/invite-check") {
+      const code = String(url.searchParams.get("code")||"").trim().toUpperCase();
+      const inv = code ? await db.prepare("SELECT email,used_at FROM invites WHERE code=?").bind(code).first().catch(()=>null) : null;
+      return json(inv && !inv.used_at ? { ok:true, email: inv.email||null } : { ok:false });
+    }
+    if (p === "/me") return me ? json({ email: me.email, name: me.name, admin: me.admin, active: me.active, active_until: me.active_until }) : json({ error:"unauthorized" }, 401);
+    if (p === "/logout" && request.method === "POST") {
+      if (me && !me.admin) await db.prepare("UPDATE teachers SET token=NULL WHERE id=?").bind(me.id).run();
+      return json({ ok:true });
+    }
+    if (p === "/changepw" && request.method === "POST") {
+      if (!me) return json({ error:"unauthorized" }, 401);
+      if (me.id === "admin") return json({ error:"the master admin key has no stored password" }, 400);
+      const pw = String(body.password||"");
+      if (pw.length < 8) return json({ error:"password must be at least 8 characters" }, 400);
+      const salt = rid(16);
+      await db.prepare("UPDATE teachers SET pw_hash=?, salt=? WHERE id=?").bind(await hashPw(pw,salt), salt, me.id).run();
+      return json({ ok:true });
+    }
+    // Admin only: list teachers / reset a teacher's password (no email service, so the
+    // admin hands the new password to the teacher).
+    if (p === "/teachers") {
+      if (!me?.admin) return json({ error:"admin only" }, 401);
+      const r = await db.prepare("SELECT id,email,name,created_at,active_until FROM teachers ORDER BY created_at DESC").all();
+      return json({ teachers: r.results });
+    }
+    // Admin only: turn a teacher on (after payment) until a date, or off.
+    if (p === "/activate" && request.method === "POST") {
+      if (!me?.admin) return json({ error:"admin only" }, 401);
+      const email = String(body.email||"").trim().toLowerCase();
+      const until = body.until ? String(body.until).slice(0,10) : null;   // "YYYY-MM-DD" or null = off
+      const r = await db.prepare("UPDATE teachers SET active_until=? WHERE email=?").bind(until, email).run();
+      return r.meta.changes ? json({ email, active_until: until }) : json({ error:"no such teacher" }, 404);
+    }
+    if (p === "/reset" && request.method === "POST") {
+      if (!me?.admin) return json({ error:"admin only" }, 401);
+      const email = String(body.email||"").trim().toLowerCase(), salt = rid(16), pw = body.password || ("LQ-"+rid(8));
+      const r = await db.prepare("UPDATE teachers SET pw_hash=?,salt=?,token=NULL WHERE email=?").bind(await hashPw(pw,salt), salt, email).run();
+      return r.meta.changes ? json({ email, password: pw }) : json({ error:"no such teacher" }, 404);
+    }
+    // Admin only: invite a teacher (one-time code; optional email lock; account active until a date).
+    if (p === "/invite" && request.method === "POST") {
+      if (!me?.admin) return json({ error:"admin only" }, 401);
+      const email = String(body.email||"").trim().toLowerCase() || null;
+      if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"enter a valid email" }, 400);
+      if (email && await db.prepare("SELECT id FROM teachers WHERE email=?").bind(email).first()) return json({ error:"that email already has an account" }, 409);
+      const code = rid(10), until = body.until ? String(body.until).slice(0,10) : null;
+      await db.prepare("INSERT INTO invites (code,email,active_until,created_at) VALUES (?,?,?,?)").bind(code, email, until, now()).run();
+      return json({ code, email, active_until: until });
+    }
+    if (p === "/invites") {
+      if (!me?.admin) return json({ error:"admin only" }, 401);
+      const r = await db.prepare("SELECT code,email,active_until,created_at,used_at,used_by FROM invites ORDER BY created_at DESC LIMIT 100").all();
+      return json({ invites: r.results });
+    }
+    if (p === "/uninvite" && request.method === "POST") {
+      if (!me?.admin) return json({ error:"admin only" }, 401);
+      await db.prepare("DELETE FROM invites WHERE code=? AND used_at IS NULL").bind(String(body.code||"")).run();
+      return json({ ok:true });
+    }
+
+    // ---- teacher endpoints (need a logged-in teacher or the admin key) ----
+    if (!teacher()) return json({ error: "unauthorized" }, 401);
+
+    if ((p === "/quiz" || p === "/course") && request.method === "POST" && !me.active)
+      return json({ error: "Your account is not active yet. Contact the LOCKqz admin to activate it." }, 402);
+
+    if (p === "/quiz" && request.method === "POST") {
+      const quiz_id = body.quiz_id || rid(8);
+      const password = "LQ-" + rid(8);
+      const { qi, ou } = ids(String(body.url||""));
+      const lock_id = `${ou||"x"}-${qi||"x"}`;
+      await db.prepare("INSERT INTO quizzes (quiz_id,title,url,password,created_at,qi,teacher_id,lock_id) VALUES (?,?,?,?,?,?,?,?)")
+        .bind(quiz_id, body.title||null, body.url||null, password, now(), qi, me.id, lock_id).run();
+      return json({ quiz_id, password, qi, lock_id, tag: `[LOCKqz] ${body.title||quiz_id}` });
+    }
+    if (p === "/quizzes") {
+      const m = mine();
+      const r = await db.prepare(`SELECT quiz_id,title,url,password,created_at,qi,lock_id,teacher_id FROM quizzes WHERE ${m.sql} ORDER BY created_at DESC`).bind(...m.args).all();
+      return json({ quizzes: r.results });
+    }
+    if (p === "/course" && request.method === "POST") {
+      const u = String(body.url || "");
+      const ou = (u.match(/ou=(\d+)/) || u.match(/\/home\/(\d+)/) || u.match(/\/(\d+)(?:\/|$)/) || [])[1];
+      if (!ou) return json({ error: "could not find the course id (ou=) in that link" }, 400);
+      const ex = await db.prepare("SELECT teacher_id FROM courses WHERE ou=?").bind(ou).first();
+      if (ex && ex.teacher_id && ex.teacher_id !== me.id && !me.admin) return json({ error:"that course is already protected by another teacher" }, 409);
+      const password = "LQ-" + rid(8);
+      await db.prepare("INSERT INTO courses (ou,title,password,created_at,teacher_id) VALUES (?,?,?,?,?) ON CONFLICT(ou) DO UPDATE SET password=excluded.password,title=excluded.title,teacher_id=excluded.teacher_id")
+        .bind(ou, body.title||null, password, now(), me.id).run();
+      return json({ ou, password });
+    }
+    if (p === "/courses") {
+      const m = mine();
+      const r = await db.prepare(`SELECT ou,title,password,created_at,teacher_id FROM courses WHERE ${m.sql} ORDER BY created_at DESC`).bind(...m.args).all();
+      return json({ courses: r.results });
+    }
+    if (p === "/delete" && request.method === "POST") {
+      const m = mine();
+      if (body.quiz_id) await db.prepare(`DELETE FROM quizzes WHERE quiz_id=? AND ${m.sql}`).bind(body.quiz_id, ...m.args).run();
+      if (body.ou)      await db.prepare(`DELETE FROM courses WHERE ou=? AND ${m.sql}`).bind(body.ou, ...m.args).run();
+      return json({ ok:true });
+    }
+
+    // Which lock ids (events.quiz_id = "<ou>-<qi>") belong to the caller?
+    async function scope(col) {
+      if (me.admin) return { sql:"1=1", args:[] };
+      const qs = (await db.prepare("SELECT lock_id,qi FROM quizzes WHERE teacher_id=?").bind(me.id).all()).results;
+      const cs = (await db.prepare("SELECT ou FROM courses WHERE teacher_id=?").bind(me.id).all()).results;
+      const parts = [], args = [];
+      qs.forEach(q => { if (q.lock_id) { parts.push(`${col}=?`); args.push(q.lock_id); } if (q.qi) { parts.push(`${col} LIKE ?`); args.push(`%-${q.qi}`); } });
+      cs.forEach(c => { parts.push(`${col} LIKE ?`); args.push(`${c.ou}-%`); });
+      return parts.length ? { sql:`(${parts.join(" OR ")})`, args } : { sql:"0", args:[] };
+    }
+
+    if (p === "/roster") {
+      const s = await scope("e.quiz_id");
+      const r = me.admin
+        ? await db.prepare("SELECT device_id,student,platform,version,installed_at,last_seen FROM devices ORDER BY last_seen DESC").all()
+        : await db.prepare(`SELECT DISTINCT d.device_id,d.student,d.platform,d.version,d.installed_at,d.last_seen FROM devices d JOIN events e ON e.device_id=d.device_id WHERE ${s.sql} ORDER BY d.last_seen DESC`).bind(...s.args).all();
+      return json({ devices: r.results });
+    }
+    if (p === "/sessions") {
+      const quiz = url.searchParams.get("quiz");
+      const s = await scope("quiz_id");
+      const r = await db.prepare(`SELECT device_id,student,quiz_id,event,detail,ts FROM events WHERE ${s.sql} AND (? IS NULL OR quiz_id=? OR quiz_id LIKE ?) ORDER BY ts DESC LIMIT 500`)
+        .bind(...s.args, quiz, quiz, quiz ? `${quiz}-%` : "\u0000").all();
+      return json({ events: r.results });
+    }
+    if (p === "/live") {
+      const quiz = url.searchParams.get("quiz");
+      if (!quiz) return json({ error: "quiz id required" }, 400);
+      const like = `${quiz}-%`;
+      const s = await scope("l.quiz_id"), s2 = await scope("e.quiz_id");
+      const STALE = 90000, nowMs = Date.now(), age = t => t ? (nowMs - Date.parse(t)) : null;
+      const locks = (await db.prepare(`SELECT l.device_id,l.quiz_id,l.last_lock,l.helper_seen,l.ext_seen,d.student,d.platform FROM locks l LEFT JOIN devices d ON d.device_id=l.device_id WHERE (l.quiz_id=? OR l.quiz_id LIKE ?) AND ${s.sql}`).bind(quiz, like, ...s.args).all()).results;
+      const tamp = new Set(((await db.prepare("SELECT DISTINCT device_id FROM events WHERE (quiz_id=? OR quiz_id LIKE ?) AND event='tamper'").bind(quiz, like).all()).results).map(t=>t.device_id));
+      const done = (await db.prepare(`SELECT DISTINCT e.device_id,d.student,d.platform FROM events e LEFT JOIN devices d ON d.device_id=e.device_id WHERE (e.quiz_id=? OR e.quiz_id LIKE ?) AND e.event IN ('unlock','auto_unlock') AND ${s2.sql}`).bind(quiz, like, ...s2.args).all()).results;
+      const active = new Set(locks.map(l=>l.device_id));
+      const rows = locks.map(l => {
+        const a = age(l.last_lock), h = age(l.helper_seen), e = age(l.ext_seen);
+        let status = "locked";
+        if (tamp.has(l.device_id)) status = "tamper";
+        else if (a !== null && a > STALE) {
+          const helperDown = h === null || h > STALE, extDown = e === null || e > STALE;
+          status = helperDown && !extDown ? "helper_killed" : (extDown && !helperDown ? "browser_closed" : "dark");
+        }
+        return { device_id:l.device_id, student:l.student||null, platform:l.platform||null, status, last_lock:l.last_lock, age_ms:a };
+      });
+      done.forEach(d => { if (!active.has(d.device_id)) rows.push({ device_id:d.device_id, student:d.student||null, platform:d.platform||null, status:"done" }); });
+      return json({ quiz, now: now(), stale_ms: STALE, rows });
+    }
+
+    return json({ error: "not found", path: p }, 404);
+  } catch (e) {
+    return json({ error: String(e) }, 500);
+  }
+}

@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOCKqz — Teacher</title>
+<style>
+  :root{--usc:#990000}
+  body{font:15px -apple-system,Segoe UI,sans-serif;margin:0;color:#111;background:#fafafa}
+  header{background:var(--usc);color:#fff;padding:12px 18px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+  header span{font-weight:400;font-size:13px}
+  header button{background:#fff;color:var(--usc);padding:5px 10px}
+  main{padding:18px;max-width:960px;margin:0 auto}
+  .card{background:#fff;border:1px solid #e5e5e5;border-radius:12px;padding:18px;margin-bottom:16px}
+  input,button,select{font:15px inherit;padding:9px 11px;border:1px solid #ccc;border-radius:8px}
+  input{min-width:0}
+  button{background:var(--usc);color:#fff;border:0;cursor:pointer}
+  button.ghost{background:#eee;color:#333}
+  h2{font-size:17px;margin:0 0 10px}
+  table{border-collapse:collapse;width:100%;font-size:14px}
+  th,td{border-bottom:1px solid #eee;padding:7px 8px;text-align:left;vertical-align:top}
+  .tamper{color:var(--usc);font-weight:700}
+  tr.s-locked td{background:#eafbea}
+  tr.s-tamper td,tr.s-dark td,tr.s-helper_killed td{background:#fdeaea;font-weight:700}
+  tr.s-browser_closed td{background:#fff4e5}
+  tr.s-done td{color:#888}
+  .muted{color:#666;font-size:13px}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  code{background:#f3f3f3;padding:2px 7px;border-radius:5px;font-size:14px;user-select:all}
+  .err{color:var(--usc);margin-top:8px}
+  #login{max-width:420px;margin:40px auto}
+  #login input{width:100%;box-sizing:border-box;margin-bottom:8px}
+  #login button{width:100%}
+  .hide{display:none}
+  .ok{background:#eafbea;padding:10px 12px;border-radius:8px;margin-top:10px}
+</style></head>
+<body>
+<header>LOCKqz — Teacher <span id="who"></span></header>
+<main>
+
+<!-- ============ LOGIN / SIGN UP ============ -->
+<div id="login" class="card">
+  <h2 id="ltitle">Log in</h2>
+  <input id="name" placeholder="Your name" class="hide">
+  <input id="email" type="email" placeholder="Email">
+  <input id="pw" type="password" placeholder="Password">
+  <button id="lbtn" onclick="go()">Log in</button>
+  <div class="muted hide" id="signuprow" style="margin-top:10px;text-align:center">
+    <a href="#" id="lswitch" onclick="toggle();return false">New here? Create an account</a>
+  </div>
+  <div class="err" id="lerr"></div>
+  <div class="muted" id="forgotrow" style="margin-top:8px;text-align:center">
+    <a href="#" id="forgotlink" onclick="showForgot();return false">Forgot password?</a>
+  </div>
+  <div id="forgot" class="hide" style="margin-top:10px">
+    <input id="femail" type="email" placeholder="Your account email">
+    <button onclick="requestReset()">Request password reset</button>
+    <div class="muted" id="fmsg" style="margin-top:8px"></div>
+  </div>
+</div>
+
+<!-- ============ DASHBOARD ============ -->
+<div id="dash" class="hide">
+
+  <div id="inactive" class="card hide" style="background:#fff4e5;border-color:#f0c070"><b>Account not active.</b> Contact the LOCKqz admin to activate it before adding quizzes.</div>
+  <div id="start" class="card hide">
+    <h2>Get started</h2>
+    <ol style="margin:0;padding-left:20px;line-height:1.8">
+      <li>Add a quiz below — paste its Brightspace link.</li>
+      <li>In Brightspace, set the password LOCKqz gives you on that quiz.</li>
+      <li>Tell students to install LOCKqz once from <a href="/">the home page</a>.</li>
+      <li>During the quiz, click <b>Watch</b> to see every student live.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Add a quiz</h2>
+    <div class="bar">
+      <input id="qtitle" placeholder="Quiz name" size="22">
+      <input id="qurl" placeholder="Paste the Brightspace quiz link" size="40">
+      <button onclick="makeQuiz()">Add</button>
+    </div>
+    <div id="newquiz"></div>
+    <div class="muted" style="margin-top:12px">Or protect a whole course (one password for every quiz in it):</div>
+    <div class="bar" style="margin-top:6px">
+      <input id="curl" placeholder="Paste the Brightspace course link" size="40">
+      <button class="ghost" onclick="makeCourse()">Protect course</button>
+    </div>
+    <div id="newcourse"></div>
+  </div>
+
+  <div class="card">
+    <h2>Your quizzes</h2>
+    <table id="quizzes"><thead><tr><th>Quiz</th><th>Password (set this on the Brightspace quiz)</th><th>Live</th><th></th></tr></thead><tbody></tbody></table>
+    <div class="muted" id="noquiz">None yet. Add one above.</div>
+  </div>
+
+  <div class="card">
+    <h2>Live monitor <span class="muted" id="livename"></span></h2>
+    <div class="muted" style="margin-bottom:6px">🟢 locked &nbsp; 🔴 tamper / helper killed / went dark &nbsp; 🟠 browser closed &nbsp; ⚪ done &nbsp; <span id="livestamp"></span></div>
+    <table id="live"><thead><tr><th>Student</th><th>Device</th><th>OS</th><th>Status</th><th>Last ping</th></tr></thead><tbody><tr><td colspan="5" class="muted">Click “Watch” on a quiz.</td></tr></tbody></table>
+  </div>
+
+  <div class="card">
+    <h2>Your students</h2>
+    <table id="roster"><thead><tr><th>Student</th><th>Device</th><th>OS</th><th>Version</th><th>Last seen</th></tr></thead><tbody></tbody></table>
+    <div class="muted" id="noroster">Students appear here after their first LOCKqz quiz with you.</div>
+  </div>
+
+  <div class="card">
+    <h2>Activity <button class="ghost" onclick="loadSessions()" style="font-size:13px;padding:4px 9px">Refresh</button></h2>
+    <table id="events"><thead><tr><th>Time</th><th>Student</th><th>Quiz</th><th>Event</th><th>Detail</th></tr></thead><tbody></tbody></table>
+  </div>
+
+  <div id="invitecard" class="card hide">
+    <h2>Invite a teacher</h2>
+    <div class="bar">
+      <input id="iemail" type="email" placeholder="Teacher's email" size="28">
+      <span class="muted">active until</span> <input id="iuntil" type="date">
+      <button onclick="makeInvite()">Create invite</button>
+    </div>
+    <div id="newinvite"></div>
+    <table id="invites" style="margin-top:10px"><thead><tr><th>Email</th><th>Active until</th><th>Created</th><th>Status</th><th></th></tr></thead><tbody></tbody></table>
+  </div>
+
+  <div id="admin" class="card hide">
+    <h2>Admin — teachers</h2>
+    <table id="teachers"><thead><tr><th>Email</th><th>Name</th><th>Joined</th><th>Active until</th><th></th></tr></thead><tbody></tbody></table>
+    <div class="muted" style="margin-top:6px">Activate after payment. Pick the semester end date; the account turns off by itself after that.</div>
+  </div>
+</div>
+</main>
+<script>
+const API = "/api";
+let token = localStorage.getItem("lockqz_token") || "";
+let signup = false, liveTimer = null, quizzes = [];
+const $ = id => document.getElementById(id);
+const H = () => ({ "X-LOCKqz-Teacher": token, "Content-Type":"application/json" });
+const get  = async p => (await fetch(API+p,{headers:H()})).json();
+const post = async (p,b) => (await fetch(API+p,{method:"POST",headers:H(),body:JSON.stringify(b||{})})).json();
+const esc = s => String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const when = t => t ? new Date(t).toLocaleString([], {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}) : "";
+
+// ---- login ----
+function toggle(){ signup=!signup; $("name").classList.toggle("hide",!signup); $("ltitle").textContent=signup?"Create an account":"Log in";
+  $("lbtn").textContent=signup?"Create account":"Log in"; $("lswitch").textContent=signup?"Already have an account? Log in":"New here? Create an account"; $("lerr").textContent="";
+  $("forgotrow").classList.toggle("hide", signup); $("forgot").classList.add("hide"); }
+async function go(){
+  $("lerr").textContent="";
+  const d = await post(signup?"/signup":"/login",{email:$("email").value,password:$("pw").value,name:$("name").value,invite:INVITE});
+  if(d.error){
+    $("lerr").textContent = signup ? d.error : "Incorrect email or password.";
+    if(!signup) $("forgotrow").classList.remove("hide");
+    return;
+  }
+  token=d.token; localStorage.setItem("lockqz_token",token);
+  if(INVITE){ INVITE=""; history.replaceState(null,"",location.pathname); }
+  boot();
+}
+function showForgot(){ $("forgot").classList.remove("hide"); $("femail").value=$("email").value||""; $("fmsg").textContent=""; }
+async function requestReset(){
+  const email=$("femail").value.trim();
+  if(!email){ $("fmsg").textContent="Enter your email."; return; }
+  await post("/forgot",{email});
+  $("fmsg").textContent="If that account exists, your LOCKqz admin has been notified to reset it and will give you a new password.";
+}
+async function changePw(){
+  const pw = prompt("Enter a new password (at least 8 characters):");
+  if(pw===null) return;
+  if(pw.length<8){ alert("Password must be at least 8 characters."); return; }
+  const d = await post("/changepw",{password:pw});
+  alert(d.error ? d.error : "Password changed. Use it next time you log in.");
+}
+["email","pw","name"].forEach(i=>$(i).addEventListener("keydown",e=>{ if(e.key==="Enter") go(); }));
+async function logout(){ await post("/logout"); token=""; localStorage.removeItem("lockqz_token"); location.reload(); }
+
+async function boot(){
+  if(!token) return;
+  const m = await get("/me");
+  if(m.error){ token=""; localStorage.removeItem("lockqz_token"); return; }
+  $("login").classList.add("hide"); $("dash").classList.remove("hide");
+  $("who").innerHTML = esc(m.name||m.email)+' &nbsp;<button onclick="changePw()">Change password</button> &nbsp;<button onclick="logout()">Log out</button>';
+  if(m.admin){ $("admin").classList.remove("hide"); $("invitecard").classList.remove("hide"); $("iuntil").value=semEnd(); loadTeachers(); loadInvites(); }
+  $("inactive").classList.toggle("hide", !!m.active);
+  loadQuizzes(); loadRoster(); loadSessions();
+}
+
+// ---- quizzes ----
+async function makeQuiz(){
+  const d = await post("/quiz",{title:$("qtitle").value,url:$("qurl").value});
+  if(d.error){ alert(d.error); return; }
+  $("newquiz").innerHTML = d.qi
+    ? `<div class="ok">Set the Brightspace quiz password to <code>${d.password}</code>. Keep it secret. Done.</div>`
+    : `<div class="ok">No quiz id found in that link. Paste the link from the quiz's own page and add again — or set the password to <code>${d.password}</code> and put <code>${esc(d.tag)}</code> in the quiz title.</div>`;
+  $("qtitle").value=""; $("qurl").value=""; loadQuizzes();
+}
+async function makeCourse(){
+  const d = await post("/course",{url:$("curl").value});
+  if(d.error){ alert(d.error); return; }
+  $("newcourse").innerHTML = `<div class="ok">Use <code>${d.password}</code> as the password on every quiz in this course. Keep it secret.</div>`;
+  $("curl").value=""; loadQuizzes();
+}
+async function delQuiz(id){ if(confirm("Remove this quiz from LOCKqz?")) { await post("/delete",{quiz_id:id}); loadQuizzes(); } }
+async function delCourse(ou){ if(confirm("Stop protecting this course?")) { await post("/delete",{ou}); loadQuizzes(); } }
+async function loadQuizzes(){
+  const [q,c] = await Promise.all([get("/quizzes"),get("/courses")]);
+  quizzes = q.quizzes||[]; const courses = c.courses||[];
+  const tb = document.querySelector("#quizzes tbody"); tb.innerHTML="";
+  courses.forEach(x=>tb.insertAdjacentHTML("beforeend",`<tr><td><b>Course</b> ${esc(x.title||x.ou)}<div class="muted">all quizzes in course ${esc(x.ou)}</div></td><td><code>${esc(x.password)}</code></td><td><button class="ghost" onclick="watch('${esc(x.ou)}','course ${esc(x.ou)}')">Watch</button></td><td><button class="ghost" onclick="delCourse('${esc(x.ou)}')">Remove</button></td></tr>`));
+  quizzes.forEach(x=>tb.insertAdjacentHTML("beforeend",`<tr><td>${esc(x.title||x.quiz_id)}<div class="muted">${when(x.created_at)}</div></td><td><code>${esc(x.password)}</code></td><td><button class="ghost" onclick="watch('${esc(x.lock_id||x.quiz_id)}','${esc(x.title||x.quiz_id)}')">Watch</button></td><td><button class="ghost" onclick="delQuiz('${esc(x.quiz_id)}')">Remove</button></td></tr>`));
+  $("noquiz").style.display = (quizzes.length||courses.length)?"none":"";
+  $("start").classList.toggle("hide", !!(quizzes.length||courses.length));
+}
+
+// ---- roster / activity ----
+async function loadRoster(){
+  const d = await get("/roster"); const tb = document.querySelector("#roster tbody"); tb.innerHTML="";
+  (d.devices||[]).forEach(x=>tb.insertAdjacentHTML("beforeend",`<tr><td>${esc(x.student||"—")}</td><td>${esc(x.device_id)}</td><td>${esc(x.platform)}</td><td>${esc(x.version)}</td><td>${when(x.last_seen)}</td></tr>`));
+  $("noroster").style.display = (d.devices||[]).length?"none":"";
+}
+async function loadSessions(){
+  const d = await get("/sessions"); const tb = document.querySelector("#events tbody"); tb.innerHTML="";
+  (d.events||[]).forEach(e=>tb.insertAdjacentHTML("beforeend",`<tr class="${e.event==='tamper'?'tamper':''}"><td>${when(e.ts)}</td><td>${esc(e.student||"—")}</td><td>${esc(e.quiz_id||"")}</td><td>${esc(e.event)}</td><td>${esc(e.detail||"")}</td></tr>`));
+  if(!(d.events||[]).length) tb.innerHTML=`<tr><td colspan="5" class="muted">Nothing yet.</td></tr>`;
+}
+
+// ---- live ----
+let liveId = "";
+const LIVE_LABEL={locked:"🟢 Locked",tamper:"🔴 TAMPER",helper_killed:"🔴 Helper killed",dark:"🔴 Went dark",browser_closed:"🟠 Browser closed",done:"⚪ Done"};
+function watch(id,name){ liveId=id; $("livename").textContent="— "+name; if(liveTimer) clearInterval(liveTimer); loadLive(); liveTimer=setInterval(loadLive,10000); window.scrollTo({top:$("live").offsetTop-120,behavior:"smooth"}); }
+async function loadLive(){
+  if(!liveId) return;
+  const d=await get("/live?quiz="+encodeURIComponent(liveId));
+  const tb=document.querySelector("#live tbody"); tb.innerHTML="";
+  (d.rows||[]).forEach(r=>{
+    const ago=(r.age_ms==null||r.status==="done")?"—":Math.round(r.age_ms/1000)+"s ago";
+    tb.insertAdjacentHTML("beforeend",`<tr class="s-${r.status}"><td>${esc(r.student||"—")}</td><td>${esc(r.device_id)}</td><td>${esc(r.platform)}</td><td>${LIVE_LABEL[r.status]||esc(r.status)}</td><td>${ago}</td></tr>`);
+  });
+  if(!(d.rows||[]).length) tb.innerHTML=`<tr><td colspan="5" class="muted">No students locked for this quiz yet.</td></tr>`;
+  $("livestamp").textContent="updated "+new Date().toLocaleTimeString();
+}
+
+// ---- admin ----
+async function loadTeachers(){
+  const d = await get("/teachers"); const tb=document.querySelector("#teachers tbody"); tb.innerHTML="";
+  const today=new Date().toISOString().slice(0,10);
+  (d.teachers||[]).forEach(t=>{
+    const on = t.active_until && t.active_until>=today;
+    tb.insertAdjacentHTML("beforeend",`<tr style="${on?'':'color:#888'}"><td>${esc(t.email)}</td><td>${esc(t.name||"")}</td><td>${when(t.created_at)}</td><td>${on?esc(t.active_until):"<b style='color:#990000'>off</b>"}</td><td><input type="date" id="d_${esc(t.id)}" value="${esc(t.active_until||semEnd())}" style="padding:4px"> <button class="ghost" onclick="activate('${esc(t.email)}','${esc(t.id)}')">Activate</button> <button class="ghost" onclick="deactivate('${esc(t.email)}')">Off</button> <button class="ghost" onclick="resetPw('${esc(t.email)}')">Reset pw</button></td></tr>`);
+  });
+}
+function semEnd(){ const d=new Date(), y=d.getFullYear(), m=d.getMonth()+1; return m<=5?`${y}-05-31`:(m<=8?`${y}-08-31`:`${y}-12-31`); }
+async function activate(email,id){ const d=await post("/activate",{email,until:$("d_"+id).value}); if(d.error) alert(d.error); loadTeachers(); }
+async function deactivate(email){ if(confirm("Turn off "+email+"?")){ await post("/activate",{email,until:null}); loadTeachers(); } }
+async function resetPw(email){ const d=await post("/reset",{email}); alert(d.error||("New password for "+email+": "+d.password)); }
+
+// ---- invites (admin) ----
+let INVITE = "";
+const inviteLink = code => location.origin + "/dashboard?invite=" + code;
+function inviteMail(email, link){
+  const s = "Your LOCKqz teacher account";
+  const b = "Hi,\n\nYou're invited to LOCKqz. It blocks AI on students' computers during your Brightspace quizzes, then turns AI back on when the quiz ends.\n\n"
+    + "1. Create your account (this link works once):\n   " + link + "\n\n"
+    + "2. Add a quiz: paste the Brightspace quiz link. LOCKqz gives you a password.\n\n"
+    + "3. In Brightspace, edit the quiz and set that password (Availability Dates & Conditions, or the Restrictions tab).\n\n"
+    + "4. Before the quiz, have students install LOCKqz once from " + location.origin + "\n\n"
+    + "During the quiz, click Watch on your dashboard to see every student live.\n\nAnthony Hall\nLOCKqz";
+  return "mailto:" + (email||"") + "?subject=" + encodeURIComponent(s) + "&body=" + encodeURIComponent(b);
+}
+async function makeInvite(){
+  const d = await post("/invite",{email:$("iemail").value,until:$("iuntil").value||semEnd()});
+  if(d.error){ alert(d.error); return; }
+  window._ilink = inviteLink(d.code); window._imail = inviteMail(d.email, window._ilink);
+  $("newinvite").innerHTML = `<div class="ok">Invite link (works once): <code>${esc(window._ilink)}</code>
+    <div style="margin-top:8px"><button class="ghost" onclick="navigator.clipboard.writeText(window._ilink);this.textContent='Copied'">Copy link</button>
+    <button onclick="location.href=window._imail">Email it</button></div></div>`;
+  $("iemail").value=""; loadInvites();
+}
+async function loadInvites(){
+  const d = await get("/invites"); const tb=document.querySelector("#invites tbody"); tb.innerHTML="";
+  (d.invites||[]).forEach(i=>tb.insertAdjacentHTML("beforeend",`<tr style="${i.used_at?'color:#888':''}"><td>${esc(i.email||"(anyone with link)")}</td><td>${esc(i.active_until||"—")}</td><td>${when(i.created_at)}</td><td>${i.used_at?"joined":"pending"}</td><td>${i.used_at?"":`<button class="ghost" onclick="cancelInvite('${esc(i.code)}')">Cancel</button>`}</td></tr>`));
+  if(!(d.invites||[]).length) tb.innerHTML=`<tr><td colspan="5" class="muted">No invites yet.</td></tr>`;
+}
+async function cancelInvite(code){ if(confirm("Cancel this invite?")){ await post("/uninvite",{code}); loadInvites(); } }
+
+// An invite link (/dashboard?invite=CODE) opens the sign-up form; without one, only Log in shows.
+(async function initInvite(){
+  INVITE = (new URLSearchParams(location.search).get("invite")||"").trim();
+  if(!INVITE) return;
+  const d = await get("/invite-check?code="+encodeURIComponent(INVITE));
+  if(!d.ok){ INVITE=""; $("lerr").textContent="This invite link is invalid or was already used. Ask the LOCKqz admin for a new one."; return; }
+  if(!signup) toggle();
+  $("ltitle").textContent="Create your teacher account";
+  $("signuprow").classList.remove("hide");
+  if(d.email){ $("email").value=d.email; $("email").readOnly=true; }
+})();
+
+boot();
+</script>
+</body></html>

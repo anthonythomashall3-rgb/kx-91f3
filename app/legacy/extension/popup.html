@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  body { width: 240px; font: 13px -apple-system, Segoe UI, sans-serif; margin: 0; padding: 14px; }
+  h1 { font-size: 15px; margin: 0 0 10px; color: #990000; }
+  .row { display:flex; justify-content:space-between; margin:6px 0; }
+  .dot { font-weight:700; }
+  .ok { color:#0a7d2c; } .bad { color:#990000; } .idle { color:#666; }
+  small { color:#666; }
+</style></head>
+<body>
+  <h1>LOCKqz</h1>
+  <div class="row"><span>Helper</span><span id="helper" class="dot idle">checking…</span></div>
+  <div class="row"><span>Quiz lock</span><span id="lock" class="dot idle">—</span></div>
+  <small id="note">AI is blocked only while a LOCKqz quiz is open.</small>
+  <script src="config.js"></script>
+  <script src="popup.js"></script>
+</body></html>

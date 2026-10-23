@@ -1,0 +1,137 @@
+# LOCKqz AI blocklist — one domain per line. Lines starting with # are ignored.
+# www. is added automatically. Served/updated from Cloudflare so it can grow without
+# reinstalling. This is the ONE part that needs ongoing upkeep as new AIs launch.
+
+# OpenAI / ChatGPT
+openai.com
+chatgpt.com
+chat.openai.com
+oaistatic.com
+oaiusercontent.com
+sora.com
+sora.chatgpt.com
+
+# Anthropic / Claude
+anthropic.com
+claude.ai
+claude.com
+console.anthropic.com
+
+# Google AI (Gemini / Bard / AI Studio / NotebookLM)
+gemini.google.com
+bard.google.com
+aistudio.google.com
+makersuite.google.com
+generativelanguage.googleapis.com
+notebooklm.google.com
+notebooklm.google
+
+# Microsoft Copilot
+copilot.microsoft.com
+copilot.cloud.microsoft
+m365.cloud.microsoft
+bing.com/chat
+
+# Perplexity
+perplexity.ai
+pplx.ai
+
+# xAI / Grok
+grok.com
+x.ai
+grok.x.com
+
+# DeepSeek
+deepseek.com
+chat.deepseek.com
+
+# Mistral
+mistral.ai
+chat.mistral.ai
+
+# Meta AI
+meta.ai
+
+# Alibaba Qwen
+qwen.ai
+chat.qwen.ai
+tongyi.aliyun.com
+
+# Moonshot Kimi
+kimi.com
+kimi.moonshot.cn
+moonshot.cn
+
+# Zhipu / Z.ai / GLM
+z.ai
+chatglm.cn
+bigmodel.cn
+
+# Other chat assistants / answer engines
+poe.com
+character.ai
+you.com
+phind.com
+huggingface.co/chat
+hf.co/chat
+chat.lmsys.org
+lmarena.ai
+groq.com
+chatbot.so
+cluely.com
+pi.ai
+inflection.ai
+venice.ai
+together.ai
+api.together.xyz
+chat.reka.ai
+reka.ai
+cohere.com
+coral.cohere.com
+jasper.ai
+writesonic.com
+chatsonic.com
+copy.ai
+quillbot.com
+deepai.org
+forefront.ai
+theb.ai
+yiyan.baidu.com
+doubao.com
+spark.ai
+xinghuo.xfyun.cn
+
+# Writing / grammar AI commonly used to cheat
+grammarly.com
+app.grammarly.com
+
+# AI APIs (apps that call models directly)
+api.openai.com
+api.anthropic.com
+api.perplexity.ai
+api.mistral.ai
+api.groq.com
+api.x.ai
+api.deepseek.com
+api.cohere.ai
+openrouter.ai
+api.openrouter.ai
+
+# Local-model runners / self-host UIs (domains they phone home to)
+ollama.com
+ollama.ai
+lmstudio.ai
+gpt4all.io
+jan.ai
+msty.app
+
+# DoH / DoT resolver endpoints — blocked so a browser's own encrypted DNS
+# cannot bypass the /etc/hosts blackhole. (Browser falls back to OS DNS = obeys hosts.)
+cloudflare-dns.com
+chrome.cloudflare-dns.com
+mozilla.cloudflare-dns.com
+dns.google
+dns.google.com
+dns.quad9.net
+doh.opendns.com
+dns.nextdns.io

@@ -1,0 +1,8 @@
+{
+  "port": 8787,
+  "token": "lqz-8f3k9x2p7m",
+  "api_base": "https://lockdownqz.pages.dev",
+  "device_id": "anthony-mac",
+  "student": "anthony",
+  "max_minutes": 180
+}

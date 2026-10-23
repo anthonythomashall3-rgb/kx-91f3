@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadDisplayName</key><string>LOCKqz — Browser AI Off</string>
+  <key>PayloadIdentifier</key><string>com.lockqz.browserai</string>
+  <key>PayloadType</key><string>Configuration</string>
+  <key>PayloadUUID</key><string>7B0E2C10-9A3F-4C21-8E77-LOCKQZ000001</string>
+  <key>PayloadVersion</key><integer>1</integer>
+  <key>PayloadScope</key><string>System</string>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadDisplayName</key><string>Google Chrome AI Off</string>
+      <key>PayloadIdentifier</key><string>com.google.Chrome.lockqz</string>
+      <key>PayloadType</key><string>com.google.Chrome</string>
+      <key>PayloadUUID</key><string>7B0E2C10-9A3F-4C21-8E77-LOCKQZ000002</string>
+      <key>PayloadVersion</key><integer>1</integer>
+      <key>GenAiDefaultSettings</key><integer>2</integer>
+      <key>GeminiSettings</key><integer>1</integer>
+      <key>DnsOverHttpsMode</key><string>off</string>
+      <key>BuiltInAIAPIsEnabled</key><false/>
+    </dict>
+    <dict>
+      <key>PayloadDisplayName</key><string>Microsoft Edge AI Off</string>
+      <key>PayloadIdentifier</key><string>com.microsoft.Edge.lockqz</string>
+      <key>PayloadType</key><string>com.microsoft.Edge</string>
+      <key>PayloadUUID</key><string>7B0E2C10-9A3F-4C21-8E77-LOCKQZ000003</string>
+      <key>PayloadVersion</key><integer>1</integer>
+      <key>GenAILocalFoundationalModelSettings</key><integer>1</integer>
+      <key>CopilotCDPPageContext</key><false/>
+      <key>HubsSidebarEnabled</key><false/>
+      <key>DnsOverHttpsMode</key><string>off</string>
+    </dict>
+  </array>
+</dict>
+</plist>

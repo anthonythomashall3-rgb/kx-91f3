@@ -1,0 +1,13 @@
+name = "lockdownqz"
+compatibility_date = "2026-10-01"
+pages_build_output_dir = "public"
+
+# D1 database binding (the API uses env.DB).
+# Create it once:  wrangler d1 create lockqz   then paste the id below.
+[[d1_databases]]
+binding = "DB"
+database_name = "lockqz"
+database_id = "02a0c476-d6b7-4bd4-8c59-2ddef91ad8a3"
+
+# Set the teacher key as a secret (not here):
+#   wrangler pages secret put TEACHER_KEY

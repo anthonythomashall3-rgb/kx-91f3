@@ -1,0 +1,35 @@
+name: Build Windows installer
+
+# Builds lockqz-win.exe on a Windows runner (Inno Setup only compiles on Windows).
+# Runs on every change to the Windows app, or on demand (Actions tab -> Run workflow).
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "app/windows/**"
+      - ".github/workflows/windows-installer.yml"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Compile installer
+        working-directory: app/windows
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "/DLQTOKEN=lqz-win-2026shared" `
+            "/DLQAPI=https://lockdownqz.pages.dev" `
+            installer.iss
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: lockqz-win
+          path: app/windows/Output/lockqz-win.exe
+          if-no-files-found: error

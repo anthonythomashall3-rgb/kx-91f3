@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "LOCKqz",
+  "version": "0.1.0",
+  "description": "Blocks AI during a designated Brightspace quiz, then restores it when the quiz ends.",
+  "permissions": ["declarativeNetRequest", "declarativeNetRequestFeedback", "scripting", "storage", "tabs", "alarms"],
+  "host_permissions": [
+    "*://*/d2l/*",
+    "*://www.google.com/*",
+    "*://www.bing.com/*",
+    "http://127.0.0.1:8787/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" },
+  "action": { "default_popup": "popup.html", "default_title": "LOCKqz", "default_icon": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" } },
+  "content_scripts": [
+    { "matches": ["*://*/d2l/lms/quizzing/*", "*://*/d2l/lms/quizzing/user/*"],
+      "js": ["config.js", "content-brightspace.js"], "run_at": "document_idle" },
+    { "matches": ["*://www.google.com/*", "*://www.bing.com/*"],
+      "js": ["config.js", "content-ai-strip.js"], "run_at": "document_idle" }
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      { "id": "ai_block", "enabled": false, "path": "dnr_rules.json" }
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "port": 8787,
+  "token": "CHANGE-ME-shared-with-extension",
+  "api_base": "https://lockdownqz.pages.dev/api",
+  "device_id": "set-at-install",
+  "student": null
+}
