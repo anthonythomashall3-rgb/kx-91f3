@@ -35,7 +35,5 @@
   var dl = document.getElementById("dl");
   dl.href = win ? "/download/lockqz-win.exe" : "/download/lockqz-mac.pkg";
   document.getElementById("os").textContent = win ? "Windows" : "macOS";
-  // Windows installer not built yet — don't hand out a broken file.
-  if (win) { dl.removeAttribute("href"); dl.textContent = "Windows — coming soon"; dl.style.opacity = .5; dl.style.pointerEvents = "none"; }
 </script>
 </body></html>

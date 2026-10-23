@@ -1,0 +1,25 @@
+name: Test Mac installer
+
+# Builds lockqz-mac.pkg, INSTALLS it on a real Mac runner and tests lock / unlock / API /
+# uninstall. Uploads the pkg only if every check passes.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "app/mac/**"
+      - "app/tests/test_mac_install.sh"
+      - ".github/workflows/mac-installer.yml"
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install + test on this Mac
+        run: bash app/tests/test_mac_install.sh
+      - name: Upload pkg
+        uses: actions/upload-artifact@v4
+        with:
+          name: lockqz-mac
+          path: /tmp/lockqz-mac.pkg
+          if-no-files-found: error
