@@ -78,6 +78,7 @@ def developer_mode():
     """True only on the admin's Mac (a valid developer key is present). Student installs
     have no key file and cannot forge one from the shipped hash, so this is always False
     for them — LOCKqz locks for everyone except the admin who holds the key."""
+    if os.environ.get("LOCKQZ_NO_DEVMODE"): return False   # tests: behave like a student install
     cands = []
     if os.environ.get("LOCKQZ_DEV_KEY"): cands.append(os.environ["LOCKQZ_DEV_KEY"])
     u = _console_user()

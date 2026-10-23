@@ -8,10 +8,13 @@ PASS=0; FAIL=0
 ok(){ PASS=$((PASS+1)); echo "  ok: $1"; }
 bad(){ FAIL=$((FAIL+1)); echo "  FAIL: $1"; }
 
-pkill -f lockqzd.py 2>/dev/null; sleep 1
-( cd "$MAC" && LOCKQZ_NO_DEVMODE=1 LOCKQZ_DRYRUN=1 python3 lockqzd.py >/tmp/lockqz_test.log 2>&1 ) &
+# own config + own port so an installed daemon on 8787 is never touched
+TMP="$(mktemp -d)"; T=test-token; PORT=18787
+printf '{"port":%s,"token":"%s","api_base":"","device_id":"test-dev","student":"test","max_minutes":5}' "$PORT" "$T" > "$TMP/config.json"
+( cd "$MAC" && LOCKQZ_NO_DEVMODE=1 LOCKQZ_DRYRUN=1 LOCKQZ_CONFIG="$TMP/config.json" python3 lockqzd.py >/tmp/lockqz_test.log 2>&1 ) &
+DPID=$!
 # wait up to 8s for the server to come up
-T=$(python3 -c 'import json;print(json.load(open("'"$MAC"'/config.json"))["token"])'); B=http://127.0.0.1:8787; up=""
+B=http://127.0.0.1:$PORT; up=""
 for i in $(seq 1 16); do
   if curl -s -H "X-LOCKqz-Token: $T" $B/status >/dev/null 2>&1; then up=1; break; fi
   sleep 0.5
@@ -35,7 +38,7 @@ curl -s -X POST -H "X-LOCKqz-Token: $T" -d '{"quiz_id":"98765-12345"}' $B/unlock
 hb=$(curl -s -X POST -H "X-LOCKqz-Token: $T" -d '{}' $B/heartbeat | python3 -c 'import sys,json;print(json.load(sys.stdin).get("ok"))' 2>/dev/null)
 [ "$hb" = "True" ] && ok "heartbeat responds ok" || bad "heartbeat failed"
 
-pkill -f lockqzd.py 2>/dev/null
+kill $DPID 2>/dev/null; pkill -f "LOCKQZ_CONFIG=$TMP" 2>/dev/null
 echo ""
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

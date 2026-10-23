@@ -31,6 +31,8 @@
   #login button{width:100%}
   .hide{display:none}
   .ok{background:#eafbea;padding:10px 12px;border-radius:8px;margin-top:10px}
+  a.bmk{display:inline-block;background:var(--usc);color:#fff;text-decoration:none;font-weight:700;padding:9px 16px;border-radius:8px;cursor:grab}
+  details{border-top:1px solid #eee;padding:8px 0} summary{cursor:pointer} .yes{color:#1a7f37;font-weight:700} .no{color:var(--usc)}
 </style></head>
 <body>
 <header>LOCKqz — Teacher <span id="who"></span></header>
@@ -64,15 +66,22 @@
   <div id="start" class="card hide">
     <h2>Get started</h2>
     <ol style="margin:0;padding-left:20px;line-height:1.8">
-      <li>Add a quiz below — paste its Brightspace link.</li>
-      <li>In Brightspace, set the password LOCKqz gives you on that quiz.</li>
+      <li>Drag <b>LOCKqz Sync</b> (below) to your bookmarks bar.</li>
+      <li>Open Brightspace and click it. Tick the quizzes LOCKqz should protect.</li>
       <li>Tell students to install LOCKqz once from <a href="/">the home page</a>.</li>
       <li>During the quiz, click <b>Watch</b> to see every student live.</li>
     </ol>
   </div>
 
   <div class="card">
-    <h2>Add a quiz</h2>
+    <h2>Brightspace</h2>
+    <div class="bar"><a class="bmk" id="bmk" href="#" onclick="alert('Drag this button to your bookmarks bar, then click it while you are in Brightspace.');return false">LOCKqz Sync</a>
+      <span class="muted">Drag to your bookmarks bar. Click it in Brightspace.</span></div>
+    <div id="bscourses" class="muted">No courses synced yet.</div>
+  </div>
+
+  <div class="card">
+    <h2>Add a quiz by link</h2>
     <div class="bar">
       <input id="qtitle" placeholder="Quiz name" size="22">
       <input id="qurl" placeholder="Paste the Brightspace quiz link" size="40">
@@ -180,7 +189,7 @@ async function boot(){
   $("who").innerHTML = esc(m.name||m.email)+' &nbsp;<button onclick="changePw()">Change password</button> &nbsp;<button onclick="logout()">Log out</button>';
   if(m.admin){ $("admin").classList.remove("hide"); $("invitecard").classList.remove("hide"); $("iuntil").value=semEnd(); loadTeachers(); loadInvites(); }
   $("inactive").classList.toggle("hide", !!m.active);
-  loadQuizzes(); loadRoster(); loadSessions();
+  loadQuizzes(); loadRoster(); loadSessions(); loadBs();
 }
 
 // ---- quizzes ----
@@ -252,6 +261,38 @@ async function activate(email,id){ const d=await post("/activate",{email,until:$
 async function deactivate(email){ if(confirm("Turn off "+email+"?")){ await post("/activate",{email,until:null}); loadTeachers(); } }
 async function resetPw(email){ const d=await post("/reset",{email}); alert(d.error||("New password for "+email+": "+d.password)); }
 
+// ---- Brightspace connector ----
+const dshort = t => t ? new Date(t).toLocaleDateString([], {month:"short",day:"numeric"}) : "";
+async function loadBs(){
+  const k = await get("/synckey");
+  if (k.key) $("bmk").href = "javascript:(function(){var s=document.createElement('script');s.src='" + location.origin + "/sync.js?k=" + k.key + "&v='+Date.now();document.body.appendChild(s)})()";
+  const d = await get("/bs"); const box = $("bscourses");
+  if (!(d.courses||[]).length) { box.textContent = "No courses synced yet."; return; }
+  box.classList.remove("muted");
+  box.innerHTML = d.courses.map(c => {
+    const inst = c.students.filter(s => s.installed).length, prot = c.quizzes.filter(q => q.password).length;
+    const qrows = c.quizzes.map(q => `<tr><td>${esc(q.name)}</td><td>${dshort(q.start_date)}</td>
+      <td>${q.password ? `<code>${esc(q.password)}</code>` : ""}</td>
+      <td>${q.password ? (q.bs_password_is_ours ? '<span class="yes">set in Brightspace</span>' : '<span class="no">click LOCKqz Sync in Brightspace</span>') : ""}</td>
+      <td><button class="ghost" onclick="protectQ('${esc(c.ou)}','${esc(q.qi)}',${q.password ? "false" : "true"})">${q.password ? "Unprotect" : "Protect"}</button>
+      ${q.password ? `<button class="ghost" onclick="watch('${esc(c.ou)}-${esc(q.qi)}','${esc(q.name).replace(/'/g,"")}')">Watch</button>` : ""}</td></tr>`).join("")
+      || '<tr><td colspan="5" class="muted">No quizzes.</td></tr>';
+    const srows = c.students.map(s => `<tr><td>${esc(s.name)}</td><td>${esc(s.email||"")}</td>
+      <td>${s.installed ? '<span class="yes">installed</span>' : '<span class="no">not installed</span>'}</td><td>${esc(s.platform||"")}</td><td>${when(s.last_seen)}</td></tr>`).join("")
+      || '<tr><td colspan="5" class="muted">No students.</td></tr>';
+    return `<details><summary><b>${esc((c.name||c.ou).replace(/^\d+_\d+\s*/,""))}</b> &nbsp;<span class="muted">${inst}/${c.students.length} installed &middot; ${prot} protected &middot; synced ${when(c.synced_at)}</span></summary>
+      <table style="margin-top:8px"><thead><tr><th>Quiz</th><th>Starts</th><th>Password</th><th>Brightspace</th><th></th></tr></thead><tbody>${qrows}</tbody></table>
+      <table style="margin-top:12px"><thead><tr><th>Student</th><th>Email</th><th>LOCKqz</th><th>OS</th><th>Last seen</th></tr></thead><tbody>${srows}</tbody></table></details>`;
+  }).join("");
+}
+async function protectQ(ou, qi, on){
+  const d = await post("/protect", {ou, qi, on});
+  if (d.error) { alert(d.error); return; }
+  alert(on ? "Protected. Click LOCKqz Sync in Brightspace to put the password on the quiz."
+           : "Unprotected. Click LOCKqz Sync in Brightspace to remove the password from the quiz.");
+  loadBs(); loadQuizzes();
+}
+
 // ---- invites (admin) ----
 let INVITE = "";
 const inviteLink = code => location.origin + "/dashboard?invite=" + code;
@@ -259,8 +300,8 @@ function inviteMail(email, link){
   const s = "Your LOCKqz teacher account";
   const b = "Hi,\n\nYou're invited to LOCKqz. It blocks AI on students' computers during your Brightspace quizzes, then turns AI back on when the quiz ends.\n\n"
     + "1. Create your account (this link works once):\n   " + link + "\n\n"
-    + "2. Add a quiz: paste the Brightspace quiz link. LOCKqz gives you a password.\n\n"
-    + "3. In Brightspace, edit the quiz and set that password (Availability Dates & Conditions, or the Restrictions tab).\n\n"
+    + "2. On your LOCKqz dashboard, drag the LOCKqz Sync button to your bookmarks bar.\n\n"
+    + "3. Open Brightspace and click LOCKqz Sync. It reads your class lists and quizzes; tick the quizzes LOCKqz should protect.\n\n"
     + "4. Before the quiz, have students install LOCKqz once from " + location.origin + "\n\n"
     + "During the quiz, click Watch on your dashboard to see every student live.\n\nAnthony Hall\nLOCKqz";
   return "mailto:" + (email||"") + "?subject=" + encodeURIComponent(s) + "&body=" + encodeURIComponent(b);

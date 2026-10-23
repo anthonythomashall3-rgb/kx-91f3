@@ -152,7 +152,7 @@ def dialog(text, title="LOCKqz"):
 
 def ask_name():
     try:
-        s = osa('text returned of (display dialog "LOCKqz setup — enter your name as it appears in Brightspace:" default answer "" with title "LOCKqz" buttons {"OK"} default button 1)', "AppleScript")
+        s = osa('text returned of (display dialog "LOCKqz setup - enter your school email (the one Brightspace uses, e.g. you@usc.edu):" default answer "" with title "LOCKqz" buttons {"OK"} default button 1)', "AppleScript")
         return s.strip() or None
     except Exception: return None
 

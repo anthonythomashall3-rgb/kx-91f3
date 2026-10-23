@@ -72,7 +72,7 @@ function Show-Message($text) {
 $Student = $null
 if (Test-Path $StudentFile) { $Student = (Get-Content $StudentFile -Raw | ConvertFrom-Json).student }
 if (-not $Student) {
-  $Student = [Microsoft.VisualBasic.Interaction]::InputBox("LOCKqz setup - enter your name as it appears in Brightspace:", "LOCKqz", "")
+  $Student = [Microsoft.VisualBasic.Interaction]::InputBox("LOCKqz setup - enter your school email (the one Brightspace uses, e.g. you@usc.edu):", "LOCKqz", "")
   if ($Student) { @{ student = $Student } | ConvertTo-Json | Set-Content $StudentFile -Encoding UTF8 }
 }
 try { Helper "/student" @{ student = $Student } | Out-Null } catch { Log "helper not reachable yet" }
