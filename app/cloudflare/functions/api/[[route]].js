@@ -108,6 +108,18 @@ export async function onRequest(context) {
   const teacher = () => !!me;
   const mine = (col="teacher_id") => me.admin ? { sql:"1=1", args:[] } : { sql:`${col}=?`, args:[me.id] };
   const inCourse = async ou => me && (me.admin || !!(await db.prepare("SELECT 1 FROM teacher_courses WHERE teacher_id=? AND ou=?").bind(me.id, String(ou)).first()));
+  // Only the INSTRUCTOR of a course (named Instructor on a roster an admin or verified professor synced)
+  // may act on it. TAs NEVER qualify -- a TA could otherwise reach the other classes they are in.
+  // Anthony (admin) is the sole exception, handled by me.admin at each call site.
+  const EMAIL = String(me && me.email || "").toLowerCase();
+  const INSTR_SQL = "(r.role LIKE '%nstructor%' OR r.role LIKE '%rofessor%' OR r.role LIKE '%aculty%')";
+  async function hasTrustedOwner(ou) {
+    return !!(await db.prepare("SELECT 1 FROM teacher_courses tc JOIN teachers te ON te.id=tc.teacher_id WHERE tc.ou=? AND (te.role='admin' OR te.verified=1) LIMIT 1").bind(String(ou)).first());
+  }
+  async function trustedInstructor(ou) {
+    if (!me || !EMAIL) return false;
+    return !!(await db.prepare(`SELECT 1 FROM roster r JOIN teacher_courses tc ON tc.ou=r.ou JOIN teachers te ON te.id=tc.teacher_id WHERE r.ou=? AND lower(r.email)=? AND ${INSTR_SQL} AND (te.role='admin' OR te.verified=1) LIMIT 1`).bind(String(ou), EMAIL).first());
+  }
   async function bsState(ous) {
     ous = ous.map(String).filter(o => /^\d+$/.test(o));
     if (!ous.length) return { protect: [], clear: [] };
@@ -393,11 +405,10 @@ export async function onRequest(context) {
       const allowed = {};
       for (const c of courses) {
         const ou = String(c.ou||""); if (!/^\d+$/.test(ou) || ou in allowed) continue;
-        if (me.admin || me.verified) { allowed[ou] = true; continue; }
-        const owned = await db.prepare("SELECT 1 FROM teacher_courses tc JOIN teachers te ON te.id=tc.teacher_id WHERE tc.ou=? AND (te.role='admin' OR te.verified=1) LIMIT 1").bind(ou).first();
-        if (!owned) { allowed[ou] = true; continue; }
-        const staffHere = await db.prepare(`SELECT 1 FROM roster WHERE ou=? AND lower(email)=? AND NOT ${LEARNER} LIMIT 1`).bind(ou, myEmail).first();
-        allowed[ou] = !!staffHere;
+        if (me.admin) { allowed[ou] = true; continue; }
+        // Write a course only if you are its trusted instructor, or nobody trusted owns it yet
+        // (seeding). Seeding grants no power until an admin/verified instructor vouches for the course.
+        allowed[ou] = (await trustedInstructor(ou)) || !(await hasTrustedOwner(ou));
       }
       for (const c of courses) {
         const ou = String(c.ou || ""); if (!/^\d+$/.test(ou) || !allowed[ou]) continue;
@@ -422,6 +433,7 @@ export async function onRequest(context) {
       const today = now().slice(0, 10);
       for (const c of courses) {
         const ou = String(c.ou || ""); if (!/^\d+$/.test(ou) || !allowed[ou] || !Array.isArray(c.quizzes)) continue;
+        if (!me.admin && !(await trustedInstructor(ou))) continue;   // auto-protect only courses you instruct
         for (const q of c.quizzes) {
           const qi = String(q.qi || ""); if (!/^\d+$/.test(qi)) continue;
           if (q.active === false) continue;
@@ -437,12 +449,13 @@ export async function onRequest(context) {
       //  - else verified only if a TRUSTED course's roster (one an admin or verified professor synced)
       //    lists this email with a staff role. So the admin (or an already-verified professor) syncing
       //    a course is what lets its real instructors/TAs in; a stranger needs that seed first.
-      if (me.id !== "admin") {
+      if (!me.admin) {
         const learner = await db.prepare(`SELECT 1 FROM roster WHERE lower(email)=? AND ${LEARNER} LIMIT 1`).bind(myEmail).first();
         if (learner) await db.prepare("UPDATE teachers SET verified=0 WHERE id=?").bind(me.id).run();
         else {
-          const staff = await db.prepare(`SELECT 1 FROM roster r JOIN teacher_courses tc ON tc.ou=r.ou JOIN teachers te ON te.id=tc.teacher_id WHERE lower(r.email)=? AND NOT (r.role LIKE '%earner%' OR r.role LIKE '%tudent%') AND (te.role='admin' OR te.verified=1) LIMIT 1`).bind(myEmail).first();
-          if (staff) await db.prepare("UPDATE teachers SET verified=1 WHERE id=?").bind(me.id).run();
+          // INSTRUCTOR only -- a TA named on a trusted roster is NOT verified.
+          const prof = await db.prepare(`SELECT 1 FROM roster r JOIN teacher_courses tc ON tc.ou=r.ou JOIN teachers te ON te.id=tc.teacher_id WHERE lower(r.email)=? AND ${INSTR_SQL} AND (te.role='admin' OR te.verified=1) LIMIT 1`).bind(myEmail).first();
+          if (prof) await db.prepare("UPDATE teachers SET verified=1 WHERE id=?").bind(me.id).run();
         }
       }
       return json(await bsState(courses.map(c => c.ou)));
@@ -464,7 +477,7 @@ export async function onRequest(context) {
     if (p === "/protect" && request.method === "POST") {
       const ou = String(body.ou||""), qi = String(body.qi||"");
       if (!/^\d+$/.test(ou) || !/^\d+$/.test(qi)) return json({ error:"bad quiz" }, 400);
-      if (!(await inCourse(ou))) return json({ error:"Sync this course from Brightspace first." }, 403);
+      if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this course can protect its quizzes." }, 403);
       const ex = await db.prepare("SELECT quiz_id,password FROM quizzes WHERE qi=?").bind(qi).first();
       if (body.on) {
         await db.prepare("DELETE FROM pending_clear WHERE ou=? AND qi=?").bind(ou, qi).run();
@@ -486,7 +499,7 @@ export async function onRequest(context) {
     if (p === "/gate" && request.method === "POST") {
       const ou = String(body.ou||""), qi = String(body.qi||"");
       if (!/^\d+$/.test(ou) || !/^\d+$/.test(qi)) return json({ error:"bad quiz" }, 400);
-      if (!(await inCourse(ou))) return json({ error:"Sync this course from Brightspace first." }, 403);
+      if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this course can gate its quizzes." }, 403);
       const r = await db.prepare("UPDATE quizzes SET gated=? WHERE qi=?").bind(body.on?1:0, qi).run();
       if (!r.meta.changes) return json({ error:"Protect this quiz first." }, 400);
       return json({ ou, qi, gated: !!body.on });
