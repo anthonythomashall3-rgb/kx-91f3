@@ -10,3 +10,4 @@ node_modules/
 *.exe
 app/mac/Output/
 app/windows/Output/
+app/cloudflare/prof_site/

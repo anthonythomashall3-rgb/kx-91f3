@@ -34,6 +34,10 @@ echo "If you haven't set it yet, run:  npx wrangler pages secret put TEACHER_KEY
 echo "== deploy =="
 npx wrangler pages deploy public --project-name "$PROJECT" --commit-dirty=true --branch main
 
+echo "== teacher site (prof.$PROJECT.pages.dev) =="
+bash build-prof.sh
+npx wrangler pages deploy prof_site --project-name "$PROJECT" --commit-dirty=true --branch prof
+
 echo ""
-echo "Done. Site: https://$PROJECT.pages.dev   Dashboard: https://$PROJECT.pages.dev/dashboard.html"
+echo "Done. Site: https://$PROJECT.pages.dev   Teachers: https://prof.$PROJECT.pages.dev"
 echo "Remember: set api_base in mac/config.json + api in extension/config.js to the URL above."
