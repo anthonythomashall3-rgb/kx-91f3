@@ -384,8 +384,23 @@ export async function onRequest(context) {
     }
     if (p === "/sync" && request.method === "POST") {
       const courses = (Array.isArray(body.courses) ? body.courses : []).slice(0, 80), t = now(), st = [];
+      const myEmail = String(me.email||"").toLowerCase();
+      const LEARNER = "(role LIKE '%earner%' OR role LIKE '%tudent%')";
+      // Trust the roster, not the browser. A course is TRUSTED once an admin or an already-verified
+      // professor has synced it. An untrusted caller (new signup, or a student) may seed a course that
+      // nobody trusted owns yet, but can NEVER overwrite a course a trusted professor already owns
+      // unless that course's roster lists them as staff -- so a student can't wipe or fake a real class.
+      const allowed = {};
       for (const c of courses) {
-        const ou = String(c.ou || ""); if (!/^\d+$/.test(ou)) continue;
+        const ou = String(c.ou||""); if (!/^\d+$/.test(ou) || ou in allowed) continue;
+        if (me.admin || me.verified) { allowed[ou] = true; continue; }
+        const owned = await db.prepare("SELECT 1 FROM teacher_courses tc JOIN teachers te ON te.id=tc.teacher_id WHERE tc.ou=? AND (te.role='admin' OR te.verified=1) LIMIT 1").bind(ou).first();
+        if (!owned) { allowed[ou] = true; continue; }
+        const staffHere = await db.prepare(`SELECT 1 FROM roster WHERE ou=? AND lower(email)=? AND NOT ${LEARNER} LIMIT 1`).bind(ou, myEmail).first();
+        allowed[ou] = !!staffHere;
+      }
+      for (const c of courses) {
+        const ou = String(c.ou || ""); if (!/^\d+$/.test(ou) || !allowed[ou]) continue;
         st.push(db.prepare("INSERT INTO teacher_courses (teacher_id,ou,name,code,role,synced_at) VALUES (?,?,?,?,?,?) ON CONFLICT(teacher_id,ou) DO UPDATE SET name=excluded.name,code=excluded.code,role=excluded.role,synced_at=excluded.synced_at")
           .bind(me.id, ou, c.name||null, c.code||null, c.role||null, t));
         if (Array.isArray(c.classlist)) {
@@ -403,11 +418,10 @@ export async function onRequest(context) {
         }
       }
       for (let i = 0; i < st.length; i += 90) await db.batch(st.slice(i, i + 90));
-      // Protect-by-default: new active quizzes get a LOCKqz password automatically. A quiz the teacher
-      // released (pending_clear) or already protns (quizzes row) is left as-is, so opt-out sticks.
+      // Protect-by-default: new active quizzes get a LOCKqz password automatically (allowed courses only).
       const today = now().slice(0, 10);
       for (const c of courses) {
-        const ou = String(c.ou || ""); if (!/^\d+$/.test(ou) || !Array.isArray(c.quizzes)) continue;
+        const ou = String(c.ou || ""); if (!/^\d+$/.test(ou) || !allowed[ou] || !Array.isArray(c.quizzes)) continue;
         for (const q of c.quizzes) {
           const qi = String(q.qi || ""); if (!/^\d+$/.test(qi)) continue;
           if (q.active === false) continue;
@@ -418,9 +432,19 @@ export async function onRequest(context) {
             .bind(rid(8), q.name||null, null, "LQ-" + rid(8), now(), qi, me.id, `${ou}-${qi}`, ou).run();
         }
       }
-      // The Sync script only sends courses where the teacher is instructor/TA, so any course here
-      // proves they are staff: verify them automatically. No email, no invite, no admin step.
-      if (me.id !== "admin" && courses.length) await db.prepare("UPDATE teachers SET verified=1 WHERE id=?").bind(me.id).run();
+      // VERIFY ONLY FROM A TRUSTED ROSTER -- a student can never become a professor:
+      //  - if this email is a Learner/Student on ANY roster, it is never verified (and loses it);
+      //  - else verified only if a TRUSTED course's roster (one an admin or verified professor synced)
+      //    lists this email with a staff role. So the admin (or an already-verified professor) syncing
+      //    a course is what lets its real instructors/TAs in; a stranger needs that seed first.
+      if (me.id !== "admin") {
+        const learner = await db.prepare(`SELECT 1 FROM roster WHERE lower(email)=? AND ${LEARNER} LIMIT 1`).bind(myEmail).first();
+        if (learner) await db.prepare("UPDATE teachers SET verified=0 WHERE id=?").bind(me.id).run();
+        else {
+          const staff = await db.prepare(`SELECT 1 FROM roster r JOIN teacher_courses tc ON tc.ou=r.ou JOIN teachers te ON te.id=tc.teacher_id WHERE lower(r.email)=? AND NOT (r.role LIKE '%earner%' OR r.role LIKE '%tudent%') AND (te.role='admin' OR te.verified=1) LIMIT 1`).bind(myEmail).first();
+          if (staff) await db.prepare("UPDATE teachers SET verified=1 WHERE id=?").bind(me.id).run();
+        }
+      }
       return json(await bsState(courses.map(c => c.ou)));
     }
     if (p === "/sync-result" && request.method === "POST") {
