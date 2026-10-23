@@ -54,7 +54,18 @@
     };
     // Brightspace special-access helpers (one user at a time). PUT grants/keeps, DELETE removes.
     var saUrl = function (ou, qi, uid) { return "/d2l/api/le/" + LE + "/" + ou + "/quizzes/" + qi + "/specialaccess/" + uid; };
-    var saList = async function (ou, qi) { return get("/d2l/api/le/" + LE + "/" + ou + "/quizzes/" + qi + "/specialaccess/").catch(function () { return []; }); };
+    // Brightspace returns special access as a PAGED object {Objects:[{UserId,SpecialAccess}],Next} (verified live
+    // on USC Brightspace 23 Oct 2026), not a bare array. Follow Next and return a flat array.
+    var saList = async function (ou, qi) {
+      var all = [], next = "/d2l/api/le/" + LE + "/" + ou + "/quizzes/" + qi + "/specialaccess/";
+      while (next) {
+        var d = await get(next).catch(function () { return null; });
+        if (!d) break;
+        if (Array.isArray(d)) { all = all.concat(d); break; }
+        all = all.concat(d.Objects || []); next = d.Next || null;
+      }
+      return all;
+    };
     var saPut = function (ou, qi, uid, endIso) { return put(saUrl(ou, qi, uid), { StartDate: null, EndDate: endIso, DueDate: null, SubmissionTimeLimit: null, AttemptsAllowed: null }); };
     var saDel = function (ou, qi, uid) { return fetch(saUrl(ou, qi, uid), { method: "DELETE", credentials: "include", headers: { "X-Csrf-Token": csrf } }); };
 
