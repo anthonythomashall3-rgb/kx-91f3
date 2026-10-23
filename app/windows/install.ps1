@@ -21,11 +21,13 @@ if (-not $Api)   { $Api   = Read-Host "API base (e.g. https://<project>.pages.de
 
 Write-Host "== installing LOCKqz helper =="
 New-Item -ItemType Directory -Force -Path $Dest | Out-Null
-Copy-Item (Join-Path $Here "lockqz.ps1")   $Dest -Force
-Copy-Item (Join-Path $Here "lockqzd.ps1")  $Dest -Force
-Copy-Item (Join-Path $Here "blocklist.txt") $Dest -Force
-Copy-Item (Join-Path $Here "browser-policy.ps1") $Dest -Force
-Copy-Item (Join-Path $Here "lockqz-agent.ps1") $Dest -Force
+# The .exe installer already unpacks into $Dest and runs this script from there; copying a
+# file onto itself throws, so only copy when installing from a separate folder.
+if ((Resolve-Path $Here).Path.TrimEnd('\') -ne (Resolve-Path $Dest).Path.TrimEnd('\')) {
+  foreach ($f in "lockqz.ps1","lockqzd.ps1","blocklist.txt","browser-policy.ps1","lockqz-agent.ps1","uninstall.ps1") {
+    Copy-Item (Join-Path $Here $f) $Dest -Force
+  }
+}
 
 $device = "win-" + [guid]::NewGuid().ToString()
 $cfg = @{ port=8787; token=$Token; api_base=$Api; device_id=$device;
