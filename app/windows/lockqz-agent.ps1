@@ -1,5 +1,5 @@
 # LOCKqz agent (Windows). Runs in the student's session at logon (scheduled task).
-# Replaces the browser extension, so the student installs ONE thing — nothing from the
+# Replaces the browser extension, so the student installs ONE thing - nothing from the
 # Chrome Web Store. Every 2 s it reads the address bar + tab titles of every Chrome/Edge/
 # Brave/Firefox window through Windows UI Automation (no browser permission needed) and:
 #   * on a Brightspace quiz attempt page -> tells the helper to LOCK, fetches the quiz

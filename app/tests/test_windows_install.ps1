@@ -12,6 +12,9 @@ Get-ChildItem "$PSScriptRoot\..\windows\*.ps1" | ForEach-Object {
   $errs = $null
   [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errs) | Out-Null
   Check "parses: $($_.Name)" ($errs.Count -eq 0)
+  $errs | Select-Object -First 3 | ForEach-Object { Write-Host "      $($_.Extent.StartLineNumber): $($_.Message)" }
+  # PowerShell 5.1 reads BOM-less scripts as Windows-1252: any non-ASCII byte can corrupt the code.
+  Check "plain ASCII: $($_.Name)" (-not ([IO.File]::ReadAllBytes($_.FullName) | Where-Object { $_ -gt 127 } | Select-Object -First 1))
 }
 
 # 1) silent install

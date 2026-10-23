@@ -9,7 +9,7 @@ ok(){ PASS=$((PASS+1)); echo "  ok: $1"; }
 bad(){ FAIL=$((FAIL+1)); echo "  FAIL: $1"; }
 
 pkill -f lockqzd.py 2>/dev/null; sleep 1
-( cd "$MAC" && LOCKQZ_DRYRUN=1 python3 lockqzd.py >/tmp/lockqz_test.log 2>&1 ) &
+( cd "$MAC" && LOCKQZ_NO_DEVMODE=1 LOCKQZ_DRYRUN=1 python3 lockqzd.py >/tmp/lockqz_test.log 2>&1 ) &
 # wait up to 8s for the server to come up
 T=$(python3 -c 'import json;print(json.load(open("'"$MAC"'/config.json"))["token"])'); B=http://127.0.0.1:8787; up=""
 for i in $(seq 1 16); do

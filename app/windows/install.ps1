@@ -60,5 +60,5 @@ Write-Host "Installed. Device id: $device"
 try {
   $s = Invoke-RestMethod -Uri "http://127.0.0.1:8787/status" -Headers @{ "X-LOCKqz-Token" = $Token } -TimeoutSec 4
   Write-Host ("Helper status: " + ($s | ConvertTo-Json -Compress))
-} catch { Write-Host "Daemon still starting — re-check http://127.0.0.1:8787/status in a few seconds." }
+} catch { Write-Host "Daemon still starting - re-check http://127.0.0.1:8787/status in a few seconds." }
 Write-Host "Done. Open a Brightspace quiz - the agent asks your name once, then locks AI automatically."

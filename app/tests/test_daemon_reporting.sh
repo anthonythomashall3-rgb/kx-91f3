@@ -45,7 +45,7 @@ cat > "$TMP/config.json" <<CFG
   "device_id": "itest-dev", "student": "Test Student", "max_minutes": 180, "beat_cycles": 1 }
 CFG
 
-LOCKQZ_DRYRUN=1 LOCKQZ_CONFIG="$TMP/config.json" python3 "$APP/mac/lockqzd.py" >"$TMP/daemon.log" 2>&1 & DPID=$!
+LOCKQZ_NO_DEVMODE=1 LOCKQZ_DRYRUN=1 LOCKQZ_CONFIG="$TMP/config.json" python3 "$APP/mac/lockqzd.py" >"$TMP/daemon.log" 2>&1 & DPID=$!
 # wait for the control server to come up
 for i in $(seq 1 20); do
   curl -s -m 2 -H "X-LOCKqz-Token: $TOKEN" "http://127.0.0.1:$CTRL_PORT/status" >/dev/null 2>&1 && break
