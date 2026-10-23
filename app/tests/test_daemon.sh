@@ -9,9 +9,11 @@ ok(){ PASS=$((PASS+1)); echo "  ok: $1"; }
 bad(){ FAIL=$((FAIL+1)); echo "  FAIL: $1"; }
 
 # own config + own port so an installed daemon on 8787 is never touched
-TMP="$(mktemp -d)"; T=test-token; PORT=18787
+TMP="$(mktemp -d)"; T=test-token
+PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 printf '{"port":%s,"token":"%s","api_base":"","device_id":"test-dev","student":"test","max_minutes":5}' "$PORT" "$T" > "$TMP/config.json"
-( cd "$MAC" && LOCKQZ_NO_DEVMODE=1 LOCKQZ_DRYRUN=1 LOCKQZ_CONFIG="$TMP/config.json" python3 lockqzd.py >/tmp/lockqz_test.log 2>&1 ) &
+# exec: $DPID is the daemon itself, so the cleanup below really stops it; key file stays in $TMP
+( cd "$MAC" && LOCKQZ_NO_DEVMODE=1 LOCKQZ_DRYRUN=1 LOCKQZ_CONFIG="$TMP/config.json" LOCKQZ_KEY_PATH="$TMP/device.key" exec python3 lockqzd.py >"$TMP/daemon.log" 2>&1 ) &
 DPID=$!
 # wait up to 8s for the server to come up
 B=http://127.0.0.1:$PORT; up=""

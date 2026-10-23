@@ -65,6 +65,13 @@ polMiss.length === 0 ? ok("windows policy has every rule") : bad("windows policy
 const over = ["\"bing.com\"", "\"huggingface.co\""].filter(d => pyPol.includes(d) || psPol.includes(d));
 over.length === 0 ? ok("no whole-domain over-block of bing.com / huggingface.co") : bad("over-blocks: " + over.join(", "));
 
+console.log("T8 the server sends the full list (helpers refresh from it every 12 h)");
+const route = readFileSync(join(DIR, "../cloudflare/functions/api/[[route]].js"), "utf8");
+const apiList = [...(route.match(/const AI_DOMAINS = \[([\s\S]*?)\];/) || [, ""])[1].matchAll(/"([^"]+)"/g)].map(m => m[1]);
+const notServed = mac.filter(d => !apiList.includes(d));
+notServed.length === 0 ? ok(`API serves all ${mac.length} domains (${apiList.length} total)`)
+  : bad(`API list is missing ${notServed.length}: ${notServed.slice(0, 8).join(", ")}...`);
+
 console.log("");
 console.log(`RESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

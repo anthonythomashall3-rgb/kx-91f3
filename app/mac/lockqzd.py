@@ -7,19 +7,25 @@
     GET  /status                                     -> current state
     POST /student {"student"}                        -> name shown on the teacher roster
     POST /heartbeat {...}                            -> forwarded to Cloudflare
+    POST /password {"url"}   -> quiz password, ONLY while this Mac is locked for that quiz
+    POST /event {"event":"quiz_left",...}            -> forwarded to Cloudflare (signed)
   All requests must carry header  X-LOCKqz-Token: <token from config>.
+- Device key: a random per-install key in a root-only file (0600). The helper registers it once
+  and signs every report and password request with it (HMAC-SHA256), so a script that never
+  installed LOCKqz cannot fake a lock and read the quiz password.
 - Watcher: while a quiz is locked, re-applies the block every few seconds, reports
   tampering, refreshes the blocklist hourly, and AUTO-UNLOCKS at a hard maximum so a
   student is never left locked.
 - Set LOCKQZ_DRYRUN=1 in the environment to run unprivileged for testing (the engine
   makes no system changes).
 """
-import hashlib, json, os, platform, ssl, subprocess, threading, time, urllib.request
+import hashlib, hmac, json, os, platform, re, secrets, ssl, subprocess, threading, time
+import urllib.error, urllib.parse, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENGINE = os.path.join(HERE, "lockqz.sh")
-BLOCKLIST = os.path.join(HERE, "blocklist.txt")
+BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.txt")
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
@@ -48,6 +54,9 @@ DRYRUN  = os.environ.get("LOCKQZ_DRYRUN", "0")
 # has no key file and cannot forge one, so it can never enter developer mode.
 DEV_KEY_HASH = "4695a520432e105e967dd2703366c24c039fe0a850fe35db03b73b6b9506aecd"
 
+KEY_PATH = os.environ.get("LOCKQZ_KEY_PATH") or "/Library/Application Support/LOCKqz/device.key"
+NET = {"skew": 0.0, "registered": False}   # skew: server clock minus ours, learned from a 401
+
 STATE = {"state": "unlocked", "quiz_id": None, "student": CONF.get("student"),
          "locked_at": None, "locked_since": 0.0, "max_minutes": MAX_MIN}
 LOCK = threading.Lock()
@@ -66,6 +75,36 @@ def engine_locked():
         return False
 
 def log(msg): print("LOCKqzd:", msg, flush=True)
+
+def device_key():
+    """This install's signing key: 32 random bytes (hex) in a file only root can read.
+    The per-user agent and the student's own account never see it."""
+    try:
+        with open(KEY_PATH) as f:
+            k = f.read().strip()
+        if re.fullmatch(r"[0-9a-f]{64}", k): return k
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        log("device key unreadable (%s) - making a new one" % e)
+    k = secrets.token_hex(32)
+    try:
+        os.makedirs(os.path.dirname(KEY_PATH), exist_ok=True)
+        tmp = KEY_PATH + ".tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f: f.write(k)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, KEY_PATH)
+    except Exception as e:
+        log("could not save device key: %s" % e)
+    return k
+
+KEY = device_key()
+
+def lock_id(url):
+    """Same rule as the agent and the server: '<ou>-<qi>' from the quiz URL."""
+    qi = re.search(r"qi=(\d+)", url or ""); ou = re.search(r"ou=(\d+)", url or "")
+    return "%s-%s" % (ou.group(1) if ou else "x", qi.group(1) if qi else "x")
 
 def _console_user():
     try:
@@ -91,19 +130,63 @@ def developer_mode():
             pass
     return False
 
-def post(path, body):
-    # Retry a few times so a brief network blip during an exam never drops a
-    # lock/unlock/tamper report. Best-effort; never raises.
-    if not API: return None
+def _json(b):
+    try: return json.loads(b or b"null")
+    except Exception: return None
+
+def signed_headers(url, raw):
+    ts = str(int(time.time() + NET["skew"]))
+    path = urllib.parse.urlsplit(url).path or "/"
+    msg = "POST\n%s\n%s\n%s" % (path, ts, hashlib.sha256(raw).hexdigest())
+    return {"X-LOCKqz-Device": DEVICE, "X-LOCKqz-Time": ts,
+            "X-LOCKqz-Sig": hmac.new(KEY.encode(), msg.encode(), hashlib.sha256).hexdigest()}
+
+def call(path, body, signed=True):
+    """POST JSON to the LOCKqz API; returns (http_status, json). Signed with the device key.
+    Retries network blips (an exam report is never dropped), corrects for a wrong student
+    clock (server_time in a 401) and re-registers if the server does not know this device.
+    Never raises."""
+    if not API: return (0, None)
+    url, raw = API + path, json.dumps(body).encode()
     for attempt in range(3):
+        hdrs = {"Content-Type": "application/json", **UA}
+        if signed: hdrs.update(signed_headers(url, raw))
         try:
-            req = urllib.request.Request(API + path, data=json.dumps(body).encode(),
-                                         headers={"Content-Type": "application/json", **UA})
-            return urllib.request.urlopen(req, timeout=8, context=ssl.create_default_context())
+            r = urllib.request.urlopen(urllib.request.Request(url, data=raw, headers=hdrs),
+                                       timeout=8, context=ssl.create_default_context())
+            return (r.status, _json(r.read()))
+        except urllib.error.HTTPError as e:
+            j = _json(e.read())
+            if e.code == 401 and signed and attempt < 2 and isinstance(j, dict):
+                st = j.get("server_time")
+                if isinstance(st, (int, float)): NET["skew"] = st - time.time()
+                if j.get("why") == "unregistered":
+                    NET["registered"] = False; register()
+                continue
+            log("api %s -> HTTP %s" % (path, e.code))
+            return (e.code, j)
         except Exception as e:
             if attempt == 2:
-                log("post %s failed after retries: %s" % (path, e)); return None
+                log("post %s failed after retries: %s" % (path, e)); return (0, None)
             time.sleep(2 * (attempt + 1))
+    return (0, None)
+
+def register():
+    """Register this install's key with the server once (trust on first use)."""
+    if NET["registered"] or not API or DEVICE in ("", "unknown"): return NET["registered"]
+    code, j = call("/register", {"device_id": DEVICE, "key": KEY, "version": VERSION,
+                                 "platform": "mac-" + platform.mac_ver()[0], "student": STATE["student"]},
+                   signed=False)
+    if code == 200: NET["registered"] = True; log("device registered")
+    elif code == 409: log("device id is registered with another key - reinstall LOCKqz for a new device id")
+    return NET["registered"]
+
+def post(path, body):
+    return call(path, body)[0]
+
+def engine_ok():
+    """True when the AI block is really in place (dry-run tests: when the state says locked)."""
+    return STATE["state"] == "locked" if DRYRUN == "1" else engine_locked()
 
 def report(event, extra=None):
     body = {"device_id": DEVICE, "event": event, "quiz_id": STATE["quiz_id"],
@@ -121,10 +204,19 @@ def refresh_blocklist():
         clean = [d.strip() for d in doms if isinstance(d, str) and "." in d and " " not in d.strip()]
         anchors = {"chatgpt.com", "claude.ai", "gemini.google.com"}
         if len(clean) >= 20 and anchors.issubset(set(clean)):
-            with open(BLOCKLIST, "w") as f:
-                f.write("# auto-updated from Cloudflare %s\n" % time.strftime("%Y-%m-%d"))
-                f.write("\n".join(clean) + "\n")
-            log("blocklist refreshed (%d domains)" % len(clean))
+            # The server can only ADD domains: a shorter or older server list never removes
+            # anything this Mac already blocks.
+            try:
+                with open(BLOCKLIST) as f:
+                    have = [l.strip() for l in f if l.strip() and not l.lstrip().startswith("#")]
+            except Exception:
+                have = []
+            merged = list(dict.fromkeys(have + clean))
+            if len(merged) > len(have):
+                with open(BLOCKLIST, "w") as f:
+                    f.write("# LOCKqz AI blocklist - shipped list plus additions from the server %s\n" % time.strftime("%Y-%m-%d"))
+                    f.write("\n".join(merged) + "\n")
+                log("blocklist refreshed (%d -> %d domains)" % (len(have), len(merged)))
         else:
             log("blocklist refresh rejected (failed sanity check) — keeping current list")
     except Exception as e:
@@ -166,6 +258,8 @@ def watcher():
         if do_beat:   report("heartbeat", {"quiz_id": qid, "source": "helper"})
         if cycles % 8640 == 0:   # ~every 12h — keeps API calls minimal
             refresh_blocklist()
+        if cycles % 720 == 0 and not NET["registered"]:   # ~hourly until the server knows this key
+            register()
 
 class H(BaseHTTPRequestHandler):
     def _auth(self): return self.headers.get("X-LOCKqz-Token") == TOKEN
@@ -213,21 +307,46 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True, "state": "locked"})
         if self.path == "/unlock":
             with LOCK:
+                qid = STATE["quiz_id"] or body.get("quiz_id")   # report WHICH quiz ended (live monitor "done")
                 STATE.update(state="unlocked", quiz_id=None, locked_at=None, locked_since=0.0)
                 engine("unlock")
-            report("unlock")
+            report("unlock", {"quiz_id": qid})
             return self._send(200, {"ok": True, "state": "unlocked"})
         if self.path == "/student":
             with LOCK: STATE["student"] = body.get("student") or STATE["student"]
             report("install", {"platform": "mac-" + platform.mac_ver()[0], "version": VERSION})
             return self._send(200, {"ok": True, "student": STATE["student"]})
         if self.path == "/heartbeat":
-            report("heartbeat", {"detail": body})
+            report("heartbeat", {"quiz_id": STATE["quiz_id"], "source": "agent", "detail": body})
+            return self._send(200, {"ok": True})
+        if self.path == "/password":
+            # The quiz password is released only to this helper, only while it holds the lock for
+            # THIS quiz with the block really in place, and only over a request signed with the
+            # root-only device key. The agent (student's account) never talks to /api/password.
+            url = str(body.get("url") or "")
+            with LOCK:
+                st, qid = STATE["state"], STATE["quiz_id"]
+            if st != "locked" or qid != lock_id(url):
+                return self._send(409, {"error": "not locked for this quiz"})
+            if not engine_ok():
+                engine("lock")
+                if not engine_ok():
+                    report("tamper", {"quiz_id": qid, "detail": "block_missing_at_password"})
+                    return self._send(409, {"error": "AI block is not in place"})
+            report("heartbeat", {"quiz_id": qid, "source": "helper"})   # fresh signed proof of the lock
+            code, j = call("/password", {"url": url, "device_id": DEVICE})
+            pw = j.get("password") if isinstance(j, dict) else None
+            return self._send(200 if pw else 502, {"password": pw, "status": code})
+        if self.path == "/event":
+            if body.get("event") != "quiz_left":
+                return self._send(400, {"error": "event not allowed"})
+            report("quiz_left", {"quiz_id": body.get("quiz_id"), "source": "agent", "detail": body.get("detail")})
             return self._send(200, {"ok": True})
         self._send(404, {"error": "not found"})
 
 def startup_network():
     # Runs in the background so a slow/absent network never delays the control server.
+    register()
     report("install", {"platform": "mac-" + platform.mac_ver()[0], "version": VERSION})
     refresh_blocklist()
 

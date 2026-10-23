@@ -2,7 +2,7 @@
 
 ## Automated test suite (run anytime, $0, no root, no network, no system changes)
     cd ~/Projects/LOCKqz/app && bash tests/run_all.sh
-As of 22 Oct 2026: **157 tests across 10 suites, all passing** (suite 8 = live quiz-monitor
+As of 23 Oct 2026: **248 tests across 12 suites, all passing** (was 157 across 10 on 22 Oct) (suite 8 = live quiz-monitor
 status + heartbeat logic; suite 9 = daemon reporting end-to-end, running the real daemon
 against a mock backend over HTTP to prove lock / helper-heartbeat / unlock actually report;
 suite 3 also guards that the extension DNR covers the full blocklist).
@@ -12,8 +12,9 @@ suite 3 also guards that the extension DNR covers the full blocklist).
    Claude/ChatGPT/Gemini/Copilot blackholed, www. variants correct, comments ignored.
 2. API enforcement logic (17) — the password gate: password released ONLY to a device locked
    in the last 60s; per-device; expires at 60s; quiz password > course password; unlock revokes.
-3. Blocklist integrity (6) — 99 domains, no duplicates, every major AI incl. Claude present,
-   all well-formed, DoH resolvers included, Mac and Windows lists identical.
+3. Blocklist integrity (10) — 99 domains, no duplicates, every major AI incl. Claude present,
+   all well-formed, DoH resolvers included, Mac and Windows lists identical, and the server's
+   list (the one helpers refresh from every 12 h) contains every domain.
 4. Mac daemon control plane (6) — boots within 8s even with no network, starts unlocked
    (fail-safe), lock/unlock work, auth enforced (401), heartbeat responds.
 5. Windows scripts lint (6) — balanced brackets, all core commands, all three verbs,
@@ -25,6 +26,19 @@ suite 3 also guards that the extension DNR covers the full blocklist).
 7. Brightspace URL parsing (37) — qi/ou parsed from every quiz URL shape (reversed params,
    extra params, encoded, uppercase, trailing hash, New Quiz Creation Experience); quiz-page
    detection fires ONLY on a real attempt page; lockIds collision-free; garbage input never throws.
+11. Device authentication (61) — 23 Oct 2026. Runs the REAL API code against an in-memory
+   database (fresh schema and an old schema upgraded by migrate_009): a script with no LOCKqz
+   cannot fake a lock or read the password; a registered device cannot be impersonated (no key,
+   wrong key, re-register with another key); signatures are bound to time, endpoint and body;
+   unsigned heartbeats cannot keep a lock alive; revoke works; old installs keep working until
+   REQUIRE_SIGNED=1. Shown to FAIL on the pre-fix API (it handed the password to the fake lock).
+12. Windows device signing (10) — loads the real signing code from lockqzd.ps1 under PowerShell:
+   both scripts parse, the HMAC matches the shared vector, and against a verifying mock it
+   registers, signs, fixes a 15-minute clock error and gets the password only while locked.
+   Suite 9 now also proves the Mac helper registers a 0600 key, signs every report, hands out the
+   password only while locked for that quiz, and reports which quiz an unlock ended. It also
+   proves a refresh from the server can only ADD domains: a short server list never shrinks a
+   Mac's list. Suites 4 and 9 pick free ports at run time and stop their daemons afterwards.
 
 ## What the tests PROVE
 - The student's computer is never corrupted: hosts is always restored exactly, even after
@@ -34,7 +48,7 @@ suite 3 also guards that the extension DNR covers the full blocklist).
 - The daemon fails safe: on restart it unlocks; during a quiz its watcher re-applies the block
   every 5s and flags tampering; a hard-max timer always unlocks so no student is stranded.
 - Network blips during an exam don't lose events (reports retry 3x) and can't wipe the blocklist
-  (refresh is sanity-checked before it's trusted).
+  (refresh is sanity-checked before it's trusted, and can only add domains, never remove one).
 
 ## What tests CANNOT prove (must be done live — all $0)
 These need the real OS / real Brightspace and are the final gate before trusting a class:

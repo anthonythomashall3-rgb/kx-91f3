@@ -2,8 +2,9 @@
 # Replaces the browser extension, so the student installs ONE thing - nothing from the
 # Chrome Web Store. Every 2 s it reads the address bar + tab titles of every Chrome/Edge/
 # Brave/Firefox window through Windows UI Automation (no browser permission needed) and:
-#   * on a Brightspace quiz attempt page -> tells the helper to LOCK, fetches the quiz
-#     password from the backend, shows it and copies it to the clipboard
+#   * on a Brightspace quiz attempt page -> tells the helper to LOCK, then asks the helper
+#     for the quiz password (the helper checks its block and signs the request with its
+#     SYSTEM-only device key), shows it and copies it to the clipboard
 #   * while locked                       -> pings the backend (teacher's live monitor)
 #   * when the quiz tab is gone (submitted / left) -> tells the helper to UNLOCK
 # First run asks the student's name once so the teacher's roster shows who is locked.
@@ -92,7 +93,11 @@ while ($true) {
         $r = $null; try { $r = Helper "/lock" @{ quiz_id = $Quiz; student = $Student; url = $quizWin.Url } } catch {}
         if ($r -and $r.ok) {
           $Locked = $true; $MissingSince = $null; $LastBeat = Get-Date; Log "LOCKED $Quiz"
-          $pw = (Api "/password" @{ url = $quizWin.Url; device_id = $Device }).password
+          $pw = $null
+          for ($i = 0; ($i -lt 3) -and (-not $pw); $i++) {
+            try { $pw = (Helper "/password" @{ url = $quizWin.Url }).password } catch { Log "password via helper failed: $_" }
+            if (-not $pw) { Start-Sleep -Seconds 2 }
+          }
           if ($pw) { Set-Clipboard -Value $pw; Show-Message "AI is locked for this quiz.`n`nQuiz password:  $pw`n(copied to your clipboard - paste it into Brightspace)" }
           else { Show-Message "AI is locked for this quiz." }
         } else { Show-Message "LOCKqz could not lock AI for this quiz. Is the LOCKqz app installed and running?"; Start-Sleep -Seconds 30 }
@@ -108,7 +113,11 @@ while ($true) {
       }
       if ($reason) {
         try { Helper "/unlock" @{ quiz_id = $Quiz } | Out-Null } catch {}
-        if ($reason -ne "submitted") { Api "/report" @{ device_id = $Device; event = "quiz_left"; quiz_id = $Quiz; student = $Student; source = "agent"; detail = $reason } | Out-Null }
+        if ($reason -ne "submitted") {
+          $sent = $false
+          try { Helper "/event" @{ event = "quiz_left"; quiz_id = $Quiz; detail = $reason } | Out-Null; $sent = $true } catch {}
+          if (-not $sent) { Api "/report" @{ device_id = $Device; event = "quiz_left"; quiz_id = $Quiz; student = $Student; source = "agent"; detail = $reason } | Out-Null }
+        }
         Log "UNLOCKED ($reason)"; $Locked = $false; $Quiz = $null; $QuizTitle = $null; $MissingSince = $null
       } elseif (((Get-Date) - $LastBeat).TotalSeconds -gt $Beat) {
         $LastBeat = Get-Date

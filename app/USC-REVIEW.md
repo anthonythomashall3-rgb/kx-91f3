@@ -50,6 +50,10 @@ LOCKqz does not claim to be unremovable — no tool on a computer whose owner ha
 can be. Instead it is tamper-evident and self-defeating to tamper with:
 - The quiz password is released only while the student's machine reports locked, so removing
   LOCKqz means the quiz never opens.
+- Lock reports and password requests are signed (HMAC-SHA256) with a random per-install key that
+  only the root/SYSTEM helper can read, and the helper asks for the password only while its AI
+  block is actually in place. A request from a computer without LOCKqz, or one pretending to be
+  another student's computer, is refused; every password release is logged for the instructor.
 - While locked, the helper re-applies the block every few seconds and flags any removal.
 - If a student kills the helper mid-quiz, it stops reporting and the instructor's live monitor
   shows that student "went dark" — a visible flag, per student, in real time.

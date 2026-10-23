@@ -1,14 +1,26 @@
 // LOCKqz API (Cloudflare Pages Function). Bindings: env.DB (D1), env.TEACHER_KEY (admin key).
 // Routes are under /api/*.  Teachers sign up / log in with email + password; each sees only
 // their own quizzes, courses, students and activity. The TEACHER_KEY is the admin master key
-// (sees everything, can reset a teacher's password).
-const AI_DOMAINS = [
-  "openai.com","chatgpt.com","chat.openai.com","oaiusercontent.com","anthropic.com","claude.ai",
-  "gemini.google.com","bard.google.com","aistudio.google.com","generativelanguage.googleapis.com",
-  "copilot.microsoft.com","perplexity.ai","pplx.ai","poe.com","character.ai","you.com","phind.com",
-  "deepseek.com","mistral.ai","meta.ai","grok.com","x.ai","groq.com","cluely.com",
-  "api.openai.com","api.anthropic.com","api.perplexity.ai","api.mistral.ai"
-];
+// (sees everything, can reset a teacher's password). Device endpoints (/report, /password, /install)
+// are authenticated with per-device keys; see "Device authentication" below.
+const AI_DOMAINS = [   // = app/mac/blocklist.txt (tests/test_blocklist.mjs keeps them in sync)
+  "openai.com","chatgpt.com","chat.openai.com","oaistatic.com","oaiusercontent.com","sora.com",
+  "sora.chatgpt.com","anthropic.com","claude.ai","claude.com","console.anthropic.com","gemini.google.com",
+  "bard.google.com","aistudio.google.com","makersuite.google.com","generativelanguage.googleapis.com","notebooklm.google.com","notebooklm.google",
+  "copilot.microsoft.com","copilot.cloud.microsoft","m365.cloud.microsoft","bing.com/chat","perplexity.ai","pplx.ai",
+  "grok.com","x.ai","grok.x.com","deepseek.com","chat.deepseek.com","mistral.ai",
+  "chat.mistral.ai","meta.ai","qwen.ai","chat.qwen.ai","tongyi.aliyun.com","kimi.com",
+  "kimi.moonshot.cn","moonshot.cn","z.ai","chatglm.cn","bigmodel.cn","poe.com",
+  "character.ai","you.com","phind.com","huggingface.co/chat","hf.co/chat","chat.lmsys.org",
+  "lmarena.ai","groq.com","chatbot.so","cluely.com","pi.ai","inflection.ai",
+  "venice.ai","together.ai","api.together.xyz","chat.reka.ai","reka.ai","cohere.com",
+  "coral.cohere.com","jasper.ai","writesonic.com","chatsonic.com","copy.ai","quillbot.com",
+  "deepai.org","forefront.ai","theb.ai","yiyan.baidu.com","doubao.com","spark.ai",
+  "xinghuo.xfyun.cn","grammarly.com","app.grammarly.com","api.openai.com","api.anthropic.com","api.perplexity.ai",
+  "api.mistral.ai","api.groq.com","api.x.ai","api.deepseek.com","api.cohere.ai","openrouter.ai",
+  "api.openrouter.ai","ollama.com","ollama.ai","lmstudio.ai","gpt4all.io","jan.ai",
+  "msty.app","cloudflare-dns.com","chrome.cloudflare-dns.com","mozilla.cloudflare-dns.com","dns.google","dns.google.com",
+  "dns.quad9.net","doh.opendns.com","dns.nextdns.io"];
 const now = () => new Date().toISOString();
 const rid = (n=6) => Array.from(crypto.getRandomValues(new Uint8Array(n))).map(b=>"ABCDEFGHJKMNPQRSTUVWXYZ23456789"[b%30]).join("");
 const hex = a => Array.from(new Uint8Array(a)).map(b=>b.toString(16).padStart(2,"0")).join("");
@@ -24,24 +36,67 @@ async function hashPw(pw, salt) {
 const ids = u => ({ qi: (u.match(/qi=(\d+)/) || u.match(/quizId=(\d+)/) || [])[1] || null,
                     ou: (u.match(/ou=(\d+)/) || u.match(/\/home\/(\d+)/) || [])[1] || null });
 
+// ---- Device authentication (23 Oct 2026) ----
+// Each install has a random 256-bit key in a file only the root/SYSTEM helper can read. The helper
+// registers it once (/register) and signs every device report and every password request:
+//   X-LOCKqz-Device: <device_id>   X-LOCKqz-Time: <unix seconds>
+//   X-LOCKqz-Sig: hex(HMAC-SHA256(key, "POST\n" + path + "\n" + time + "\n" + sha256hex(body)))
+// With the Pages variable REQUIRE_SIGNED=1, unsigned device writes and password requests are refused,
+// so a script that never installed LOCKqz can no longer fake a lock and read the quiz password.
+// Without it (rollout), old unsigned installs keep working, but a registered device can never be
+// impersonated and unsigned heartbeats can never keep a lock alive.
+const SIG_WINDOW_S = 300;
+const enc = new TextEncoder();
+const unixNow = () => Math.floor(Date.now() / 1000);
+async function sha256hex(bytes) { return hex(await crypto.subtle.digest("SHA-256", bytes)); }
+async function hmacHex(keyText, msg) {
+  const k = await crypto.subtle.importKey("raw", enc.encode(keyText), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return hex(await crypto.subtle.sign("HMAC", k, enc.encode(msg)));
+}
+function sameHex(a, b) {   // constant-time compare
+  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
+async function verifyDevice(request, raw, db) {
+  const id = (request.headers.get("X-LOCKqz-Device") || "").trim();
+  const ts = (request.headers.get("X-LOCKqz-Time") || "").trim();
+  const sig = (request.headers.get("X-LOCKqz-Sig") || "").trim().toLowerCase();
+  if (!id || !ts || !sig) return { ok: false, why: "unsigned" };
+  const t = Number(ts);
+  if (!Number.isFinite(t) || Math.abs(unixNow() - t) > SIG_WINDOW_S) return { ok: false, why: "clock", id };
+  const d = await db.prepare("SELECT device_key, revoked FROM devices WHERE device_id=?").bind(id).first();
+  if (!d || !d.device_key) return { ok: false, why: "unregistered", id };
+  if (d.revoked) return { ok: false, why: "revoked", id };
+  const msg = `POST\n${new URL(request.url).pathname}\n${ts}\n${await sha256hex(raw)}`;
+  return request.method === "POST" && sameHex(await hmacHex(d.device_key, msg), sig) ? { ok: true, id } : { ok: false, why: "bad signature", id };
+}
+const isRegistered = async (db, id) => !!(id && await db.prepare("SELECT 1 AS r FROM devices WHERE device_id=? AND device_key IS NOT NULL").bind(String(id)).first());
+
 export async function onRequest(context) {
   const { request, env } = context;
   const url = new URL(request.url);
   const p = url.pathname.replace(/^\/api/, "") || "/";
   const db = env.DB;
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
-  const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
+  const raw = request.method === "POST" ? new Uint8Array(await request.arrayBuffer()) : new Uint8Array(0);
+  let body = {};
+  if (raw.length) { try { body = JSON.parse(new TextDecoder().decode(raw)); } catch { body = {}; } }
+  if (!body || typeof body !== "object" || Array.isArray(body)) body = {};
+  const strict = String(env.REQUIRE_SIGNED || "").trim() === "1";
+  const denied = (v, extra = {}) => json({ error: "unauthorized device", why: v.why, server_time: unixNow(), ...extra }, 401);
 
   // ---- who is calling? admin (master key) | teacher (session token) | nobody ----
   const hdr = (request.headers.get("X-LOCKqz-Teacher") || "").trim();
   const adminKey = (env.TEACHER_KEY || "").trim();
   let me = null;                                   // { id, email, name, admin }
-  if (hdr && adminKey && hdr === adminKey) me = { id:"admin", email:"admin", name:"Admin", admin:true };
+  if (hdr && adminKey && hdr === adminKey) me = { id:"admin", email:"admin", name:"Admin", admin:true, verified:true };
   else {
     const syncKey = (request.headers.get("X-LOCKqz-Sync") || "").trim();
-    const t = hdr ? await db.prepare("SELECT id,email,name,role,active_until FROM teachers WHERE token=?").bind(hdr).first().catch(()=>null)
-          : syncKey ? await db.prepare("SELECT id,email,name,role,active_until FROM teachers WHERE sync_key=?").bind(syncKey).first().catch(()=>null) : null;
-    if (t) me = { id:t.id, email:t.email, name:t.name, admin: t.role === "admin", active: t.role === "admin" || (!!t.active_until && t.active_until >= now().slice(0,10)), active_until: t.active_until||null };
+    const t = hdr ? await db.prepare("SELECT id,email,name,role,active_until,verified FROM teachers WHERE token=?").bind(hdr).first().catch(()=>null)
+          : syncKey ? await db.prepare("SELECT id,email,name,role,active_until,verified FROM teachers WHERE sync_key=?").bind(syncKey).first().catch(()=>null) : null;
+    if (t) me = { id:t.id, email:t.email, name:t.name, admin: t.role === "admin", verified: t.role === "admin" || t.verified === 1, active: t.role === "admin" || t.verified === 1 || (!!t.active_until && t.active_until >= now().slice(0,10)), active_until: t.active_until||null };
   }
   const teacher = () => !!me;
   const mine = (col="teacher_id") => me.admin ? { sql:"1=1", args:[] } : { sql:`${col}=?`, args:[me.id] };
@@ -56,44 +111,83 @@ export async function onRequest(context) {
   }
 
   try {
-    // ---- device + extension endpoints (no auth) ----
+    // ---- device endpoints (signed by the device key; see verifyDevice) ----
     if (p === "/blocklist") return json({ domains: AI_DOMAINS });
 
+    // One-time device registration (trust on first use). A device id can never be re-keyed, so a
+    // registered student's device cannot be taken over by registering the same id again.
+    if (p === "/register" && request.method === "POST") {
+      const id = String(body.device_id || "").trim(), key = String(body.key || "").trim().toLowerCase();
+      if (!/^[A-Za-z0-9._-]{6,80}$/.test(id) || id === "unknown") return json({ error: "bad device id" }, 400);
+      if (!/^[0-9a-f]{64}$/.test(key)) return json({ error: "bad key" }, 400);
+      await db.prepare("INSERT INTO devices (device_id,student,platform,version,installed_at,last_seen,device_key,registered_at,reg_ip) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET device_key=excluded.device_key, registered_at=excluded.registered_at, reg_ip=excluded.reg_ip, platform=COALESCE(excluded.platform,devices.platform), version=COALESCE(excluded.version,devices.version), last_seen=excluded.last_seen WHERE devices.device_key IS NULL")
+        .bind(id, body.student || null, body.platform || null, body.version || null, now(), now(), key, now(), request.headers.get("CF-Connecting-IP") || null).run();
+      const d = await db.prepare("SELECT device_key, revoked FROM devices WHERE device_id=?").bind(id).first();
+      if (d && d.revoked) return json({ error: "device revoked" }, 403);
+      return d && sameHex(d.device_key, key) ? json({ ok: true, registered: true }) : json({ error: "device already registered" }, 409);
+    }
+
     if (p === "/install" && request.method === "POST") {
+      const v = await verifyDevice(request, raw, db);
+      if (!v.ok && (strict || await isRegistered(db, body.device_id))) return denied(v);
+      if (v.ok) body.device_id = v.id;
       await db.prepare("INSERT INTO devices (device_id,student,platform,version,installed_at,last_seen) VALUES (?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET platform=excluded.platform,version=excluded.version,last_seen=excluded.last_seen")
         .bind(body.device_id, body.student||null, body.platform||null, body.version||null, now(), now()).run();
       return json({ ok: true });
     }
 
     if (p === "/report" && request.method === "POST") {
-      const { device_id, event, quiz_id, student, detail } = body;
+      const v = await verifyDevice(request, raw, db);
+      const { event, quiz_id, student, detail } = body;
       const ev = event || "heartbeat";
+      const agentBeat = ev === "heartbeat" && /^(ext|agent)/.test(String(body.source || body.from || "helper"));
+      if (v.ok && body.device_id && body.device_id !== v.id) return json({ error: "device mismatch" }, 400);
+      if (!v.ok) {
+        const claimed = body.device_id ? String(body.device_id) : null;
+        const legacy = !strict && !(await isRegistered(db, claimed));
+        // An unsigned heartbeat only shows the agent is alive: it may touch ext_seen, nothing else.
+        if (ev === "heartbeat" && (agentBeat || !legacy)) {
+          if (claimed && quiz_id) await db.prepare("UPDATE locks SET ext_seen=? WHERE device_id=? AND quiz_id=?").bind(now(), claimed, quiz_id).run();
+          return json({ ok: true, verified: false });
+        }
+        if (!legacy) return denied(v);
+      }
+      const device_id = v.ok ? v.id : (body.device_id || null);
+      const signed = v.ok ? 1 : 0;
       if (ev !== "heartbeat")
         await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)")
           .bind(device_id||null, student||null, quiz_id||null, ev, detail?JSON.stringify(detail):null, now()).run();
       if (device_id) await db.prepare("INSERT OR IGNORE INTO devices (device_id,installed_at) VALUES (?,?)").bind(device_id, now()).run();
       await db.prepare("UPDATE devices SET last_seen=?, student=COALESCE(?,student) WHERE device_id=?").bind(now(), student||null, device_id||null).run();
       if (ev === "lock")
-        await db.prepare("INSERT INTO locks (device_id,quiz_id,last_lock,helper_seen) VALUES (?,?,?,?) ON CONFLICT(device_id,quiz_id) DO UPDATE SET last_lock=excluded.last_lock,helper_seen=excluded.helper_seen").bind(device_id, quiz_id, now(), now()).run();
+        await db.prepare("INSERT INTO locks (device_id,quiz_id,last_lock,helper_seen,signed) VALUES (?,?,?,?,?) ON CONFLICT(device_id,quiz_id) DO UPDATE SET last_lock=excluded.last_lock,helper_seen=excluded.helper_seen,signed=excluded.signed").bind(device_id, quiz_id, now(), now(), signed).run();
       if (ev === "unlock")
         await db.prepare("DELETE FROM locks WHERE device_id=? AND quiz_id=?").bind(device_id, quiz_id).run();
       if (ev === "heartbeat" && quiz_id) {
-        const col = /^(ext|agent)/.test(String(body.source || body.from || "helper")) ? "ext_seen" : "helper_seen";
-        await db.prepare(`UPDATE locks SET last_lock=?, ${col}=? WHERE device_id=? AND quiz_id=?`).bind(now(), now(), device_id, quiz_id).run();
+        // Only the helper's heartbeat keeps a lock alive; the agent's only proves the agent runs.
+        if (agentBeat) await db.prepare("UPDATE locks SET ext_seen=? WHERE device_id=? AND quiz_id=?").bind(now(), device_id, quiz_id).run();
+        else await db.prepare("UPDATE locks SET last_lock=?, helper_seen=?, signed=? WHERE device_id=? AND quiz_id=?").bind(now(), now(), signed, device_id, quiz_id).run();
       }
       return json({ ok: true });
     }
 
-    // Release the quiz/course password ONLY while this device is locked for this page.
+    // Release the quiz/course password ONLY while this device is locked for this page. The request
+    // and the lock must both be signed by the device's key (strict mode / registered devices).
     if (p === "/password" && request.method === "POST") {
+      const v = await verifyDevice(request, raw, db);
+      const claimed = body.device_id ? String(body.device_id) : "";
+      if (!v.ok && (strict || await isRegistered(db, claimed))) return denied(v, { password: null });
+      const device_id = v.ok ? v.id : claimed;
       const { qi, ou } = ids(String(body.url || ""));
       const lockId = `${ou || "x"}-${qi || "x"}`;
-      const lk = await db.prepare("SELECT last_lock FROM locks WHERE device_id=? AND quiz_id=?").bind(body.device_id, lockId).first();
-      const fresh = lk && (Date.now() - Date.parse(lk.last_lock) < 60000);
+      const lk = await db.prepare("SELECT last_lock, signed FROM locks WHERE device_id=? AND quiz_id=?").bind(device_id, lockId).first();
+      const fresh = lk && (Date.now() - Date.parse(lk.last_lock) < 60000) && (!(strict || v.ok) || Number(lk.signed) === 1);
       if (!fresh) return json({ password: null, reason: "not locked" }, 403);
       let pw = null;
       if (qi) { const q = await db.prepare("SELECT password FROM quizzes WHERE qi=?").bind(qi).first(); if (q) pw = q.password; }
       if (!pw && ou) { const c = await db.prepare("SELECT password FROM courses WHERE ou=?").bind(ou).first(); if (c) pw = c.password; }
+      if (pw) await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,(SELECT student FROM devices WHERE device_id=?),?,?,?,?)")
+        .bind(device_id, device_id, lockId, "password_released", JSON.stringify({ verified: v.ok, ip: request.headers.get("CF-Connecting-IP") || null }), now()).run();
       return json({ password: pw, lockId });
     }
 
@@ -104,6 +198,13 @@ export async function onRequest(context) {
       return json({ match: false });
     }
 
+    // Admin: revoke a device (e.g. one caught faking a lock). Its signed requests are refused.
+    if (p === "/revoke-device" && request.method === "POST") {
+      if (!me?.admin) return json({ error: "admin only" }, 401);
+      const r = await db.prepare("UPDATE devices SET revoked=1 WHERE device_id=?").bind(String(body.device_id || "")).run();
+      return r.meta.changes ? json({ ok: true }) : json({ error: "no such device" }, 404);
+    }
+
     // ---- teacher accounts ----
     if (p === "/signup" && request.method === "POST") {
       const email = String(body.email||"").trim().toLowerCase(), pw = String(body.password||"");
@@ -111,17 +212,21 @@ export async function onRequest(context) {
       if (pw.length < 8) return json({ error:"password must be at least 8 characters" }, 400);
       const dup = await db.prepare("SELECT id FROM teachers WHERE email=?").bind(email).first();
       if (dup) return json({ error:"that email already has an account — log in instead" }, 409);
-      // The very first account on the site is the admin. Every account after that is
-      // INVITE-ONLY: it needs an unused invite code the admin created (students can't sign up).
+      // The first account on the site is the admin. Anyone can sign up after that, but a new teacher
+      // is UNVERIFIED and can protect nothing until they prove -- through their OWN Brightspace login
+      // (LOCKqz Sync) -- that they are an instructor or TA. A student can make an account but can never
+      // verify (no staff role in Brightspace), so a student can never act as a teacher. No email from
+      // anyone is needed. An optional invite code still sets the paid window, but is not required.
       const n = (await db.prepare("SELECT COUNT(*) AS n FROM teachers").first()).n;
       let inv = null;
-      if (n > 0) {
+      {
         const code = String(body.invite||"").trim().toUpperCase();
-        inv = code ? await db.prepare("SELECT code,email,active_until,used_at FROM invites WHERE code=?").bind(code).first() : null;
-        if (!inv || inv.used_at) return json({ error:"Teacher accounts are invite-only. Use the link from your invite (each link works once)." }, 403);
-        if (inv.email && inv.email !== email) return json({ error:"This invite is for " + inv.email + "." }, 403);
-        const claim = await db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE code=? AND used_at IS NULL").bind(now(), email, inv.code).run();
-        if (!claim.meta.changes) return json({ error:"This invite was already used." }, 403);
+        if (code) {
+          inv = await db.prepare("SELECT code,email,active_until,used_at FROM invites WHERE code=?").bind(code).first();
+          if (inv && !inv.used_at && (!inv.email || inv.email === email))
+            await db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE code=? AND used_at IS NULL").bind(now(), email, inv.code).run();
+          else inv = null;
+        }
       }
       const id = rid(10), salt = rid(16), token = hex(crypto.getRandomValues(new Uint8Array(24)));
       await db.prepare("INSERT INTO teachers (id,email,name,pw_hash,salt,token,created_at,role,active_until) VALUES (?,?,?,?,?,?,?,?,?)")
@@ -149,7 +254,7 @@ export async function onRequest(context) {
       const inv = code ? await db.prepare("SELECT email,used_at FROM invites WHERE code=?").bind(code).first().catch(()=>null) : null;
       return json(inv && !inv.used_at ? { ok:true, email: inv.email||null } : { ok:false });
     }
-    if (p === "/me") return me ? json({ email: me.email, name: me.name, admin: me.admin, active: me.active, active_until: me.active_until }) : json({ error:"unauthorized" }, 401);
+    if (p === "/me") return me ? json({ email: me.email, name: me.name, admin: me.admin, verified: !!me.verified, active: me.active, active_until: me.active_until }) : json({ error:"unauthorized" }, 401);
     if (p === "/logout" && request.method === "POST") {
       if (me && !me.admin) await db.prepare("UPDATE teachers SET token=NULL WHERE id=?").bind(me.id).run();
       return json({ ok:true });
@@ -208,6 +313,8 @@ export async function onRequest(context) {
     // ---- teacher endpoints (need a logged-in teacher or the admin key) ----
     if (!teacher()) return json({ error: "unauthorized" }, 401);
 
+    if ((p === "/quiz" || p === "/course" || p === "/protect" || p === "/gate") && request.method === "POST" && !me.admin && !me.verified)
+      return json({ error: "Verify you teach this course first: open Brightspace and click LOCKqz Sync." }, 403);
     if ((p === "/quiz" || p === "/course" || (p === "/protect" && body.on)) && request.method === "POST" && !me.active)
       return json({ error: "Your account is not active yet. Contact the LOCKqz admin to activate it." }, 402);
 
@@ -285,6 +392,9 @@ export async function onRequest(context) {
         }
       }
       for (let i = 0; i < st.length; i += 90) await db.batch(st.slice(i, i + 90));
+      // The Sync script only sends courses where the teacher is instructor/TA, so any course here
+      // proves they are staff: verify them automatically. No email, no invite, no admin step.
+      if (me.id !== "admin" && courses.length) await db.prepare("UPDATE teachers SET verified=1 WHERE id=?").bind(me.id).run();
       return json(await bsState(courses.map(c => c.ou)));
     }
     if (p === "/sync-result" && request.method === "POST") {
@@ -321,12 +431,22 @@ export async function onRequest(context) {
       }
       return json({ ou, qi, on:false, clear: ex ? ex.password : null });
     }
+    // Turn the live access gate on/off for a quiz. While on, the Sync tab hides the quiz from everyone
+    // and admits only students LOCKqz is actively locking. Requires the course to be synced + protected.
+    if (p === "/gate" && request.method === "POST") {
+      const ou = String(body.ou||""), qi = String(body.qi||"");
+      if (!/^\d+$/.test(ou) || !/^\d+$/.test(qi)) return json({ error:"bad quiz" }, 400);
+      if (!(await inCourse(ou))) return json({ error:"Sync this course from Brightspace first." }, 403);
+      const r = await db.prepare("UPDATE quizzes SET gated=? WHERE qi=?").bind(body.on?1:0, qi).run();
+      if (!r.meta.changes) return json({ error:"Protect this quiz first." }, 400);
+      return json({ ou, qi, gated: !!body.on });
+    }
     if (p === "/bs") {
       const cs = (await db.prepare("SELECT ou,name,code,role,synced_at FROM teacher_courses WHERE teacher_id=? ORDER BY name").bind(me.id).all()).results;
       if (!cs.length) return json({ courses: [] });
       const ous = cs.map(c => c.ou), ph = ous.map(()=>"?").join(",");
       const roster = (await db.prepare(`SELECT ou,user_id,name,email,username,role FROM roster WHERE ou IN (${ph}) ORDER BY name`).bind(...ous).all()).results;
-      const qz = (await db.prepare(`SELECT b.ou,b.qi,b.name,b.active,b.start_date,b.end_date,b.due_date,b.bs_has_password,b.bs_password_is_ours,q.password,q.lock_id FROM bs_quizzes b LEFT JOIN quizzes q ON q.qi=b.qi WHERE b.ou IN (${ph}) ORDER BY b.name`).bind(...ous).all()).results;
+      const qz = (await db.prepare(`SELECT b.ou,b.qi,b.name,b.active,b.start_date,b.end_date,b.due_date,b.bs_has_password,b.bs_password_is_ours,q.password,q.lock_id,q.gated FROM bs_quizzes b LEFT JOIN quizzes q ON q.qi=b.qi WHERE b.ou IN (${ph}) ORDER BY b.name`).bind(...ous).all()).results;
       const devs = (await db.prepare(`SELECT device_id,lower(student) AS who,platform,version,last_seen FROM devices WHERE lower(student) IN (SELECT lower(email) FROM roster WHERE ou IN (${ph})) OR lower(student) IN (SELECT lower(name) FROM roster WHERE ou IN (${ph}))`).bind(...ous, ...ous).all()).results;
       const by = {}; devs.forEach(d => { (by[d.who] = by[d.who] || []).push(d); });
       return json({ courses: cs.map(c => ({ ...c,
@@ -369,7 +489,7 @@ export async function onRequest(context) {
       const like = `${quiz}-%`;
       const s = await scope("l.quiz_id"), s2 = await scope("e.quiz_id");
       const STALE = 90000, nowMs = Date.now(), age = t => t ? (nowMs - Date.parse(t)) : null;
-      const locks = (await db.prepare(`SELECT l.device_id,l.quiz_id,l.last_lock,l.helper_seen,l.ext_seen,d.student,d.platform FROM locks l LEFT JOIN devices d ON d.device_id=l.device_id WHERE (l.quiz_id=? OR l.quiz_id LIKE ?) AND ${s.sql}`).bind(quiz, like, ...s.args).all()).results;
+      const locks = (await db.prepare(`SELECT l.device_id,l.quiz_id,l.last_lock,l.helper_seen,l.ext_seen,l.signed,d.student,d.platform FROM locks l LEFT JOIN devices d ON d.device_id=l.device_id WHERE (l.quiz_id=? OR l.quiz_id LIKE ?) AND ${s.sql}`).bind(quiz, like, ...s.args).all()).results;
       const tamp = new Set(((await db.prepare("SELECT DISTINCT device_id FROM events WHERE (quiz_id=? OR quiz_id LIKE ?) AND event='tamper'").bind(quiz, like).all()).results).map(t=>t.device_id));
       const done = (await db.prepare(`SELECT DISTINCT e.device_id,d.student,d.platform FROM events e LEFT JOIN devices d ON d.device_id=e.device_id WHERE (e.quiz_id=? OR e.quiz_id LIKE ?) AND e.event IN ('unlock','auto_unlock') AND ${s2.sql}`).bind(quiz, like, ...s2.args).all()).results;
       const active = new Set(locks.map(l=>l.device_id));
@@ -381,14 +501,18 @@ export async function onRequest(context) {
           const helperDown = h === null || h > STALE, extDown = e === null || e > STALE;
           status = helperDown && !extDown ? "helper_killed" : (extDown && !helperDown ? "browser_closed" : "dark");
         }
-        return { device_id:l.device_id, student:l.student||null, platform:l.platform||null, status, last_lock:l.last_lock, age_ms:a };
+        return { device_id:l.device_id, student:l.student||null, platform:l.platform||null, status, last_lock:l.last_lock, age_ms:a, verified: Number(l.signed) === 1 };
       });
       done.forEach(d => { if (!active.has(d.device_id)) rows.push({ device_id:d.device_id, student:d.student||null, platform:d.platform||null, status:"done" }); });
-      const em = [...new Set(rows.map(r => String(r.student||"").toLowerCase()).filter(e => e.includes("@")))];
+      // A student is admitted ONLY when LOCKqz is holding a fresh, device-signed lock (status "locked",
+      // verified). The gate loop reads r.eligible + r.user_id to grant/revoke Brightspace special access.
+      rows.forEach(r => { r.email = String(r.student||"").toLowerCase().includes("@") ? String(r.student).toLowerCase() : null; r.eligible = (r.status === "locked" && r.verified === true); });
+      const em = [...new Set(rows.map(r => r.email).filter(Boolean))];
       if (em.length) {
-        const nm = (await db.prepare(`SELECT lower(email) AS e, name FROM roster WHERE lower(email) IN (${em.map(()=>"?").join(",")})`).bind(...em).all()).results;
-        const m = Object.fromEntries(nm.map(x => [x.e, x.name]));
-        rows.forEach(r => { const n = m[String(r.student||"").toLowerCase()]; if (n) r.student = n; });
+        const nm = (await db.prepare(`SELECT lower(email) AS e, name, user_id FROM roster WHERE lower(email) IN (${em.map(()=>"?").join(",")})`).bind(...em).all()).results;
+        const nameOf = Object.fromEntries(nm.map(x => [x.e, x.name]));
+        const idOf = Object.fromEntries(nm.map(x => [x.e, x.user_id]));
+        rows.forEach(r => { if (r.email) { r.user_id = idOf[r.email] || null; const n = nameOf[r.email]; if (n) r.student = n; } });
       }
       return json({ quiz, now: now(), stale_ms: STALE, rows });
     }

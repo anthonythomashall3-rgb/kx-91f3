@@ -1,6 +1,10 @@
 # LOCKqz Windows daemon (watcher + loopback control server).  Run elevated.
 # Mirrors the macOS daemon: the per-user agent calls 127.0.0.1:8787 to lock/unlock;
 # a watcher re-applies the block during a quiz and reports tampering.
+# Device key: a random per-install key in a file only SYSTEM and Administrators can read. The
+# daemon registers it once and signs every report and password request (HMAC-SHA256), so a
+# script that never installed LOCKqz cannot fake a lock and read the quiz password. The agent
+# gets the password from POST /password here, only while this PC is locked for that quiz.
 $ErrorActionPreference = "SilentlyContinue"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
@@ -12,29 +16,105 @@ $Api    = if ($Conf.api_base) { $Conf.api_base.TrimEnd("/") } else { "" }
 if ($Api -and -not $Api.EndsWith("/api")) { $Api += "/api" }   # accept a bare site URL too
 $Device = if ($Conf.device_id) { $Conf.device_id } else { "unknown" }
 $MaxMin = if ($Conf.max_minutes) { [int]$Conf.max_minutes } else { 180 }
-$State  = [hashtable]::Synchronized(@{ state="unlocked"; quiz_id=$null; student=$Conf.student; locked_since=0; max_minutes=$MaxMin })
+$State  = [hashtable]::Synchronized(@{ state="unlocked"; quiz_id=$null; student=$Conf.student; locked_since=0; max_minutes=$MaxMin; skew=0; registered=$false })
+$KeyPath = "$env:ProgramData\LOCKqz\device.key"
+
+# Signing + API calls. Kept as text so the watcher runspace can load the same code.
+$SignLib = @'
+function LQ-Hex([byte[]]$b) { -join ($b | ForEach-Object { $_.ToString("x2") }) }
+function LQ-Sign([string]$key, [string]$path, [string]$ts, [byte[]]$raw) {
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  $msg = "POST`n" + $path + "`n" + $ts + "`n" + (LQ-Hex $sha.ComputeHash($raw))
+  $h = New-Object System.Security.Cryptography.HMACSHA256
+  $h.Key = [Text.Encoding]::ASCII.GetBytes($key)
+  LQ-Hex $h.ComputeHash([Text.Encoding]::UTF8.GetBytes($msg))
+}
+function LQ-Call($api, $path, $obj, $device, $key, $state, [bool]$signed) {
+  # POST JSON to the LOCKqz API. Returns @{ code = <http status, 0 = no answer>; data = <reply> }.
+  # Signed with the device key; corrects a wrong PC clock and re-registers on a 401. Never throws.
+  if (-not $api) { return @{ code = 0; data = $null } }
+  $url = $api + $path
+  $raw = [Text.Encoding]::UTF8.GetBytes(($obj | ConvertTo-Json -Compress))
+  for ($i = 0; $i -lt 3; $i++) {
+    $hd = @{}
+    if ($signed) {
+      $ts = [string]([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + [int64]$state.skew)
+      $hd["X-LOCKqz-Device"] = $device
+      $hd["X-LOCKqz-Time"] = $ts
+      $hd["X-LOCKqz-Sig"] = LQ-Sign $key ([Uri]$url).AbsolutePath $ts $raw
+    }
+    try {
+      $d = Invoke-RestMethod -Uri $url -Method Post -Body $raw -Headers $hd -ContentType "application/json; charset=utf-8" -TimeoutSec 8
+      return @{ code = 200; data = $d }
+    } catch {
+      $code = 0; $data = $null
+      if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
+      if ($_.ErrorDetails -and $_.ErrorDetails.Message) { try { $data = $_.ErrorDetails.Message | ConvertFrom-Json } catch {} }
+      if ($code -eq 401 -and $signed -and $data -and $i -lt 2) {
+        if ($data.server_time) { $state.skew = [int64]$data.server_time - [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }
+        if ($data.why -eq "unregistered") { $state.registered = $false; LQ-Register $api $device $key $state | Out-Null }
+        continue
+      }
+      if ($code -ne 0) { return @{ code = $code; data = $data } }
+      Start-Sleep -Seconds (2 * ($i + 1))
+    }
+  }
+  return @{ code = 0; data = $null }
+}
+function LQ-Register($api, $device, $key, $state) {
+  # Register the key of this install once (trust on first use).
+  if ($state.registered -or -not $api -or -not $device -or $device -eq "unknown") { return $state.registered }
+  $r = LQ-Call $api "/register" @{ device_id = $device; key = $key; platform = "windows"; version = "0.2.0"; student = $state.student } $device $key $state $false
+  if ($r.code -eq 200) { $state.registered = $true }
+  return $state.registered
+}
+'@
+. ([ScriptBlock]::Create($SignLib))
+
+function Get-DeviceKey {
+  # 32 random bytes (hex) that only SYSTEM and Administrators can read; students' normal
+  # accounts, and the per-user agent, cannot.
+  if (Test-Path $KeyPath) {
+    $k = ([string](Get-Content $KeyPath -Raw)).Trim()
+    if ($k -match "^[0-9a-f]{64}$") { return $k }
+  }
+  $bytes = New-Object byte[] 32
+  [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+  $k = LQ-Hex $bytes
+  Set-Content -Path $KeyPath -Value $k -Encoding ASCII -NoNewline
+  & icacls $KeyPath /inheritance:r /grant:r "*S-1-5-18:F" "*S-1-5-32-544:F" | Out-Null
+  return $k
+}
+$Key = Get-DeviceKey
 
 function Engine([string]$c) { & powershell -ExecutionPolicy Bypass -File $Engine $c | Out-Null }
 function EngineLocked { (& powershell -ExecutionPolicy Bypass -File $Engine status) -match "LOCKED" }
-function Report($event, $detail) {
-  if (-not $Api) { return }
-  $body = @{ device_id=$Device; event=$event; quiz_id=$State.quiz_id; student=$State.student;
-             ts=(Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"); detail=$detail } | ConvertTo-Json
-  try { Invoke-RestMethod -Uri "$Api/report" -Method Post -Body $body -ContentType "application/json" -TimeoutSec 8 } catch {}
+function Lock-Id($u) {
+  # Same rule as the agent and the server: "<ou>-<qi>" from the quiz URL.
+  $qi = if ($u -match "qi=(\d+)") { $Matches[1] } else { "x" }
+  $ou = if ($u -match "ou=(\d+)") { $Matches[1] } else { "x" }
+  "$ou-$qi"
+}
+function Report($event, $detail, $source, $quiz) {
+  $b = @{ device_id=$Device; event=$event; quiz_id=$(if ($quiz) { $quiz } else { $State.quiz_id }); student=$State.student;
+          ts=(Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") }
+  if ($detail) { $b.detail = $detail }
+  if ($source) { $b.source = $source }
+  LQ-Call $Api "/report" $b $Device $Key $State $true | Out-Null
 }
 
 # Watcher runspace: re-apply the block while locked; flag tamper.
 $watcher = [powershell]::Create()
 $watcher.AddScript({
-  param($State,$Engine,$Api,$Device)
+  param($State,$Engine,$Api,$Device,$Key,$SignLib)
+  . ([ScriptBlock]::Create($SignLib))
   function ELocked { (& powershell -ExecutionPolicy Bypass -File $Engine status) -match "LOCKED" }
   function WReport($event,$detail,$source) {
-    if (-not $Api) { return }
     $b = @{ device_id=$Device; event=$event; quiz_id=$State.quiz_id; student=$State.student;
             ts=(Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") }
     if ($detail) { $b.detail = $detail }
     if ($source) { $b.source = $source }
-    try { Invoke-RestMethod -Uri "$Api/report" -Method Post -Body ($b|ConvertTo-Json) -ContentType "application/json" -TimeoutSec 8 } catch {}
+    LQ-Call $Api "/report" $b $Device $Key $State $true | Out-Null
   }
   $cycles = 0
   while ($true) {
@@ -53,12 +133,15 @@ $watcher.AddScript({
         if ($cycles % 9 -eq 0) { WReport "heartbeat" $null "helper" }
       }
     }
+    # ~hourly until the server knows this device's key
+    if (($cycles % 720 -eq 0) -and -not $State.registered) { LQ-Register $Api $Device $Key $State | Out-Null }
   }
-}).AddArgument($State).AddArgument($Engine).AddArgument($Api).AddArgument($Device) | Out-Null
+}).AddArgument($State).AddArgument($Engine).AddArgument($Api).AddArgument($Device).AddArgument($Key).AddArgument($SignLib) | Out-Null
 $watcher.BeginInvoke() | Out-Null
 
 # Fail safe on start: never leave a machine locked across a restart.
 Engine "unlock"
+LQ-Register $Api $Device $Key $State | Out-Null
 
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://127.0.0.1:$Port/")
@@ -78,9 +161,27 @@ while ($listener.IsListening) {
   $out = @{ ok = $true }
   switch ($path) {
     "/lock"      { $State.state="locked"; $State.quiz_id=$body.quiz_id; if($body.student){$State.student=$body.student}; if($body.max_minutes){$State.max_minutes=[int]$body.max_minutes}; $State.locked_since=[int][double]::Parse((Get-Date -UFormat %s)); Engine "lock"; Report "lock" $null; $out.state="locked" }
-    "/unlock"    { $State.state="unlocked"; $State.quiz_id=$null; Engine "unlock"; Report "unlock" $null; $out.state="unlocked" }
+    "/unlock"    { $q = if ($State.quiz_id) { $State.quiz_id } else { $body.quiz_id }; $State.state="unlocked"; $State.quiz_id=$null; Engine "unlock"; Report "unlock" $null $null $q; $out.state="unlocked" }
     "/student"   { if($body.student){$State.student=$body.student}; Report "install" @{ platform="windows"; version="0.2.0" }; $out.student=$State.student }
-    "/heartbeat" { Report "heartbeat" $body }
+    "/heartbeat" { Report "heartbeat" $body "agent" }
+    "/password"  {
+      # The quiz password is released only to this helper, only while it holds the lock for THIS
+      # quiz with the block really in place, over a request signed with the SYSTEM-only key.
+      $u = [string]$body.url
+      if ($State.state -ne "locked" -or $State.quiz_id -ne (Lock-Id $u)) { $res.StatusCode = 409; $out = @{ error = "not locked for this quiz" } }
+      else {
+        if (-not (EngineLocked)) { Engine "lock" }
+        if (-not (EngineLocked)) { Report "tamper" "block_missing_at_password" $null; $res.StatusCode = 409; $out = @{ error = "AI block is not in place" } }
+        else {
+          Report "heartbeat" $null "helper"
+          $r = LQ-Call $Api "/password" @{ url = $u; device_id = $Device } $Device $Key $State $true
+          $pw = $null; if ($r.data) { $pw = $r.data.password }
+          if (-not $pw) { $res.StatusCode = 502 }
+          $out = @{ password = $pw; status = $r.code }
+        }
+      }
+    }
+    "/event"     { if ($body.event -eq "quiz_left") { Report "quiz_left" $body.detail "agent" $body.quiz_id } else { $res.StatusCode = 400; $out = @{ error = "event not allowed" } } }
     "/status"    { $out = @{ state=$State.state; quiz_id=$State.quiz_id; engine_locked=(EngineLocked); version="0.2.0" } }
     default      { $res.StatusCode = 404; $out = @{ error="not found" } }
   }

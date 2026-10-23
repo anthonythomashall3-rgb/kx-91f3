@@ -44,6 +44,15 @@
       if (d.error) throw new Error(d.error);
       return d;
     };
+    var lqget = async function (path) {
+      var r = await fetch(API + path, { headers: { "X-LOCKqz-Sync": KEY } });
+      return r.json().catch(function () { return {}; });
+    };
+    // Brightspace special-access helpers (one user at a time). PUT grants/keeps, DELETE removes.
+    var saUrl = function (ou, qi, uid) { return "/d2l/api/le/" + LE + "/" + ou + "/quizzes/" + qi + "/specialaccess/" + uid; };
+    var saList = async function (ou, qi) { return get("/d2l/api/le/" + LE + "/" + ou + "/quizzes/" + qi + "/specialaccess/").catch(function () { return []; }); };
+    var saPut = function (ou, qi, uid, endIso) { return put(saUrl(ou, qi, uid), { StartDate: null, EndDate: endIso, DueDate: null, SubmissionTimeLimit: null, AttemptsAllowed: null }); };
+    var saDel = function (ou, qi, uid) { return fetch(saUrl(ou, qi, uid), { method: "DELETE", credentials: "include", headers: { "X-Csrf-Token": csrf } }); };
 
     // ---- 1. read Brightspace ----
     say("Reading your Brightspace courses...");
@@ -83,9 +92,9 @@
     // ---- 3. passwords into / out of Brightspace ----
     var rt = function (o) { var t = o && o.Text; return { Text: { Content: (t && (t.Html || t.Text)) || "", Type: (t && t.Html) ? "Html" : "Text" }, IsDisplayed: !!(o && o.IsDisplayed) }; };
     var quizUrl = function (ou, qi) { return "/d2l/api/le/" + LE + "/" + ou + "/quizzes/" + qi; };
-    async function writePw(ou, qi, pw) {
+    async function writePw(ou, qi, pw, extra) {
       var cur = await get(quizUrl(ou, qi));
-      var w = Object.assign({}, cur, { Instructions: rt(cur.Instructions), Description: rt(cur.Description), Header: rt(cur.Header), Footer: rt(cur.Footer), Password: pw });
+      var w = Object.assign({}, cur, { Instructions: rt(cur.Instructions), Description: rt(cur.Description), Header: rt(cur.Header), Footer: rt(cur.Footer), Password: pw }, extra || {});
       w.NumberOfAttemptsAllowed = (cur.AttemptsAllowed && !cur.AttemptsAllowed.IsUnlimited) ? cur.AttemptsAllowed.NumberOfAttemptsAllowed : null;
       delete w.AttemptsAllowed; delete w.QuizId; delete w.ActivityId;
       if (!w.RestrictIPAddressRange || !w.RestrictIPAddressRange.length) w.RestrictIPAddressRange = null;
@@ -130,10 +139,12 @@
       if (!c.quizzes.length) html += '<div style="color:#888;font-size:13px">No quizzes.</div>';
       c.quizzes.forEach(function (q) {
         var on = !!prot[String(q.qi)];
-        html += '<label style="display:flex;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid #eee;cursor:pointer">' +
+        html += '<div style="padding:4px 0;border-bottom:1px solid #eee">' +
+          '<label style="display:flex;gap:8px;align-items:center;cursor:pointer">' +
           '<input type="checkbox" data-ou="' + c.ou + '" data-qi="' + q.qi + '"' + (on ? " checked" : "") + '>' +
           '<span style="flex:1">' + esc(q.name) + (q.start ? ' <span style="color:#888;font-size:12px">' + day(q.start) + "</span>" : "") + "</span>" +
-          '<span data-st="' + q.qi + '" style="font-size:12px;color:' + (on ? "#1a7f37" : "#888") + '">' + (on ? "protected" : "") + "</span></label>";
+          '<span data-st="' + q.qi + '" style="font-size:12px;color:' + (on ? "#1a7f37" : "#888") + '">' + (on ? "protected" : "") + "</span></label>" +
+          '<div style="margin:4px 0 0 26px;font-size:12px"><button data-gate="' + c.ou + ":" + q.qi + '" ' + (on ? "" : "disabled ") + 'style="font:12px -apple-system;padding:2px 10px;border:1px solid #990000;border-radius:6px;background:#fff;color:#990000;cursor:pointer">Start gate</button> <span data-gst="' + q.qi + '" style="color:#888">off</span> <span style="color:#aaa">— while on, only students LOCKqz is locking can open the quiz</span></div></div>';
       });
     });
     say('<div style="background:#eafbea;padding:8px 10px;border-radius:8px">Synced ' + courses.length + " course" + (courses.length === 1 ? "" : "s") +
@@ -141,6 +152,50 @@
       (errors.length ? '<div style="color:#990000;margin-top:8px">Could not update: ' + esc(errors.join("; ")) + "</div>" : "") +
       '<div style="margin-top:10px;font-weight:700">Protect with LOCKqz (blocks AI during the quiz):</div>' + html +
       '<div style="margin-top:12px"><a href="' + DASH + '" target="_blank" style="color:#990000;font-weight:700">Open LOCKqz dashboard</a></div>');
+
+    // ---- live access gate: only students LOCKqz is actively locking can see the quiz ----
+    // Teacher clicks Start and leaves this tab open. Every 10s we read who is locked (device-signed,
+    // fresh) from LOCKqz and grant Brightspace special access to exactly them; anyone who stops being
+    // locked (killed/uninstalled/tampered/left) is removed within ~10s, and if this tab closes every
+    // grant lapses on its own because each carries a 90s rolling EndDate.
+    var GATES = {};   // qi -> { ou, timer, busy }
+    async function gateStep(ou, qi) {
+      var end = new Date(Date.now() + 90000).toISOString();
+      var live = await lqget("/live?quiz=" + ou + "-" + qi);
+      var want = {}; (live.rows || []).forEach(function (r) { if (r.eligible && r.user_id) want[String(r.user_id)] = true; });
+      var have = await saList(ou, qi); var haveSet = {};
+      (Array.isArray(have) ? have : []).forEach(function (x) { if (x && x.UserId != null) haveSet[String(x.UserId)] = true; });
+      for (var uid in want) { try { await saPut(ou, qi, uid, end); } catch (e) {} }          // grant / refresh EndDate
+      for (var u2 in haveSet) { if (!want[u2]) { try { await saDel(ou, qi, u2); } catch (e) {} } } // revoke those no longer locked
+      return Object.keys(want).length;
+    }
+    async function startGate(ou, qi, pw, st) {
+      st.textContent = "starting..."; st.style.color = "#666";
+      await writePw(ou, qi, pw, { AllowOnlyUsersWithSpecialAccess: true });   // hide quiz from everyone
+      await lq("/gate", { ou: ou, qi: qi, on: true });
+      var tick = async function () {
+        if (GATES[qi].busy) return; GATES[qi].busy = true;
+        try { var n = await gateStep(ou, qi); st.textContent = "LIVE — " + n + " locked in"; st.style.color = "#1a7f37"; }
+        catch (e) { st.textContent = "gate error: " + e.message.slice(0, 50); st.style.color = "#990000"; }
+        GATES[qi].busy = false;
+      };
+      GATES[qi] = { ou: ou, busy: false, timer: setInterval(tick, 10000) };
+      tick();
+    }
+    async function stopGate(ou, qi, st) {
+      if (GATES[qi]) { clearInterval(GATES[qi].timer); delete GATES[qi]; }
+      st.textContent = "stopping..."; st.style.color = "#666";
+      try {
+        var have = await saList(ou, qi);
+        for (var i = 0; i < (have || []).length; i++) { try { await saDel(ou, qi, have[i].UserId); } catch (e) {} }
+        await writePw(ou, qi, pw_of(qi), { AllowOnlyUsersWithSpecialAccess: false });   // quiz open again (password still applies)
+      } catch (e) {}
+      await lq("/gate", { ou: ou, qi: qi, on: false });
+      st.textContent = "off"; st.style.color = "#888";
+    }
+    var PW = {};   // qi -> current LOCKqz password, filled when protected
+    (state.protect || []).forEach(function (p) { PW[String(p.qi)] = p.password; });
+    function pw_of(qi) { return PW[String(qi)]; }
 
     B.querySelectorAll("input[type=checkbox]").forEach(function (cb) {
       cb.onchange = async function () {
@@ -154,7 +209,19 @@
         } catch (e) {
           cb.checked = !cb.checked; st.style.color = "#990000"; st.textContent = e.message.slice(0, 60);
         }
+        var gb = B.querySelector('[data-gate="' + cb.dataset.ou + ":" + cb.dataset.qi + '"]');
+        if (gb) gb.disabled = !cb.checked;
         cb.disabled = false;
+      };
+    });
+    B.querySelectorAll("button[data-gate]").forEach(function (gb) {
+      var parts = gb.dataset.gate.split(":"), ou = parts[0], qi = parts[1];
+      var st = B.querySelector('[data-gst="' + qi + '"]');
+      gb.onclick = async function () {
+        gb.disabled = true;
+        if (!GATES[qi]) { await startGate(ou, qi, pw_of(qi), st); gb.textContent = "Stop gate"; }
+        else { await stopGate(ou, qi, st); gb.textContent = "Start gate"; }
+        gb.disabled = false;
       };
     });
   } catch (e) {

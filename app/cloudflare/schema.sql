@@ -5,7 +5,11 @@ CREATE TABLE IF NOT EXISTS devices (
   platform    TEXT,
   version     TEXT,
   installed_at TEXT,
-  last_seen   TEXT
+  last_seen   TEXT,
+  device_key  TEXT,            -- per-install signing key (set once by /register)
+  registered_at TEXT,
+  reg_ip      TEXT,
+  revoked     INTEGER DEFAULT 0
 );
 
 -- qi = the Brightspace quiz-id parsed from the pasted link (auto-detect, no title tag).
@@ -18,7 +22,8 @@ CREATE TABLE IF NOT EXISTS quizzes (
   qi        TEXT,
   teacher_id TEXT,
   lock_id   TEXT,
-  ou        TEXT
+  ou        TEXT,
+  gated     INTEGER DEFAULT 0   -- quiz hidden to all but LOCKqz-locked students (AllowOnlyUsersWithSpecialAccess)
 );
 CREATE INDEX IF NOT EXISTS idx_quizzes_qi ON quizzes(qi);
 
@@ -54,6 +59,7 @@ CREATE TABLE IF NOT EXISTS locks (
   last_lock TEXT,
   helper_seen TEXT,
   ext_seen  TEXT,
+  signed    INTEGER DEFAULT 0, -- 1 = lock proven by a request signed with the device key
   PRIMARY KEY (device_id, quiz_id)
 );
 
@@ -68,7 +74,8 @@ CREATE TABLE IF NOT EXISTS teachers (
   created_at TEXT,
   role      TEXT,
   active_until TEXT,
-  sync_key  TEXT
+  sync_key  TEXT,
+  verified  INTEGER DEFAULT 0   -- proven instructor/TA via their own Brightspace login
 );
 CREATE INDEX IF NOT EXISTS idx_teachers_token ON teachers(token);
 

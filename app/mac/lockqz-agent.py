@@ -4,8 +4,9 @@ student installs ONE thing and nothing comes from the Chrome Web Store.
 
 Every 2 s it reads the open tab URLs of every running browser (Chrome, Edge, Brave,
 Chromium, Vivaldi, Arc, Safari via Apple Events; Firefox via its session file) and:
-  * on a Brightspace quiz attempt page  -> tells the root helper to LOCK, fetches the
-    quiz password from the LOCKqz backend, shows it and copies it to the clipboard
+  * on a Brightspace quiz attempt page  -> tells the root helper to LOCK, then asks the
+    helper for the quiz password (the helper checks its block is in place and makes a
+    request signed with its root-only device key), shows it and copies it to the clipboard
   * while locked                        -> pings the backend (live monitor), and forces
     any Google/Bing/DDG/... search tab onto Google "Web" results (no AI answer) —
     the backstop for Safari, which has no policy layer
@@ -201,7 +202,12 @@ class Agent:
             dialog("LOCKqz could not lock AI for this quiz. Is the LOCKqz app installed and running?"); return
         self.locked, self.missing_since, self.last_beat = True, None, time.time()
         log("LOCKED %s" % self.quiz)
-        pw = (self.api_post("/password", {"url": url, "device_id": self.device}) or {}).get("password")
+        pw = None
+        for attempt in range(3):   # the helper fetches it (signed); retry a brief network blip
+            try: pw = self.helper("/password", {"url": url}).get("password")
+            except Exception as e: log("password via helper failed: %s" % e)
+            if pw: break
+            time.sleep(2)
         if pw:
             clipboard(pw)
             dialog("AI is locked for this quiz.\n\nQuiz password:  %s\n(copied to your clipboard — paste it into Brightspace)" % pw)
@@ -212,8 +218,10 @@ class Agent:
         try: self.helper("/unlock", {"quiz_id": self.quiz})
         except Exception as e: log("helper unlock failed: %s" % e)
         if reason != "submitted":
-            self.api_post("/report", {"device_id": self.device, "event": "quiz_left", "quiz_id": self.quiz,
-                                      "student": self.student, "source": "agent", "detail": reason})
+            try: self.helper("/event", {"event": "quiz_left", "quiz_id": self.quiz, "detail": reason})
+            except Exception:   # helper unreachable: send it directly (unsigned, best-effort)
+                self.api_post("/report", {"device_id": self.device, "event": "quiz_left", "quiz_id": self.quiz,
+                                          "student": self.student, "source": "agent", "detail": reason})
         log("UNLOCKED (%s)" % reason)
         self.locked, self.quiz, self.url, self.missing_since = False, None, None, None
 
