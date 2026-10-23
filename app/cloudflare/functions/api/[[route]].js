@@ -203,6 +203,9 @@ export async function onRequest(context) {
       const lk = await db.prepare("SELECT last_lock, signed FROM locks WHERE device_id=? AND quiz_id=?").bind(device_id, lockId).first();
       const fresh = lk && (Date.now() - Date.parse(lk.last_lock) < 60000) && (!(strict || v.ok) || Number(lk.signed) === 1);
       if (!fresh) return json({ password: null, reason: "not locked" }, 403);
+      // Admit only at the quiz's scheduled start time -- even if the professor unhid it early.
+      const sq = await db.prepare("SELECT start_date FROM bs_quizzes WHERE ou=? AND qi=?").bind(String(ou||""), String(qi||"")).first();
+      if (sq && sq.start_date && Date.now() < Date.parse(sq.start_date)) return json({ password: null, reason: "not started", start: sq.start_date }, 403);
       let pw = null, rot = null;
       if (qi) { const q = await db.prepare("SELECT password FROM quizzes WHERE qi=?").bind(qi).first(); if (q) pw = q.password; }
       if (!pw && ou) { const c = await db.prepare("SELECT password FROM courses WHERE ou=?").bind(ou).first(); if (c) pw = c.password; }
@@ -581,7 +584,10 @@ export async function onRequest(context) {
       done.forEach(d => { if (!active.has(d.device_id)) rows.push({ device_id:d.device_id, student:d.student||null, platform:d.platform||null, status:"done" }); });
       // A student is admitted ONLY when LOCKqz is holding a fresh, device-signed lock (status "locked",
       // verified). The gate loop reads r.eligible + r.user_id to grant/revoke Brightspace special access.
-      rows.forEach(r => { r.email = String(r.student||"").toLowerCase().includes("@") ? String(r.student).toLowerCase() : null; r.eligible = (r.status === "locked" && r.verified === true); });
+      const _qi = String(quiz).split("-").pop(), _ou = String(quiz).split("-")[0];
+      const _sq = /^\d+$/.test(_qi) ? await db.prepare("SELECT start_date FROM bs_quizzes WHERE ou=? AND qi=?").bind(_ou, _qi).first() : null;
+      const started = !(_sq && _sq.start_date) || Date.now() >= Date.parse(_sq.start_date);   // not before scheduled start
+      rows.forEach(r => { r.email = String(r.student||"").toLowerCase().includes("@") ? String(r.student).toLowerCase() : null; r.eligible = (started && r.status === "locked" && r.verified === true); });
       const em = [...new Set(rows.map(r => r.email).filter(Boolean))];
       if (em.length) {
         const nm = (await db.prepare(`SELECT lower(email) AS e, name, user_id FROM roster WHERE lower(email) IN (${em.map(()=>"?").join(",")})`).bind(...em).all()).results;
