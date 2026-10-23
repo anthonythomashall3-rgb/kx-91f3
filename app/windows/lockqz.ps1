@@ -14,7 +14,15 @@ $MarkEnd   = "# LOCKqz END"
 $Here      = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BlockFile = Join-Path $Here "blocklist.txt"
 $Policy    = Join-Path $Here "browser-policy.ps1"
-$AiApps = @("chatgpt","claude","copilot","perplexity","ollama","lmstudio","gpt4all","msty","cluely","jan","dia","comet","atlas","opera","notion ai")
+$AiApps = @("chatgpt","claude","copilot","perplexity","ollama","lmstudio","gpt4all","msty","cluely","jan","dia","comet","atlas","opera","notion ai","deepseek","poe","mistral","sider","grammarly")
+# Non-browser routes to AI or a human helper, all closed during the quiz:
+$VmApps     = @("Parallels","prl_vm_app","vmware","vmware-vmx","VirtualBox","VirtualBoxVM","VBoxHeadless","qemu-system-x86_64","qemu-system-aarch64","vmwp","vmms","Docker Desktop","com.docker.backend")
+$RemoteApps = @("TeamViewer","AnyDesk","RustDesk","remoting_host","ScreenConnect","ConnectWiseControl","LogMeIn","Splashtop","SRServer","vncserver","winvnc","tvnserver","Parsec","GoToMyPC")
+$OverlayApps= @("Cluely","InterviewCoder","Interview Coder","LockedInAI","FinalRound","Ohmni","Sensei","UltraCode","Pieces")
+$ModelProcs = @("ollama","llama-server","llamafile","koboldcpp","localai","jan","gpt4all","text-generation-webui","vllm")
+$VpnApps    = @("nordvpn","expressvpn","surfshark","protonvpn","mullvad","pia","piaservice","Cloudflare WARP","warp-svc","openvpn","wireguard","windscribe","tunnelbear","hssvpn","cyberghost")
+$ModelPorts = @(11434,1234,4891,1337,8080,7860,5000,8000)
+$VpnPorts   = @(51820,1194,500,4500)
 $FwTag  = "LOCKqz-AI"
 
 function Get-Domains {
@@ -43,7 +51,20 @@ function Do-Lock {
   if (Test-Path $Policy) { & powershell -ExecutionPolicy Bypass -File $Policy lock | Out-Null }
 
   foreach ($a in $AiApps) { Stop-Process -Name $a -Force }
-  "LOCKqz: LOCKED"
+  foreach ($a in ($VmApps + $RemoteApps + $OverlayApps + $ModelProcs + $VpnApps)) { Stop-Process -Name $a -Force }
+
+  # Firewall: block local AI model servers and VPN protocols (backup to closing their apps).
+  New-NetFirewallRule -DisplayName "$FwTag-models" -Direction Outbound -Action Block -Protocol TCP -RemotePort $ModelPorts | Out-Null
+  New-NetFirewallRule -DisplayName "$FwTag-vpn-udp" -Direction Outbound -Action Block -Protocol UDP -RemotePort $VpnPorts  | Out-Null
+  New-NetFirewallRule -DisplayName "$FwTag-vpn-tcp" -Direction Outbound -Action Block -Protocol TCP -RemotePort 1194      | Out-Null
+
+  # Windows built-in AI off for the quiz (Copilot, Recall snapshots, Click to Do) via HKLM policy.
+  $wai = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI"
+  New-Item -Path $wai -Force | Out-Null
+  Set-ItemProperty -Path $wai -Name "TurnOffWindowsCopilot" -Value 1 -Type DWord
+  Set-ItemProperty -Path $wai -Name "DisableAIDataAnalysis" -Value 1 -Type DWord
+  Set-ItemProperty -Path $wai -Name "DisableClickToDo" -Value 1 -Type DWord
+  "LOCKqz: LOCKED (AI apps, VPNs, VMs, remote-desktop, overlays and local models closed; Windows Copilot/Recall off)"
 }
 
 function Do-Unlock {
@@ -55,6 +76,8 @@ function Do-Unlock {
     ipconfig /flushdns | Out-Null
   }
   Get-NetFirewallRule -DisplayName "$FwTag-*" | Remove-NetFirewallRule
+  $wai = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI"
+  Remove-ItemProperty -Path $wai -Name "TurnOffWindowsCopilot","DisableAIDataAnalysis","DisableClickToDo" -ErrorAction SilentlyContinue
   if (Test-Path $Policy) { & powershell -ExecutionPolicy Bypass -File $Policy unlock | Out-Null }
   "LOCKqz: UNLOCKED"
 }

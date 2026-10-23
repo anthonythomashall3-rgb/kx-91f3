@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS locks (
   helper_seen TEXT,
   ext_seen  TEXT,
   signed    INTEGER DEFAULT 0, -- 1 = lock proven by a request signed with the device key
+  ip        TEXT,              -- device IP at lock (used by the gate to restrict the quiz to locked IPs)
   PRIMARY KEY (device_id, quiz_id)
 );
 

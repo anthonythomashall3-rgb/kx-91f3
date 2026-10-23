@@ -98,7 +98,7 @@ async function suite(label, oldSchema) {
   r = await lock(strict, { key: K, device: DEV });
   check("signed lock accepted", r.status === 200, `got ${r.status} ${JSON.stringify(r.data)}`);
   r = await pass_(strict, { key: K, device: DEV });
-  check("signed password while locked -> released", r.status === 200 && r.data?.password === "LQ-SECRET01", `got ${r.status} ${JSON.stringify(r.data)}`);
+  check("signed password while locked -> released (rotating code off the seed)", r.status === 200 && r.data?.seed === "LQ-SECRET01" && String(r.data?.password||"").startsWith("LQ-SECRET01-"), `got ${r.status} ${JSON.stringify(r.data)}`);
   const ev = sqlite.prepare("SELECT detail FROM events WHERE device_id=? AND event='password_released'").get(DEV);
   check("password release logged for the teacher", !!ev && JSON.parse(ev.detail).verified === true);
 
@@ -135,7 +135,7 @@ async function suite(label, oldSchema) {
   r = await call(strict, "/report", { device_id: DEV, event: "heartbeat", quiz_id: LOCK_ID, source: "helper" }, { key: K, device: DEV });
   check("signed helper heartbeat accepted", r.status === 200);
   r = await pass_(strict, { key: K, device: DEV });
-  check("lock alive again after signed helper heartbeat -> password", r.status === 200 && r.data?.password === "LQ-SECRET01");
+  check("lock alive again after signed helper heartbeat -> password", r.status === 200 && String(r.data?.password||"").startsWith("LQ-SECRET01-"));
   r = await call(strict, "/report", { device_id: DEV, event: "unlock", quiz_id: LOCK_ID }, { key: K, device: DEV });
   r = await pass_(strict, { key: K, device: DEV });
   check("after unlock -> no password", r.status === 403);
@@ -152,7 +152,7 @@ async function suite(label, oldSchema) {
   r = await lock(legacy, { device: "old-install-01" });
   check("legacy unsigned lock accepted", r.status === 200);
   r = await pass_(legacy, { device: "old-install-01" });
-  check("legacy unsigned password released", r.status === 200 && r.data?.password === "LQ-SECRET01");
+  check("legacy unsigned password released", r.status === 200 && String(r.data?.password||"").startsWith("LQ-SECRET01-"));
   r = await pass_(strict, { device: "old-install-01" });
   check("same request refused once REQUIRE_SIGNED=1", r.status === 401);
 

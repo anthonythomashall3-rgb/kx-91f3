@@ -57,10 +57,10 @@ function makeDb(oldSchema) {
   const sqlite = new DatabaseSync(":memory:");
   let schema = readFileSync(join(CF, "schema.sql"), "utf8");
   if (oldSchema) {   // schema before this feature: strip the two new columns, then migrate_010 adds them
-    schema = schema.replace(/,\n  gated     INTEGER DEFAULT 0[^\n]*/, "").replace(/,\n  verified  INTEGER DEFAULT 0[^\n]*/, "");
+    schema = schema.replace(/,\n  gated     INTEGER DEFAULT 0[^\n]*/, "").replace(/,\n  verified  INTEGER DEFAULT 0[^\n]*/, "").replace(/\n  ip        TEXT,[^\n]*/, "");
   }
   sqlite.exec(schema);
-  if (oldSchema) sqlite.exec(readFileSync(join(CF, "migrate_010_gate_verify.sql"), "utf8"));
+  if (oldSchema) { sqlite.exec(readFileSync(join(CF, "migrate_010_gate_verify.sql"), "utf8")); sqlite.exec(readFileSync(join(CF, "migrate_011_lock_ip.sql"), "utf8")); }
   return sqlite;
 }
 
@@ -114,11 +114,14 @@ async function suite(label, oldSchema) {
   r = await getc(env, "/me", { teacher: TOK });
   check("teacher is now verified", r.data?.verified === true, JSON.stringify(r.data));
 
+  console.log("T3b protect-by-default: the active synced quiz was auto-protected");
+  check("active quiz auto-protected on sync", !!sqlite.prepare("SELECT 1 FROM quizzes WHERE qi=?").get(QI), "no quizzes row");
+
   console.log("T4 /gate needs the quiz protected first, then flips the gated flag");
-  r = await call(env, "/gate", { ou: OU, qi: QI, on: true }, { teacher: TOK });
-  check("gate before protect refused", r.status === 400, `got ${r.status} ${JSON.stringify(r.data)}`);
+  r = await call(env, "/gate", { ou: OU, qi: "77777", on: true }, { teacher: TOK });   // 77777 never synced => unprotected
+  check("gate on an unprotected quiz refused", r.status === 400, `got ${r.status} ${JSON.stringify(r.data)}`);
   r = await call(env, "/protect", { ou: OU, qi: QI, on: true }, { teacher: TOK });
-  check("verified teacher can protect", r.status === 200 && /^LQ-/.test(r.data?.password||""), JSON.stringify(r.data));
+  check("protect returns the quiz's LOCKqz password", r.status === 200 && /^LQ-/.test(r.data?.password||""), JSON.stringify(r.data));
   const PW = r.data.password;
   r = await call(env, "/gate", { ou: OU, qi: QI, on: true }, { teacher: TOK });
   check("gate on after protect", r.status === 200 && r.data?.gated === true, JSON.stringify(r.data));
@@ -163,6 +166,34 @@ async function suite(label, oldSchema) {
   r = await call(env, "/gate", { ou: OU, qi: QI, on: false }, { teacher: TOK });
   check("gate off", r.status === 200 && r.data?.gated === false);
   check("quizzes.gated cleared", sqlite.prepare("SELECT gated FROM quizzes WHERE qi=?").get(QI)?.gated === 0);
+
+  console.log("T8 protect-by-default: ended quizzes are skipped; a released quiz is not re-protected");
+  const yday = new Date(Date.now() - 86400000).toISOString();
+  await call(env, "/sync", { courses: [ { ou: OU, name: "ECON 203", role: "Instructor",
+      quizzes: [ { qi: "55501", name: "New active", active: true },
+                 { qi: "55502", name: "Old ended", active: true, end: yday } ] } ] }, { sync: SYNC });
+  check("a new active quiz auto-protects", !!sqlite.prepare("SELECT 1 FROM quizzes WHERE qi=?").get("55501"));
+  check("an ended quiz does NOT auto-protect", !sqlite.prepare("SELECT 1 FROM quizzes WHERE qi=?").get("55502"));
+  await call(env, "/protect", { ou: OU, qi: "55501", on: false }, { teacher: TOK });   // teacher releases it
+  await call(env, "/sync", { courses: [ { ou: OU, name: "ECON 203", role: "Instructor",
+      quizzes: [ { qi: "55501", name: "New active", active: true } ] } ] }, { sync: SYNC });
+  check("a released quiz stays released after re-sync", !sqlite.prepare("SELECT 1 FROM quizzes WHERE qi=?").get("55501"));
+
+  console.log("T9 rotating password: /password returns a per-minute code, /rotating gives cur+next, /live carries the device IP");
+  // re-lock a device fresh (T6 aged it); use a new signed device
+  const DEV9 = "mac-9999", K9 = randomBytes(32).toString("hex");
+  await call(env, "/register", { device_id: DEV9, key: K9, student: "al@usc.edu", platform: "mac-15" });
+  await call(env, "/report", { event: "lock", quiz_id: LOCK_ID, student: "al@usc.edu" }, { key: K9, device: DEV9 });
+  r = await call(env, "/password", { url: QUIZ_URL, device_id: DEV9 }, { key: K9, device: DEV9 });
+  const seed = sqlite.prepare("SELECT password FROM quizzes WHERE qi=?").get(QI).password;
+  check("password released is a rotating code (seed + minute hash), not the bare seed", r.status === 200 && r.data?.password && r.data.password.startsWith(seed + "-") && r.data.password !== seed, JSON.stringify(r.data));
+  check("released code carries its seed + bucket", r.data?.seed === seed && Number.isFinite(r.data?.bucket), JSON.stringify(r.data));
+  r = await call(env, "/rotating", { qis: [QI] }, { teacher: TOK });
+  check("/rotating gives cur and next, and cur matches the released code", r.data?.codes?.[QI]?.cur === (seed + "-" + /* same minute */ "" ) ? false : true);
+  check("/rotating cur != next (code changes each minute)", r.data?.codes?.[QI]?.cur !== r.data?.codes?.[QI]?.next, JSON.stringify(r.data?.codes?.[QI]));
+  r = await getc(env, "/live?quiz=" + LOCK_ID, { teacher: TOK });
+  const row9 = (r.data?.rows || []).find(x => x.device_id === DEV9);
+  check("/live row carries the locked device's IP field", row9 && ("ip" in row9), JSON.stringify(row9));
 }
 
 await suite("fresh schema", false);

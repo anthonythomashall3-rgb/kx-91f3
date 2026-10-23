@@ -16,7 +16,7 @@ Created 22 Oct 2026. Everything USC asks for to add LOCKqz to Brightspace (LTI),
 - Draft is in Anthony's USC Gmail (subject "LTI Intake Form: LOCKqz (FBE, Professor Bristow)"). Attach the four documents before sending.
 
 ## Open items before sending
-- Fake-lock hole (a student could fake a lock and get the quiz password): fixed in code and tested 23 Oct 2026, see 07_device_auth. Before sending: roll the fix out, then update HECVAT START HERE C27 with the text in 07_device_auth/DEVICE-AUTH.md.
+- Fake-lock hole (a student could fake a lock and get the quiz password): fixed and live 23 Oct 2026, strict mode on (see 07_device_auth). HECVAT START HERE C27 updated to match.
 - Privacy page fixed locally (contact email; name collected at setup). Not yet deployed.
 - HECVAT PDAT-04 left blank: confirm the Cloudflare D1 database region.
 - No SOC 2 (USC asks for one); hosting provider Cloudflare holds SOC 2 Type II.

@@ -48,6 +48,10 @@
       var r = await fetch(API + path, { headers: { "X-LOCKqz-Sync": KEY } });
       return r.json().catch(function () { return {}; });
     };
+    var lqpost = async function (path, body) {
+      var r = await fetch(API + path, { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Sync": KEY }, body: JSON.stringify(body || {}) });
+      return r.json().catch(function () { return {}; });
+    };
     // Brightspace special-access helpers (one user at a time). PUT grants/keeps, DELETE removes.
     var saUrl = function (ou, qi, uid) { return "/d2l/api/le/" + LE + "/" + ou + "/quizzes/" + qi + "/specialaccess/" + uid; };
     var saList = async function (ou, qi) { return get("/d2l/api/le/" + LE + "/" + ou + "/quizzes/" + qi + "/specialaccess/").catch(function () { return []; }); };
@@ -159,14 +163,27 @@
     // locked (killed/uninstalled/tampered/left) is removed within ~10s, and if this tab closes every
     // grant lapses on its own because each carries a 90s rolling EndDate.
     var GATES = {};   // qi -> { ou, timer, busy }
+    var GPW = {};   // qi -> last rotating code written to Brightspace (so we only PUT on change)
     async function gateStep(ou, qi) {
       var end = new Date(Date.now() + 90000).toISOString();
       var live = await lqget("/live?quiz=" + ou + "-" + qi);
-      var want = {}; (live.rows || []).forEach(function (r) { if (r.eligible && r.user_id) want[String(r.user_id)] = true; });
+      var want = {}, ips = {};
+      (live.rows || []).forEach(function (r) { if (r.eligible && r.user_id) { want[String(r.user_id)] = true; if (r.ip) ips[r.ip] = true; } });
       var have = await saList(ou, qi); var haveSet = {};
       (Array.isArray(have) ? have : []).forEach(function (x) { if (x && x.UserId != null) haveSet[String(x.UserId)] = true; });
       for (var uid in want) { try { await saPut(ou, qi, uid, end); } catch (e) {} }          // grant / refresh EndDate
       for (var u2 in haveSet) { if (!want[u2]) { try { await saDel(ou, qi, u2); } catch (e) {} } } // revoke those no longer locked
+      // Rotating password + IP lock, written straight onto the quiz. The app fetches the same code live
+      // and types it, so what a student copies out of the field dies within a minute.
+      try {
+        var rot = await lqpost("/rotating", { qis: [qi] });
+        var code = rot && rot.codes && rot.codes[qi] ? rot.codes[qi].cur : null;
+        var ranges = Object.keys(ips).map(function (ip) { return { IPRangeStart: ip, IPRangeEnd: ip }; });
+        if (code && (GPW[qi] !== code || Object.keys(ips).length)) {
+          await writePw(ou, qi, code, { AllowOnlyUsersWithSpecialAccess: true, RestrictIPAddressRange: ranges.length ? ranges : null });
+          GPW[qi] = code;
+        }
+      } catch (e) {}
       return Object.keys(want).length;
     }
     async function startGate(ou, qi, pw, st) {
@@ -188,7 +205,7 @@
       try {
         var have = await saList(ou, qi);
         for (var i = 0; i < (have || []).length; i++) { try { await saDel(ou, qi, have[i].UserId); } catch (e) {} }
-        await writePw(ou, qi, pw_of(qi), { AllowOnlyUsersWithSpecialAccess: false });   // quiz open again (password still applies)
+        await writePw(ou, qi, pw_of(qi), { AllowOnlyUsersWithSpecialAccess: false, RestrictIPAddressRange: null });   // quiz open again (password still applies)
       } catch (e) {}
       await lq("/gate", { ou: ou, qi: qi, on: false });
       st.textContent = "off"; st.style.color = "#888";

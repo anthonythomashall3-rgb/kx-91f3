@@ -2,7 +2,7 @@
 
 ## Automated test suite (run anytime, $0, no root, no network, no system changes)
     cd ~/Projects/LOCKqz/app && bash tests/run_all.sh
-As of 23 Oct 2026: **248 tests across 12 suites, all passing** (was 157 across 10 on 22 Oct) (suite 8 = live quiz-monitor
+As of 23 Oct 2026: **290 tests across 13 suites, all passing** (was 157 across 10 on 22 Oct) (suite 8 = live quiz-monitor
 status + heartbeat logic; suite 9 = daemon reporting end-to-end, running the real daemon
 against a mock backend over HTTP to prove lock / helper-heartbeat / unlock actually report;
 suite 3 also guards that the extension DNR covers the full blocklist).
@@ -39,6 +39,10 @@ suite 3 also guards that the extension DNR covers the full blocklist).
    password only while locked for that quiz, and reports which quiz an unlock ended. It also
    proves a refresh from the server can only ADD domains: a short server list never shrinks a
    Mac's list. Suites 4 and 9 pick free ports at run time and stop their daemons afterwards.
+13. Access gate + teacher self-verify (42) — 23 Oct 2026. Runs the REAL API against an in-memory
+   database (fresh schema and one upgraded by migrate_010): a professor who signs up stays unverified
+   until a course sync shows they are staff; only a verified professor can protect or gate a quiz;
+   the live gate admits only a device holding a fresh, device-signed lock.
 
 ## What the tests PROVE
 - The student's computer is never corrupted: hosts is always restored exactly, even after

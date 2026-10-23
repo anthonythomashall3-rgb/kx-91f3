@@ -46,6 +46,13 @@ const ids = u => ({ qi: (u.match(/qi=(\d+)/) || u.match(/quizId=(\d+)/) || [])[1
 // Without it (rollout), old unsigned installs keep working, but a registered device can never be
 // impersonated and unsigned heartbeats can never keep a lock alive.
 const SIG_WINDOW_S = 300;
+// Per-minute code for a quiz: stable seed + HMAC(minute). Released to the locked app only; the app
+// types it and never shows it, so a code a student exfiltrates stops working within ~60 seconds.
+const minuteBucket = () => Math.floor(Date.now() / 60000);
+async function rotatingPw(seed, bucket) {
+  const h = await hmacHex(String(seed), "lqz-rot:" + bucket);
+  return String(seed) + "-" + h.slice(0, 6).toUpperCase();
+}
 const enc = new TextEncoder();
 const unixNow = () => Math.floor(Date.now() / 1000);
 async function sha256hex(bytes) { return hex(await crypto.subtle.digest("SHA-256", bytes)); }
@@ -159,14 +166,15 @@ export async function onRequest(context) {
           .bind(device_id||null, student||null, quiz_id||null, ev, detail?JSON.stringify(detail):null, now()).run();
       if (device_id) await db.prepare("INSERT OR IGNORE INTO devices (device_id,installed_at) VALUES (?,?)").bind(device_id, now()).run();
       await db.prepare("UPDATE devices SET last_seen=?, student=COALESCE(?,student) WHERE device_id=?").bind(now(), student||null, device_id||null).run();
+      const clientIp = request.headers.get("CF-Connecting-IP") || null;
       if (ev === "lock")
-        await db.prepare("INSERT INTO locks (device_id,quiz_id,last_lock,helper_seen,signed) VALUES (?,?,?,?,?) ON CONFLICT(device_id,quiz_id) DO UPDATE SET last_lock=excluded.last_lock,helper_seen=excluded.helper_seen,signed=excluded.signed").bind(device_id, quiz_id, now(), now(), signed).run();
+        await db.prepare("INSERT INTO locks (device_id,quiz_id,last_lock,helper_seen,signed,ip) VALUES (?,?,?,?,?,?) ON CONFLICT(device_id,quiz_id) DO UPDATE SET last_lock=excluded.last_lock,helper_seen=excluded.helper_seen,signed=excluded.signed,ip=excluded.ip").bind(device_id, quiz_id, now(), now(), signed, clientIp).run();
       if (ev === "unlock")
         await db.prepare("DELETE FROM locks WHERE device_id=? AND quiz_id=?").bind(device_id, quiz_id).run();
       if (ev === "heartbeat" && quiz_id) {
         // Only the helper's heartbeat keeps a lock alive; the agent's only proves the agent runs.
         if (agentBeat) await db.prepare("UPDATE locks SET ext_seen=? WHERE device_id=? AND quiz_id=?").bind(now(), device_id, quiz_id).run();
-        else await db.prepare("UPDATE locks SET last_lock=?, helper_seen=?, signed=? WHERE device_id=? AND quiz_id=?").bind(now(), now(), signed, device_id, quiz_id).run();
+        else await db.prepare("UPDATE locks SET last_lock=?, helper_seen=?, signed=?, ip=COALESCE(?,ip) WHERE device_id=? AND quiz_id=?").bind(now(), now(), signed, clientIp, device_id, quiz_id).run();
       }
       return json({ ok: true });
     }
@@ -183,12 +191,15 @@ export async function onRequest(context) {
       const lk = await db.prepare("SELECT last_lock, signed FROM locks WHERE device_id=? AND quiz_id=?").bind(device_id, lockId).first();
       const fresh = lk && (Date.now() - Date.parse(lk.last_lock) < 60000) && (!(strict || v.ok) || Number(lk.signed) === 1);
       if (!fresh) return json({ password: null, reason: "not locked" }, 403);
-      let pw = null;
+      let pw = null, rot = null;
       if (qi) { const q = await db.prepare("SELECT password FROM quizzes WHERE qi=?").bind(qi).first(); if (q) pw = q.password; }
       if (!pw && ou) { const c = await db.prepare("SELECT password FROM courses WHERE ou=?").bind(ou).first(); if (c) pw = c.password; }
+      // Rotating code the app actually types (the Sync tab writes the same current code into Brightspace
+      // each cycle). prev covers a type that lands just after the minute ticks over.
+      if (pw) { const b = minuteBucket(); rot = await rotatingPw(pw, b); }
       if (pw) await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,(SELECT student FROM devices WHERE device_id=?),?,?,?,?)")
         .bind(device_id, device_id, lockId, "password_released", JSON.stringify({ verified: v.ok, ip: request.headers.get("CF-Connecting-IP") || null }), now()).run();
-      return json({ password: pw, lockId });
+      return json({ password: rot || pw, seed: pw, bucket: minuteBucket(), lockId });
     }
 
     if (p === "/match" && request.method === "POST") {
@@ -392,6 +403,21 @@ export async function onRequest(context) {
         }
       }
       for (let i = 0; i < st.length; i += 90) await db.batch(st.slice(i, i + 90));
+      // Protect-by-default: new active quizzes get a LOCKqz password automatically. A quiz the teacher
+      // released (pending_clear) or already protns (quizzes row) is left as-is, so opt-out sticks.
+      const today = now().slice(0, 10);
+      for (const c of courses) {
+        const ou = String(c.ou || ""); if (!/^\d+$/.test(ou) || !Array.isArray(c.quizzes)) continue;
+        for (const q of c.quizzes) {
+          const qi = String(q.qi || ""); if (!/^\d+$/.test(qi)) continue;
+          if (q.active === false) continue;
+          if (q.end && String(q.end).slice(0, 10) < today) continue;   // skip ended quizzes
+          const seen = await db.prepare("SELECT 1 FROM quizzes WHERE qi=? UNION ALL SELECT 1 FROM pending_clear WHERE ou=? AND qi=?").bind(qi, ou, qi).first();
+          if (seen) continue;
+          await db.prepare("INSERT INTO quizzes (quiz_id,title,url,password,created_at,qi,teacher_id,lock_id,ou,gated) VALUES (?,?,?,?,?,?,?,?,?,0)")
+            .bind(rid(8), q.name||null, null, "LQ-" + rid(8), now(), qi, me.id, `${ou}-${qi}`, ou).run();
+        }
+      }
       // The Sync script only sends courses where the teacher is instructor/TA, so any course here
       // proves they are staff: verify them automatically. No email, no invite, no admin step.
       if (me.id !== "admin" && courses.length) await db.prepare("UPDATE teachers SET verified=1 WHERE id=?").bind(me.id).run();
@@ -441,6 +467,18 @@ export async function onRequest(context) {
       if (!r.meta.changes) return json({ error:"Protect this quiz first." }, 400);
       return json({ ou, qi, gated: !!body.on });
     }
+    // Current rotating code(s) for quizzes the teacher protects -- the Sync tab writes these into
+    // Brightspace each cycle so the live password changes every minute. Returns current + next so a
+    // write is valid right up to the tick.
+    if (p === "/rotating") {
+      const qis = (Array.isArray(body.qis) ? body.qis : []).map(String).filter(x => /^\d+$/.test(x)).slice(0, 500);
+      if (!qis.length) return json({ codes: {} });
+      const ph = qis.map(()=>"?").join(",");
+      const rows = (await db.prepare(`SELECT qi,password FROM quizzes WHERE qi IN (${ph})`).bind(...qis).all()).results;
+      const b = minuteBucket(), codes = {};
+      for (const r of rows) if (r.password) codes[String(r.qi)] = { cur: await rotatingPw(r.password, b), next: await rotatingPw(r.password, b + 1), bucket: b };
+      return json({ codes });
+    }
     if (p === "/bs") {
       const cs = (await db.prepare("SELECT ou,name,code,role,synced_at FROM teacher_courses WHERE teacher_id=? ORDER BY name").bind(me.id).all()).results;
       if (!cs.length) return json({ courses: [] });
@@ -489,7 +527,7 @@ export async function onRequest(context) {
       const like = `${quiz}-%`;
       const s = await scope("l.quiz_id"), s2 = await scope("e.quiz_id");
       const STALE = 90000, nowMs = Date.now(), age = t => t ? (nowMs - Date.parse(t)) : null;
-      const locks = (await db.prepare(`SELECT l.device_id,l.quiz_id,l.last_lock,l.helper_seen,l.ext_seen,l.signed,d.student,d.platform FROM locks l LEFT JOIN devices d ON d.device_id=l.device_id WHERE (l.quiz_id=? OR l.quiz_id LIKE ?) AND ${s.sql}`).bind(quiz, like, ...s.args).all()).results;
+      const locks = (await db.prepare(`SELECT l.device_id,l.quiz_id,l.last_lock,l.helper_seen,l.ext_seen,l.signed,l.ip,d.student,d.platform FROM locks l LEFT JOIN devices d ON d.device_id=l.device_id WHERE (l.quiz_id=? OR l.quiz_id LIKE ?) AND ${s.sql}`).bind(quiz, like, ...s.args).all()).results;
       const tamp = new Set(((await db.prepare("SELECT DISTINCT device_id FROM events WHERE (quiz_id=? OR quiz_id LIKE ?) AND event='tamper'").bind(quiz, like).all()).results).map(t=>t.device_id));
       const done = (await db.prepare(`SELECT DISTINCT e.device_id,d.student,d.platform FROM events e LEFT JOIN devices d ON d.device_id=e.device_id WHERE (e.quiz_id=? OR e.quiz_id LIKE ?) AND e.event IN ('unlock','auto_unlock') AND ${s2.sql}`).bind(quiz, like, ...s2.args).all()).results;
       const active = new Set(locks.map(l=>l.device_id));
@@ -501,7 +539,7 @@ export async function onRequest(context) {
           const helperDown = h === null || h > STALE, extDown = e === null || e > STALE;
           status = helperDown && !extDown ? "helper_killed" : (extDown && !helperDown ? "browser_closed" : "dark");
         }
-        return { device_id:l.device_id, student:l.student||null, platform:l.platform||null, status, last_lock:l.last_lock, age_ms:a, verified: Number(l.signed) === 1 };
+        return { device_id:l.device_id, student:l.student||null, platform:l.platform||null, status, last_lock:l.last_lock, age_ms:a, verified: Number(l.signed) === 1, ip: l.ip||null };
       });
       done.forEach(d => { if (!active.has(d.device_id)) rows.push({ device_id:d.device_id, student:d.student||null, platform:d.platform||null, status:"done" }); });
       // A student is admitted ONLY when LOCKqz is holding a fresh, device-signed lock (status "locked",

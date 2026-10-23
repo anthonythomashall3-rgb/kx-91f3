@@ -25,10 +25,12 @@ DEV_KEY_HASH="4695a520432e105e967dd2703366c24c039fe0a850fe35db03b73b6b9506aecd"
 
 # Shared, unit-tested block/unblock core (see tests/test_engine.sh).
 source "$HERE/lockqz-core.sh"
+source "$HERE/extra-block.sh"   # VPN/VM/remote-desktop/overlay/local-model/Apple Intelligence blockers
 
 AI_APPS=("ChatGPT" "Claude" "Copilot" "Perplexity" "Ollama" "LM Studio" \
          "GPT4All" "Msty" "Cluely" "Google Gemini" "Jan" "Pieces" "MacGPT" \
-         "Dia" "Comet" "ChatGPT Atlas" "Atlas" "Opera" "Raycast" "Notion AI")
+         "Dia" "Comet" "ChatGPT Atlas" "Atlas" "Opera" "Raycast" "Notion AI" \
+         "Grammarly" "GrammarlyDesktop" "DeepSeek" "Poe" "Mistral" "Le Chat" "Sider" "MacWhisper")
 
 say() { echo "LOCKqz: $*"; }
 
@@ -70,7 +72,8 @@ do_lock() {
   if is_locked; then say "already locked."; return; fi
   if [ "$DRYRUN" = "1" ]; then
     say "[dry-run] would blackhole $(domains | wc -l | tr -d ' ') domains, load pf, flush DNS, close AI apps."
-    build_block | sed 's/^/    /' | head -10; echo "    ..."; return
+    extra_lock
+    build_block | sed 's/^/    /' | head -10 || true; echo "    ..."; return
   fi
   mkdir -p "$STATE"; [ -f "$BACKUP" ] || cp "$HOSTS" "$BACKUP"
   hosts_add_block "$HOSTS" "$BLOCKLIST"
@@ -79,13 +82,14 @@ do_lock() {
   dscacheutil -flushcache 2>/dev/null || true
   killall -HUP mDNSResponder 2>/dev/null || true
   close_ai_apps
+  extra_lock
   write_status locked
-  say "LOCKED. AI domains blackholed; firewall up; browser AI off; AI apps closed."
+  say "LOCKED. AI domains blackholed; firewall up (incl. local-model + VPN ports); browser AI off; AI apps, VPNs, VMs, remote-desktop and overlay tools closed; Apple Intelligence off."
 }
 
 do_unlock() {
   need_root
-  if [ "$DRYRUN" = "1" ]; then say "[dry-run] would strip LOCKqz block, flush pf, flush DNS."; return; fi
+  if [ "$DRYRUN" = "1" ]; then say "[dry-run] would strip LOCKqz block, flush pf, flush DNS, restore Apple Intelligence."; extra_unlock; return; fi
   if is_locked; then
     hosts_remove_block "$HOSTS"
     dscacheutil -flushcache 2>/dev/null || true
@@ -93,6 +97,7 @@ do_unlock() {
   fi
   unload_pf
   policy unlock
+  extra_unlock
   write_status unlocked
   say "UNLOCKED. AI access restored."
 }
