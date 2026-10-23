@@ -24,16 +24,15 @@
       <small id="os"></small>
     </div>
 
-    <div class="step">
-      <a class="btn ghost" href="https://prof.lockqz.pages.dev">Teacher login</a>
-    </div>
-
     <footer><a href="/privacy.html">Privacy</a></footer>
   </div>
 <script>
-  var win = navigator.userAgent.indexOf("Windows") > -1;
-  var dl = document.getElementById("dl");
-  dl.href = win ? "/download/lockqz-win.exe" : "/download/lockqz-mac.pkg";
-  document.getElementById("os").textContent = win ? "Windows" : "macOS";
+  var ua = navigator.userAgent, dl = document.getElementById("dl"), os = document.getElementById("os");
+  var ipad = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+  var win = /Windows/.test(ua) && !/Windows Phone/.test(ua);
+  var mac = /Macintosh|Mac OS X/.test(ua) && !ipad && !/iPhone|iPad|iPod/.test(ua);
+  if (win) { dl.href = "/download/lockqz-win.exe"; os.textContent = "Windows"; }
+  else if (mac) { dl.href = "/download/lockqz-mac.pkg"; os.textContent = "macOS"; }
+  else { dl.removeAttribute("href"); dl.style.opacity = .5; dl.style.pointerEvents = "none"; os.textContent = "Use a Mac or Windows computer"; }
 </script>
 </body></html>
