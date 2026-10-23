@@ -9,7 +9,7 @@ check() { if eval "$2" >/dev/null 2>&1; then echo "PASS  $1"; else echo "FAIL  $
 DEST="/Library/Application Support/LOCKqz"
 TOK="lqz-ci-$RANDOM$RANDOM"
 
-bash make-pkg.sh --token "$TOK" --api https://lockdownqz.pages.dev/api --out /tmp/lockqz-mac.pkg >/dev/null
+bash make-pkg.sh --token "$TOK" --api https://lockqz.pages.dev/api --out /tmp/lockqz-mac.pkg >/dev/null
 check "pkg built" "[ -s /tmp/lockqz-mac.pkg ]"
 sudo installer -pkg /tmp/lockqz-mac.pkg -target / >/tmp/install.log 2>&1
 check "installer succeeded" "grep -q 'successful' /tmp/install.log"
@@ -43,7 +43,7 @@ check "Chrome AI policy removed" "[ ! -f '/Library/Managed Preferences/com.googl
 
 sleep 3
 check "daemon reports reach the server (no 403 in log)" "! grep -q '403' \"$DEST/lockqzd.log\""
-check "server reachable with app user agent" "/usr/bin/python3 -c \"import urllib.request,json;r=urllib.request.urlopen(urllib.request.Request('https://lockdownqz.pages.dev/api/blocklist',headers={'User-Agent':'LOCKqz/0.2.0 (macOS)'}),timeout=10);assert len(json.load(r)['domains'])>=20\""
+check "server reachable with app user agent" "/usr/bin/python3 -c \"import urllib.request,json;r=urllib.request.urlopen(urllib.request.Request('https://lockqz.pages.dev/api/blocklist',headers={'User-Agent':'LOCKqz/0.2.0 (macOS)'}),timeout=10);assert len(json.load(r)['domains'])>=20\""
 
 sudo bash uninstall.sh >/dev/null 2>&1 || sudo bash "$DEST/../LOCKqz/uninstall.sh" >/dev/null 2>&1
 check "uninstall removed daemon" "! sudo launchctl print system/com.lockqz.helper"

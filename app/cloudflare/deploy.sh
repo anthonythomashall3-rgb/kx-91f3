@@ -5,7 +5,7 @@
 # Idempotent: creates the project + D1 if missing, loads schema, deploys, and prints the URL.
 set -e
 cd "$(dirname "$0")"
-PROJECT=lockdownqz
+PROJECT=lockqz
 DB=lockqz
 
 echo "== who am I =="; npx wrangler whoami | tail -3
@@ -37,6 +37,11 @@ npx wrangler pages deploy public --project-name "$PROJECT" --commit-dirty=true -
 echo "== teacher site (prof.$PROJECT.pages.dev) =="
 bash build-prof.sh
 npx wrangler pages deploy prof_site --project-name "$PROJECT" --commit-dirty=true --branch prof
+
+echo "== old address lockdownqz.pages.dev: pages forward here; its API keeps serving apps installed before the rename =="
+bash build-legacy.sh
+npx wrangler pages deploy legacy_site --project-name lockdownqz --commit-dirty=true --branch main
+npx wrangler pages deploy legacy_prof --project-name lockdownqz --commit-dirty=true --branch prof
 
 echo ""
 echo "Done. Site: https://$PROJECT.pages.dev   Teachers: https://prof.$PROJECT.pages.dev"

@@ -32,7 +32,7 @@ jobs:
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
             "/DLQTOKEN=$env:LQTOKEN" `
-            "/DLQAPI=https://lockdownqz.pages.dev/api" `
+            "/DLQAPI=https://lockqz.pages.dev/api" `
             installer.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

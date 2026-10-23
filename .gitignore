@@ -11,3 +11,5 @@ node_modules/
 app/mac/Output/
 app/windows/Output/
 app/cloudflare/prof_site/
+app/cloudflare/legacy_site/
+app/cloudflare/legacy_prof/
