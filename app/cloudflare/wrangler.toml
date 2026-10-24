@@ -7,7 +7,7 @@ pages_build_output_dir = "public"
 [[d1_databases]]
 binding = "DB"
 database_name = "lockqz"
-database_id = "02a0c476-d6b7-4bd4-8c59-2ddef91ad8a3"
+database_id = "e5e18c30-b8d8-4ee9-bd36-31ca257b01c8"
 
 # Set the teacher key as a secret (not here):
 #   wrangler pages secret put TEACHER_KEY
