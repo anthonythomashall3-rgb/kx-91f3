@@ -46,3 +46,6 @@ npx wrangler pages deploy legacy_prof --project-name lockdownqz --commit-dirty=t
 echo ""
 echo "Done. Site: https://$PROJECT.pages.dev   Teachers: https://prof.$PROJECT.pages.dev"
 echo "Remember: set api_base in mac/config.json + api in extension/config.js to the URL above."
+
+# Optional (recommended): a dedicated secret for rotating-code derivation. Falls back to TEACHER_KEY.
+#   npx wrangler pages secret put ROT_SECRET --project-name "$PROJECT"

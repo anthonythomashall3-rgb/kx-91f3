@@ -14,6 +14,7 @@ Chromium, Vivaldi, Arc, Safari via Apple Events; Firefox via its session file) a
 First run asks the student's name once so the professor's roster shows who is locked.
 """
 import hashlib, json, os, re, subprocess, threading, time, urllib.request, urllib.parse, glob
+NOPROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))   # never go through a system proxy
 
 SYS_CONF = "/Library/Application Support/LOCKqz/config.json"
 USER_DIR = os.path.expanduser("~/Library/Application Support/LOCKqz")
@@ -38,7 +39,14 @@ WEB_OK_UDM = {"14", "2", "12", "7", "36"}
 WEB_OK_TBM = {"isch", "nws", "vid", "bks"}
 JXA_BROWSERS = ["Google Chrome", "Microsoft Edge", "Brave Browser", "Chromium", "Vivaldi", "Arc", "Safari"]
 
-def log(m): print("LOCKqz-agent:", m, flush=True)
+_LOGF = os.path.expanduser("~/Library/Logs/LOCKqz-agent.log")
+def log(m):
+    line = "LOCKqz-agent: " + str(m)
+    print(line, flush=True)
+    try:
+        os.makedirs(os.path.dirname(_LOGF), exist_ok=True)
+        with open(_LOGF, "a") as f: f.write(time.strftime("%Y-%m-%dT%H:%M:%S ") + line + "\n")
+    except Exception: pass
 
 def load(p):
     try:
@@ -107,8 +115,9 @@ def firefox_urls(session):
     return out
 
 # ---------- live browser access ----------
-def osa(script, lang="JavaScript"):
-    r = subprocess.run(["osascript", "-l", lang, "-e", script], capture_output=True, text=True, timeout=10)
+def osa(script, lang="JavaScript", timeout=10, args=None):
+    cmd = ["osascript", "-l", lang, "-e", script] + ([str(a) for a in args] if args else [])
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     if r.returncode: raise RuntimeError(r.stderr.strip())
     return r.stdout.strip()
 
@@ -144,11 +153,12 @@ def permission_hint(app):
     if app in _hinted: return
     _hinted.add(app)
     dialog("LOCKqz needs permission to see your %s tabs so it can tell when a quiz starts.\n\n"
-           "System Settings → Privacy & Security → Automation → allow LOCKqz / python3 for %s." % (app, app))
+           "System Settings > Privacy & Security > Automation > allow LOCKqz / python3 for %s." % (app, app))
 
 def dialog(text, title="LOCKqz"):
     def run():
-        try: osa('display dialog %s with title %s buttons {"OK"} default button 1 giving up after 180' % (json.dumps(text), json.dumps(title)), "AppleScript")
+        try: osa('on run argv\n display dialog (item 1 of argv) with title (item 2 of argv) buttons {"OK"} default button 1 giving up after 180\nend run',
+                 "AppleScript", timeout=200, args=[text, title])
         except Exception: pass
     threading.Thread(target=run, daemon=True).start()
 
@@ -158,7 +168,8 @@ def ask_name():
     msg = "LOCKqz setup - enter your school email (the one Brightspace uses, e.g. you@usc.edu):"
     for _ in range(3):
         try:
-            s = osa('text returned of (display dialog %s default answer "" with title "LOCKqz" buttons {"OK"} default button 1)' % json.dumps(msg), "AppleScript")
+            s = osa('on run argv\n return text returned of (display dialog (item 1 of argv) default answer "" with title "LOCKqz" buttons {"OK"} default button 1 giving up after 280)\nend run',
+                    "AppleScript", timeout=300, args=[msg])
         except Exception: return None
         s = (s or "").strip().lower()
         if EMAIL_RE.match(s): return s
@@ -185,20 +196,21 @@ class Agent:
         self.student = u.get("student")
         self.locked, self.quiz, self.url, self.missing_since, self.last_beat = False, None, None, None, 0.0
 
-    def helper(self, path, body=None):
+    def helper(self, path, body=None, timeout=90):
         req = urllib.request.Request("http://127.0.0.1:%d%s" % (self.port, path),
                                      data=json.dumps(body).encode() if body is not None else None,
                                      headers={"Content-Type": "application/json", "X-LOCKqz-Token": self.token},
                                      method="POST" if body is not None else "GET")
-        return json.loads(urllib.request.urlopen(req, timeout=8).read())
+        return json.loads(NOPROXY.open(req, timeout=timeout).read())   # loopback must bypass any system proxy
 
     def api_post(self, path, body):
         if not self.api: return None
         try:
-            # Cloudflare blocks the default "Python-urllib" user agent (403) — send our own.
+            # Cloudflare blocks the default "Python-urllib" user agent (403) — send our own. Bypass any
+            # system proxy, which could block or MITM the call.
             req = urllib.request.Request(self.api + path, data=json.dumps(body).encode(),
-                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/0.3.2 (macOS)"})
-            return json.loads(urllib.request.urlopen(req, timeout=8).read())
+                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/0.3.3 (macOS)"})
+            return json.loads(NOPROXY.open(req, timeout=8).read())
         except Exception as e:
             log("api %s failed: %s" % (path, e)); return None
 
@@ -285,8 +297,17 @@ class Agent:
                                       "student": self.student, "source": "agent"})
 
     def run(self):
-        try: self.helper("/student", {"student": self.student})
+        try: self.helper("/student", {"student": self.student}, timeout=8)
         except Exception as e: log("helper not reachable yet: %s" % e)
+        # If the daemon is already locked (resumed after a reboot/login), adopt that lock so we unlock
+        # correctly when the quiz ends instead of leaving the student blocked until the hard max.
+        try:
+            st = self.helper("/status", timeout=8)
+            if st.get("state") in ("locked", "developer") and st.get("quiz_id"):
+                self.locked, self.quiz, self.url = True, st["quiz_id"], ""
+                self.missing_since, self.last_beat = time.time(), time.time()
+                log("adopted existing lock %s at startup" % self.quiz)
+        except Exception as e: log("startup status check failed: %s" % e)
         log("running (device %s, student %s)" % (self.device, self.student))
         while True:
             try: self.tick()

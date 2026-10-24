@@ -26,6 +26,9 @@ $BrowserClasses = @("Chrome_WidgetWin_1","MozillaWindowClass")
 function Log($m) { Add-Content -Path "$UserDir\agent.log" -Value ("{0} {1}" -f (Get-Date -Format s), $m) }
 function Is-QuizPath($u) { ($u -match "/d2l/lms/quizzing/user/") -or (($u -match "/d2l/lms/quizzing/") -and ($u -match "isprv=1|preview")) }
 function Is-Quiz($u)    { (Is-QuizPath $u) -and ($u -match "qi=") -and -not ($u -match "quizzes_list|quiz_submissions|feedback|results|submission") }
+# Brightspace quiz-attempt pages carry "Quiz" (and often the LMS name) in the window title; used when
+# the address bar is hidden (F11 / PWA), so going fullscreen can neither start nor drop a lock silently.
+function Is-QuizByTitle($t) { $t -match "Quiz" -and $t -match "Brightspace|D2L|Attempt" }
 function Is-Leaving($u) { (Is-QuizPath $u) -and ($u -match "quizzes_list|quiz_submissions|feedback|results|submission") }
 function Lock-Id($u) {
   $qi = if ($u -match "qi=(\d+)") { $Matches[1] } else { "x" }
@@ -53,10 +56,10 @@ function Get-BrowserWindows {
   $out
 }
 
-function Helper($path, $body) {
+function Helper($path, $body, $timeout = 90) {
   $h = @{ "X-LOCKqz-Token" = $Token }
-  if ($null -ne $body) { Invoke-RestMethod -Uri "http://127.0.0.1:$Port$path" -Method Post -Headers $h -Body ($body | ConvertTo-Json -Compress) -ContentType "application/json" -TimeoutSec 8 }
-  else { Invoke-RestMethod -Uri "http://127.0.0.1:$Port$path" -Headers $h -TimeoutSec 8 }
+  if ($null -ne $body) { Invoke-RestMethod -Uri "http://127.0.0.1:$Port$path" -Method Post -Headers $h -Body ($body | ConvertTo-Json -Compress) -ContentType "application/json" -TimeoutSec $timeout }
+  else { Invoke-RestMethod -Uri "http://127.0.0.1:$Port$path" -Headers $h -TimeoutSec $timeout }
 }
 function Api($path, $body) {
   if (-not $Api) { return $null }
@@ -83,20 +86,29 @@ if (-not $Student) {
   }
   if ($Student) { @{ student = $Student } | ConvertTo-Json | Set-Content $StudentFile -Encoding UTF8 }
 }
-try { Helper "/student" @{ student = $Student } | Out-Null } catch { Log "helper not reachable yet" }
+try { Helper "/student" @{ student = $Student } 8 | Out-Null } catch { Log "helper not reachable yet" }
 Log "running (device $Device, student $Student)"
 
 # ---- main loop ----
 $Locked = $false; $Quiz = $null; $QuizTitle = $null; $QuizUrl = $null; $LastPw = $null; $PwChecked = Get-Date; $MissingSince = $null; $LastBeat = Get-Date; $LastCheck = Get-Date
+# Adopt an existing lock (daemon resumed after a reboot/login) so we unlock correctly when the quiz
+# ends instead of leaving the student blocked until the hard max.
+try {
+  $st0 = Helper "/status" $null 8
+  if ((($st0.state -eq "locked") -or ($st0.state -eq "developer")) -and $st0.quiz_id) {
+    $Locked = $true; $Quiz = $st0.quiz_id; $QuizUrl = ""; $MissingSince = $null; $LastBeat = Get-Date; $LastCheck = Get-Date
+    Log "adopted existing lock $Quiz at startup"
+  }
+} catch { Log "startup status check failed" }
 while ($true) {
   try {
     $wins = Get-BrowserWindows
     $quizWin = $wins | Where-Object { Is-Quiz $_.Url } | Select-Object -First 1
-    $leaving = ($wins | Where-Object { Is-Leaving $_.Url }).Count -gt 0
+    $leaving = @($wins | Where-Object { Is-Leaving $_.Url }).Count -gt 0
     if (-not $Locked) {
       if ($quizWin) {
         $Quiz = Lock-Id $quizWin.Url
-        $QuizTitle = ($quizWin.Title -replace " - (Google Chrome|Microsoft. Edge|Brave|Mozilla Firefox).*$","")
+        $QuizTitle = ($quizWin.Title -replace " and \d+ more page[s]?","" -replace "\s[-\u2014]\s(Google Chrome|Microsoft.Edge|Microsoft.Edge.*|Brave|Mozilla Firefox|Opera|Vivaldi).*$","")
         $r = $null; try { $r = Helper "/lock" @{ quiz_id = $Quiz; student = $Student; url = $quizWin.Url } } catch {}
         if ($r -and $r.ok) {
           $QuizUrl = $quizWin.Url; $LastCheck = Get-Date
@@ -112,7 +124,7 @@ while ($true) {
         } else { Show-Message "LOCKqz could not lock AI for this quiz. Is the LOCKqz app installed and running?"; Start-Sleep -Seconds 30 }
       }
     } else {
-      $present = ($null -ne $quizWin) -or (($wins | Where-Object { $_.Tabs -contains $QuizTitle }).Count -gt 0)
+      $present = ($null -ne $quizWin) -or (@($wins | Where-Object { ($_.Tabs -contains $QuizTitle) -or ($_.Title -like "$QuizTitle*") }).Count -gt 0) -or (@($wins | Where-Object { Is-QuizByTitle $_.Title }).Count -gt 0)
       $reason = $null
       if ($present) {
         $MissingSince = $null
@@ -136,7 +148,7 @@ while ($true) {
       elseif ($leaving) { $reason = "submitted" }
       else {
         if (-not $MissingSince) { $MissingSince = Get-Date }
-        if (((Get-Date) - $MissingSince).TotalSeconds -gt $Grace) { $reason = if ($wins.Count -eq 0) { "browser_closed" } else { "quiz_tab_closed" } }
+        if (((Get-Date) - $MissingSince).TotalSeconds -gt $Grace) { $reason = if (@($wins).Count -eq 0) { "browser_closed" } else { "quiz_tab_closed" } }
       }
       if ($reason) {
         try { Helper "/unlock" @{ quiz_id = $Quiz } | Out-Null } catch {}

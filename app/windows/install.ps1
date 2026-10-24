@@ -56,6 +56,9 @@ if (-not $Api)   { $Api   = Read-Host "API base (e.g. https://<project>.pages.de
 
 Write-Host "== installing LOCKqz helper =="
 New-Item -ItemType Directory -Force -Path $Dest | Out-Null
+# Only SYSTEM + Administrators may write here; Users get read+execute. Stops a standard user from
+# swapping a staged self-update file between its hash check and the move (local privilege escalation).
+& icacls "$Dest" /inheritance:r /grant:r "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F" "Users:(OI)(CI)RX" | Out-Null
 # The .exe installer already unpacks into $Dest and runs this script from there; copying a
 # file onto itself throws, so only copy when installing from a separate folder.
 if ((Resolve-Path $Here).Path.TrimEnd('\') -ne (Resolve-Path $Dest).Path.TrimEnd('\')) {
@@ -65,8 +68,17 @@ if ((Resolve-Path $Here).Path.TrimEnd('\') -ne (Resolve-Path $Dest).Path.TrimEnd
 }
 
 $device = "win-" + [guid]::NewGuid().ToString()
+$prevStudent = $null
+if (Test-Path "$Dest\config.json") {
+  try {
+    $prev = Get-Content "$Dest\config.json" -Raw | ConvertFrom-Json
+    if ($prev.token)     { $Token  = $prev.token }       # keep the key the running helper already uses
+    if ($prev.device_id) { $device = $prev.device_id }   # keep roster continuity
+    if ($prev.student)   { $prevStudent = $prev.student }
+  } catch { }
+}
 $cfg = @{ port=8787; token=$Token; api_base=$Api; device_id=$device;
-          student= if ($Student) { $Student } else { $null }; max_minutes=180 }
+          student= if ($Student) { $Student } elseif ($prevStudent) { $prevStudent } else { $null }; max_minutes=180 }
 if ($StorePackage) { $cfg.store_package = $StorePackage }   # Store install: updates come from the Store
 $cfg | ConvertTo-Json | Set-Content -Path "$Dest\config.json" -Encoding UTF8
 
@@ -74,9 +86,12 @@ $cfg | ConvertTo-Json | Set-Content -Path "$Dest\config.json" -Encoding UTF8
 $action  = New-ScheduledTaskAction -Execute "powershell.exe" `
   -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Dest\lockqzd.ps1`""
 $trigger = New-ScheduledTaskTrigger -AtStartup
+# Repeat the trigger so the task restarts even after a clean process exit (RestartCount only covers
+# launch failures). MultipleInstances=IgnoreNew keeps a single running copy.
+$trigger.Repetition = (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)).Repetition
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 # Comes back on its own if it ever stops (crash, kill, self-update restart); no time limit, runs on battery.
-$dSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0 -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
+$dSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0 -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
 Register-ScheduledTask -TaskName "LOCKqz" -Action $action -Trigger $trigger `
   -Principal $principal -Settings $dSettings -Force | Out-Null
 

@@ -99,7 +99,11 @@ PY
 chmod 644 "$DEST/config.json"   # the per-user agent reads it (loopback token only)
 
 # Firewall anchor so the pf (encrypted-DNS) layer is evaluated.
-grep -q 'anchor "com.lockqz"' /etc/pf.conf || echo 'anchor "com.lockqz"' >> /etc/pf.conf
+if ! grep -q 'anchor "com.lockqz"' /etc/pf.conf; then
+  [ -n "$(tail -c1 /etc/pf.conf 2>/dev/null)" ] && echo "" >> /etc/pf.conf   # ensure a trailing newline first
+  echo 'anchor "com.lockqz"' >> /etc/pf.conf
+  pfctl -f /etc/pf.conf 2>/dev/null || true                                  # make the anchor live now
+fi
 
 # LaunchDaemon: start the helper at boot as root.
 cat > "$PLIST" <<PLISTEOF
@@ -131,8 +135,6 @@ cat > "$AGENT" <<AGENTEOF
   <array><string>/usr/bin/python3</string><string>$DEST/lockqz-agent.py</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/tmp/lockqz-agent.log</string>
-  <key>StandardErrorPath</key><string>/tmp/lockqz-agent.log</string>
 </dict></plist>
 AGENTEOF
 chown root:wheel "$AGENT"; chmod 644 "$AGENT"

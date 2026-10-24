@@ -193,7 +193,7 @@
       for (var u2 in revoke) { if (haveSet[u2] && !g.keep[u2] && !want[u2]) { try { await saDel(ou, qi, u2); } catch (e) {} } }
       if (g.nextRot && Date.now() < g.nextRot) return Object.keys(want).length;   // code changes every 5 min
       try {
-        var rot = await lqpost("/rotating", { qis: [qi] });
+        var rot = await lqpost("/rotating", { ou: ou, qis: [qi] });
         var code = rot && rot.codes && rot.codes[qi] ? rot.codes[qi].cur : null;
         if (rot && rot.codes && rot.codes[qi]) g.nextRot = (rot.codes[qi].bucket + 1) * 300000 + 2000;
         if (code && GPW[qi] !== code) {

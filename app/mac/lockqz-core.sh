@@ -7,7 +7,7 @@
 : "${MARK_END:=# LOCKqz END}"
 
 # domains_from <blocklist-file>  -> clean domain list (no comments/blanks/spaces)
-domains_from() { grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$1" | sed 's/[[:space:]]//g'; }
+domains_from() { grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$1" | sed 's/[[:space:]]//g' | grep -v '/'; }
 
 # build_block_from <blocklist-file>  -> the exact text block we add to hosts
 build_block_from() {

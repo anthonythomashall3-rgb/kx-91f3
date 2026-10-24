@@ -30,7 +30,7 @@ else extra_lock(){ :; }; extra_unlock(){ :; }; fi   # core lock still works if t
 
 AI_APPS=("ChatGPT" "Claude" "Copilot" "Perplexity" "Ollama" "LM Studio" \
          "GPT4All" "Msty" "Cluely" "Google Gemini" "Jan" "Pieces" "MacGPT" \
-         "Dia" "Comet" "ChatGPT Atlas" "Atlas" "Opera" "Raycast" "Notion AI" \
+         "Dia" "Comet" "ChatGPT Atlas" "Atlas" "Raycast" "Notion AI" \
          "Grammarly" "GrammarlyDesktop" "DeepSeek" "Poe" "Mistral" "Le Chat" "Sider" "MacWhisper")
 
 say() { echo "LOCKqz: $*"; }
@@ -55,10 +55,17 @@ write_status() {  # write_status <locked|unlocked>
 
 load_pf() {
   [ -f "$PFCONF" ] || return 0
+  # Make sure the main ruleset actually references our anchor; if not, reload /etc/pf.conf (which the
+  # installer appended `anchor "com.lockqz"` to). Without this the anchor rules are never evaluated.
+  pfctl -sr 2>/dev/null | grep -q "anchor \"$PF_ANCHOR\"" || pfctl -f /etc/pf.conf 2>/dev/null || true
   pfctl -a "$PF_ANCHOR" -f "$PFCONF" 2>/dev/null || true
-  pfctl -E 2>/dev/null || true
+  # Enable pf and remember whether WE enabled it, so we can leave it as we found it on unlock.
+  if pfctl -s info 2>/dev/null | grep -qi "Status: Disabled"; then pfctl -E 2>/dev/null && touch "$STATE/pf.enabled" || true; fi
 }
-unload_pf() { pfctl -a "$PF_ANCHOR" -F all 2>/dev/null || true; }
+unload_pf() {
+  pfctl -a "$PF_ANCHOR" -F all 2>/dev/null || true   # empty our anchor
+  if [ -f "$STATE/pf.enabled" ]; then pfctl -d 2>/dev/null || true; rm -f "$STATE/pf.enabled"; fi
+}
 policy() { [ -f "$POLICY" ] && /usr/bin/python3 "$POLICY" "$1" 2>/dev/null || true; }
 
 # Kill ONLY the named app or program: an exact process name, or a process running from "<name>.app".
@@ -77,22 +84,24 @@ close_ai_apps() {
 
 do_lock() {
   need_root
-  if is_locked; then say "already locked."; return; fi
   if [ "$DRYRUN" = "1" ]; then
     say "[dry-run] would blackhole $(domains | wc -l | tr -d ' ') domains, load pf, flush DNS, close AI apps."
     extra_lock
     build_block | sed 's/^/    /' | head -10 || true; echo "    ..."; return
   fi
+  local already=0; is_locked && already=1
   mkdir -p "$STATE"; [ -f "$BACKUP" ] || cp "$HOSTS" "$BACKUP"
-  hosts_add_block "$HOSTS" "$BLOCKLIST"
-  load_pf
-  policy lock
-  dscacheutil -flushcache 2>/dev/null || true
-  killall -HUP mDNSResponder 2>/dev/null || true
-  close_ai_apps
-  extra_lock
+  hosts_add_block "$HOSTS" "$BLOCKLIST"   # idempotent
+  load_pf                                 # reasserts the anchor if it was cleared
+  policy lock                             # idempotent; browser policy
+  if [ "$already" = 0 ]; then
+    dscacheutil -flushcache 2>/dev/null || true
+    killall -HUP mDNSResponder 2>/dev/null || true
+  fi
+  close_ai_apps   # ALWAYS: close AI apps reopened mid-quiz
+  extra_lock      # ALWAYS: re-close VPN/VM/remote/overlay/local-model, keep Apple Intelligence off
   write_status locked
-  say "LOCKED. AI domains blackholed; firewall up (incl. local-model + VPN ports); browser AI off; AI apps, VPNs, VMs, remote-desktop and overlay tools closed; Apple Intelligence off."
+  [ "$already" = 1 ] || say "LOCKED. AI domains blackholed; firewall up (incl. local-model + VPN ports); browser AI off; AI apps, VPNs, VMs, remote-desktop and overlay tools closed; Apple Intelligence off."
 }
 
 do_unlock() {

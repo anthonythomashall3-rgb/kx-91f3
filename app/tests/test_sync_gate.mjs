@@ -29,7 +29,7 @@ const check = (m, c, i = "") => { if (c) { pass++; console.log("  ok:", m); } el
 // ---- LOCKqz API on an in-memory database ----
 const sqlite = new DatabaseSync(":memory:");
 sqlite.exec(readFileSync(join(CF, "schema.sql"), "utf8"));
-for (const m of ["migrate_012_bs_code.sql", "migrate_013_sa_keep.sql"]) sqlite.exec(readFileSync(join(CF, m), "utf8"));
+for (const m of ["migrate_012_bs_code.sql", "migrate_013_sa_keep.sql", "migrate_014_lockqz_off.sql"]) sqlite.exec(readFileSync(join(CF, m), "utf8"));
 const db = { prepare(sql) { const st = sqlite.prepare(sql); let args = [];
   const o = { bind(...a) { args = a.map(x => x === undefined ? null : typeof x === "boolean" ? Number(x) : x); return o; },
     first: async () => st.get(...args) ?? null, all: async () => ({ results: st.all(...args) }),

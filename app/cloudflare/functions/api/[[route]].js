@@ -22,6 +22,9 @@ const AI_DOMAINS = [   // = app/mac/blocklist.txt (tests/test_blocklist.mjs keep
   "msty.app","cloudflare-dns.com","chrome.cloudflare-dns.com","mozilla.cloudflare-dns.com","dns.google","dns.google.com",
   "dns.quad9.net","doh.opendns.com","dns.nextdns.io"];
 const now = () => new Date().toISOString();
+// "Today" in America/Los_Angeles as YYYY-MM-DD, so a professor stays active through the end of their
+// paid date in Pacific time (not 5pm Pacific, which UTC-midnight would give).
+const laToday = () => new Date(Date.now() - 7*3600000).toISOString().slice(0,10);
 const rid = (n=6) => Array.from(crypto.getRandomValues(new Uint8Array(n))).map(b=>"ABCDEFGHJKMNPQRSTUVWXYZ23456789"[b%30]).join("");
 const hex = a => Array.from(new Uint8Array(a)).map(b=>b.toString(16).padStart(2,"0")).join("");
 const CORS = { "Access-Control-Allow-Origin":"*", "Access-Control-Allow-Headers":"Content-Type, X-LOCKqz-Teacher, X-LOCKqz-Sync", "Access-Control-Allow-Methods":"GET, POST, OPTIONS", "Access-Control-Max-Age":"86400" };
@@ -52,9 +55,9 @@ const SIG_WINDOW_S = 300;
 // students out; a longer period means a student who pastes a little late is not rejected).
 const ROT_MS = 300000;
 const minuteBucket = () => Math.floor(Date.now() / ROT_MS);
-async function rotatingPw(seed, bucket) {
-  const h = await hmacHex(String(seed), "lqz-rot:" + bucket);
-  return String(seed) + "-" + h.slice(0, 6).toUpperCase();
+async function rotatingPw(secret, ou, qi, bucket) {
+  const h = await hmacHex(String(secret||"lqz-fallback"), `lqz-rot:${ou}:${qi}:${bucket}`);
+  return "LQ-" + h.slice(0, 10).toUpperCase();
 }
 const enc = new TextEncoder();
 const unixNow = () => Math.floor(Date.now() / 1000);
@@ -101,13 +104,17 @@ export async function onRequest(context) {
   const hdr = (request.headers.get("X-LOCKqz-Teacher") || "").trim();
   const adminKey = (env.TEACHER_KEY || "").trim();
   let me = null;                                   // { id, email, name, admin }
-  if (hdr && adminKey && hdr === adminKey) me = { id:"admin", email:"admin", name:"Admin", admin:true, verified:true, active:true };
+  if (hdr && adminKey && sameHex(hdr, adminKey)) me = { id:"admin", email:(env.ADMIN_EMAIL||"admin").toLowerCase(), name:"Admin", admin:true, verified:true, active:true };
   else {
     const syncKey = (request.headers.get("X-LOCKqz-Sync") || "").trim();
     const t = hdr ? await db.prepare("SELECT id,email,name,role,active_until,verified FROM teachers WHERE token=?").bind(hdr).first().catch(()=>null)
           : syncKey ? await db.prepare("SELECT id,email,name,role,active_until,verified FROM teachers WHERE sync_key=?").bind(syncKey).first().catch(()=>null) : null;
-    if (t) me = { id:t.id, email:t.email, name:t.name, admin: t.role === "admin", verified: t.role === "admin" || t.verified === 1, active: t.role === "admin" || (!!t.active_until && t.active_until >= now().slice(0,10)), active_until: t.active_until||null };
+    if (t) me = { id:t.id, email:t.email, name:t.name, admin: t.role === "admin", verified: t.role === "admin" || t.verified === 1, active: t.role === "admin" || (!!t.active_until && t.active_until >= laToday()), active_until: t.active_until||null };
   }
+  // The sync key (in the bookmarklet URL, readable by any script on the Brightspace page) authorizes
+  // ONLY the Brightspace-connector endpoints. Account management needs the real session token.
+  const viaSyncKey = !!(request.headers.get("X-LOCKqz-Sync") || "").trim() && !(hdr && adminKey && sameHex(hdr, adminKey)) && !(hdr);
+  const SYNC_OK = new Set(["/sync","/sync-result","/protect","/gate","/rotating","/rotated","/live","/synckey","/me","/bs"]);
   const teacher = () => !!me;
   const mine = (col="teacher_id") => me.admin ? { sql:"1=1", args:[] } : { sql:`${col}=?`, args:[me.id] };
   const inCourse = async ou => me && (me.admin || !!(await db.prepare("SELECT 1 FROM teacher_courses WHERE teacher_id=? AND ou=?").bind(me.id, String(ou)).first()));
@@ -127,12 +134,20 @@ export async function onRequest(context) {
     const qs = (await db.prepare("SELECT qi,ou,password FROM quizzes WHERE teacher_id=? AND ou IS NOT NULL").bind(tid).all()).results;
     for (const q of qs) {
       await db.prepare("INSERT OR REPLACE INTO pending_clear (ou,qi,password) VALUES (?,?,?)").bind(String(q.ou), String(q.qi), q.password).run();
-      await db.prepare("DELETE FROM quizzes WHERE qi=?").bind(q.qi).run();
+      await db.prepare("DELETE FROM quizzes WHERE qi=? AND ou=? AND teacher_id=?").bind(q.qi, String(q.ou), tid).run();
     }
   }
   async function trustedInstructor(ou) {
     if (!me || !EMAIL) return false;
     return !!(await db.prepare(`SELECT 1 FROM roster r JOIN teacher_courses tc ON tc.ou=r.ou JOIN teachers te ON te.id=tc.teacher_id WHERE r.ou=? AND lower(r.email)=? AND ${INSTR_SQL} AND (te.role='admin' OR te.verified=1) LIMIT 1`).bind(String(ou), EMAIL).first());
+  }
+  // Load a quiz by (ou,qi) and confirm the caller instructs THAT course. Prevents acting on another
+  // course's quiz by passing your own ou with a foreign qi.
+  async function ownedQuiz(ou, qi) {
+    if (!/^\d+$/.test(String(ou)) || !/^\d+$/.test(String(qi))) return { bad: true };
+    if (!(me.admin || await trustedInstructor(ou))) return { forbidden: true };
+    const row = await db.prepare("SELECT quiz_id,password,gated,sa_keep,bs_code,ou,teacher_id FROM quizzes WHERE ou=? AND qi=?").bind(String(ou), String(qi)).first();
+    return { row };
   }
   async function bsState(ous) {
     ous = ous.map(String).filter(o => /^\d+$/.test(o));
@@ -144,6 +159,9 @@ export async function onRequest(context) {
   }
 
   try {
+    // The Sync bookmark's key authorizes ONLY the Brightspace-connector endpoints (it is exposed in the
+    // bookmarklet URL inside the Brightspace page). Everything else needs the real session token.
+    if (viaSyncKey && !SYNC_OK.has(p)) return json({ error: "this action needs your LOCKqz login, not the Sync bookmark" }, 403);
     // ---- device endpoints (signed by the device key; see verifyDevice) ----
     if (p === "/blocklist") return json({ domains: AI_DOMAINS });
 
@@ -153,6 +171,9 @@ export async function onRequest(context) {
       const id = String(body.device_id || "").trim(), key = String(body.key || "").trim().toLowerCase();
       if (!/^[A-Za-z0-9._-]{6,80}$/.test(id) || id === "unknown") return json({ error: "bad device id" }, 400);
       if (!/^[0-9a-f]{64}$/.test(key)) return json({ error: "bad key" }, 400);
+      const regIp = request.headers.get("CF-Connecting-IP") || "?";
+      const regN = (await db.prepare("SELECT COUNT(*) AS n FROM devices WHERE reg_ip=? AND registered_at>?").bind(regIp, new Date(Date.now()-3600000).toISOString()).first()).n;
+      if (regN > 30) return json({ error: "too many registrations" }, 429);
       await db.prepare("INSERT INTO devices (device_id,student,platform,version,installed_at,last_seen,device_key,registered_at,reg_ip) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET device_key=excluded.device_key, registered_at=excluded.registered_at, reg_ip=excluded.reg_ip, platform=COALESCE(excluded.platform,devices.platform), version=COALESCE(excluded.version,devices.version), last_seen=excluded.last_seen WHERE devices.device_key IS NULL")
         .bind(id, body.student || null, body.platform || null, body.version || null, now(), now(), key, now(), request.headers.get("CF-Connecting-IP") || null).run();
       const d = await db.prepare("SELECT device_key, revoked FROM devices WHERE device_id=?").bind(id).first();
@@ -180,27 +201,30 @@ export async function onRequest(context) {
         const legacy = !strict && !(await isRegistered(db, claimed));
         // An unsigned heartbeat only shows the agent is alive: it may touch ext_seen, nothing else.
         if (ev === "heartbeat" && (agentBeat || !legacy)) {
-          if (claimed && quiz_id) await db.prepare("UPDATE locks SET ext_seen=? WHERE device_id=? AND quiz_id=?").bind(now(), claimed, quiz_id).run();
+          if (claimed && typeof quiz_id === "string" && /^\d+-\d+$/.test(quiz_id)) await db.prepare("UPDATE locks SET ext_seen=? WHERE device_id=? AND quiz_id=?").bind(now(), claimed, quiz_id).run();
           return json({ ok: true, verified: false });
         }
         if (!legacy) return denied(v);
       }
       const device_id = v.ok ? v.id : (body.device_id || null);
       const signed = v.ok ? 1 : 0;
+      const qidOk = typeof quiz_id === "string" && /^\d+-\d+$/.test(quiz_id) ? quiz_id : null;
+      const detailStr = detail ? JSON.stringify(detail).slice(0, 2000) : null;
+      const evName = String(ev).slice(0, 40);
       if (ev !== "heartbeat")
         await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)")
-          .bind(device_id||null, student||null, quiz_id||null, ev, detail?JSON.stringify(detail):null, now()).run();
+          .bind(device_id||null, (student?String(student).slice(0,200):null), qidOk, evName, detailStr, now()).run();
       if (device_id) await db.prepare("INSERT OR IGNORE INTO devices (device_id,installed_at) VALUES (?,?)").bind(device_id, now()).run();
       await db.prepare("UPDATE devices SET last_seen=?, student=COALESCE(?,student) WHERE device_id=?").bind(now(), student||null, device_id||null).run();
       const clientIp = request.headers.get("CF-Connecting-IP") || null;
-      if (ev === "lock")
-        await db.prepare("INSERT INTO locks (device_id,quiz_id,last_lock,helper_seen,signed,ip) VALUES (?,?,?,?,?,?) ON CONFLICT(device_id,quiz_id) DO UPDATE SET last_lock=excluded.last_lock,helper_seen=excluded.helper_seen,signed=excluded.signed,ip=excluded.ip").bind(device_id, quiz_id, now(), now(), signed, clientIp).run();
-      if (ev === "unlock")
-        await db.prepare("DELETE FROM locks WHERE device_id=? AND quiz_id=?").bind(device_id, quiz_id).run();
-      if (ev === "heartbeat" && quiz_id) {
+      if (ev === "lock" && qidOk)
+        await db.prepare("INSERT INTO locks (device_id,quiz_id,last_lock,helper_seen,signed,ip) VALUES (?,?,?,?,?,?) ON CONFLICT(device_id,quiz_id) DO UPDATE SET last_lock=excluded.last_lock,helper_seen=excluded.helper_seen,signed=excluded.signed,ip=excluded.ip").bind(device_id, qidOk, now(), now(), signed, clientIp).run();
+      if (ev === "unlock" && qidOk)
+        await db.prepare("DELETE FROM locks WHERE device_id=? AND quiz_id=?").bind(device_id, qidOk).run();
+      if (ev === "heartbeat" && qidOk) {
         // Only the helper's heartbeat keeps a lock alive; the agent's only proves the agent runs.
-        if (agentBeat) await db.prepare("UPDATE locks SET ext_seen=? WHERE device_id=? AND quiz_id=?").bind(now(), device_id, quiz_id).run();
-        else await db.prepare("UPDATE locks SET last_lock=?, helper_seen=?, signed=?, ip=COALESCE(?,ip) WHERE device_id=? AND quiz_id=?").bind(now(), now(), signed, clientIp, device_id, quiz_id).run();
+        if (agentBeat) await db.prepare("UPDATE locks SET ext_seen=? WHERE device_id=? AND quiz_id=?").bind(now(), device_id, qidOk).run();
+        else await db.prepare("UPDATE locks SET last_lock=?, helper_seen=?, signed=?, ip=COALESCE(?,ip) WHERE device_id=? AND quiz_id=?").bind(now(), now(), signed, clientIp, device_id, qidOk).run();
       }
       return json({ ok: true });
     }
@@ -213,17 +237,28 @@ export async function onRequest(context) {
       if (!v.ok && (strict || await isRegistered(db, claimed))) return denied(v, { password: null });
       const device_id = v.ok ? v.id : claimed;
       const { qi, ou } = ids(String(body.url || ""));
-      const lockId = `${ou || "x"}-${qi || "x"}`;
+      if (!/^\d+$/.test(String(qi||"")) || !/^\d+$/.test(String(ou||""))) return json({ password: null, reason: "bad quiz url" }, 400);
+      const lockId = `${ou}-${qi}`;
       const lk = await db.prepare("SELECT last_lock, signed FROM locks WHERE device_id=? AND quiz_id=?").bind(device_id, lockId).first();
       const fresh = lk && (Date.now() - Date.parse(lk.last_lock) < 60000) && (!(strict || v.ok) || Number(lk.signed) === 1);
       if (!fresh) return json({ password: null, reason: "not locked" }, 403);
       const devLk = await db.prepare("SELECT 1 FROM events e JOIN devices d ON d.device_id=e.device_id WHERE e.device_id=? AND e.quiz_id=? AND e.event='lock' AND e.detail LIKE '%\"developer\":true%' AND lower(COALESCE(d.student,'')) NOT IN (SELECT lower(email) FROM teachers WHERE role='admin') LIMIT 1").bind(device_id, lockId).first();
       if (devLk) return json({ password: null, reason: "not locked" }, 403);   // dev mode is admin-only
-      // Admit only at the quiz's scheduled start time -- even if the professor unhid it early.
+      // Admit only at the quiz's scheduled start time -- even if the professor unhid it early. But a
+      // student with an accommodation (in the gate's kept special-access list) may have an earlier
+      // window, so let them through the start gate.
       const sq = await db.prepare("SELECT start_date FROM bs_quizzes WHERE ou=? AND qi=?").bind(String(ou||""), String(qi||"")).first();
-      if (sq && sq.start_date && Date.now() < Date.parse(sq.start_date)) return json({ password: null, reason: "not started", start: sq.start_date }, 403);
+      if (sq && sq.start_date && Date.now() < Date.parse(sq.start_date)) {
+        const dq = await db.prepare("SELECT sa_keep FROM quizzes WHERE ou=? AND qi=?").bind(ou, qi).first();
+        let accommodated = false;
+        if (dq && dq.sa_keep) {
+          const who = (await db.prepare("SELECT user_id FROM roster WHERE ou=? AND (lower(email)=(SELECT lower(student) FROM devices WHERE device_id=?) OR lower(name)=(SELECT lower(student) FROM devices WHERE device_id=?))").bind(ou, device_id, device_id).first());
+          try { accommodated = who && who.user_id && JSON.parse(dq.sa_keep).map(String).includes(String(who.user_id)); } catch {}
+        }
+        if (!accommodated) return json({ password: null, reason: "not started", start: sq.start_date }, 403);
+      }
       let pw = null, rot = null;
-      if (qi) { const q = await db.prepare("SELECT password, gated, bs_code FROM quizzes WHERE qi=?").bind(qi).first(); if (q) { pw = q.password; if (Number(q.gated) === 1 && q.bs_code) rot = q.bs_code; } }
+      if (qi && ou) { const q = await db.prepare("SELECT password, gated, bs_code FROM quizzes WHERE qi=? AND ou=?").bind(qi, ou).first(); if (q) { pw = q.password; if (Number(q.gated) === 1 && q.bs_code) rot = q.bs_code; } }
       if (!pw && ou) { const c = await db.prepare("SELECT password FROM courses WHERE ou=?").bind(ou).first(); if (c) pw = c.password; }
       // Give the student EXACTLY what is in Brightspace: the code the Sync tab last confirmed writing
       // (gated quiz) or the quiz's fixed LOCKqz password (protected, not gated). Never a computed code,
@@ -254,6 +289,16 @@ export async function onRequest(context) {
       if (pw.length < 8) return json({ error:"password must be at least 8 characters" }, 400);
       const dup = await db.prepare("SELECT id FROM teachers WHERE email=?").bind(email).first();
       if (dup) return json({ error:"that email already has an account — log in instead" }, 409);
+      // An instructor email that an admin/verified professor has already put on a trusted roster is a
+      // real professor's identity. Self-signup can't claim it without an admin invite code (which only
+      // the admin issues to that person), so a student can't pre-register bristow@usc.edu.
+      const codeUp = String(body.invite||"").trim().toUpperCase();
+      const invPre = codeUp ? await db.prepare("SELECT 1 FROM invites WHERE code=? AND used_at IS NULL AND (email IS NULL OR email=?)").bind(codeUp, email).first() : null;
+      if (!invPre) {
+        const INSTR_ANY = "(r.role LIKE '%nstructor%' OR r.role LIKE '%rofessor%' OR r.role LIKE '%aculty%')";
+        const claimed = await db.prepare(`SELECT 1 FROM roster r JOIN teacher_courses tc ON tc.ou=r.ou JOIN teachers te ON te.id=tc.teacher_id WHERE lower(r.email)=? AND ${INSTR_ANY} AND (te.role='admin' OR te.verified=1) LIMIT 1`).bind(email).first();
+        if (claimed) return json({ error:"This email belongs to a professor already on a course roster. Ask the LOCKqz admin for an invite to claim it." }, 409);
+      }
       // The first account on the site is the admin. Anyone can sign up after that, but a new teacher
       // is UNVERIFIED and can protect nothing until they prove -- through their OWN Brightspace login
       // (LOCKqz Sync) -- that they are an instructor or TA. A student can make an account but can never
@@ -265,9 +310,10 @@ export async function onRequest(context) {
         const code = String(body.invite||"").trim().toUpperCase();
         if (code) {
           inv = await db.prepare("SELECT code,email,active_until,used_at FROM invites WHERE code=?").bind(code).first();
-          if (inv && !inv.used_at && (!inv.email || inv.email === email))
-            await db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE code=? AND used_at IS NULL").bind(now(), email, inv.code).run();
-          else inv = null;
+          if (inv && !inv.used_at && (!inv.email || inv.email === email)) {
+            const u = await db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE code=? AND used_at IS NULL").bind(now(), email, inv.code).run();
+            if (!u.meta.changes) inv = null;   // lost the race — treat as no invite
+          } else inv = null;
         }
       }
       const id = rid(10), salt = rid(16), token = hex(crypto.getRandomValues(new Uint8Array(24)));
@@ -277,8 +323,15 @@ export async function onRequest(context) {
     }
     if (p === "/login" && request.method === "POST") {
       const email = String(body.email||"").trim().toLowerCase(), pw = String(body.password||"");
+      const ip = request.headers.get("CF-Connecting-IP") || "?";
+      const lkey = `login:${email}:${ip}`, since = new Date(Date.now()-900000).toISOString();
+      const fails = (await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='login_fail' AND detail=? AND ts>?").bind(lkey, since).first()).n;
+      if (fails >= 5) return json({ error:"too many attempts — wait 15 minutes" }, 429);
       const t = await db.prepare("SELECT id,email,name,pw_hash,salt,token FROM teachers WHERE email=?").bind(email).first();
-      if (!t || (await hashPw(pw, t.salt)) !== t.pw_hash) return json({ error:"wrong email or password" }, 401);
+      if (!t || (await hashPw(pw, t.salt)) !== t.pw_hash) {
+        await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(null,null,null,"login_fail",lkey,now()).run();
+        return json({ error:"wrong email or password" }, 401);
+      }
       let token = t.token;
       if (!token) { token = hex(crypto.getRandomValues(new Uint8Array(24))); await db.prepare("UPDATE teachers SET token=? WHERE id=?").bind(token, t.id).run(); }
       return json({ token, email: t.email, name: t.name });
@@ -304,11 +357,13 @@ export async function onRequest(context) {
     if (p === "/changepw" && request.method === "POST") {
       if (!me) return json({ error:"unauthorized" }, 401);
       if (me.id === "admin") return json({ error:"the master admin key has no stored password" }, 400);
+      const cur = await db.prepare("SELECT pw_hash,salt FROM teachers WHERE id=?").bind(me.id).first();
+      if (!cur || (await hashPw(String(body.old_password||""), cur.salt)) !== cur.pw_hash) return json({ error:"current password is wrong" }, 403);
       const pw = String(body.password||"");
       if (pw.length < 8) return json({ error:"password must be at least 8 characters" }, 400);
-      const salt = rid(16);
-      await db.prepare("UPDATE teachers SET pw_hash=?, salt=? WHERE id=?").bind(await hashPw(pw,salt), salt, me.id).run();
-      return json({ ok:true });
+      const salt = rid(16), token = hex(crypto.getRandomValues(new Uint8Array(24)));
+      await db.prepare("UPDATE teachers SET pw_hash=?, salt=?, token=?, sync_key=NULL WHERE id=?").bind(await hashPw(pw,salt), salt, token, me.id).run();
+      return json({ ok:true, token });
     }
     // Admin only: list teachers / reset a teacher's password (no email service, so the
     // admin hands the new password to the teacher).
@@ -323,7 +378,7 @@ export async function onRequest(context) {
       const email = String(body.email||"").trim().toLowerCase();
       const until = body.until ? String(body.until).slice(0,10) : null;   // "YYYY-MM-DD" or null = off
       const r = await db.prepare("UPDATE teachers SET active_until=? WHERE email=?").bind(until, email).run();
-      if (r.meta.changes && (!until || until < now().slice(0,10))) {
+      if (r.meta.changes && (!until || until < laToday())) {
         const tt = await db.prepare("SELECT id FROM teachers WHERE email=?").bind(email).first();
         if (tt) await releaseAll(tt.id);
       }
@@ -367,23 +422,28 @@ export async function onRequest(context) {
       return json({ error: "Not active. LOCKqz turns on after payment — contact the LOCKqz admin." }, 402);
 
     if (p === "/quiz" && request.method === "POST") {
+      const { qi, ou } = ids(String(body.url||""));
+      if (!/^\d+$/.test(String(ou||"")) || !/^\d+$/.test(String(qi||""))) return json({ error:"could not find ou= and qi= in that link" }, 400);
+      if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this course can add its quizzes." }, 403);
+      const dupe = await db.prepare("SELECT teacher_id FROM quizzes WHERE ou=? AND qi=?").bind(ou, qi).first();
+      if (dupe && dupe.teacher_id !== me.id && !me.admin) return json({ error:"that quiz is already managed by another professor" }, 409);
       const quiz_id = body.quiz_id || rid(8);
       const password = "LQ-" + rid(8);
-      const { qi, ou } = ids(String(body.url||""));
-      const lock_id = `${ou||"x"}-${qi||"x"}`;
-      await db.prepare("INSERT INTO quizzes (quiz_id,title,url,password,created_at,qi,teacher_id,lock_id) VALUES (?,?,?,?,?,?,?,?)")
-        .bind(quiz_id, body.title||null, body.url||null, password, now(), qi, me.id, lock_id).run();
+      const lock_id = `${ou}-${qi}`;
+      await db.prepare("INSERT INTO quizzes (quiz_id,title,url,password,created_at,qi,teacher_id,lock_id,ou) VALUES (?,?,?,?,?,?,?,?,?)")
+        .bind(quiz_id, body.title||null, body.url||null, password, now(), qi, me.id, lock_id, ou).run();
       return json({ quiz_id, password, qi, lock_id, tag: `[LOCKqz] ${body.title||quiz_id}` });
     }
     if (p === "/quizzes") {
       const m = mine();
-      const r = await db.prepare(`SELECT quiz_id,title,url,password,created_at,qi,lock_id,teacher_id,ou FROM quizzes WHERE (${m.sql} OR ou IN (SELECT ou FROM teacher_courses WHERE teacher_id=?)) ORDER BY created_at DESC`).bind(...m.args, me.id).all();
+      const r = await db.prepare(`SELECT quiz_id,title,url,password,created_at,qi,lock_id,teacher_id,ou FROM quizzes WHERE ${m.sql} ORDER BY created_at DESC`).bind(...m.args).all();
       return json({ quizzes: r.results });
     }
     if (p === "/course" && request.method === "POST") {
       const u = String(body.url || "");
       const ou = (u.match(/ou=(\d+)/) || u.match(/\/home\/(\d+)/) || u.match(/\/(\d+)(?:\/|$)/) || [])[1];
       if (!ou) return json({ error: "could not find the course id (ou=) in that link" }, 400);
+      if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this course can protect it." }, 403);
       const ex = await db.prepare("SELECT teacher_id FROM courses WHERE ou=?").bind(ou).first();
       if (ex && ex.teacher_id && ex.teacher_id !== me.id && !me.admin) return json({ error:"that course is already protected by another professor" }, 409);
       const password = "LQ-" + rid(8);
@@ -399,7 +459,7 @@ export async function onRequest(context) {
     if (p === "/delete" && request.method === "POST") {
       const m = mine();
       if (body.quiz_id) {
-        const q = await db.prepare(`SELECT ou,qi,password FROM quizzes WHERE quiz_id=? AND (${m.sql} OR ou IN (SELECT ou FROM teacher_courses WHERE teacher_id=?))`).bind(body.quiz_id, ...m.args, me.id).first();
+        const q = await db.prepare(`SELECT ou,qi,password FROM quizzes WHERE quiz_id=? AND ${m.sql}`).bind(body.quiz_id, ...m.args).first();
         if (q) {
           if (q.ou && q.qi) await db.prepare("INSERT OR REPLACE INTO pending_clear (ou,qi,password) VALUES (?,?,?)").bind(q.ou, q.qi, q.password).run();
           await db.prepare("DELETE FROM quizzes WHERE quiz_id=?").bind(body.quiz_id).run();
@@ -437,6 +497,8 @@ export async function onRequest(context) {
       }
       for (const c of courses) {
         const ou = String(c.ou || ""); if (!/^\d+$/.test(ou) || !allowed[ou]) continue;
+        // A trusted owner syncing this course evicts any seed rows a non-trusted account left on it.
+        if (me.admin || await trustedInstructor(ou)) await db.prepare("DELETE FROM teacher_courses WHERE ou=? AND teacher_id<>? AND teacher_id NOT IN (SELECT id FROM teachers WHERE role='admin' OR verified=1)").bind(ou, me.id).run();
         st.push(db.prepare("INSERT INTO teacher_courses (teacher_id,ou,name,code,role,synced_at) VALUES (?,?,?,?,?,?) ON CONFLICT(teacher_id,ou) DO UPDATE SET name=excluded.name,code=excluded.code,role=excluded.role,synced_at=excluded.synced_at")
           .bind(me.id, ou, c.name||null, c.code||null, c.role||null, t));
         if (Array.isArray(c.classlist)) {
@@ -464,7 +526,7 @@ export async function onRequest(context) {
           const qi = String(q.qi || ""); if (!/^\d+$/.test(qi)) continue;
           if (q.active === false) continue;
           if (q.end && String(q.end).slice(0, 10) < today) continue;   // skip ended quizzes
-          const seen = await db.prepare("SELECT 1 FROM quizzes WHERE qi=? UNION ALL SELECT 1 FROM pending_clear WHERE ou=? AND qi=?").bind(qi, ou, qi).first();
+          const seen = await db.prepare("SELECT 1 FROM quizzes WHERE qi=? AND ou=? UNION ALL SELECT 1 FROM pending_clear WHERE ou=? AND qi=? UNION ALL SELECT 1 FROM lockqz_off WHERE ou=? AND qi=?").bind(qi, ou, ou, qi, ou, qi).first();
           if (seen) continue;
           await db.prepare("INSERT INTO quizzes (quiz_id,title,url,password,created_at,qi,teacher_id,lock_id,ou,gated) VALUES (?,?,?,?,?,?,?,?,?,0)")
             .bind(rid(8), q.name||null, null, "LQ-" + rid(8), now(), qi, me.id, `${ou}-${qi}`, ou).run();
@@ -476,16 +538,17 @@ export async function onRequest(context) {
       //    lists this email with a staff role. So the admin (or an already-verified professor) syncing
       //    a course is what lets its real instructors/TAs in; a stranger needs that seed first.
       if (!me.admin) {
-        const learner = await db.prepare(`SELECT 1 FROM roster WHERE lower(email)=? AND ${LEARNER} LIMIT 1`).bind(myEmail).first();
-        if (learner) await db.prepare("UPDATE teachers SET verified=0 WHERE id=?").bind(me.id).run();
-        else {
-          // INSTRUCTOR only -- a TA named on a trusted roster is NOT verified.
-          const prof = await db.prepare(`SELECT 1 FROM roster r JOIN teacher_courses tc ON tc.ou=r.ou JOIN teachers te ON te.id=tc.teacher_id WHERE lower(r.email)=? AND ${INSTR_SQL} AND (te.role='admin' OR te.verified=1) LIMIT 1`).bind(myEmail).first();
-          if (prof) await db.prepare("UPDATE teachers SET verified=1 WHERE id=?").bind(me.id).run();
-        }
+        // Verified iff this email is an Instructor on a TRUSTED course's roster. A grad-student who
+        // instructs one course and takes another is still verified (instructor takes precedence over
+        // being a learner elsewhere). A pure student is never an Instructor anywhere, so never verified.
+        const prof = await db.prepare(`SELECT 1 FROM roster r JOIN teacher_courses tc ON tc.ou=r.ou JOIN teachers te ON te.id=tc.teacher_id WHERE lower(r.email)=? AND ${INSTR_SQL} AND (te.role='admin' OR te.verified=1) LIMIT 1`).bind(myEmail).first();
+        await db.prepare("UPDATE teachers SET verified=? WHERE id=?").bind(prof ? 1 : 0, me.id).run();
       }
       if (!me.active) await releaseAll(me.id);
-      return json(await bsState(courses.map(c => c.ou)));
+      // Only hand back passwords for courses this caller instructs (never leak another course's).
+      const ownOus = [];
+      for (const c of courses) { const ou = String(c.ou||""); if (/^\d+$/.test(ou) && (me.admin || await trustedInstructor(ou))) ownOus.push(ou); }
+      return json(await bsState(ownOus));
     }
     if (p === "/sync-result" && request.method === "POST") {
       for (const r of (Array.isArray(body.results) ? body.results : []).slice(0, 1000)) {
@@ -505,10 +568,11 @@ export async function onRequest(context) {
       const ou = String(body.ou||""), qi = String(body.qi||"");
       if (!/^\d+$/.test(ou) || !/^\d+$/.test(qi)) return json({ error:"bad quiz" }, 400);
       if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this course can protect its quizzes." }, 403);
-      const ex = await db.prepare("SELECT quiz_id,password FROM quizzes WHERE qi=?").bind(qi).first();
+      const ex = await db.prepare("SELECT quiz_id,password FROM quizzes WHERE qi=? AND ou=?").bind(qi, ou).first();
       if (body.on) {
         await db.prepare("DELETE FROM pending_clear WHERE ou=? AND qi=?").bind(ou, qi).run();
-        if (ex) { await db.prepare("UPDATE quizzes SET ou=?, lock_id=? WHERE qi=?").bind(ou, `${ou}-${qi}`, qi).run(); return json({ ou, qi, on:true, password: ex.password }); }
+        await db.prepare("DELETE FROM lockqz_off WHERE ou=? AND qi=?").bind(ou, qi).run();
+        if (ex) { await db.prepare("UPDATE quizzes SET lock_id=? WHERE qi=? AND ou=?").bind(`${ou}-${qi}`, qi, ou).run(); return json({ ou, qi, on:true, password: ex.password }); }
         const bq = await db.prepare("SELECT name FROM bs_quizzes WHERE ou=? AND qi=?").bind(ou, qi).first();
         const password = "LQ-" + rid(8);
         await db.prepare("INSERT INTO quizzes (quiz_id,title,url,password,created_at,qi,teacher_id,lock_id,ou) VALUES (?,?,?,?,?,?,?,?,?)")
@@ -517,8 +581,10 @@ export async function onRequest(context) {
       }
       if (ex) {
         await db.prepare("INSERT OR REPLACE INTO pending_clear (ou,qi,password) VALUES (?,?,?)").bind(ou, qi, ex.password).run();
-        await db.prepare("DELETE FROM quizzes WHERE qi=?").bind(qi).run();
+        await db.prepare("DELETE FROM quizzes WHERE qi=? AND ou=?").bind(qi, ou).run();
       }
+      // Remember the professor turned it OFF, so the next Sync's auto-protect does not re-add it.
+      await db.prepare("INSERT OR REPLACE INTO lockqz_off (ou,qi,teacher_id,at) VALUES (?,?,?,?)").bind(ou, qi, me.id, now()).run();
       return json({ ou, qi, on:false, clear: ex ? ex.password : null });
     }
     // Turn the live access gate on/off for a quiz. While on, the Sync tab hides the quiz from everyone
@@ -527,13 +593,13 @@ export async function onRequest(context) {
       const ou = String(body.ou||""), qi = String(body.qi||"");
       if (!/^\d+$/.test(ou) || !/^\d+$/.test(qi)) return json({ error:"bad quiz" }, 400);
       if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this course can gate its quizzes." }, 403);
-      const cur = await db.prepare("SELECT gated, sa_keep FROM quizzes WHERE qi=?").bind(qi).first();
+      const cur = await db.prepare("SELECT gated, sa_keep FROM quizzes WHERE qi=? AND ou=?").bind(qi, ou).first();
       if (!cur) return json({ error:"Protect this quiz first." }, 400);
       // Accommodation list: recorded once when the gate first starts; kept across Sync-tab reloads.
       let keep = cur.sa_keep;
       if (body.on && !(Number(cur.gated) === 1 && keep)) keep = JSON.stringify((Array.isArray(body.keep) ? body.keep : []).map(String).filter(x => /^\d+$/.test(x)).slice(0, 3000));
       if (!body.on) keep = null;
-      await db.prepare("UPDATE quizzes SET gated=?, sa_keep=?, bs_code=CASE WHEN ?=1 THEN bs_code ELSE NULL END WHERE qi=?").bind(body.on?1:0, keep, body.on?1:0, qi).run();
+      await db.prepare("UPDATE quizzes SET gated=?, sa_keep=?, bs_code=CASE WHEN ?=1 THEN bs_code ELSE NULL END WHERE qi=? AND ou=?").bind(body.on?1:0, keep, body.on?1:0, qi, ou).run();
       return json({ ou, qi, gated: !!body.on, keep: keep ? JSON.parse(keep) : [] });
     }
     // The Sync tab confirms the exact password it just wrote into Brightspace for a gated quiz.
@@ -541,28 +607,33 @@ export async function onRequest(context) {
       const ou = String(body.ou||""), qi = String(body.qi||""), code = String(body.code||"");
       if (!/^\d+$/.test(ou) || !/^\d+$/.test(qi) || !/^LQ-[A-Za-z0-9-]{1,40}$/.test(code)) return json({ error:"bad request" }, 400);
       if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this course." }, 403);
-      await db.prepare("UPDATE quizzes SET bs_code=? WHERE qi=? AND gated=1").bind(code, qi).run();
+      await db.prepare("UPDATE quizzes SET bs_code=? WHERE qi=? AND ou=? AND gated=1").bind(code, qi, ou).run();
       return json({ ok: true });
     }
     // Current rotating code(s) for quizzes the teacher protects -- the Sync tab writes these into
     // Brightspace each cycle so the live password changes every minute. Returns current + next so a
     // write is valid right up to the tick.
     if (p === "/rotating") {
-      const qis = (Array.isArray(body.qis) ? body.qis : []).map(String).filter(x => /^\d+$/.test(x)).slice(0, 500);
+      // The Sync tab passes {ou, qis:[...]} for ONE course it instructs; only that course's codes return.
+      const ou = String(body.ou||"");
+      if (!/^\d+$/.test(ou)) return json({ error:"bad course" }, 400);
+      if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this course." }, 403);
+      const qis = (Array.isArray(body.qis) ? body.qis : []).map(String).filter(x => /^\d+$/.test(x)).slice(0, 200);
       if (!qis.length) return json({ codes: {} });
       const ph = qis.map(()=>"?").join(",");
-      const rows = (await db.prepare(`SELECT qi,password FROM quizzes WHERE qi IN (${ph})`).bind(...qis).all()).results;
+      const rows = (await db.prepare(`SELECT qi FROM quizzes WHERE ou=? AND qi IN (${ph})`).bind(ou, ...qis).all()).results;
+      const secret = env.ROT_SECRET || env.TEACHER_KEY || "lqz-fallback";
       const b = minuteBucket(), codes = {};
-      for (const r of rows) if (r.password) codes[String(r.qi)] = { cur: await rotatingPw(r.password, b), next: await rotatingPw(r.password, b + 1), bucket: b };
+      for (const r of rows) codes[String(r.qi)] = { cur: await rotatingPw(secret, ou, r.qi, b), next: await rotatingPw(secret, ou, r.qi, b + 1), bucket: b };
       return json({ codes });
     }
     if (p === "/bs") {
-      const cs = (await db.prepare("SELECT ou,name,code,role,synced_at FROM teacher_courses WHERE teacher_id=? ORDER BY name").bind(me.id).all()).results;
+      const cs = (await db.prepare("SELECT ou,name,code,role,synced_at FROM teacher_courses WHERE teacher_id=? ORDER BY name LIMIT 200").bind(me.id).all()).results;
       if (!cs.length) return json({ courses: [] });
-      const ous = cs.map(c => c.ou), ph = ous.map(()=>"?").join(",");
-      const roster = (await db.prepare(`SELECT ou,user_id,name,email,username,role FROM roster WHERE ou IN (${ph}) ORDER BY name`).bind(...ous).all()).results;
-      const qz = (await db.prepare(`SELECT b.ou,b.qi,b.name,b.active,b.start_date,b.end_date,b.due_date,b.bs_has_password,b.bs_password_is_ours,q.password,q.lock_id,q.gated FROM bs_quizzes b LEFT JOIN quizzes q ON q.qi=b.qi WHERE b.ou IN (${ph}) ORDER BY b.name`).bind(...ous).all()).results;
-      const devs = (await db.prepare(`SELECT device_id,lower(student) AS who,platform,version,last_seen FROM devices WHERE lower(student) IN (SELECT lower(email) FROM roster WHERE ou IN (${ph})) OR lower(student) IN (SELECT lower(name) FROM roster WHERE ou IN (${ph}))`).bind(...ous, ...ous).all()).results;
+      const sub = "SELECT ou FROM teacher_courses WHERE teacher_id=?";
+      const roster = (await db.prepare(`SELECT ou,user_id,name,email,username,role FROM roster WHERE ou IN (${sub}) ORDER BY name`).bind(me.id).all()).results;
+      const qz = (await db.prepare(`SELECT b.ou,b.qi,b.name,b.active,b.start_date,b.end_date,b.due_date,b.bs_has_password,b.bs_password_is_ours,q.password,q.lock_id,q.gated FROM bs_quizzes b LEFT JOIN quizzes q ON q.qi=b.qi AND q.ou=b.ou WHERE b.ou IN (${sub}) ORDER BY b.name`).bind(me.id).all()).results;
+      const devs = (await db.prepare(`SELECT device_id,lower(student) AS who,platform,version,last_seen FROM devices WHERE lower(student) IN (SELECT lower(email) FROM roster WHERE ou IN (${sub})) OR lower(student) IN (SELECT lower(name) FROM roster WHERE ou IN (${sub}))`).bind(me.id, me.id).all()).results;
       const by = {}; devs.forEach(d => { (by[d.who] = by[d.who] || []).push(d); });
       const adminEmails = new Set(((await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin'").all()).results).map(x => x.e));
       return json({ courses: cs.map(c => ({ ...c,
@@ -575,20 +646,18 @@ export async function onRequest(context) {
     }
 
     // Which lock ids (events.quiz_id = "<ou>-<qi>") belong to the caller?
-    async function scope(col) {
+    // quiz_id is "<ou>-<qi>". A caller owns a row when its ou (the part before the first "-") is a
+    // course they instruct, or the row's lock_id is one of their quizzes. Expressed as subqueries so
+    // the bound-parameter count is fixed (D1 caps at 100), no matter how many quizzes they have.
+    function scope(col) {
       if (me.admin) return { sql:"1=1", args:[] };
-      const qs = (await db.prepare("SELECT lock_id,qi FROM quizzes WHERE teacher_id=?").bind(me.id).all()).results;
-      const cs = (await db.prepare("SELECT ou FROM courses WHERE teacher_id=?").bind(me.id).all()).results;
-      const parts = [], args = [];
-      qs.forEach(q => { if (q.lock_id) { parts.push(`${col}=?`); args.push(q.lock_id); } if (q.qi) { parts.push(`${col} LIKE ?`); args.push(`%-${q.qi}`); } });
-      cs.forEach(c => { parts.push(`${col} LIKE ?`); args.push(`${c.ou}-%`); });
-      const tc = (await db.prepare("SELECT ou FROM teacher_courses WHERE teacher_id=?").bind(me.id).all()).results;
-      tc.forEach(c => { parts.push(`${col} LIKE ?`); args.push(`${c.ou}-%`); });
-      return parts.length ? { sql:`(${parts.join(" OR ")})`, args } : { sql:"0", args:[] };
+      const ouExpr = `substr(${col},1,instr(${col}||'-','-')-1)`;
+      return { sql:`(${col} IN (SELECT lock_id FROM quizzes WHERE teacher_id=?) OR ${ouExpr} IN (SELECT ou FROM teacher_courses WHERE teacher_id=?) OR ${ouExpr} IN (SELECT ou FROM courses WHERE teacher_id=?))`,
+               args:[me.id, me.id, me.id] };
     }
 
     if (p === "/roster") {
-      const s = await scope("e.quiz_id");
+      const s = scope("e.quiz_id");
       const r = me.admin
         ? await db.prepare("SELECT device_id,student,platform,version,installed_at,last_seen FROM devices ORDER BY last_seen DESC").all()
         : await db.prepare(`SELECT DISTINCT d.device_id,d.student,d.platform,d.version,d.installed_at,d.last_seen FROM devices d JOIN events e ON e.device_id=d.device_id WHERE ${s.sql} ORDER BY d.last_seen DESC`).bind(...s.args).all();
@@ -596,7 +665,7 @@ export async function onRequest(context) {
     }
     if (p === "/sessions") {
       const quiz = url.searchParams.get("quiz");
-      const s = await scope("quiz_id");
+      const s = scope("quiz_id");
       const r = await db.prepare(`SELECT device_id,student,quiz_id,event,detail,ts FROM events WHERE ${s.sql} AND (? IS NULL OR quiz_id=? OR quiz_id LIKE ?) ORDER BY ts DESC LIMIT 500`)
         .bind(...s.args, quiz, quiz, quiz ? `${quiz}-%` : "\u0000").all();
       return json({ events: r.results });
@@ -605,7 +674,9 @@ export async function onRequest(context) {
       const quiz = url.searchParams.get("quiz");
       if (!quiz) return json({ error: "quiz id required" }, 400);
       const like = `${quiz}-%`;
-      const s = await scope("l.quiz_id"), s2 = await scope("e.quiz_id");
+      const _ou0 = String(quiz).split("-")[0];
+      if (!me.admin && !(await inCourse(_ou0)) && !(await trustedInstructor(_ou0))) return json({ error: "not your course" }, 403);
+      const s = scope("l.quiz_id"), s2 = scope("e.quiz_id");
       const STALE = 90000, nowMs = Date.now(), age = t => t ? (nowMs - Date.parse(t)) : null;
       const locks = (await db.prepare(`SELECT l.device_id,l.quiz_id,l.last_lock,l.helper_seen,l.ext_seen,l.signed,l.ip,d.student,d.platform FROM locks l LEFT JOIN devices d ON d.device_id=l.device_id WHERE (l.quiz_id=? OR l.quiz_id LIKE ?) AND ${s.sql}`).bind(quiz, like, ...s.args).all()).results;
       const tamp = new Set(((await db.prepare("SELECT DISTINCT device_id FROM events WHERE (quiz_id=? OR quiz_id LIKE ?) AND event='tamper'").bind(quiz, like).all()).results).map(t=>t.device_id));
@@ -636,14 +707,18 @@ export async function onRequest(context) {
       const _qi = String(quiz).split("-").pop(), _ou = String(quiz).split("-")[0];
       const _sq = /^\d+$/.test(_qi) ? await db.prepare("SELECT start_date FROM bs_quizzes WHERE ou=? AND qi=?").bind(_ou, _qi).first() : null;
       const started = !(_sq && _sq.start_date) || Date.now() >= Date.parse(_sq.start_date);   // not before scheduled start
-      rows.forEach(r => { r.email = String(r.student||"").toLowerCase().includes("@") ? String(r.student).toLowerCase() : null; r.eligible = (started && (r.status === "locked" || r.status === "developer") && r.verified === true); });
-      const em = [...new Set(rows.map(r => r.email).filter(Boolean))];
-      if (em.length) {
-        const nm = (await db.prepare(`SELECT lower(email) AS e, name, user_id FROM roster WHERE lower(email) IN (${em.map(()=>"?").join(",")})`).bind(...em).all()).results;
-        const nameOf = Object.fromEntries(nm.map(x => [x.e, x.name]));
-        const idOf = Object.fromEntries(nm.map(x => [x.e, x.user_id]));
-        rows.forEach(r => { if (r.email) { r.user_id = idOf[r.email] || null; const n = nameOf[r.email]; if (n) r.student = n; } });
-      }
+      rows.forEach(r => { r.eligible = (started && (r.status === "locked" || r.status === "developer") && r.verified === true); });
+      // Resolve each locked device to a Brightspace user_id, by email OR name OR username, from THIS
+      // course's roster only (one query, no per-student bound params -> no D1 100-param limit).
+      const rl = (await db.prepare("SELECT lower(email) AS e, lower(name) AS n, lower(username) AS u, name AS display, user_id FROM roster WHERE ou=?").bind(_ou0).all()).results;
+      const byEmail = {}, byName = {}, byUser = {};
+      rl.forEach(x => { if (x.e) byEmail[x.e] = x; if (x.n) byName[x.n] = x; if (x.u) byUser[x.u] = x; });
+      rows.forEach(r => {
+        const who = String(r.student||"").toLowerCase();
+        const hit = byEmail[who] || byName[who] || byUser[who];
+        if (hit) { r.user_id = hit.user_id || null; if (hit.display) r.student = hit.display; }
+        r.email = who.includes("@") ? who : (hit && hit.e) || null;
+      });
       return json({ quiz, now: now(), stale_ms: STALE, rows });
     }
 

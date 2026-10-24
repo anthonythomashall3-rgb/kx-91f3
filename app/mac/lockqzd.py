@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -172,7 +172,16 @@ def developer_mode():
     if u: cands.append("/Users/%s/Library/Application Support/LOCKqz/developer.key" % u)
     for p in cands:
         try:
-            if hashlib.sha256(open(p, "rb").read().strip()).hexdigest() == DEV_KEY_HASH:
+            # O_NOFOLLOW: never follow a symlink (a student could point it at /dev/zero or a fifo).
+            fd = os.open(p, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0))
+            try:
+                st = os.fstat(fd)
+                import stat as _stat
+                if not _stat.S_ISREG(st.st_mode) or st.st_size > 256: continue
+                data = os.read(fd, 256)
+            finally:
+                os.close(fd)
+            if hashlib.sha256(data.strip()).hexdigest() == DEV_KEY_HASH:
                 return True
         except Exception:
             pass
@@ -242,6 +251,11 @@ def report(event, extra=None):
     if extra: body.update(extra)
     post("/report", body)
 
+def report_async(event, extra=None):
+    # Reply to the agent first; send the server report in the background so a slow network never makes
+    # a successful lock/unlock look like a failure to the agent (which would then never unlock).
+    threading.Thread(target=lambda: report(event, extra), daemon=True).start()
+
 def refresh_blocklist():
     if not API: return
     try:
@@ -249,7 +263,7 @@ def refresh_blocklist():
         doms = json.loads(r.read()).get("domains", [])
         # Validate before trusting: must be a healthy list of well-formed hosts, and
         # must still contain the anchors. A bad/empty download never wipes the list.
-        clean = [d.strip() for d in doms if isinstance(d, str) and "." in d and " " not in d.strip()]
+        clean = [d.strip() for d in doms if isinstance(d, str) and re.fullmatch(r"[A-Za-z0-9.-]+\.[A-Za-z]{2,}", d.strip() or "")]
         anchors = {"chatgpt.com", "claude.ai", "gemini.google.com"}
         if len(clean) >= 20 and anchors.issubset(set(clean)):
             # The server can only ADD domains: a shorter or older server list never removes
@@ -261,9 +275,11 @@ def refresh_blocklist():
                 have = []
             merged = list(dict.fromkeys(have + clean))
             if len(merged) > len(have):
-                with open(BLOCKLIST, "w") as f:
+                tmp = BLOCKLIST + ".tmp"
+                with open(tmp, "w") as f:
                     f.write("# LOCKqz AI blocklist - shipped list plus additions from the server %s\n" % time.strftime("%Y-%m-%d"))
                     f.write("\n".join(merged) + "\n")
+                os.replace(tmp, BLOCKLIST)   # atomic: readers see either the old list or the full new one
                 log("blocklist refreshed (%d -> %d domains)" % (len(have), len(merged)))
         else:
             log("blocklist refresh rejected (failed sanity check) — keeping current list")
@@ -340,6 +356,9 @@ def check_update():
                 os.replace(os.path.join(stage, name), dst)
                 os.chmod(dst, 0o755 if name.endswith((".sh", ".py")) else 0o644)
         shutil.rmtree(stage, ignore_errors=True)
+        try:
+            with open(os.path.join(UPDATE_DIR, ".updated"), "w") as f: f.write(new)
+        except Exception: pass
         log("update: %s -> %s installed (%d files)" % (VERSION, new, len(files)))
         report("update", {"from": VERSION, "to": new})
         restart_after_update()
@@ -427,7 +446,7 @@ class H(BaseHTTPRequestHandler):
                     engine("unlock")
                 # Signed "lock" flagged developer: the server admits ONLY the admin's account with it
                 # (any other device sending this is shown as tamper and refused the password).
-                report("lock", {"quiz_id": body.get("quiz_id"), "detail": {"developer": True}})
+                report_async("lock", {"quiz_id": body.get("quiz_id"), "detail": {"developer": True}})
                 return self._send(200, {"ok": True, "state": "developer", "developer": True})
             with LOCK:
                 STATE.update(state="locked", quiz_id=body.get("quiz_id"),
@@ -436,18 +455,18 @@ class H(BaseHTTPRequestHandler):
                              locked_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                              locked_since=time.time())
                 engine("lock"); save_lock()
-            report("lock")
+            report_async("lock")
             return self._send(200, {"ok": True, "state": "locked"})
         if self.path == "/unlock":
             with LOCK:
                 qid = STATE["quiz_id"] or body.get("quiz_id")   # report WHICH quiz ended (live monitor "done")
                 STATE.update(state="unlocked", quiz_id=None, locked_at=None, locked_since=0.0)
                 engine("unlock"); clear_lock()
-            report("unlock", {"quiz_id": qid})
+            report_async("unlock", {"quiz_id": qid})
             return self._send(200, {"ok": True, "state": "unlocked"})
         if self.path == "/student":
             with LOCK: STATE["student"] = body.get("student") or STATE["student"]
-            report("install", {"platform": "mac-" + platform.mac_ver()[0], "version": VERSION})
+            report_async("install", {"platform": "mac-" + platform.mac_ver()[0], "version": VERSION})
             return self._send(200, {"ok": True, "student": STATE["student"]})
         if self.path == "/heartbeat":
             report("heartbeat", {"quiz_id": STATE["quiz_id"], "source": "agent", "detail": body})
@@ -494,8 +513,16 @@ def main():
                       locked_at=rec.get("locked_at"), locked_since=float(rec["locked_since"]),
                       max_minutes=int(rec.get("max_minutes") or MAX_MIN))
         engine("lock")
-        log("resumed lock for %s after restart (tamper)" % rec["quiz_id"])
-        threading.Thread(target=lambda: report("tamper", {"quiz_id": rec["quiz_id"], "detail": "helper_restarted_mid_quiz"}), daemon=True).start()
+        # A restart from our own signed self-update is expected, not tampering. The updater drops a
+        # marker; consume it and report a benign "resumed" instead of "tamper".
+        updated = os.path.exists(os.path.join(UPDATE_DIR, ".updated"))
+        try:
+            if updated: os.remove(os.path.join(UPDATE_DIR, ".updated"))
+        except Exception: pass
+        log("resumed lock for %s after restart" % rec["quiz_id"])
+        ev = "resumed" if updated else "tamper"
+        detail = "resumed_after_update" if updated else "helper_restarted_mid_quiz"
+        threading.Thread(target=lambda: report(ev, {"quiz_id": rec["quiz_id"], "detail": detail}), daemon=True).start()
     else:
         engine("unlock")  # no live quiz: never stay locked across a restart
     threading.Thread(target=startup_network, daemon=True).start()

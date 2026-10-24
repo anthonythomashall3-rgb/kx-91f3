@@ -68,8 +68,6 @@ cat > "$AGENT" <<AG
   <key>ProgramArguments</key>
   <array><string>/usr/bin/python3</string><string>$DEST/lockqz-agent.py</string></array>
   <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/tmp/lockqz-agent.log</string>
-  <key>StandardErrorPath</key><string>/tmp/lockqz-agent.log</string>
 </dict></plist>
 AG
 chown root:wheel "$AGENT"; chmod 644 "$AGENT"

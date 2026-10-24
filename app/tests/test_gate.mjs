@@ -61,7 +61,7 @@ function makeDb(oldSchema) {
   }
   sqlite.exec(schema);
   if (oldSchema) { sqlite.exec(readFileSync(join(CF, "migrate_010_gate_verify.sql"), "utf8")); sqlite.exec(readFileSync(join(CF, "migrate_011_lock_ip.sql"), "utf8")); }
-  for (const m of ["migrate_012_bs_code.sql", "migrate_013_sa_keep.sql"]) sqlite.exec(readFileSync(join(CF, m), "utf8"));
+  for (const m of ["migrate_012_bs_code.sql", "migrate_013_sa_keep.sql", "migrate_014_lockqz_off.sql"]) sqlite.exec(readFileSync(join(CF, m), "utf8"));
   return sqlite;
 }
 
@@ -131,7 +131,7 @@ async function suite(label, oldSchema) {
   check("unpaid /protect refused (402)", r.status === 402, `got ${r.status}`);
   r = await call(env, "/gate", { ou: OU, qi: QI, on: true }, { teacher: TOK });
   check("unpaid /gate refused (402)", r.status === 402, `got ${r.status}`);
-  r = await call(env, "/rotating", { qis: [QI] }, { teacher: TOK });
+  r = await call(env, "/rotating", { ou: OU, qis: [QI] }, { teacher: TOK });
   check("unpaid /rotating refused (402)", r.status === 402, `got ${r.status}`);
   r = await call(env, "/activate", { email: "student-nobody@usc.edu", until: "2099-12-31" }, { teacher: TOK });
   check("a professor cannot activate anyone (admin only)", r.status === 401, `got ${r.status}`);
@@ -223,7 +223,7 @@ async function suite(label, oldSchema) {
   check("gate on records the accommodation list", JSON.stringify(r.data?.keep) === JSON.stringify(["4100"]), JSON.stringify(r.data));
   r = await call(env, "/password", { url: QUIZ_URL, device_id: DEV9 }, { key: K9, device: DEV9 });
   check("gated, Sync has not confirmed a code yet -> the fixed password", r.data?.password === seed, JSON.stringify(r.data));
-  r = await call(env, "/rotating", { qis: [QI] }, { teacher: TOK });
+  r = await call(env, "/rotating", { ou: OU, qis: [QI] }, { teacher: TOK });
   const cur9 = r.data?.codes?.[QI]?.cur;
   check("/rotating code differs from next", cur9 && cur9 !== r.data?.codes?.[QI]?.next, JSON.stringify(r.data?.codes?.[QI]));
   r = await call(env, "/rotated", { ou: OU, qi: QI, code: cur9 }, { teacher: TOK });

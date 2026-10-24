@@ -87,10 +87,28 @@ ok("agent task registered") if "LOCKqz Agent" in inst and "lockqz-agent.ps1" in 
 ok("no Web Store / extension step") if "ExtensionInstallForcelist" not in inst and "ExtId" not in inst else bad("extension step still present")
 
 print("T6 engine + daemon share the same hosts marker")
-if "LOCKqz START" in open(eng, encoding="utf-8").read():
+eng_src = open(eng, encoding="utf-8").read()
+if "LOCKqz START" in eng_src:
     ok("hosts marker consistent")
 else:
     bad("hosts marker missing in engine")
+
+print("T7 regression guards from the 25-Oct audit")
+dmn = open(os.path.join(WIN, "lockqzd.ps1"), encoding="utf-8").read()
+# #2: the engine-locked check must be case-SENSITIVE (so "unlocked" never matches "LOCKED")
+ok("engine-locked check is case-sensitive") if '-match "LOCKED"' not in dmn and dmn.count('-cmatch "LOCKqz: LOCKED"') >= 2 else bad("engine-locked still uses case-insensitive -match")
+# #19: no locale/DST-dependent unix time
+ok("no Get-Date -UFormat %s (locale/DST safe time)") if "-UFormat %s" not in dmn else bad("still parses Get-Date -UFormat %s")
+# #21: uninstall uses CIM (Get-Process has no CommandLine in PS 5.1) and stops tasks before unlock
+uni = open(os.path.join(WIN, "uninstall.ps1"), encoding="utf-8").read()
+ok("uninstall stops the agent via CIM") if "Get-CimInstance Win32_Process" in uni else bad("uninstall relies on Get-Process .CommandLine (PS5.1 null)")
+ok("uninstall stops tasks before unlock") if uni.index("Unregister-ScheduledTask") < uni.index("lockqz.ps1") + uni[uni.index("lockqz.ps1"):].index("unlock") and uni.index("Unregister-ScheduledTask") < uni.index(" unlock") else bad("uninstall unlocks before stopping the watcher")
+# #14: no path-style hosts entries written by the engine
+ok("engine skips path-style blocklist entries") if '-like "*/*"' in eng_src else bad("engine may write invalid hosts lines with /")
+# #5: single-object .Count guarded with @()
+ok("agent guards .Count with @()") if "@($wins | Where-Object { Is-Leaving $_.Url }).Count" in open(agt, encoding="utf-8").read() else bad("agent .Count not wrapped in @() (PS5.1 single-object bug)")
+# #13: installer reuses an existing token
+ok("installer reuses existing token/device") if "keep the key the running helper already uses" in inst else bad("reinstall mints a new token the running helper won't accept")
 
 print("")
 print(f"RESULT: {passed} passed, {failed} failed")

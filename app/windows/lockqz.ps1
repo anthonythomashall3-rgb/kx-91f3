@@ -14,7 +14,7 @@ $MarkEnd   = "# LOCKqz END"
 $Here      = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BlockFile = Join-Path $Here "blocklist.txt"
 $Policy    = Join-Path $Here "browser-policy.ps1"
-$AiApps = @("chatgpt","claude","copilot","perplexity","ollama","lmstudio","gpt4all","msty","cluely","jan","dia","comet","atlas","opera","notion ai","deepseek","poe","mistral","sider","grammarly")
+$AiApps = @("chatgpt","claude","copilot","perplexity","ollama","lmstudio","gpt4all","msty","cluely","jan","dia","comet","atlas","notion ai","deepseek","poe","mistral","sider","grammarly")
 # Non-browser routes to AI or a human helper, all closed during the quiz:
 $VmApps     = @("Parallels","prl_vm_app","vmware","vmware-vmx","VirtualBox","VirtualBoxVM","VBoxHeadless","qemu-system-x86_64","qemu-system-aarch64","vmwp","vmms","Docker Desktop","com.docker.backend")
 $RemoteApps = @("TeamViewer","AnyDesk","RustDesk","remoting_host","ScreenConnect","ConnectWiseControl","LogMeIn","Splashtop","SRServer","vncserver","winvnc","tvnserver","Parsec","GoToMyPC")
@@ -30,12 +30,19 @@ function Get-Domains {
 }
 function Is-Locked { (Get-Content $Hosts -Raw) -match [regex]::Escape($MarkStart) }
 
+function Kill-AiAndTools {
+  foreach ($a in ($AiApps + $VmApps + $RemoteApps + $OverlayApps + $ModelProcs + $VpnApps)) {
+    Stop-Process -Name $a -Force -ErrorAction SilentlyContinue
+  }
+}
 function Do-Lock {
-  if (Is-Locked) { "LOCKqz: already locked"; return }
+  $already = Is-Locked
+  if ($already) { Kill-AiAndTools; "LOCKqz: re-locked (apps re-closed)"; return }
   New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
   if (-not (Test-Path $Backup)) { Copy-Item $Hosts $Backup -Force }
   $lines = @($MarkStart)
   foreach ($d in Get-Domains) {
+    if ($d -like "*/*") { continue }   # a path (e.g. site.com/chat) can't be a hosts entry; browser policy covers it
     $lines += "0.0.0.0 $d"; $lines += ":: $d"
     if ($d -like "*.*" -and $d -notlike "www.*") { $lines += "0.0.0.0 www.$d"; $lines += ":: www.$d" }
   }
@@ -50,8 +57,7 @@ function Do-Lock {
   # Browser AI + AI search answers + extensions off, Windows Copilot off (quiz only).
   if (Test-Path $Policy) { & powershell -ExecutionPolicy Bypass -File $Policy lock | Out-Null }
 
-  foreach ($a in $AiApps) { Stop-Process -Name $a -Force }
-  foreach ($a in ($VmApps + $RemoteApps + $OverlayApps + $ModelProcs + $VpnApps)) { Stop-Process -Name $a -Force }
+  Kill-AiAndTools
 
   # Firewall: block local AI model servers and VPN protocols (backup to closing their apps).
   New-NetFirewallRule -DisplayName "$FwTag-models" -Direction Outbound -Action Block -Protocol TCP -RemotePort $ModelPorts | Out-Null

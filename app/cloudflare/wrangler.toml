@@ -11,3 +11,8 @@ database_id = "02a0c476-d6b7-4bd4-8c59-2ddef91ad8a3"
 
 # Set the teacher key as a secret (not here):
 #   wrangler pages secret put TEACHER_KEY
+
+# Device auth is enforced in production: unsigned device writes / password requests are refused.
+[vars]
+REQUIRE_SIGNED = "1"
+ADMIN_EMAIL = "athall@usc.edu"

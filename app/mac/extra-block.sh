@@ -48,6 +48,12 @@ _kill_list() {   # _kill_list "label" name...
 
 apple_intelligence_off() {
   if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would write $AI_MDM (Apple Intelligence off)"; return 0; fi
+  # Already applied? Just sweep any generative helpers (cheap) and return — do NOT rewrite the plist
+  # or kill cfprefsd again (the watcher calls this every 5s).
+  if [ -f "$AI_MDM" ] && /usr/bin/grep -q "$XB_MARK" "$AI_MDM" 2>/dev/null; then
+    pkill -i -f "GenerativeExperiences|IntelligencePlatform|WritingTools|ImagePlayground|com.apple.generativeexperiencesd" 2>/dev/null || true
+    return 0
+  fi
   mkdir -p "$(dirname "$AI_MDM")" 2>/dev/null || true
   /usr/bin/python3 - "$AI_MDM" "$XB_MARK" <<'PY' 2>/dev/null || true
 import plistlib, sys

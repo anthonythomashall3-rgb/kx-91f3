@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.3.2"
+$Version = "0.3.3"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = "$env:ProgramData\LOCKqz\config.json"
@@ -71,7 +71,7 @@ function LQ-Call($api, $path, $obj, $device, $key, $state, [bool]$signed) {
 function LQ-Register($api, $device, $key, $state) {
   # Register the key of this install once (trust on first use).
   if ($state.registered -or -not $api -or -not $device -or $device -eq "unknown") { return $state.registered }
-  $r = LQ-Call $api "/register" @{ device_id = $device; key = $key; platform = "windows"; version = "0.3.2"; student = $state.student } $device $key $state $false
+  $r = LQ-Call $api "/register" @{ device_id = $device; key = $key; platform = "windows"; version = "0.3.3"; student = $state.student } $device $key $state $false
   if ($r.code -eq 200) { $state.registered = $true }
   return $state.registered
 }
@@ -174,7 +174,7 @@ function Engine([string]$c) {
   try { $null = $EngineMutex.WaitOne(120000) } catch [System.Threading.AbandonedMutexException] { }
   try { & powershell -ExecutionPolicy Bypass -File $Engine $c | Out-Null } finally { try { $EngineMutex.ReleaseMutex() } catch { } }
 }
-function EngineLocked { (& powershell -ExecutionPolicy Bypass -File $Engine status) -match "LOCKED" }
+function EngineLocked { (& powershell -ExecutionPolicy Bypass -File $Engine status) -cmatch "LOCKqz: LOCKED" }
 # Active-lock record (SYSTEM/admins only). Brightspace checks access only when a quiz is LAUNCHED, so the
 # lock must survive this service being killed: on restart we resume an unexpired lock instead of unlocking.
 $LockFile = if ($env:LOCKQZ_LOCKFILE) { $env:LOCKQZ_LOCKFILE } else { "$env:ProgramData\LOCKqz\active_lock.json" }
@@ -187,7 +187,7 @@ function Clear-Lock { Remove-Item -Path $LockFile -Force -ErrorAction SilentlyCo
 function Load-Lock {
   try {
     $r = Get-Content $LockFile -Raw | ConvertFrom-Json
-    $now = [int][double]::Parse((Get-Date -UFormat %s)); $mx = if ($r.max_minutes) { [int]$r.max_minutes } else { $MaxMin }
+    $now = [int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); $mx = if ($r.max_minutes) { [int]$r.max_minutes } else { $MaxMin }
     if ($r.quiz_id -and $r.locked_since -gt 0 -and ($now - [int]$r.locked_since) -ge 0 -and ($now - [int]$r.locked_since) -lt ($mx * 60)) { return $r }
   } catch {}
   Clear-Lock; return $null
@@ -219,7 +219,7 @@ $watcher.AddScript({
     # Restart both tasks from a detached process: stopping "LOCKqz" ends this very process.
     Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoProfile -Command `"Stop-ScheduledTask -TaskName 'LOCKqz Agent'; Stop-ScheduledTask -TaskName 'LOCKqz'; Start-Sleep 3; Start-ScheduledTask -TaskName 'LOCKqz'; Start-ScheduledTask -TaskName 'LOCKqz Agent'`""
   }
-  function ELocked { (& powershell -ExecutionPolicy Bypass -File $Engine status) -match "LOCKED" }
+  function ELocked { (& powershell -ExecutionPolicy Bypass -File $Engine status) -cmatch "LOCKqz: LOCKED" }
   function WReport($event,$detail,$source) {
     $b = @{ device_id=$Device; event=$event; quiz_id=$State.quiz_id; student=$State.student;
             ts=(Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") }
@@ -232,7 +232,7 @@ $watcher.AddScript({
   while ($true) {
     Start-Sleep -Seconds 5; $cycles++
     if ($State.state -eq "locked") {
-      $now = [int][double]::Parse((Get-Date -UFormat %s))
+      $now = [int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
       if ($State.locked_since -gt 0 -and ($now - $State.locked_since) -gt ($State.max_minutes * 60)) {
         # hard-max safety: never leave a student locked
         WReport "auto_unlock" "max_minutes" $null
@@ -286,7 +286,7 @@ while ($listener.IsListening) {
   if ($req.HasEntityBody) { $body = (New-Object IO.StreamReader($req.InputStream)).ReadToEnd() | ConvertFrom-Json }
   $out = @{ ok = $true }
   switch ($path) {
-    "/lock"      { $State.state="locked"; $State.quiz_id=$body.quiz_id; if($body.student){$State.student=$body.student}; if($body.max_minutes){$State.max_minutes=[int]$body.max_minutes}; $State.locked_since=[int][double]::Parse((Get-Date -UFormat %s)); Engine "lock"; Save-Lock; Report "lock" $null; $out.state="locked" }
+    "/lock"      { $State.state="locked"; $State.quiz_id=$body.quiz_id; if($body.student){$State.student=$body.student}; if($body.max_minutes){$State.max_minutes=[int]$body.max_minutes}; $State.locked_since=[int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); Engine "lock"; Save-Lock; Report "lock" $null; $out.state="locked" }
     "/unlock"    { $q = if ($State.quiz_id) { $State.quiz_id } else { $body.quiz_id }; $State.state="unlocked"; $State.quiz_id=$null; Engine "unlock"; Clear-Lock; Report "unlock" $null $null $q; $out.state="unlocked" }
     "/student"   { if($body.student){$State.student=$body.student}; Report "install" @{ platform="windows"; version=$Version }; $out.student=$State.student }
     "/heartbeat" { Report "heartbeat" $body "agent" }
