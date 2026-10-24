@@ -1,335 +1,397 @@
 <!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOCKqz Professor</title>
+<title>LOCKqz</title>
 <style>
-  :root{--usc:#990000}
-  body{font:15px -apple-system,Segoe UI,sans-serif;margin:0;color:#111;background:#fafafa}
-  header{background:var(--usc);color:#fff;padding:12px 18px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
-  header span{font-weight:400;font-size:13px}
-  header button{background:#fff;color:var(--usc);padding:5px 10px}
-  main{padding:18px;max-width:960px;margin:0 auto}
-  .card{background:#fff;border:1px solid #e5e5e5;border-radius:12px;padding:18px;margin-bottom:16px}
-  input,button,select{font:15px inherit;padding:9px 11px;border:1px solid #ccc;border-radius:8px}
-  input{min-width:0}
-  button{background:var(--usc);color:#fff;border:0;cursor:pointer}
-  button.ghost{background:#eee;color:#333}
-  h2{font-size:17px;margin:0 0 10px}
-  table{border-collapse:collapse;width:100%;font-size:14px}
-  th,td{border-bottom:1px solid #eee;padding:7px 8px;text-align:left;vertical-align:top}
-  .tamper{color:var(--usc);font-weight:700}
-  tr.s-locked td{background:#eafbea}
-  tr.s-tamper td,tr.s-dark td,tr.s-helper_killed td{background:#fdeaea;font-weight:700}
-  tr.s-browser_closed td{background:#fff4e5}
-  tr.s-done td{color:#888}
-  .muted{color:#666;font-size:13px}
-  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
-  code{background:#f3f3f3;padding:2px 7px;border-radius:5px;font-size:14px;user-select:all}
-  .err{color:var(--usc);margin-top:8px}
-  #login{max-width:420px;margin:40px auto}
-  #login input{width:100%;box-sizing:border-box;margin-bottom:8px}
-  #login button{width:100%}
-  .hide{display:none}
-  .ok{background:#eafbea;padding:10px 12px;border-radius:8px;margin-top:10px}
-  a.bmk{display:inline-block;background:var(--usc);color:#fff;text-decoration:none;font-weight:700;padding:9px 16px;border-radius:8px;cursor:grab}
-  details{border-top:1px solid #eee;padding:8px 0} summary{cursor:pointer} .yes{color:#1a7f37;font-weight:700} .no{color:var(--usc)}
+  :root{--usc:#990000;--ink:#1a1a1a;--mute:#5c5952;--faint:#8a877f;--line:#e6e3dc;--bg:#f6f5f2;--ok:#1a7f37;--okbg:#e3f3e8;--warn:#b45309;--warnbg:#fff6e8;--warnline:#f3dcb3;--off:#c9c5bb}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 Inter,-apple-system,Segoe UI,system-ui,sans-serif}
+  a{color:var(--usc);text-decoration:none}a:hover{text-decoration:underline}
+  button{font:inherit;cursor:pointer;color:inherit;background:none;border:0;padding:0}
+  input{font:inherit}
+  .hide{display:none!important}
+  header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 32px;background:#fff;border-bottom:1px solid var(--line)}
+  .brand{display:flex;align-items:center;gap:10px;font-size:20px;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
+  .brand:hover{text-decoration:none}
+  .menu{position:relative}
+  .menu>summary{list-style:none;display:flex;align-items:center;gap:8px;font-weight:500;padding:10px 4px;min-height:44px;cursor:pointer}
+  .menu>summary::-webkit-details-marker{display:none}
+  .menu>div{position:absolute;right:0;top:100%;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.12);min-width:230px;padding:6px;z-index:10;display:flex;flex-direction:column}
+  .menu>div button,.menu>div a{display:block;width:100%;text-align:left;padding:10px 12px;border-radius:8px;color:var(--ink);font-size:14px}
+  .menu>div button:hover,.menu>div a:hover{background:var(--bg);text-decoration:none}
+  main{width:100%;max-width:1040px;margin:0 auto;padding:32px 24px 56px;display:flex;flex-direction:column;gap:24px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:24px 28px}
+  .band{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:20px}
+  .band h1{margin:0;font-size:26px;font-weight:700;letter-spacing:-.015em;line-height:1.2}
+  .sub{margin:4px 0 0;color:var(--mute);font-size:15px}
+  .orb{width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:var(--okbg)}
+  .orb.off{background:#f1efe9}
+  .sw{display:flex;align-items:center;gap:10px;padding:6px;min-height:44px}
+  .sw b{font-size:14px;font-weight:600}
+  .sw i{position:relative;width:48px;height:28px;border-radius:14px;background:var(--off);display:inline-block;transition:background .2s;flex-shrink:0}
+  .sw i::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:left .2s}
+  .sw[aria-pressed=true] i{background:var(--ok)}.sw[aria-pressed=true] i::after{left:23px}
+  .sw.big i{width:56px;height:32px;border-radius:16px}.sw.big i::after{width:26px;height:26px}.sw.big[aria-pressed=true] i::after{left:27px}
+  .sw:disabled{opacity:.5;cursor:wait}
+  .eyebrow{margin:0 0 -6px 4px;font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6b6861}
+  .cls{display:flex;flex-direction:column;gap:20px}
+  .cls.off{opacity:.72}
+  .cls .top{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+  .cls .top a{display:flex;flex-direction:column;gap:2px;color:var(--ink);min-width:0}
+  .cls .top a:hover{text-decoration:none}.cls .top a:hover span:first-child{text-decoration:underline}
+  .cls .top .nm{font-size:20px;font-weight:700;letter-spacing:-.01em}
+  .cls .top .sm{font-size:14px;color:#6b6861}
+  .tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+  @media(max-width:700px){.tiles{grid-template-columns:1fr}}
+  .tile{background:#faf9f6;border:1px solid #ebe8e1;border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:8px}
+  .tile .k{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#6b6861}
+  .tile .v{font-size:28px;font-weight:700;letter-spacing:-.02em;line-height:1}
+  .tile .v small{font-size:16px;font-weight:500;color:#6b6861}
+  .tile .v.md{font-size:18px;line-height:1.2;letter-spacing:-.01em}
+  .tile .n{font-size:13px;color:#6b6861}
+  .bar{display:block;height:6px;border-radius:3px;background:#ebe8e1;overflow:hidden}.bar span{display:block;height:6px;background:var(--ok);border-radius:3px}
+  .note{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:12px 16px;border-radius:10px;font-size:14px}
+  .note.warn{background:var(--warnbg);border:1px solid var(--warnline);color:#6a4a00}
+  .note.ok{background:var(--okbg);border:1px solid #bfe3c9;color:#0f5a25}
+  .note.red{background:#fff1f1;border:1px solid #f0c4c4;color:var(--usc)}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:8px;padding:10px 14px;min-height:44px;font-size:14px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--ink);text-decoration:none!important}
+  .btn.warn{border-color:#d9b26b;color:#6a4a00}
+  .btn.prime{background:var(--usc);border-color:var(--usc);color:#fff}
+  .btn.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+  .btn:disabled{opacity:.5;cursor:wait}
+  .back{display:inline-flex;align-items:center;gap:6px;font-size:14px;font-weight:500;min-height:44px;align-self:flex-start}
+  .two{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}
+  .two>section{flex:1 1 420px;min-width:0;display:flex;flex-direction:column;gap:14px}
+  .two h2{margin:0;font-size:17px;font-weight:700}
+  .hrow{display:flex;align-items:baseline;justify-content:space-between;gap:12px}.hrow span{font-size:13px;color:#6b6861}
+  ul.list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+  ul.list li{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid #efece6}
+  ul.list .grow{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:3px}
+  ul.list .t{font-size:15px;font-weight:600}ul.list .d{font-size:13px;color:#6b6861}
+  .dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;background:var(--off)}
+  .dot.ok{background:var(--ok)}.dot.warn{background:#d97706}.dot.red{background:var(--usc)}
+  .st{font-size:13px;font-weight:500;color:#6b6861;white-space:nowrap}.st.ok{color:var(--ok)}.st.warn{color:var(--warn)}.st.red{color:var(--usc);font-weight:700}
+  .more{font-size:13px;color:var(--faint);text-align:center;padding-top:8px}
+  .foot{margin:0 4px;font-size:13px;color:var(--faint)}
+  .counts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+  @media(max-width:700px){.counts{grid-template-columns:1fr}}
+  .count{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px 22px;display:flex;flex-direction:column;gap:6px}
+  .count .k{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#6b6861}
+  .count .v{font-size:40px;font-weight:700;letter-spacing:-.03em;line-height:1}
+  .count.ok .v{color:var(--ok)}.count.red{border:2px solid var(--usc)}.count.red .k,.count.red .v{color:var(--usc)}
+  li.flag{background:#fff1f1;margin:0 -12px;padding-left:12px;padding-right:12px;border-radius:8px}
+  .pulse{width:10px;height:10px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px var(--okbg);display:inline-block}
+  /* login */
+  .gate{min-height:calc(100vh - 73px);display:flex;align-items:center;justify-content:center;padding:40px 24px}
+  .gate .card{width:100%;max-width:460px;padding:44px 40px;display:flex;flex-direction:column;gap:18px;text-align:center}
+  .gate h1{margin:0;font-size:22px;font-weight:700}
+  .gate p{margin:0;color:var(--mute)}
+  .gate input{width:100%;padding:12px 14px;border:1px solid #cfccc4;border-radius:10px;font-size:16px}
+  .gate .btn.prime{width:100%;min-height:52px;font-size:16px;border-radius:12px}
+  .err{color:var(--usc);font-size:14px}
+  .muted{color:var(--mute);font-size:14px}
+  .bmk{display:inline-flex;align-items:center;gap:8px;background:var(--usc);color:#fff!important;font-weight:700;padding:12px 18px;border-radius:10px;cursor:grab;text-decoration:none!important}
+  ol.steps{margin:0;padding-left:22px;line-height:1.9;color:var(--ink)}
+  table{border-collapse:collapse;width:100%;font-size:14px}th,td{border-bottom:1px solid #efece6;padding:8px;text-align:left;vertical-align:top}
+  code{background:#f3f1ec;padding:2px 7px;border-radius:5px;font-size:13px;user-select:all}
+  details.past summary{cursor:pointer;font-size:14px;color:var(--mute);padding:10px 0}
 </style></head>
 <body>
-<header>LOCKqz Professor <span id="who"></span></header>
-<main>
+<header>
+  <a class="brand" href="#" onclick="nav('');return false"><svg aria-hidden="true" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#990000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/></svg>LOCKqz</a>
+  <details class="menu hide" id="menu">
+    <summary id="who">
+      <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b6861" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+    </summary>
+    <div>
+      <button onclick="nav('connect')">Brightspace connection</button>
+      <button onclick="nav('activity')">Activity log</button>
+      <button id="m-admin" class="hide" onclick="nav('admin')">Admin</button>
+      <button onclick="changePw()">Change password</button>
+      <button onclick="logout()">Log out</button>
+    </div>
+  </details>
+</header>
 
-<!-- ============ LOGIN / SIGN UP ============ -->
-<div id="login" class="card">
-  <h2 id="ltitle">Log in</h2>
-  <input id="name" placeholder="Your name" class="hide">
-  <input id="email" type="email" placeholder="Email">
-  <input id="pw" type="password" placeholder="Password">
-  <button id="lbtn" onclick="go()">Log in</button>
-  <div class="muted hide" id="signuprow" style="margin-top:10px;text-align:center">
-    <a href="#" id="lswitch" onclick="toggle();return false">New here? Create an account</a>
-  </div>
-  <div class="err" id="lerr"></div>
-  <div class="muted" id="forgotrow" style="margin-top:8px;text-align:center">
-    <a href="#" id="forgotlink" onclick="showForgot();return false">Forgot password?</a>
-  </div>
-  <div id="forgot" class="hide" style="margin-top:10px">
-    <input id="femail" type="email" placeholder="Your account email">
-    <button onclick="requestReset()">Request password reset</button>
-    <div class="muted" id="fmsg" style="margin-top:8px"></div>
+<!-- ============ LOGIN ============ -->
+<div id="login" class="gate">
+  <div class="card">
+    <div class="brand" style="justify-content:center;font-size:26px"><svg aria-hidden="true" width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#990000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/></svg>LOCKqz</div>
+    <div><h1 id="ltitle">No AI during your exams.</h1><p id="lsub">Sign in. Your classes, rosters and exams come from Brightspace by themselves.</p></div>
+    <input id="name" placeholder="Your name" class="hide" autocomplete="name">
+    <input id="email" type="email" placeholder="USC email" autocomplete="username">
+    <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+    <button id="lbtn" class="btn prime" onclick="go()">Sign in</button>
+    <div class="err" id="lerr"></div>
+    <div class="muted hide" id="signuprow"><a href="#" id="lswitch" onclick="toggle();return false">New here? Create an account</a></div>
+    <div class="muted" id="forgotrow"><a href="#" onclick="showForgot();return false">Forgot password?</a></div>
+    <div id="forgot" class="hide" style="display:flex;flex-direction:column;gap:10px">
+      <input id="femail" type="email" placeholder="Your account email">
+      <button class="btn" onclick="requestReset()">Request password reset</button>
+      <div class="muted" id="fmsg"></div>
+    </div>
+    <p class="muted" style="font-size:13px"><a href="/privacy.html">Privacy</a></p>
   </div>
 </div>
 
-<!-- ============ DASHBOARD ============ -->
-<div id="dash" class="hide">
+<!-- ============ APP ============ -->
+<main id="app" class="hide"></main>
 
-  <div id="inactive" class="card hide" style="background:#fff4e5;border-color:#f0c070"><b>Account not active.</b> Contact the LOCKqz admin to activate it before adding quizzes.</div>
-  <div id="start" class="card hide">
-    <h2>Get started</h2>
-    <ol style="margin:0;padding-left:20px;line-height:1.8">
-      <li>Drag <b>LOCKqz Sync</b> (below) to your bookmarks bar.</li>
-      <li>Open Brightspace and click it. Tick the quizzes LOCKqz should protect.</li>
-      <li>Tell students to install LOCKqz once from <a href="https://lockqz.pages.dev">lockqz.pages.dev</a>.</li>
-      <li>During the quiz, click <b>Watch</b> to see every student live.</li>
-    </ol>
-  </div>
-
-  <div class="card">
-    <h2>Brightspace</h2>
-    <div class="bar"><a class="bmk" id="bmk" href="#" onclick="alert('Drag this button to your bookmarks bar, then click it while you are in Brightspace.');return false">LOCKqz Sync</a>
-      <span class="muted">Drag to your bookmarks bar. Click it in Brightspace.</span></div>
-    <div id="bscourses" class="muted">No courses synced yet.</div>
-  </div>
-
-  <div class="card">
-    <h2>Add a quiz by link</h2>
-    <div class="bar">
-      <input id="qtitle" placeholder="Quiz name" size="22">
-      <input id="qurl" placeholder="Paste the Brightspace quiz link" size="40">
-      <button onclick="makeQuiz()">Add</button>
-    </div>
-    <div id="newquiz"></div>
-    <div class="muted" style="margin-top:12px">Or protect a whole course (one password for every quiz in it):</div>
-    <div class="bar" style="margin-top:6px">
-      <input id="curl" placeholder="Paste the Brightspace course link" size="40">
-      <button class="ghost" onclick="makeCourse()">Protect course</button>
-    </div>
-    <div id="newcourse"></div>
-  </div>
-
-  <div class="card">
-    <h2>Your quizzes</h2>
-    <table id="quizzes"><thead><tr><th>Quiz</th><th>Password (set this on the Brightspace quiz)</th><th>Live</th><th></th></tr></thead><tbody></tbody></table>
-    <div class="muted" id="noquiz">None yet. Add one above.</div>
-  </div>
-
-  <div class="card">
-    <h2>Live monitor <span class="muted" id="livename"></span></h2>
-    <div class="muted" style="margin-bottom:6px">🟢 locked &nbsp; 🔴 tamper / helper killed / went dark &nbsp; 🟠 browser closed &nbsp; ⚪ done &nbsp; <span id="livestamp"></span></div>
-    <table id="live"><thead><tr><th>Student</th><th>Device</th><th>OS</th><th>Status</th><th>Last ping</th></tr></thead><tbody><tr><td colspan="5" class="muted">Click “Watch” on a quiz.</td></tr></tbody></table>
-  </div>
-
-  <div class="card">
-    <h2>Your students</h2>
-    <table id="roster"><thead><tr><th>Student</th><th>Device</th><th>OS</th><th>Version</th><th>Last seen</th></tr></thead><tbody></tbody></table>
-    <div class="muted" id="noroster">Students appear here after their first LOCKqz quiz with you.</div>
-  </div>
-
-  <div class="card">
-    <h2>Activity <button class="ghost" onclick="loadSessions()" style="font-size:13px;padding:4px 9px">Refresh</button></h2>
-    <table id="events"><thead><tr><th>Time</th><th>Student</th><th>Quiz</th><th>Event</th><th>Detail</th></tr></thead><tbody></tbody></table>
-  </div>
-
-  <div id="invitecard" class="card hide">
-    <h2>Invite a professor</h2>
-    <div class="bar">
-      <input id="iemail" type="email" placeholder="Professor's email" size="28">
-      <span class="muted">active until</span> <input id="iuntil" type="date">
-      <button onclick="makeInvite()">Create invite</button>
-    </div>
-    <div id="newinvite"></div>
-    <table id="invites" style="margin-top:10px"><thead><tr><th>Email</th><th>Active until</th><th>Created</th><th>Status</th><th></th></tr></thead><tbody></tbody></table>
-  </div>
-
-  <div id="admin" class="card hide">
-    <h2>Admin — professors</h2>
-    <table id="teachers"><thead><tr><th>Email</th><th>Name</th><th>Joined</th><th>Active until</th><th></th></tr></thead><tbody></tbody></table>
-    <div class="muted" style="margin-top:6px">Activate after payment. Pick the semester end date; the account turns off by itself after that.</div>
-  </div>
-</div>
-</main>
 <script>
-const API = "/api";
+const API = "/api", INSTALL = "https://lockqz.pages.dev";
 let token = localStorage.getItem("lockqz_token") || "";
-let signup = false, liveTimer = null, quizzes = [];
+let signup = false, ME = null, BS = { courses: [] }, LEGACY = [], SYNCKEY = "", liveTimer = null, INVITE = "";
 const $ = id => document.getElementById(id);
 const H = () => ({ "X-LOCKqz-Teacher": token, "Content-Type":"application/json" });
 const get  = async p => (await fetch(API+p,{headers:H()})).json();
 const post = async (p,b) => (await fetch(API+p,{method:"POST",headers:H(),body:JSON.stringify(b||{})})).json();
-const esc = s => String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const when = t => t ? new Date(t).toLocaleString([], {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}) : "";
+const esc = s => String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const when = t => t ? new Date(t).toLocaleString([], {weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}) : "";
+const ago = t => { if(!t) return "never"; const m=Math.round((Date.now()-Date.parse(t))/60000); return m<1?"just now":m<60?m+" min ago":m<1440?Math.round(m/60)+" h ago":Math.round(m/1440)+" d ago"; };
+const cname = c => String(c.name||c.ou).replace(/^\d+_\w+\s*/,"");
+const SHIELD = (c,s) => `<svg aria-hidden="true" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/></svg>`;
+const BACK = (to,label) => `<a class="back" href="#" onclick="nav('${to}');return false"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>${label}</a>`;
 
-// ---- login ----
-function toggle(){ signup=!signup; $("name").classList.toggle("hide",!signup); $("ltitle").textContent=signup?"Create an account":"Log in";
-  $("lbtn").textContent=signup?"Create account":"Log in"; $("lswitch").textContent=signup?"Already have an account? Log in":"New here? Create an account"; $("lerr").textContent="";
+// ---- login (unchanged behaviour) ----
+function toggle(){ signup=!signup; $("name").classList.toggle("hide",!signup); $("ltitle").textContent=signup?"Create your professor account":"No AI during your exams.";
+  $("lbtn").textContent=signup?"Create account":"Sign in"; $("lswitch").textContent=signup?"Already have an account? Sign in":"New here? Create an account"; $("lerr").textContent="";
   $("forgotrow").classList.toggle("hide", signup); $("forgot").classList.add("hide"); }
 async function go(){
   $("lerr").textContent="";
   const d = await post(signup?"/signup":"/login",{email:$("email").value,password:$("pw").value,name:$("name").value,invite:INVITE});
-  if(d.error){
-    $("lerr").textContent = signup ? d.error : "Incorrect email or password.";
-    if(!signup) $("forgotrow").classList.remove("hide");
-    return;
-  }
+  if(d.error){ $("lerr").textContent = signup ? d.error : "Incorrect email or password."; return; }
   token=d.token; localStorage.setItem("lockqz_token",token);
   if(INVITE){ INVITE=""; history.replaceState(null,"",location.pathname); }
   boot();
 }
 function showForgot(){ $("forgot").classList.remove("hide"); $("femail").value=$("email").value||""; $("fmsg").textContent=""; }
-async function requestReset(){
-  const email=$("femail").value.trim();
-  if(!email){ $("fmsg").textContent="Enter your email."; return; }
-  await post("/forgot",{email});
-  $("fmsg").textContent="If that account exists, your LOCKqz admin has been notified to reset it and will give you a new password.";
-}
-async function changePw(){
-  const pw = prompt("Enter a new password (at least 8 characters):");
-  if(pw===null) return;
+async function requestReset(){ const email=$("femail").value.trim(); if(!email){ $("fmsg").textContent="Enter your email."; return; }
+  await post("/forgot",{email}); $("fmsg").textContent="If that account exists, your LOCKqz admin has been notified and will give you a new password."; }
+async function changePw(){ const pw = prompt("Enter a new password (at least 8 characters):"); if(pw===null) return;
   if(pw.length<8){ alert("Password must be at least 8 characters."); return; }
-  const d = await post("/changepw",{password:pw});
-  alert(d.error ? d.error : "Password changed. Use it next time you log in.");
-}
+  const d = await post("/changepw",{password:pw}); alert(d.error ? d.error : "Password changed."); }
 ["email","pw","name"].forEach(i=>$(i).addEventListener("keydown",e=>{ if(e.key==="Enter") go(); }));
-async function logout(){ await post("/logout"); token=""; localStorage.removeItem("lockqz_token"); location.reload(); }
+async function logout(){ await post("/logout"); token=""; localStorage.removeItem("lockqz_token"); location.hash=""; location.reload(); }
 
+// ---- boot ----
 async function boot(){
   if(!token) return;
   const m = await get("/me");
   if(m.error){ token=""; localStorage.removeItem("lockqz_token"); return; }
-  $("login").classList.add("hide"); $("dash").classList.remove("hide");
-  $("who").innerHTML = esc(m.name||m.email)+' &nbsp;<button onclick="changePw()">Change password</button> &nbsp;<button onclick="logout()">Log out</button>';
-  if(m.admin){ $("admin").classList.remove("hide"); $("invitecard").classList.remove("hide"); $("iuntil").value=semEnd(); loadTeachers(); loadInvites(); }
-  $("inactive").classList.toggle("hide", !!m.active);
-  loadQuizzes(); loadRoster(); loadSessions(); loadBs();
+  ME = m;
+  $("login").classList.add("hide"); $("app").classList.remove("hide"); $("menu").classList.remove("hide");
+  $("who").insertAdjacentHTML("afterbegin", esc(m.name||m.email));
+  if(m.admin) $("m-admin").classList.remove("hide");
+  await refresh(); route();
+  setInterval(async()=>{ if(!location.hash.startsWith("#live")) { await refresh(); route(); } }, 60000);
+}
+async function refresh(){
+  const [b,q,k] = await Promise.all([get("/bs"), get("/quizzes"), SYNCKEY?{key:SYNCKEY}:get("/synckey")]);
+  BS = b.courses ? b : { courses: [] };
+  LEGACY = (q.quizzes||[]).filter(x=>!x.ou);              // quizzes added by link in the old UI, not from Brightspace
+  if(k.key) SYNCKEY = k.key;
+}
+function nav(h){ location.hash = h; }
+window.addEventListener("hashchange", route);
+document.addEventListener("click", e=>{ const m=$("menu"); if(m && !m.contains(e.target)) m.removeAttribute("open"); });
+
+// ---- derived state ----
+const now = () => Date.now();
+const live = q => q.password && q.start_date && Date.parse(q.start_date) <= now() && (!q.end_date || Date.parse(q.end_date) > now()) && (!q.start_date || now() - Date.parse(q.start_date) < 6*3600e3);
+const ended = q => (q.end_date && Date.parse(q.end_date) < now()) || (q.due_date && !q.end_date && Date.parse(q.due_date) < now() - 86400e3);
+const current = c => c.quizzes.filter(q => q.active !== 0 && !ended(q));
+const pendingSync = () => BS.courses.some(c => c.quizzes.some(q => q.password && !q.bs_password_is_ours));
+function classStats(c){
+  const cur = current(c), prot = cur.filter(q=>q.password), ready = c.students.filter(s=>s.installed).length;
+  const next = cur.filter(q=>q.start_date && Date.parse(q.start_date) > now()).sort((a,b)=>Date.parse(a.start_date)-Date.parse(b.start_date))[0];
+  return { cur, prot, ready, next, missing: c.students.filter(s=>!s.installed), on: cur.length ? prot.length>0 : true, inprog: cur.filter(live) };
 }
 
-// ---- quizzes ----
-async function makeQuiz(){
-  const d = await post("/quiz",{title:$("qtitle").value,url:$("qurl").value});
-  if(d.error){ alert(d.error); return; }
-  $("newquiz").innerHTML = d.qi
-    ? `<div class="ok">Set the Brightspace quiz password to <code>${d.password}</code>. Keep it secret. Done.</div>`
-    : `<div class="ok">No quiz id found in that link. Paste the link from the quiz's own page and add again — or set the password to <code>${d.password}</code> and put <code>${esc(d.tag)}</code> in the quiz title.</div>`;
-  $("qtitle").value=""; $("qurl").value=""; loadQuizzes();
-}
-async function makeCourse(){
-  const d = await post("/course",{url:$("curl").value});
-  if(d.error){ alert(d.error); return; }
-  $("newcourse").innerHTML = `<div class="ok">Use <code>${d.password}</code> as the password on every quiz in this course. Keep it secret.</div>`;
-  $("curl").value=""; loadQuizzes();
-}
-async function delQuiz(id){ if(confirm("Remove this quiz from LOCKqz?")) { await post("/delete",{quiz_id:id}); loadQuizzes(); } }
-async function delCourse(ou){ if(confirm("Stop protecting this course?")) { await post("/delete",{ou}); loadQuizzes(); } }
-async function loadQuizzes(){
-  const [q,c] = await Promise.all([get("/quizzes"),get("/courses")]);
-  quizzes = q.quizzes||[]; const courses = c.courses||[];
-  const tb = document.querySelector("#quizzes tbody"); tb.innerHTML="";
-  courses.forEach(x=>tb.insertAdjacentHTML("beforeend",`<tr><td><b>Course</b> ${esc(x.title||x.ou)}<div class="muted">all quizzes in course ${esc(x.ou)}</div></td><td><code>${esc(x.password)}</code></td><td><button class="ghost" onclick="watch('${esc(x.ou)}','course ${esc(x.ou)}')">Watch</button></td><td><button class="ghost" onclick="delCourse('${esc(x.ou)}')">Remove</button></td></tr>`));
-  quizzes.forEach(x=>tb.insertAdjacentHTML("beforeend",`<tr><td>${esc(x.title||x.quiz_id)}<div class="muted">${when(x.created_at)}</div></td><td><code>${esc(x.password)}</code></td><td><button class="ghost" onclick="watch('${esc(x.lock_id||x.quiz_id)}','${esc(x.title||x.quiz_id)}')">Watch</button></td><td><button class="ghost" onclick="delQuiz('${esc(x.quiz_id)}')">Remove</button></td></tr>`));
-  $("noquiz").style.display = (quizzes.length||courses.length)?"none":"";
-  $("start").classList.toggle("hide", !!(quizzes.length||courses.length));
+// ---- router ----
+function route(){
+  if(!ME) return;
+  if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+  $("menu").removeAttribute("open");
+  const h = location.hash.replace(/^#/,""), [v,a] = h.split("/");
+  const app = $("app");
+  if(v==="class" && a) return app.innerHTML = viewClass(a);
+  if(v==="live" && a) { app.innerHTML = viewLive(a); loadLive(a); liveTimer = setInterval(()=>loadLive(a), 10000); return; }
+  if(v==="connect") return app.innerHTML = viewConnect();
+  if(v==="activity") { app.innerHTML = viewActivity(); loadSessions(); return; }
+  if(v==="admin" && ME.admin) { app.innerHTML = viewAdmin(); loadTeachers(); loadInvites(); return; }
+  app.innerHTML = viewHome();
 }
 
-// ---- roster / activity ----
-async function loadRoster(){
-  const d = await get("/roster"); const tb = document.querySelector("#roster tbody"); tb.innerHTML="";
-  (d.devices||[]).forEach(x=>tb.insertAdjacentHTML("beforeend",`<tr><td>${esc(x.student||"—")}</td><td>${esc(x.device_id)}</td><td>${esc(x.platform)}</td><td>${esc(x.version)}</td><td>${when(x.last_seen)}</td></tr>`));
-  $("noroster").style.display = (d.devices||[]).length?"none":"";
-}
-async function loadSessions(){
-  const d = await get("/sessions"); const tb = document.querySelector("#events tbody"); tb.innerHTML="";
-  (d.events||[]).forEach(e=>tb.insertAdjacentHTML("beforeend",`<tr class="${e.event==='tamper'?'tamper':''}"><td>${when(e.ts)}</td><td>${esc(e.student||"—")}</td><td>${esc(e.quiz_id||"")}</td><td>${esc(e.event)}</td><td>${esc(e.detail||"")}</td></tr>`));
-  if(!(d.events||[]).length) tb.innerHTML=`<tr><td colspan="5" class="muted">Nothing yet.</td></tr>`;
-}
-
-// ---- live ----
-let liveId = "";
-const LIVE_LABEL={locked:"🟢 Locked",tamper:"🔴 TAMPER",helper_killed:"🔴 Helper killed",dark:"🔴 Went dark",browser_closed:"🟠 Browser closed",done:"⚪ Done"};
-function watch(id,name){ liveId=id; $("livename").textContent="— "+name; if(liveTimer) clearInterval(liveTimer); loadLive(); liveTimer=setInterval(loadLive,10000); window.scrollTo({top:$("live").offsetTop-120,behavior:"smooth"}); }
-async function loadLive(){
-  if(!liveId) return;
-  const d=await get("/live?quiz="+encodeURIComponent(liveId));
-  const tb=document.querySelector("#live tbody"); tb.innerHTML="";
-  (d.rows||[]).forEach(r=>{
-    const ago=(r.age_ms==null||r.status==="done")?"—":Math.round(r.age_ms/1000)+"s ago";
-    tb.insertAdjacentHTML("beforeend",`<tr class="s-${r.status}"><td>${esc(r.student||"—")}</td><td>${esc(r.device_id)}</td><td>${esc(r.platform)}</td><td>${LIVE_LABEL[r.status]||esc(r.status)}</td><td>${ago}</td></tr>`);
+// ---- HOME ----
+function viewHome(){
+  let h = "";
+  if(!ME.active) h += `<div class="note warn"><span>Your account is not active yet. The LOCKqz admin activates it for the semester; until then exams are not protected.</span></div>`;
+  if(!BS.courses.length) return h + viewConnect(true);
+  const all = BS.courses.map(classStats);
+  const exams = all.reduce((n,s)=>n+s.cur.length,0), prot = all.reduce((n,s)=>n+s.prot.length,0), students = BS.courses.reduce((n,c)=>n+c.students.length,0);
+  const allOn = exams>0 && prot===exams, allOff = prot===0;
+  const synced = BS.courses.map(c=>c.synced_at).sort().pop();
+  const inprog = all.flatMap(s=>s.inprog.map(q=>({q, c: BS.courses[all.indexOf(s)]})));
+  const headline = exams===0 ? "No upcoming exams in Brightspace yet." : allOff ? "LOCKqz is off. Students can use AI during your exams." : allOn ? `LOCKqz is on for all ${exams} of your upcoming exam${exams===1?"":"s"}.` : `LOCKqz is on for ${prot} of your ${exams} upcoming exams.`;
+  h += `<section class="card band" aria-label="Status">
+    <div style="display:flex;align-items:center;gap:20px;min-width:0">
+      <div class="orb ${allOff?'off':''}">${SHIELD(allOff?'#6b6861':'#1a7f37',30)}</div>
+      <div><h1>${headline}</h1><p class="sub">Synced with Brightspace ${ago(synced)} · ${BS.courses.length} class${BS.courses.length===1?"":"es"} · ${students} students${pendingSync()?"":" · nothing for you to do"}</p></div>
+    </div>
+    ${exams ? `<button class="sw big" aria-pressed="${!allOff}" aria-label="LOCKqz on for all exams" onclick="setAll(${allOff})"><b>${allOff?"Off":"On"}</b><i></i></button>` : ""}
+  </section>`;
+  if(pendingSync()) h += `<div class="note warn"><span>One more click: open Brightspace and press your <b>LOCKqz Sync</b> bookmark so Brightspace matches these settings.</span><button class="btn warn" onclick="nav('connect')">How</button></div>`;
+  inprog.forEach(({q,c}) => h += `<div class="note ok"><span style="display:flex;align-items:center;gap:10px"><span class="pulse"></span><b>${esc(q.name)}</b> is in progress · ${esc(cname(c))}</span><a class="btn ok" href="#live/${esc(c.ou)}-${esc(q.qi)}">Watch live</a></div>`);
+  h += `<section aria-label="Your classes" style="display:flex;flex-direction:column;gap:16px"><h2 class="eyebrow">Your classes</h2>`;
+  BS.courses.forEach((c,i) => {
+    const s = all[i], pct = c.students.length ? Math.round(100*s.ready/c.students.length) : 0;
+    h += `<article class="card cls ${s.on?'':'off'}">
+      <div class="top">
+        <a href="#class/${esc(c.ou)}"><span class="nm">${esc(cname(c))}</span><span class="sm">${esc(c.code||"")}${c.code?" · ":""}${c.students.length} students</span></a>
+        ${s.cur.length ? `<button class="sw" aria-pressed="${s.on}" aria-label="LOCKqz on for this class" onclick="setClass('${esc(c.ou)}',${!s.on})"><b>${s.on?"On":"Off"}</b><i></i></button>` : ""}
+      </div>
+      <div class="tiles">
+        <div class="tile"><span class="k">Students ready</span><span class="v">${s.ready}<small> / ${c.students.length}</small></span><span class="bar"><span style="width:${pct}%"></span></span></div>
+        <div class="tile"><span class="k">Exams protected</span><span class="v">${s.prot.length}<small> / ${s.cur.length}</small></span><span class="n">${s.cur.length===0?"no upcoming exams":s.on&&s.prot.length===s.cur.length?"all of them, automatically":s.on?"some turned off":"LOCKqz is off for this class"}</span></div>
+        <div class="tile"><span class="k">Next exam</span><span class="v md">${s.next?esc(s.next.name):"—"}</span><span class="n">${s.next?when(s.next.start_date):"none scheduled"}</span></div>
+      </div>
+      ${s.on && s.missing.length && s.cur.length ? `<div class="note warn"><span>${s.missing.length} student${s.missing.length===1?"":"s"} still need${s.missing.length===1?"s":""} to install LOCKqz${s.next?" before "+esc(s.next.name):""}.</span><a class="btn warn" href="${mailMissing(c,s)}">Send them the install link</a></div>` : ""}
+    </article>`;
   });
-  if(!(d.rows||[]).length) tb.innerHTML=`<tr><td colspan="5" class="muted">No students locked for this quiz yet.</td></tr>`;
-  $("livestamp").textContent="updated "+new Date().toLocaleTimeString();
+  h += `</section>`;
+  if(LEGACY.length) h += `<details class="past card" style="padding:12px 28px"><summary>${LEGACY.length} quiz${LEGACY.length===1?"":"zes"} added by link (old method)</summary><table><thead><tr><th>Quiz</th><th>Brightspace password</th><th></th></tr></thead><tbody>${LEGACY.map(x=>`<tr><td>${esc(x.title||x.quiz_id)}</td><td><code>${esc(x.password)}</code></td><td><a href="#live/${esc(x.lock_id||x.quiz_id)}">Watch</a> · <button style="color:var(--usc)" onclick="delLegacy('${esc(x.quiz_id)}')">Remove</button></td></tr>`).join("")}</tbody></table></details>`;
+  h += `<p class="foot">New classes, students and exams appear here on their own. Students without LOCKqz cannot open a protected exam.</p>`;
+  return h;
+}
+function mailMissing(c,s){
+  const bcc = s.missing.map(x=>x.email).filter(Boolean).join(",");
+  const subj = `Install LOCKqz before ${s.next?s.next.name:"our next exam"} (${cname(c)})`;
+  const body = `Hi,\n\nOur Brightspace exams in ${cname(c)} use LOCKqz. You need it installed once, or the exam will not open for you.\n\n1. Go to ${INSTALL}\n2. Click Download and run the installer.\n\nThat is all. It only blocks AI tools while an exam is open and turns itself off after.\n\n${ME.name||""}`;
+  return `mailto:?bcc=${encodeURIComponent(bcc)}&subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`;
+}
+async function setAll(on){ const jobs=[]; BS.courses.forEach(c=>current(c).forEach(q=>{ if(!!q.password!==on) jobs.push(post("/protect",{ou:c.ou,qi:q.qi,on})); })); await Promise.all(jobs); await refresh(); route(); }
+async function setClass(ou,on){ const c=BS.courses.find(x=>x.ou===ou); const jobs=current(c).filter(q=>!!q.password!==on).map(q=>post("/protect",{ou,qi:q.qi,on})); await Promise.all(jobs); await refresh(); route(); }
+async function setQuiz(ou,qi,on){ const d=await post("/protect",{ou,qi,on}); if(d.error){ alert(d.error); return; } await refresh(); route(); }
+async function delLegacy(id){ if(confirm("Remove this quiz from LOCKqz?")){ await post("/delete",{quiz_id:id}); await refresh(); route(); } }
+
+// ---- CLASS ----
+function viewClass(ou){
+  const c = BS.courses.find(x=>x.ou===ou); if(!c) return viewHome();
+  const s = classStats(c), past = c.quizzes.filter(q=>ended(q) || q.active===0);
+  const row = q => { const on=!!q.password, pend = on && !q.bs_password_is_ours;
+    return `<li><div class="grow"><span class="t" style="color:${on?'var(--ink)':'#6b6861'}">${esc(q.name)}</span><span class="d">${q.start_date?when(q.start_date):"no start date"}${q.end_date?" – "+when(q.end_date):""}${live(q)?` · <a href="#live/${esc(ou)}-${esc(q.qi)}">in progress — watch</a>`:""}</span></div>
+      <button class="sw" aria-pressed="${on}" aria-label="Protect this exam" onclick="this.disabled=true;setQuiz('${esc(ou)}','${esc(q.qi)}',${!on})"><b class="st ${on?(pend?'warn':'ok'):''}" style="min-width:110px;text-align:right">${on?(pend?"Protected · 1 click left":"Protected"):"Not protected"}</b><i></i></button></li>`; };
+  return `${BACK('', 'All classes')}
+  <div class="band"><div><h1 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-.015em">${esc(cname(c))}</h1><p class="sub">${esc(c.code||"")}${c.code?" · ":""}${c.students.length} students · from Brightspace, updated ${ago(c.synced_at)}</p></div>
+    ${s.cur.length ? `<button class="sw" aria-pressed="${s.on}" aria-label="LOCKqz on for this class" onclick="setClass('${esc(ou)}',${!s.on})"><b>LOCKqz ${s.on?"on":"off"}</b><i></i></button>` : ""}</div>
+  <div class="two">
+    <section class="card"><div class="hrow"><h2>Exams</h2><span>every exam starts protected</span></div>
+      <ul class="list">${s.cur.map(row).join("") || `<li class="d">No upcoming exams in Brightspace.</li>`}</ul>
+      ${past.length ? `<details class="past"><summary>${past.length} past or inactive</summary><ul class="list">${past.map(q=>`<li><div class="grow"><span class="t" style="color:#6b6861">${esc(q.name)}</span><span class="d">${q.end_date?"ended "+when(q.end_date):q.active===0?"inactive":""}</span></div><span class="st">${q.password?"was protected":""}</span></li>`).join("")}</ul></details>` : ""}
+    </section>
+    <section class="card"><div class="hrow"><h2>Students</h2><span><b style="color:var(--ok)">${s.ready} ready</b>${s.missing.length?` · <b style="color:var(--warn)">${s.missing.length} not yet</b>`:""}</span></div>
+      ${s.missing.length ? `<div class="note warn"><span>${s.missing.length} student${s.missing.length===1?" has":"s have"} not installed LOCKqz. They cannot open a protected exam until they do.</span><a class="btn warn" href="${mailMissing(c,s)}">Send them the install link</a></div>` : `<div class="note ok"><span>Every student has LOCKqz installed.</span></div>`}
+      <ul class="list">${[...s.missing, ...c.students.filter(x=>x.installed)].map(x=>`<li><span class="dot ${x.installed?'ok':'warn'}"></span><span class="grow"><span style="font-size:15px">${esc(x.name)}</span></span><span class="st ${x.installed?'ok':'warn'}">${x.installed?"Ready"+(x.platform?" · "+esc(x.platform):""):"Needs LOCKqz"}</span></li>`).join("") || `<li class="d">No students on the Brightspace roster.</li>`}</ul>
+    </section>
+  </div>`;
 }
 
-// ---- admin ----
-async function loadTeachers(){
-  const d = await get("/teachers"); const tb=document.querySelector("#teachers tbody"); tb.innerHTML="";
-  const today=new Date().toISOString().slice(0,10);
-  (d.teachers||[]).forEach(t=>{
-    const on = t.active_until && t.active_until>=today;
-    tb.insertAdjacentHTML("beforeend",`<tr style="${on?'':'color:#888'}"><td>${esc(t.email)}</td><td>${esc(t.name||"")}</td><td>${when(t.created_at)}</td><td>${on?esc(t.active_until):"<b style='color:#990000'>off</b>"}</td><td><input type="date" id="d_${esc(t.id)}" value="${esc(t.active_until||semEnd())}" style="padding:4px"> <button class="ghost" onclick="activate('${esc(t.email)}','${esc(t.id)}')">Activate</button> <button class="ghost" onclick="deactivate('${esc(t.email)}')">Off</button> <button class="ghost" onclick="resetPw('${esc(t.email)}')">Reset pw</button></td></tr>`);
-  });
+// ---- LIVE ----
+const LBL = {locked:["ok","Locked · working"],tamper:["red","Tampering detected — AI may be open"],helper_killed:["red","LOCKqz was stopped — AI may be open"],dark:["red","Lost contact — AI may be open"],browser_closed:["warn","Browser closed"],done:["","Submitted · unlocked"]};
+function viewLive(id){
+  const [ou,qi] = id.split("-"); const c = BS.courses.find(x=>x.ou===ou); const q = c && c.quizzes.find(x=>String(x.qi)===qi);
+  const title = q ? q.name : (LEGACY.find(x=>(x.lock_id||x.quiz_id)===id)||{}).title || id;
+  return `${BACK(c?'class/'+esc(ou):'', c?esc(cname(c)):'Home')}
+  <div class="band"><div><div style="display:flex;align-items:center;gap:10px"><span class="pulse"></span><span style="font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ok)">Live</span></div>
+    <h1 style="margin:4px 0 0;font-size:28px;font-weight:700;letter-spacing:-.015em">${esc(title)}</h1><p class="sub" id="lsub">${q&&q.start_date?"Started "+when(q.start_date)+" · ":""}updates every 10 seconds</p></div></div>
+  <div class="counts" id="lcounts"></div>
+  <section class="card" style="padding:8px 24px 12px"><ul class="list" id="lrows"><li class="d">Loading…</li></ul></section>
+  <p class="foot">Students without a fresh LOCKqz lock cannot open this exam while the gate is on. Everything here is kept in the activity log.</p>`;
 }
+async function loadLive(id){
+  const d = await get("/live?quiz="+encodeURIComponent(id)); if(!$("lrows")) return;
+  const rows = d.rows||[], [ou] = id.split("-"), c = BS.courses.find(x=>x.ou===ou);
+  const seen = new Set(rows.map(r=>(r.email||r.student||"").toLowerCase()));
+  const nameOf = r => { const k=(r.email||r.student||"").toLowerCase(); const s=c&&c.students.find(x=>(x.email||"").toLowerCase()===k||(x.name||"").toLowerCase()===k); return s?s.name:(r.student||r.device_id); };
+  const notStarted = c ? c.students.filter(s=>!seen.has((s.email||"").toLowerCase()) && !seen.has((s.name||"").toLowerCase())) : [];
+  const flagged = rows.filter(r=>LBL[r.status]&&LBL[r.status][0]==="red"), ok = rows.filter(r=>r.status==="locked"), done = rows.filter(r=>r.status==="done");
+  $("lcounts").innerHTML = `<div class="count ok"><span class="k">AI blocked</span><span class="v">${ok.length}</span><span class="n">students locked and working</span></div>
+    <div class="count ${flagged.length?'red':''}"><span class="k">Needs a look</span><span class="v">${flagged.length}</span><span class="n">${flagged.length?"LOCKqz stopped or tampered mid-exam":"nothing unusual"}</span></div>
+    <div class="count"><span class="k">${c?"Not started":"Finished"}</span><span class="v">${c?notStarted.length:done.length}</span><span class="n">${c?"have not opened the exam":"submitted and unlocked"}</span></div>`;
+  const order = r => r.status==="done"?3:LBL[r.status]&&LBL[r.status][0]==="red"?0:r.status==="browser_closed"?1:2;
+  const list = rows.sort((a,b)=>order(a)-order(b)).map(r=>{ const [k,l]=LBL[r.status]||["",r.status]; const t=(r.age_ms==null||r.status==="done")?"":Math.round(r.age_ms/1000)+" s";
+    return `<li class="${k==='red'?'flag':''}"><span class="dot ${k}"></span><span class="grow"><span style="font-size:15px;font-weight:${k==='red'?700:500}">${esc(nameOf(r))}</span></span><span class="st ${k}">${l}</span><span class="st" style="min-width:48px;text-align:right">${t}</span></li>`; })
+    .concat(notStarted.map(s=>`<li><span class="dot"></span><span class="grow"><span style="font-size:15px">${esc(s.name)}</span></span><span class="st">Has not opened the exam</span><span class="st" style="min-width:48px"></span></li>`));
+  $("lrows").innerHTML = list.join("") || `<li class="d">No students have opened this exam yet.</li>`;
+  $("lsub").textContent = ($("lsub").textContent.split("·")[0].includes("Started")?$("lsub").textContent.split("·")[0]+"· ":"") + "updated " + new Date().toLocaleTimeString();
+}
+
+// ---- CONNECT (the one manual step; shown on first visit and from the menu) ----
+function viewConnect(first){
+  const bmk = SYNCKEY ? `javascript:(function(){var s=document.createElement('script');s.src='${location.origin}/sync.js?k=${SYNCKEY}&v='+Date.now();document.body.appendChild(s)})()` : "#";
+  return `${first?"":BACK('', 'Home')}
+  <section class="card" style="display:flex;flex-direction:column;gap:18px">
+    <div><h1 style="margin:0;font-size:24px;font-weight:700;letter-spacing:-.015em">${first?"One step, once.":"Brightspace connection"}</h1>
+    <p class="sub">LOCKqz reads your classes, rosters and exams from Brightspace and protects every exam. It needs your Brightspace login once per semester to do that.</p></div>
+    <ol class="steps">
+      <li>Drag this button to your bookmarks bar: &nbsp;<a class="bmk" href="${esc(bmk)}" onclick="alert('Drag this button to your bookmarks bar, then click it while you are in Brightspace.');return false">${SHIELD('#fff',18)} LOCKqz Sync</a></li>
+      <li>Open <a href="https://brightspace.usc.edu" target="_blank" rel="noopener">brightspace.usc.edu</a> and click the bookmark. Keep that tab open during exams.</li>
+      <li>Come back here. Your classes are filled in and every exam is on.</li>
+    </ol>
+    ${BS.courses.length ? `<p class="muted">Last synced ${ago(BS.courses.map(c=>c.synced_at).sort().pop())}. ${pendingSync()?"Some changes you made here are waiting for the next click.":"Everything is up to date."}</p>` : ""}
+  </section>
+  <p class="foot">Students install LOCKqz once from <a href="${INSTALL}">${INSTALL.replace("https://","")}</a>. You never see or type an exam password.</p>`;
+}
+
+// ---- ACTIVITY ----
+function viewActivity(){ return `${BACK('', 'Home')}<section class="card"><div class="hrow"><h2>Activity log</h2><span><button class="btn" style="min-height:36px;padding:6px 12px" onclick="loadSessions()">Refresh</button></span></div>
+  <div style="overflow-x:auto;margin-top:12px"><table id="events"><thead><tr><th>Time</th><th>Student</th><th>Exam</th><th>Event</th><th>Detail</th></tr></thead><tbody></tbody></table></div></section>`; }
+const qname = lid => { for(const c of BS.courses){ const q=c.quizzes.find(x=>`${c.ou}-${x.qi}`===lid); if(q) return q.name; } return lid||""; };
+async function loadSessions(){ const d = await get("/sessions"); const tb=document.querySelector("#events tbody"); if(!tb) return; tb.innerHTML="";
+  (d.events||[]).forEach(e=>tb.insertAdjacentHTML("beforeend",`<tr style="${e.event==='tamper'?'color:var(--usc);font-weight:700':''}"><td>${when(e.ts)}</td><td>${esc(e.student||"—")}</td><td>${esc(qname(e.quiz_id))}</td><td>${esc(e.event)}</td><td>${esc(e.detail||"")}</td></tr>`));
+  if(!(d.events||[]).length) tb.innerHTML=`<tr><td colspan="5" class="muted">Nothing yet.</td></tr>`; }
+
+// ---- ADMIN (unchanged behaviour, moved under the name menu) ----
 function semEnd(){ const d=new Date(), y=d.getFullYear(), m=d.getMonth()+1; return m<=5?`${y}-05-31`:(m<=8?`${y}-08-31`:`${y}-12-31`); }
+function viewAdmin(){ return `${BACK('', 'Home')}
+  <section class="card"><h2 style="margin:0 0 12px">Invite a professor</h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><input id="iemail" type="email" placeholder="Professor's email" style="padding:10px;border:1px solid #cfccc4;border-radius:8px;flex:1 1 220px"><span class="muted">active until</span><input id="iuntil" type="date" value="${semEnd()}" style="padding:10px;border:1px solid #cfccc4;border-radius:8px"><button class="btn prime" onclick="makeInvite()">Create invite</button></div>
+    <div id="newinvite"></div>
+    <div style="overflow-x:auto;margin-top:12px"><table id="invites"><thead><tr><th>Email</th><th>Active until</th><th>Created</th><th>Status</th><th></th></tr></thead><tbody></tbody></table></div></section>
+  <section class="card"><h2 style="margin:0 0 12px">Professors</h2>
+    <div style="overflow-x:auto"><table id="teachers"><thead><tr><th>Email</th><th>Name</th><th>Joined</th><th>Active until</th><th></th></tr></thead><tbody></tbody></table></div>
+    <p class="muted">Activate after payment. Pick the semester end date; the account turns off by itself after that.</p></section>`; }
+async function loadTeachers(){ const d = await get("/teachers"); const tb=document.querySelector("#teachers tbody"); if(!tb) return; tb.innerHTML=""; const today=new Date().toISOString().slice(0,10);
+  (d.teachers||[]).forEach(t=>{ const on = t.active_until && t.active_until>=today;
+    tb.insertAdjacentHTML("beforeend",`<tr style="${on?'':'color:#888'}"><td>${esc(t.email)}</td><td>${esc(t.name||"")}</td><td>${when(t.created_at)}</td><td>${on?esc(t.active_until):"<b style='color:#990000'>off</b>"}</td><td style="white-space:nowrap"><input type="date" id="d_${esc(t.id)}" value="${esc(t.active_until||semEnd())}" style="padding:4px"> <button class="btn" style="min-height:32px;padding:4px 10px" onclick="activate('${esc(t.email)}','${esc(t.id)}')">Activate</button> <button class="btn" style="min-height:32px;padding:4px 10px" onclick="deactivate('${esc(t.email)}')">Off</button> <button class="btn" style="min-height:32px;padding:4px 10px" onclick="resetPw('${esc(t.email)}')">Reset pw</button></td></tr>`); }); }
 async function activate(email,id){ const d=await post("/activate",{email,until:$("d_"+id).value}); if(d.error) alert(d.error); loadTeachers(); }
 async function deactivate(email){ if(confirm("Turn off "+email+"?")){ await post("/activate",{email,until:null}); loadTeachers(); } }
 async function resetPw(email){ const d=await post("/reset",{email}); alert(d.error||("New password for "+email+": "+d.password)); }
-
-// ---- Brightspace connector ----
-const dshort = t => t ? new Date(t).toLocaleDateString([], {month:"short",day:"numeric"}) : "";
-async function loadBs(){
-  const k = await get("/synckey");
-  if (k.key) $("bmk").href = "javascript:(function(){var s=document.createElement('script');s.src='" + location.origin + "/sync.js?k=" + k.key + "&v='+Date.now();document.body.appendChild(s)})()";
-  const d = await get("/bs"); const box = $("bscourses");
-  if (!(d.courses||[]).length) { box.textContent = "No courses synced yet."; return; }
-  box.classList.remove("muted");
-  box.innerHTML = d.courses.map(c => {
-    const inst = c.students.filter(s => s.installed).length, prot = c.quizzes.filter(q => q.password).length;
-    const qrows = c.quizzes.map(q => `<tr><td>${esc(q.name)}</td><td>${dshort(q.start_date)}</td>
-      <td>${q.password ? `<code>${esc(q.password)}</code>` : ""}</td>
-      <td>${q.password ? (q.bs_password_is_ours ? '<span class="yes">set in Brightspace</span>' : '<span class="no">click LOCKqz Sync in Brightspace</span>') : ""}</td>
-      <td><button class="ghost" onclick="protectQ('${esc(c.ou)}','${esc(q.qi)}',${q.password ? "false" : "true"})">${q.password ? "Unprotect" : "Protect"}</button>
-      ${q.password ? `<button class="ghost" onclick="watch('${esc(c.ou)}-${esc(q.qi)}','${esc(q.name).replace(/'/g,"")}')">Watch</button>` : ""}</td></tr>`).join("")
-      || '<tr><td colspan="5" class="muted">No quizzes.</td></tr>';
-    const srows = c.students.map(s => `<tr><td>${esc(s.name)}</td><td>${esc(s.email||"")}</td>
-      <td>${s.installed ? '<span class="yes">installed</span>' : '<span class="no">not installed</span>'}</td><td>${esc(s.platform||"")}</td><td>${when(s.last_seen)}</td></tr>`).join("")
-      || '<tr><td colspan="5" class="muted">No students.</td></tr>';
-    return `<details><summary><b>${esc((c.name||c.ou).replace(/^\d+_\d+\s*/,""))}</b> &nbsp;<span class="muted">${inst}/${c.students.length} installed &middot; ${prot} protected &middot; synced ${when(c.synced_at)}</span></summary>
-      <table style="margin-top:8px"><thead><tr><th>Quiz</th><th>Starts</th><th>Password</th><th>Brightspace</th><th></th></tr></thead><tbody>${qrows}</tbody></table>
-      <table style="margin-top:12px"><thead><tr><th>Student</th><th>Email</th><th>LOCKqz</th><th>OS</th><th>Last seen</th></tr></thead><tbody>${srows}</tbody></table></details>`;
-  }).join("");
-}
-async function protectQ(ou, qi, on){
-  const d = await post("/protect", {ou, qi, on});
-  if (d.error) { alert(d.error); return; }
-  alert(on ? "Protected. Click LOCKqz Sync in Brightspace to put the password on the quiz."
-           : "Unprotected. Click LOCKqz Sync in Brightspace to remove the password from the quiz.");
-  loadBs(); loadQuizzes();
-}
-
-// ---- invites (admin) ----
-let INVITE = "";
 const inviteLink = code => location.origin + "/?invite=" + code;
 function inviteMail(email, link){
   const s = "Your LOCKqz professor account";
-  const b = "Hi,\n\nYou're invited to LOCKqz. It blocks AI on students' computers during your Brightspace quizzes, then turns AI back on when the quiz ends.\n\n"
+  const b = "Hi,\n\nYou're invited to LOCKqz. It blocks AI on students' computers during your Brightspace exams, then turns AI back on when the exam ends.\n\n"
     + "1. Create your account (this link works once):\n   " + link + "\n\n"
-    + "2. On your LOCKqz dashboard, drag the LOCKqz Sync button to your bookmarks bar.\n\n"
-    + "3. Open Brightspace and click LOCKqz Sync. It reads your class lists and quizzes; tick the quizzes LOCKqz should protect.\n\n"
-    + "4. Before the quiz, have students install LOCKqz once from https://lockqz.pages.dev" + "\n\n"
-    + "During the quiz, click Watch on your dashboard to see every student live.\n\nAnthony Hall\nLOCKqz";
+    + "2. Drag the LOCKqz Sync button to your bookmarks bar and click it once in Brightspace. Your classes and exams fill in; every exam is protected automatically.\n\n"
+    + "3. Students install LOCKqz once from " + INSTALL + " (the dashboard emails the ones who haven't).\n\nAnthony Hall\nLOCKqz";
   return "mailto:" + (email||"") + "?subject=" + encodeURIComponent(s) + "&body=" + encodeURIComponent(b);
 }
-async function makeInvite(){
-  const d = await post("/invite",{email:$("iemail").value,until:$("iuntil").value||semEnd()});
-  if(d.error){ alert(d.error); return; }
+async function makeInvite(){ const d = await post("/invite",{email:$("iemail").value,until:$("iuntil").value||semEnd()}); if(d.error){ alert(d.error); return; }
   window._ilink = inviteLink(d.code); window._imail = inviteMail(d.email, window._ilink);
-  $("newinvite").innerHTML = `<div class="ok">Invite link (works once): <code>${esc(window._ilink)}</code>
-    <div style="margin-top:8px"><button class="ghost" onclick="navigator.clipboard.writeText(window._ilink);this.textContent='Copied'">Copy link</button>
-    <button onclick="location.href=window._imail">Email it</button></div></div>`;
-  $("iemail").value=""; loadInvites();
-}
-async function loadInvites(){
-  const d = await get("/invites"); const tb=document.querySelector("#invites tbody"); tb.innerHTML="";
-  (d.invites||[]).forEach(i=>tb.insertAdjacentHTML("beforeend",`<tr style="${i.used_at?'color:#888':''}"><td>${esc(i.email||"(anyone with link)")}</td><td>${esc(i.active_until||"—")}</td><td>${when(i.created_at)}</td><td>${i.used_at?"joined":"pending"}</td><td>${i.used_at?"":`<button class="ghost" onclick="cancelInvite('${esc(i.code)}')">Cancel</button>`}</td></tr>`));
-  if(!(d.invites||[]).length) tb.innerHTML=`<tr><td colspan="5" class="muted">No invites yet.</td></tr>`;
-}
+  $("newinvite").innerHTML = `<div class="note ok" style="margin-top:10px"><span>Invite link (works once): <code>${esc(window._ilink)}</code></span><span style="display:flex;gap:8px"><button class="btn" onclick="navigator.clipboard.writeText(window._ilink);this.textContent='Copied'">Copy link</button><button class="btn prime" onclick="location.href=window._imail">Email it</button></span></div>`;
+  $("iemail").value=""; loadInvites(); }
+async function loadInvites(){ const d = await get("/invites"); const tb=document.querySelector("#invites tbody"); if(!tb) return; tb.innerHTML="";
+  (d.invites||[]).forEach(i=>tb.insertAdjacentHTML("beforeend",`<tr style="${i.used_at?'color:#888':''}"><td>${esc(i.email||"(anyone with link)")}</td><td>${esc(i.active_until||"—")}</td><td>${when(i.created_at)}</td><td>${i.used_at?"joined":"pending"}</td><td>${i.used_at?"":`<button class="btn" style="min-height:32px;padding:4px 10px" onclick="cancelInvite('${esc(i.code)}')">Cancel</button>`}</td></tr>`));
+  if(!(d.invites||[]).length) tb.innerHTML=`<tr><td colspan="5" class="muted">No invites yet.</td></tr>`; }
 async function cancelInvite(code){ if(confirm("Cancel this invite?")){ await post("/uninvite",{code}); loadInvites(); } }
 
-// An invite link (/dashboard?invite=CODE) opens the sign-up form; without one, only Log in shows.
+// An invite link (/?invite=CODE or /dashboard?invite=CODE) opens the sign-up form; without one, only Sign in shows.
 (async function initInvite(){
   INVITE = (new URLSearchParams(location.search).get("invite")||"").trim();
   if(!INVITE) return;
   const d = await get("/invite-check?code="+encodeURIComponent(INVITE));
   if(!d.ok){ INVITE=""; $("lerr").textContent="This invite link is invalid or was already used. Ask the LOCKqz admin for a new one."; return; }
   if(!signup) toggle();
-  $("ltitle").textContent="Create your professor account";
   $("signuprow").classList.remove("hide");
   if(d.email){ $("email").value=d.email; $("email").readOnly=true; }
 })();
