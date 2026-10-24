@@ -110,7 +110,7 @@ What changed (all code, all tested: 14 suites; Windows updater proven under Powe
   downgrades, never touches `config.json`, `device.key` or the active lock, and anything wrong
   (signature, hash, bad name, network) leaves the install exactly as it was. A daemon started from
   a source checkout never updates the checkout. Students never reinstall again.
-- **CI deploys on every push to `main`** (`.github/workflows/release.yml`): all suites on Linux ->
+- **CI deploys on every push to `master`** (`.github/workflows/release.yml`): all suites on Linux ->
   build + install-test the `.pkg` on a real Mac runner and the `.exe` on a real Windows runner ->
   build the signed manifest (`app/release/make-manifest.py`) -> `deploy.sh` (schema, migrations,
   site, API, teacher site, legacy forwarders) -> live checks. Until the three secrets below exist,
@@ -143,10 +143,10 @@ What changed (all code, all tested: 14 suites; Windows updater proven under Powe
 4. Back on the GitHub secrets page: **New repository secret**, Name `CLOUDFLARE_API_TOKEN`, Secret = the token. **Add secret**.
 5. Open https://dash.cloudflare.com, click **Workers & Pages**; the **Account ID** is in the right-hand column. Copy it.
    GitHub: **New repository secret**, Name `CLOUDFLARE_ACCOUNT_ID`, Secret = that id. **Add secret**.
-6. Make sure everything you want live is committed on `main` (CI deploys the committed tree, not your
+6. Make sure everything you want live is committed on `master` (CI deploys the committed tree, not your
    working folder — the dashboard redesign in progress on 23 Oct is still uncommitted).
 7. Open https://github.com/anthonythomashall3-rgb/LOCKqz/actions/workflows/release.yml and click
-   **Run workflow** → **Run workflow**. Green = live. From now on every push to `main` does this by itself.
+   **Run workflow** → **Run workflow**. Green = live. From now on every push to `master` does this by itself.
 8. GitHub Actions minutes: a public repository has unlimited free minutes; a private one has 2,000/month
    and the macOS runner counts 10x. If you keep it private, expect roughly 60-80 charged minutes per push.
    Making the repo public costs nothing and removes that limit (the private key is not in the repo).

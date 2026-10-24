@@ -1,6 +1,6 @@
 name: Release
 
-# Every push to main: run every test suite, build + install-test the Mac .pkg and Windows .exe on
+# Every push to master: run every test suite, build + install-test the Mac .pkg and Windows .exe on
 # real runners, build the SIGNED update manifest, and deploy the site + API + database migrations
 # to Cloudflare. Installed helpers then pick up the new release on their own (signed self-update).
 # Nothing here costs money: GitHub Actions (public repo or free minutes) + Cloudflare free tier.
@@ -13,7 +13,7 @@ name: Release
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     paths-ignore:
       - "**.md"
       - "0*_*/**"
