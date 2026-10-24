@@ -167,7 +167,13 @@ function Get-DeviceKey {
 }
 $Key = Get-DeviceKey
 
-function Engine([string]$c) { & powershell -ExecutionPolicy Bypass -File $Engine $c | Out-Null }
+# One engine run at a time (shared with the watcher): a re-lock still running when the quiz ends
+# must never land after the unlock and leave the student blocked.
+$EngineMutex = New-Object System.Threading.Mutex($false, "Global\LOCKqzEngine")
+function Engine([string]$c) {
+  try { $null = $EngineMutex.WaitOne(120000) } catch [System.Threading.AbandonedMutexException] { }
+  try { & powershell -ExecutionPolicy Bypass -File $Engine $c | Out-Null } finally { try { $EngineMutex.ReleaseMutex() } catch { } }
+}
 function EngineLocked { (& powershell -ExecutionPolicy Bypass -File $Engine status) -match "LOCKED" }
 # Active-lock record (SYSTEM/admins only). Brightspace checks access only when a quiz is LAUNCHED, so the
 # lock must survive this service being killed: on restart we resume an unexpired lock instead of unlocking.
@@ -221,6 +227,7 @@ $watcher.AddScript({
     if ($source) { $b.source = $source }
     LQ-Call $Api "/report" $b $Device $Key $State $true | Out-Null
   }
+  $mx = New-Object System.Threading.Mutex($false, "Global\LOCKqzEngine")
   $cycles = 0
   while ($true) {
     Start-Sleep -Seconds 5; $cycles++
@@ -230,12 +237,15 @@ $watcher.AddScript({
         # hard-max safety: never leave a student locked
         WReport "auto_unlock" "max_minutes" $null
         $State.state = "unlocked"; $State.quiz_id = $null; $State.locked_since = 0
-        & powershell -ExecutionPolicy Bypass -File $Engine unlock | Out-Null
+        try { $null = $mx.WaitOne(120000) } catch [System.Threading.AbandonedMutexException] { }
+        try { & powershell -ExecutionPolicy Bypass -File $Engine unlock | Out-Null } finally { try { $mx.ReleaseMutex() } catch { } }
         $lf = if ($env:LOCKQZ_LOCKFILE) { $env:LOCKQZ_LOCKFILE } else { "$env:ProgramData\LOCKqz\active_lock.json" }
         Remove-Item -Path $lf -Force -ErrorAction SilentlyContinue
       } else {
         if (-not (ELocked)) { WReport "tamper" "hosts_block_removed" $null }
-        & powershell -ExecutionPolicy Bypass -File $Engine lock | Out-Null
+        try { $null = $mx.WaitOne(120000) } catch [System.Threading.AbandonedMutexException] { }
+        try { if ($State.state -eq "locked") { & powershell -ExecutionPolicy Bypass -File $Engine lock | Out-Null } }
+        finally { try { $mx.ReleaseMutex() } catch { } }
         # liveness ping every ~45s so a killed helper shows up on the live monitor
         if ($cycles % 9 -eq 0) { WReport "heartbeat" $null "helper" }
       }
