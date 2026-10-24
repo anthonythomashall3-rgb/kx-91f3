@@ -15,5 +15,6 @@ database_id = "02a0c476-d6b7-4bd4-8c59-2ddef91ad8a3"
 # Device auth is enforced in production by the Pages SECRET REQUIRE_SIGNED=1 (set in Cloudflare;
 # do not also list it here -- a var and a secret with one name fail the deploy).
 # Email codes: secrets MAIL_USER + MAIL_APP_PASSWORD (Gmail app password).
+# Optional: ROT_SECRET as a secret for rotating-code derivation; the API falls back to TEACHER_KEY.
 [vars]
 ADMIN_EMAIL = "athall@usc.edu"

@@ -163,9 +163,9 @@ export async function onRequest(context) {
   if (hdr && adminKey && sameHex(hdr, adminKey)) me = { id:"admin", email:(env.ADMIN_EMAIL||"admin").toLowerCase(), name:"Admin", admin:true, verified:true, active:true };
   else {
     const syncKey = (request.headers.get("X-LOCKqz-Sync") || "").trim();
-    const t = hdr ? await db.prepare("SELECT id,email,name,role,active_until,verified FROM teachers WHERE token=?").bind(hdr).first().catch(()=>null)
-          : syncKey ? await db.prepare("SELECT id,email,name,role,active_until,verified FROM teachers WHERE sync_key=?").bind(syncKey).first().catch(()=>null) : null;
-    if (t) me = { id:t.id, email:t.email, name:t.name, admin: t.role === "admin", verified: t.role === "admin" || t.verified === 1, active: t.role === "admin" || (!!t.active_until && t.active_until >= laToday()), active_until: t.active_until||null };
+    const t = hdr ? await db.prepare("SELECT id,email,name,role,active_until,verified,bs_user_id FROM teachers WHERE token=?").bind(hdr).first().catch(()=>null)
+          : syncKey ? await db.prepare("SELECT id,email,name,role,active_until,verified,bs_user_id FROM teachers WHERE sync_key=?").bind(syncKey).first().catch(()=>null) : null;
+    if (t) me = { id:t.id, email:t.email, name:t.name, admin: t.role === "admin", verified: t.role === "admin" || t.verified === 1, active: t.role === "admin" || (!!t.active_until && t.active_until >= laToday()), active_until: t.active_until||null, bs_user_id: t.bs_user_id||null };
   }
   // The sync key (in the bookmarklet URL, readable by any script on the Brightspace page) authorizes
   // ONLY the Brightspace-connector endpoints. Account management needs the real session token.
@@ -195,7 +195,11 @@ export async function onRequest(context) {
   }
   async function trustedInstructor(ou) {
     if (!me || !EMAIL) return false;
-    return !!(await db.prepare(`SELECT 1 FROM roster r JOIN teacher_courses tc ON tc.ou=r.ou JOIN teachers te ON te.id=tc.teacher_id WHERE r.ou=? AND lower(r.email)=? AND ${INSTR_SQL} AND (te.role='admin' OR te.verified=1) LIMIT 1`).bind(String(ou), EMAIL).first());
+    if (me.admin) return true;
+    // Must be listed as Instructor on a TRUSTED roster for this course, by BOTH email and the caller's
+    // own Brightspace user id (captured at first sync) -- so holding someone else's email is not enough.
+    if (!me.bs_user_id) return false;
+    return !!(await db.prepare(`SELECT 1 FROM roster r JOIN teacher_courses tc ON tc.ou=r.ou JOIN teachers te ON te.id=tc.teacher_id WHERE r.ou=? AND lower(r.email)=? AND r.user_id=? AND ${INSTR_SQL} AND (te.role='admin' OR te.verified=1) LIMIT 1`).bind(String(ou), EMAIL, String(me.bs_user_id)).first());
   }
   // Load a quiz by (ou,qi) and confirm the caller instructs THAT course. Prevents acting on another
   // course's quiz by passing your own ou with a foreign qi.
@@ -587,6 +591,13 @@ export async function onRequest(context) {
     if (p === "/sync" && request.method === "POST") {
       const courses = (Array.isArray(body.courses) ? body.courses : []).slice(0, 80), t = now(), st = [];
       const myEmail = String(me.email||"").toLowerCase();
+      // Capture the caller's own Brightspace id once (first sync wins; it can never be changed later),
+      // so verification can require the roster's Instructor row to carry this same id.
+      const whoId = body.whoami && body.whoami.id != null ? String(body.whoami.id) : null;
+      if (whoId && !me.admin) {
+        await db.prepare("UPDATE teachers SET bs_user_id=? WHERE id=? AND (bs_user_id IS NULL OR bs_user_id='')").bind(whoId, me.id).run();
+        if (!me.bs_user_id) me.bs_user_id = whoId;   // reflect it within THIS request (auto-protect below needs it)
+      }
       const LEARNER = "(role LIKE '%earner%' OR role LIKE '%tudent%')";
       // Trust the roster, not the browser. A course is TRUSTED once an admin or an already-verified
       // professor has synced it. An untrusted caller (new signup, or a student) may seed a course that
@@ -646,7 +657,11 @@ export async function onRequest(context) {
         // Verified iff this email is an Instructor on a TRUSTED course's roster. A grad-student who
         // instructs one course and takes another is still verified (instructor takes precedence over
         // being a learner elsewhere). A pure student is never an Instructor anywhere, so never verified.
-        const prof = await db.prepare(`SELECT 1 FROM roster r JOIN teacher_courses tc ON tc.ou=r.ou JOIN teachers te ON te.id=tc.teacher_id WHERE lower(r.email)=? AND ${INSTR_SQL} AND (te.role='admin' OR te.verified=1) LIMIT 1`).bind(myEmail).first();
+        // Verified iff a TRUSTED roster lists this email as Instructor AND that row's Brightspace user
+        // id equals the id this account first synced with. So pre-registering someone else's email and
+        // waiting for the admin to seed the roster no longer grants verification (the ids won't match).
+        const myBs = (await db.prepare("SELECT bs_user_id FROM teachers WHERE id=?").bind(me.id).first())?.bs_user_id || null;
+        const prof = myBs ? await db.prepare(`SELECT 1 FROM roster r JOIN teacher_courses tc ON tc.ou=r.ou JOIN teachers te ON te.id=tc.teacher_id WHERE lower(r.email)=? AND ${INSTR_SQL} AND r.user_id=? AND (te.role='admin' OR te.verified=1) LIMIT 1`).bind(myEmail, String(myBs)).first() : null;
         await db.prepare("UPDATE teachers SET verified=? WHERE id=?").bind(prof ? 1 : 0, me.id).run();
       }
       if (!me.active) await releaseAll(me.id);

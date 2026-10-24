@@ -53,7 +53,7 @@ function makeDb(oldSchema) {
       .replace(/last_seen   TEXT,\n\);/, "last_seen   TEXT\n);").replace(/ext_seen  TEXT,\n  PRIMARY/, "ext_seen  TEXT,\n  PRIMARY");
   sqlite.exec(schema);
   if (oldSchema) sqlite.exec(readFileSync(join(CF, "migrate_009_device_auth.sql"), "utf8"));
-  for (const m of ["migrate_012_bs_code.sql", "migrate_013_sa_keep.sql", "migrate_014_lockqz_off.sql"]) sqlite.exec(readFileSync(join(CF, m), "utf8"));
+  for (const m of ["migrate_012_bs_code.sql", "migrate_013_sa_keep.sql", "migrate_014_lockqz_off.sql", "migrate_015_bs_user.sql"]) { try { sqlite.exec(readFileSync(join(CF, m), "utf8")); } catch (e) { /* already in schema.sql */ } }
   const now = new Date().toISOString();
   sqlite.prepare("INSERT INTO quizzes (quiz_id,title,password,created_at,qi,teacher_id,lock_id,ou) VALUES (?,?,?,?,?,?,?,?)")
     .run("q1", "Quiz 1", "LQ-SECRET01", now, "12345", "t1", LOCK_ID, "98765");

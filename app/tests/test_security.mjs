@@ -27,7 +27,7 @@ function d1(sqlite) {
 }
 const sqlite = new DatabaseSync(":memory:");
 sqlite.exec(readFileSync(join(CF, "schema.sql"), "utf8"));
-for (const m of ["migrate_012_bs_code.sql","migrate_013_sa_keep.sql","migrate_014_lockqz_off.sql"]) sqlite.exec(readFileSync(join(CF, m), "utf8"));
+for (const m of ["migrate_012_bs_code.sql","migrate_013_sa_keep.sql","migrate_014_lockqz_off.sql","migrate_015_bs_user.sql"]) { try { sqlite.exec(readFileSync(join(CF, m), "utf8")); } catch (e) { /* already in schema.sql */ } }
 const env = { DB: d1(sqlite), TEACHER_KEY: "admin-key", REQUIRE_SIGNED: "1", ADMIN_EMAIL: "admin@usc.edu", ROT_SECRET: "test-rot-secret" };
 const BASE = "https://lockqz.test";
 const sign = (key, path, ts, raw) => createHmac("sha256", key).update(`POST\n${path}\n${ts}\n${createHash("sha256").update(raw).digest("hex")}`).digest("hex");
@@ -56,10 +56,10 @@ await call("/activate", { email:"profb@usc.edu", until:"2099-12-31" }, { teacher
 const SA = (await call("/synckey", {}, { teacher: A })).data.key;
 const SB = (await call("/synckey", {}, { teacher: B })).data.key;
 // each professor syncs their own course with a quiz
-await call("/sync", { courses:[{ ou:"100", name:"C100", role:"Instructor", classlist:[
+await call("/sync", { whoami:{id:"1100"}, courses:[{ ou:"100", name:"C100", role:"Instructor", classlist:[
   { id:"1100", name:"Prof", email:"profa@usc.edu", role:"Instructor" }, { id:"2100", name:"Stu", email:"stu100@usc.edu", role:"Student" } ],
   quizzes:[{ qi:"5100", name:"A Mid", active:true }] }] }, { sync: SA });
-await call("/sync", { courses:[{ ou:"200", name:"C200", role:"Instructor", classlist:[
+await call("/sync", { whoami:{id:"1200"}, courses:[{ ou:"200", name:"C200", role:"Instructor", classlist:[
   { id:"1200", name:"Prof", email:"profb@usc.edu", role:"Instructor" }, { id:"2200", name:"Stu", email:"stu200@usc.edu", role:"Student" } ],
   quizzes:[{ qi:"5200", name:"B Mid", active:true }] }] }, { sync: SB });
 
@@ -105,7 +105,7 @@ console.log("SEC6 seeded-course access does not survive the real owner syncing")
 // a fresh account 'sneaky' seeds an unowned course 300, then the real prof (admin-seeded) syncs it
 const SNEAK = (await call("/signup", { email:"sneaky@usc.edu", password:"sneaky123" })).data.token;
 const SS = (await call("/synckey", {}, { teacher: SNEAK })).data.key;
-await call("/sync", { courses:[{ ou:"300", name:"grab", role:"Instructor", classlist:[{ id:"1", name:"Me", email:"sneaky@usc.edu", role:"Instructor" }], quizzes:[] }] }, { sync: SS });
+await call("/sync", { whoami:{id:"sneak1"}, courses:[{ ou:"300", name:"grab", role:"Instructor", classlist:[{ id:"1", name:"Me", email:"sneaky@usc.edu", role:"Instructor" }], quizzes:[] }] }, { sync: SS });
 check("sneaky seeded course 300", !!sqlite.prepare("SELECT 1 FROM teacher_courses WHERE ou='300' AND teacher_id=(SELECT id FROM teachers WHERE email='sneaky@usc.edu')").get());
 await call("/sync", { courses:[{ ou:"300", name:"ECON", role:"Instructor", classlist:[
   { id:"1300", name:"RealProf", email:"realprof@usc.edu", role:"Instructor" } ], quizzes:[] }] }, { teacher: ADMIN });
@@ -116,6 +116,19 @@ check("sneaky's /quizzes shows nothing for 300", !(r.data?.quizzes||[]).some(q =
 console.log("SEC7 signup cannot pre-claim a professor already on a trusted roster");
 r = await call("/signup", { email:"realprof@usc.edu", password:"imposter1" });
 check("signup as a rostered instructor is refused (409)", r.status === 409, `got ${r.status} ${JSON.stringify(r.data)}`);
+
+console.log("SEC7b identity binding: an email pre-claimed before the admin seeds cannot verify as that professor");
+// 'imposter' signs up as realprof2@usc.edu BEFORE any roster has that email, then syncs with ITS OWN
+// Brightspace id. Later the admin seeds course 400 with realprof2 as Instructor (a different id).
+const IMP = (await call("/signup", { email:"realprof2@usc.edu", password:"imposter9" })).data.token;
+const SI = (await call("/synckey", {}, { teacher: IMP })).data.key;
+await call("/sync", { whoami:{id:"impostor-id"}, courses:[{ ou:"400", name:"seed", role:"Instructor", classlist:[{ id:"impostor-id", name:"Me", email:"realprof2@usc.edu", role:"Instructor" }], quizzes:[] }] }, { sync: SI });
+await call("/sync", { courses:[{ ou:"400", name:"REAL", role:"Instructor", classlist:[{ id:"real-400-id", name:"Real", email:"realprof2@usc.edu", role:"Instructor" }], quizzes:[{ qi:"5400", name:"Final", active:true }] }] }, { teacher: ADMIN });
+let ri = await call("/sync", { whoami:{id:"impostor-id"}, courses:[{ ou:"400" }] }, { sync: SI });
+ri = await call("/me", {}, { teacher: IMP, get:true });
+check("pre-claim account stays UNVERIFIED after the admin seeds the real roster (id mismatch)", ri.data?.verified === false, JSON.stringify(ri.data));
+ri = await call("/protect", { ou:"400", qi:"5400", on:true }, { teacher: IMP });
+check("pre-claim account cannot protect the real course's quiz", ri.status === 403, `got ${ri.status}`);
 
 console.log("SEC8 /changepw needs the current password and rotates the token");
 r = await call("/changepw", { password:"newpass12" }, { teacher: B });

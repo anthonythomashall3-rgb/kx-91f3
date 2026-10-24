@@ -24,8 +24,12 @@ CREATE TABLE IF NOT EXISTS quizzes (
   teacher_id TEXT,
   lock_id   TEXT,
   ou        TEXT,
-  gated     INTEGER DEFAULT 0   -- quiz hidden to all but LOCKqz-locked students (AllowOnlyUsersWithSpecialAccess)
+  gated     INTEGER DEFAULT 0,  -- quiz hidden to all but LOCKqz-locked students (AllowOnlyUsersWithSpecialAccess)
+  bs_code   TEXT,                -- exact password last written into Brightspace for a gated quiz (migrate_012)
+  sa_keep   TEXT                 -- JSON: special-access user ids that pre-date the gate (accommodations; migrate_013)
 );
+-- Quizzes a professor turned LOCKqz OFF for; auto-protect never re-adds them (migrate_014).
+CREATE TABLE IF NOT EXISTS lockqz_off (ou TEXT, qi TEXT, teacher_id TEXT, at TEXT, PRIMARY KEY (ou, qi));
 CREATE INDEX IF NOT EXISTS idx_quizzes_qi ON quizzes(qi);
 
 -- Protect a whole course once: one password for every quiz in it. ou = course-id.
@@ -77,7 +81,8 @@ CREATE TABLE IF NOT EXISTS teachers (
   role      TEXT,
   active_until TEXT,
   sync_key  TEXT,
-  verified  INTEGER DEFAULT 0   -- proven instructor/TA via their own Brightspace login
+  verified  INTEGER DEFAULT 0,  -- proven instructor/TA via their own Brightspace login
+  bs_user_id TEXT               -- their own Brightspace user id (whoami), captured on first sync (migrate_015)
 );
 CREATE INDEX IF NOT EXISTS idx_teachers_token ON teachers(token);
 

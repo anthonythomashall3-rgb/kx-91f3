@@ -61,7 +61,7 @@ function makeDb(oldSchema) {
   }
   sqlite.exec(schema);
   if (oldSchema) { sqlite.exec(readFileSync(join(CF, "migrate_010_gate_verify.sql"), "utf8")); sqlite.exec(readFileSync(join(CF, "migrate_011_lock_ip.sql"), "utf8")); }
-  for (const m of ["migrate_012_bs_code.sql", "migrate_013_sa_keep.sql", "migrate_014_lockqz_off.sql"]) sqlite.exec(readFileSync(join(CF, m), "utf8"));
+  for (const m of ["migrate_012_bs_code.sql", "migrate_013_sa_keep.sql", "migrate_014_lockqz_off.sql", "migrate_015_bs_user.sql"]) { try { sqlite.exec(readFileSync(join(CF, m), "utf8")); } catch (e) { /* already in schema.sql */ } }
   return sqlite;
 }
 
@@ -115,7 +115,7 @@ async function suite(label, oldSchema) {
                    { id: "4001", name: "Al Student", email: "al@usc.edu", role: "Student" },
                    { id: "4002", name: "Bo Student", email: "bo@usc.edu", role: "Student" } ],
       quizzes: [] } ] }, { teacher: ADMIN_TOK });
-  r = await call(env, "/sync", { courses: [ { ou: OU, name: "ECON 203", code: "ECON-203", role: "Instructor",
+  r = await call(env, "/sync", { whoami: { id: "4000" }, courses: [ { ou: OU, name: "ECON 203", code: "ECON-203", role: "Instructor",
       classlist: [ { id: "4000", name: "Prof", email: "prof@usc.edu", role: "Instructor" },
                    { id: "4001", name: "Al Student", email: "al@usc.edu", role: "Student" },
                    { id: "4002", name: "Bo Student", email: "bo@usc.edu", role: "Student" } ],
@@ -137,7 +137,7 @@ async function suite(label, oldSchema) {
   check("a professor cannot activate anyone (admin only)", r.status === 401, `got ${r.status}`);
   r = await call(env, "/activate", { email: "prof@usc.edu", until: "2099-12-31" }, { teacher: ADMIN_TOK });
   check("admin activates after payment", r.status === 200, JSON.stringify(r.data));
-  r = await call(env, "/sync", { courses: [ { ou: OU, name: "ECON 203", code: "ECON-203", role: "Instructor",
+  r = await call(env, "/sync", { whoami: { id: "4000" }, courses: [ { ou: OU, name: "ECON 203", code: "ECON-203", role: "Instructor",
       classlist: [ { id: "4000", name: "Prof", email: "prof@usc.edu", role: "Instructor" },
                    { id: "4001", name: "Al Student", email: "al@usc.edu", role: "Student" },
                    { id: "4002", name: "Bo Student", email: "bo@usc.edu", role: "Student" } ],
