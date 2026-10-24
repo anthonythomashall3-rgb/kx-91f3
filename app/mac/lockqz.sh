@@ -61,10 +61,17 @@ load_pf() {
 unload_pf() { pfctl -a "$PF_ANCHOR" -F all 2>/dev/null || true; }
 policy() { [ -f "$POLICY" ] && /usr/bin/python3 "$POLICY" "$1" 2>/dev/null || true; }
 
+# Kill ONLY the named app or program: an exact process name, or a process running from "<name>.app".
+# (Never a loose substring of a command line: "Dia" would match every "media" process, incl. the
+# browser's own helpers, and this runs every 5s during a quiz.)
+kill_named() {
+  pkill -ix -- "$1" 2>/dev/null || true
+  pkill -if -- "$(app_re "$1")" 2>/dev/null || true
+}
 close_ai_apps() {
   for a in "${AI_APPS[@]}"; do
-    osascript -e "tell application \"$a\" to quit" 2>/dev/null || true
-    pkill -if "$a" 2>/dev/null || true
+    pgrep -if -- "$(app_re "$a")" >/dev/null 2>&1 && osascript -e "tell application \"$a\" to quit" 2>/dev/null || true
+    kill_named "$a"
   done
 }
 

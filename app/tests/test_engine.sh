@@ -25,6 +25,7 @@ hosts_add_block "$ORIG" "$BL"
 check "locked after add" 'hosts_is_locked "$ORIG"'
 check "chatgpt blackholed" 'grep -q "0.0.0.0 chatgpt.com" "$ORIG"'
 check "claude.ai blackholed" 'grep -q "0.0.0.0 claude.ai" "$ORIG"'
+check "IPv6 blackholed too" 'grep -q ":: chatgpt.com" "$ORIG"'
 check "anthropic.com blackholed" 'grep -q "0.0.0.0 anthropic.com" "$ORIG"'
 check "gemini blackholed" 'grep -q "0.0.0.0 gemini.google.com" "$ORIG"'
 check "copilot blackholed" 'grep -q "0.0.0.0 copilot.microsoft.com" "$ORIG"'

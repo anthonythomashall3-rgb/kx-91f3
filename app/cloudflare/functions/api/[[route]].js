@@ -48,7 +48,10 @@ const ids = u => ({ qi: (u.match(/qi=(\d+)/) || u.match(/quizId=(\d+)/) || [])[1
 const SIG_WINDOW_S = 300;
 // Per-minute code for a quiz: stable seed + HMAC(minute). Released to the locked app only; the app
 // types it and never shows it, so a code a student exfiltrates stops working within ~60 seconds.
-const minuteBucket = () => Math.floor(Date.now() / 60000);
+// Rotation period for the gated quiz password: 5 minutes (the hide-gate already keeps unlocked
+// students out; a longer period means a student who pastes a little late is not rejected).
+const ROT_MS = 300000;
+const minuteBucket = () => Math.floor(Date.now() / ROT_MS);
 async function rotatingPw(seed, bucket) {
   const h = await hmacHex(String(seed), "lqz-rot:" + bucket);
   return String(seed) + "-" + h.slice(0, 6).toUpperCase();
@@ -135,7 +138,7 @@ export async function onRequest(context) {
     ous = ous.map(String).filter(o => /^\d+$/.test(o));
     if (!ous.length) return { protect: [], clear: [] };
     const ph = ous.map(()=>"?").join(",");
-    const protect = (await db.prepare(`SELECT ou,qi,password,title FROM quizzes WHERE ou IN (${ph}) AND qi IS NOT NULL`).bind(...ous).all()).results;
+    const protect = (await db.prepare(`SELECT ou,qi,password,title,gated FROM quizzes WHERE ou IN (${ph}) AND qi IS NOT NULL`).bind(...ous).all()).results;
     const clear = (await db.prepare(`SELECT ou,qi,password FROM pending_clear WHERE ou IN (${ph})`).bind(...ous).all()).results;
     return { protect, clear };
   }
@@ -220,14 +223,14 @@ export async function onRequest(context) {
       const sq = await db.prepare("SELECT start_date FROM bs_quizzes WHERE ou=? AND qi=?").bind(String(ou||""), String(qi||"")).first();
       if (sq && sq.start_date && Date.now() < Date.parse(sq.start_date)) return json({ password: null, reason: "not started", start: sq.start_date }, 403);
       let pw = null, rot = null;
-      if (qi) { const q = await db.prepare("SELECT password FROM quizzes WHERE qi=?").bind(qi).first(); if (q) pw = q.password; }
+      if (qi) { const q = await db.prepare("SELECT password, gated, bs_code FROM quizzes WHERE qi=?").bind(qi).first(); if (q) { pw = q.password; if (Number(q.gated) === 1 && q.bs_code) rot = q.bs_code; } }
       if (!pw && ou) { const c = await db.prepare("SELECT password FROM courses WHERE ou=?").bind(ou).first(); if (c) pw = c.password; }
-      // Rotating code the app actually types (the Sync tab writes the same current code into Brightspace
-      // each cycle). prev covers a type that lands just after the minute ticks over.
-      if (pw) { const b = minuteBucket(); rot = await rotatingPw(pw, b); }
+      // Give the student EXACTLY what is in Brightspace: the code the Sync tab last confirmed writing
+      // (gated quiz) or the quiz's fixed LOCKqz password (protected, not gated). Never a computed code,
+      // so a closed or sleeping Sync tab can never cause a wrong password.
       if (pw) await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,(SELECT student FROM devices WHERE device_id=?),?,?,?,?)")
         .bind(device_id, device_id, lockId, "password_released", JSON.stringify({ verified: v.ok, ip: request.headers.get("CF-Connecting-IP") || null }), now()).run();
-      return json({ password: rot || pw, seed: pw, bucket: minuteBucket(), lockId });
+      return json({ password: rot || pw, lockId });
     }
 
     if (p === "/match" && request.method === "POST") {
@@ -524,9 +527,22 @@ export async function onRequest(context) {
       const ou = String(body.ou||""), qi = String(body.qi||"");
       if (!/^\d+$/.test(ou) || !/^\d+$/.test(qi)) return json({ error:"bad quiz" }, 400);
       if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this course can gate its quizzes." }, 403);
-      const r = await db.prepare("UPDATE quizzes SET gated=? WHERE qi=?").bind(body.on?1:0, qi).run();
-      if (!r.meta.changes) return json({ error:"Protect this quiz first." }, 400);
-      return json({ ou, qi, gated: !!body.on });
+      const cur = await db.prepare("SELECT gated, sa_keep FROM quizzes WHERE qi=?").bind(qi).first();
+      if (!cur) return json({ error:"Protect this quiz first." }, 400);
+      // Accommodation list: recorded once when the gate first starts; kept across Sync-tab reloads.
+      let keep = cur.sa_keep;
+      if (body.on && !(Number(cur.gated) === 1 && keep)) keep = JSON.stringify((Array.isArray(body.keep) ? body.keep : []).map(String).filter(x => /^\d+$/.test(x)).slice(0, 3000));
+      if (!body.on) keep = null;
+      await db.prepare("UPDATE quizzes SET gated=?, sa_keep=?, bs_code=CASE WHEN ?=1 THEN bs_code ELSE NULL END WHERE qi=?").bind(body.on?1:0, keep, body.on?1:0, qi).run();
+      return json({ ou, qi, gated: !!body.on, keep: keep ? JSON.parse(keep) : [] });
+    }
+    // The Sync tab confirms the exact password it just wrote into Brightspace for a gated quiz.
+    if (p === "/rotated" && request.method === "POST") {
+      const ou = String(body.ou||""), qi = String(body.qi||""), code = String(body.code||"");
+      if (!/^\d+$/.test(ou) || !/^\d+$/.test(qi) || !/^LQ-[A-Za-z0-9-]{1,40}$/.test(code)) return json({ error:"bad request" }, 400);
+      if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this course." }, 403);
+      await db.prepare("UPDATE quizzes SET bs_code=? WHERE qi=? AND gated=1").bind(code, qi).run();
+      return json({ ok: true });
     }
     // Current rotating code(s) for quizzes the teacher protects -- the Sync tab writes these into
     // Brightspace each cycle so the live password changes every minute. Returns current + next so a
@@ -605,8 +621,11 @@ export async function onRequest(context) {
         const dev = devClaim.has(l.device_id);
         if (tamp.has(l.device_id) || (dev && !adminEm.has(String(l.student||"").toLowerCase()))) status = "tamper";
         else if (a !== null && a > STALE) {
-          const helperDown = h === null || h > STALE, extDown = e === null || e > STALE;
-          status = helperDown && !extDown ? "helper_killed" : (extDown && !helperDown ? "browser_closed" : "dark");
+          // "helper_killed" needs PROOF: the agent kept reporting after the helper went silent. A wifi
+          // drop silences both -> "dark" (never treated as cheating; access is kept).
+          const helperDown = h === null || h > STALE, extDown = e === null || e > 300000;   // agent beats every 120s
+          const agentAfterHelper = e !== null && (h === null || e < h - 30000);
+          status = helperDown && agentAfterHelper ? "helper_killed" : (extDown && !helperDown ? "browser_closed" : "dark");
         }
         else if (dev) status = "developer";
         return { device_id:l.device_id, student:l.student||null, platform:l.platform||null, status, last_lock:l.last_lock, age_ms:a, verified: Number(l.signed) === 1, ip: l.ip||null };

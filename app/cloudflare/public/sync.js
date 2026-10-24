@@ -169,54 +169,67 @@
       '<div style="margin-top:12px"><a href="' + DASH + '" target="_blank" style="color:#990000;font-weight:700">Open LOCKqz dashboard</a></div>');
 
     // ---- live access gate: only students LOCKqz is actively locking can see the quiz ----
-    // Teacher clicks Start and leaves this tab open. Every 10s we read who is locked (device-signed,
-    // fresh) from LOCKqz and grant Brightspace special access to exactly them; anyone who stops being
-    // locked (killed/uninstalled/tampered/left) is removed within ~10s, and if this tab closes every
-    // grant lapses on its own because each carries a 90s rolling EndDate.
-    var GATES = {};   // qi -> { ou, timer, busy }
-    var GPW = {};   // qi -> last rotating code written to Brightspace (so we only PUT on change)
+    // Professor clicks Start and leaves this tab open. Every 10s we read who is locked (device-signed,
+    // fresh) and grant Brightspace special access to exactly them. Safety rules (24 Oct 2026):
+    //  * special access that existed BEFORE the gate (accommodations) is never changed or removed;
+    //  * a grant lasts until the quiz's own end (not 90s), so a sleeping/closed tab or a student's
+    //    wifi blip never locks an honest student out mid-quiz; grants are removed only on positive
+    //    evidence (tamper, LOCKqz stopped, submitted/left);
+    //  * no IP lock (IPv6 / campus NAT pools would reject honest students);
+    //  * the password is changed only when its code changes, then confirmed to LOCKqz, so the app
+    //    always hands out exactly what Brightspace holds.
+    var GATES = {};   // qi -> { ou, timer, busy, keep:{uid:true}, end }
+    var GPW = {};     // qi -> last code written to Brightspace
+    var REVOKE = { tamper: 1, helper_killed: 1, done: 1 };
     async function gateStep(ou, qi) {
-      var end = new Date(Date.now() + 90000).toISOString();
-      var live = await lqget("/live?quiz=" + ou + "-" + qi);
-      var want = {}, ips = {};
-      (live.rows || []).forEach(function (r) { if (r.eligible && r.user_id) { want[String(r.user_id)] = true; if (r.ip) ips[r.ip] = true; } });
-      var have = await saList(ou, qi); var haveSet = {};
+      var g = GATES[qi], live = await lqget("/live?quiz=" + ou + "-" + qi);
+      if (!live || !live.rows) throw new Error("LOCKqz not reachable");
+      var want = {}, revoke = {};
+      live.rows.forEach(function (r) { if (!r.user_id) return; var u = String(r.user_id);
+        if (r.eligible) want[u] = true; else if (REVOKE[r.status]) revoke[u] = true; });
+      var have = await saList(ou, qi), haveSet = {};
       (Array.isArray(have) ? have : []).forEach(function (x) { if (x && x.UserId != null) haveSet[String(x.UserId)] = true; });
-      for (var uid in want) { try { await saPut(ou, qi, uid, end); } catch (e) {} }          // grant / refresh EndDate
-      for (var u2 in haveSet) { if (!want[u2]) { try { await saDel(ou, qi, u2); } catch (e) {} } } // revoke those no longer locked
-      // Rotating password + IP lock, written straight onto the quiz. The app fetches the same code live
-      // and types it, so what a student copies out of the field dies within a minute.
+      for (var uid in want) { if (!g.keep[uid] && !haveSet[uid]) { try { await saPut(ou, qi, uid, g.end); } catch (e) {} } }
+      for (var u2 in revoke) { if (haveSet[u2] && !g.keep[u2] && !want[u2]) { try { await saDel(ou, qi, u2); } catch (e) {} } }
+      if (g.nextRot && Date.now() < g.nextRot) return Object.keys(want).length;   // code changes every 5 min
       try {
         var rot = await lqpost("/rotating", { qis: [qi] });
         var code = rot && rot.codes && rot.codes[qi] ? rot.codes[qi].cur : null;
-        var ranges = Object.keys(ips).map(function (ip) { return { IPRangeStart: ip, IPRangeEnd: ip }; });
-        if (code && (GPW[qi] !== code || Object.keys(ips).length)) {
-          await writePw(ou, qi, code, { AllowOnlyUsersWithSpecialAccess: true, RestrictIPAddressRange: ranges.length ? ranges : null });
+        if (rot && rot.codes && rot.codes[qi]) g.nextRot = (rot.codes[qi].bucket + 1) * 300000 + 2000;
+        if (code && GPW[qi] !== code) {
+          await writePw(ou, qi, code, { AllowOnlyUsersWithSpecialAccess: true });
           GPW[qi] = code;
+          await lqpost("/rotated", { ou: ou, qi: qi, code: code });
         }
-      } catch (e) {}
+      } catch (e) { g.nextRot = 0; }
       return Object.keys(want).length;
     }
-    async function startGate(ou, qi, pw, st) {
+    async function startGate(ou, qi, pw, st, resume) {
       st.textContent = "starting..."; st.style.color = "#666";
-      await writePw(ou, qi, pw, { AllowOnlyUsersWithSpecialAccess: true });   // hide quiz from everyone
-      await lq("/gate", { ou: ou, qi: qi, on: true });
+      var cur = await get(quizUrl(ou, qi));
+      var before = (await saList(ou, qi)).map(function (x) { return String(x.UserId); });
+      var g = await lq("/gate", { ou: ou, qi: qi, on: true, keep: before });   // server keeps the FIRST list
+      var keep = {}; (g.keep || []).forEach(function (u) { keep[String(u)] = true; });
+      var end = cur.EndDate || new Date(Date.now() + 12 * 3600000).toISOString();
+      if (!resume) await writePw(ou, qi, pw, { AllowOnlyUsersWithSpecialAccess: true });   // hide quiz from everyone else
       var tick = async function () {
-        if (GATES[qi].busy) return; GATES[qi].busy = true;
+        if (!GATES[qi] || GATES[qi].busy) return; GATES[qi].busy = true;
         try { var n = await gateStep(ou, qi); st.textContent = "LIVE — " + n + " locked in"; st.style.color = "#1a7f37"; }
-        catch (e) { st.textContent = "gate error: " + e.message.slice(0, 50); st.style.color = "#990000"; }
-        GATES[qi].busy = false;
+        catch (e) { st.textContent = "gate error: " + e.message.slice(0, 50) + " (retrying)"; st.style.color = "#990000"; }
+        if (GATES[qi]) GATES[qi].busy = false;
       };
-      GATES[qi] = { ou: ou, busy: false, timer: setInterval(tick, 10000) };
+      GATES[qi] = { ou: ou, busy: false, keep: keep, end: end, timer: setInterval(tick, 10000) };
       tick();
     }
     async function stopGate(ou, qi, st) {
-      if (GATES[qi]) { clearInterval(GATES[qi].timer); delete GATES[qi]; }
+      var g = GATES[qi]; if (g) { clearInterval(g.timer); delete GATES[qi]; }
       st.textContent = "stopping..."; st.style.color = "#666";
       try {
+        var keep = (g && g.keep) || {};
         var have = await saList(ou, qi);
-        for (var i = 0; i < (have || []).length; i++) { try { await saDel(ou, qi, have[i].UserId); } catch (e) {} }
+        for (var i = 0; i < (have || []).length; i++) { var u = String(have[i].UserId); if (!keep[u]) { try { await saDel(ou, qi, u); } catch (e) {} } }
         await writePw(ou, qi, pw_of(qi), { AllowOnlyUsersWithSpecialAccess: false, RestrictIPAddressRange: null });   // quiz open again (password still applies)
+        delete GPW[qi];
       } catch (e) {}
       await lq("/gate", { ou: ou, qi: qi, on: false });
       st.textContent = "off"; st.style.color = "#888";
@@ -251,6 +264,13 @@
         else { await stopGate(ou, qi, st); gb.textContent = "Start gate"; }
         gb.disabled = false;
       };
+    });
+    // Resume any gate that was on before this tab was (re)opened, so a reload never strands a class.
+    (state.protect || []).forEach(function (p) {
+      if (Number(p.gated) !== 1) return;
+      var gb = B.querySelector('[data-gate="' + p.ou + ":" + p.qi + '"]'), st = B.querySelector('[data-gst="' + p.qi + '"]');
+      if (!gb || !st || GATES[String(p.qi)]) return;
+      startGate(String(p.ou), String(p.qi), pw_of(p.qi), st, true).then(function () { gb.textContent = "Stop gate"; }).catch(function (e) { st.textContent = "resume failed: " + e.message.slice(0, 40); });
     });
   } catch (e) {
     say('<b style="color:#990000">' + esc(e.message) + "</b>");

@@ -37,7 +37,7 @@ WEB_SEARCH = "https://www.google.com/search?udm=14&q={searchTerms}"
 def chromium_policy(domain):
     p = {MARK: True,
          "GenAiDefaultSettings": 2, "GeminiSettings": 1, "BuiltInAIAPIsEnabled": False,
-         "DnsOverHttpsMode": "off",
+         "DnsOverHttpsMode": "off", "ProxyMode": "direct",   # a proxy would resolve AI sites past hosts
          "URLBlocklist": SEARCH_BLOCK, "URLAllowlist": SEARCH_ALLOW,
          "DefaultSearchProviderEnabled": True, "DefaultSearchProviderName": "Google (Web)",
          "DefaultSearchProviderSearchURL": WEB_SEARCH,
@@ -65,6 +65,7 @@ def firefox_policy():
            "https://www.ecosia.org/search*", "https://www.startpage.com/*"]
     return {MARK: True, "EnterprisePoliciesEnabled": True,
             "DNSOverHTTPS": {"Enabled": False, "Locked": True},
+            "Proxy": {"Mode": "none", "Locked": True},
             "WebsiteFilter": {"Block": blk, "Exceptions": exc},
             "Preferences": {"browser.ml.chat.enabled": {"Value": False, "Status": "locked"},
                             "browser.ml.enable": {"Value": False, "Status": "locked"},

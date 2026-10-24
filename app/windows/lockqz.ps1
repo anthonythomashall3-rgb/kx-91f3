@@ -36,8 +36,8 @@ function Do-Lock {
   if (-not (Test-Path $Backup)) { Copy-Item $Hosts $Backup -Force }
   $lines = @($MarkStart)
   foreach ($d in Get-Domains) {
-    $lines += "0.0.0.0 $d"
-    if ($d -like "*.*" -and $d -notlike "www.*") { $lines += "0.0.0.0 www.$d" }
+    $lines += "0.0.0.0 $d"; $lines += ":: $d"
+    if ($d -like "*.*" -and $d -notlike "www.*") { $lines += "0.0.0.0 www.$d"; $lines += ":: www.$d" }
   }
   $lines += $MarkEnd
   Add-Content -Path $Hosts -Value ("`r`n" + ($lines -join "`r`n"))

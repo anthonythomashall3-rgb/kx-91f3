@@ -29,6 +29,8 @@ prv = [B + "/d2l/lms/quizzing/user/quiz_summary.d2l?qi=456&ou=123&isprv=1",
 edit = [B + "/d2l/lms/quizzing/admin/modify/quiz_newedit_properties.d2l?ou=123&qi=456"]
 ok("TA/staff Preview of a quiz locks too") if all(A.is_quiz(u) for u in prv) else bad("a preview page did not lock")
 ok("quiz edit page (no preview) never locks") if not any(A.is_quiz(u) for u in edit) else bad("an edit page locked")
+ok("real email accepted") if A.EMAIL_RE.match("you@usc.edu") else bad("email rejected")
+ok("a name is not an email") if not A.EMAIL_RE.match("anthony") else bad("name accepted as email")
 
 print("T2 search backstop: AI-answer searches are sent to Google Web; clean ones are left alone")
 r = A.rewrite_search

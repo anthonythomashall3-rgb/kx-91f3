@@ -18,7 +18,7 @@ import hashlib, json, os, re, subprocess, threading, time, urllib.request, urlli
 SYS_CONF = "/Library/Application Support/LOCKqz/config.json"
 USER_DIR = os.path.expanduser("~/Library/Application Support/LOCKqz")
 USER_CONF = os.path.join(USER_DIR, "student.json")
-POLL, POLL_LOCKED, GRACE, BEAT = 2, 1, 30, 45
+POLL, POLL_LOCKED, GRACE, BEAT = 2, 1, 30, 120   # agent beat only proves the agent runs; 120s saves Cloudflare requests
 DEV_KEY = os.path.join(USER_DIR, "developer.key")
 DEV_KEY_HASH = "4695a520432e105e967dd2703366c24c039fe0a850fe35db03b73b6b9506aecd"
 
@@ -152,11 +152,18 @@ def dialog(text, title="LOCKqz"):
         except Exception: pass
     threading.Thread(target=run, daemon=True).start()
 
+EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 def ask_name():
-    try:
-        s = osa('text returned of (display dialog "LOCKqz setup - enter your school email (the one Brightspace uses, e.g. you@usc.edu):" default answer "" with title "LOCKqz" buttons {"OK"} default button 1)', "AppleScript")
-        return s.strip() or None
-    except Exception: return None
+    # Must be a real email: the professor's roster and the quiz gate match students by it.
+    msg = "LOCKqz setup - enter your school email (the one Brightspace uses, e.g. you@usc.edu):"
+    for _ in range(3):
+        try:
+            s = osa('text returned of (display dialog %s default answer "" with title "LOCKqz" buttons {"OK"} default button 1)' % json.dumps(msg), "AppleScript")
+        except Exception: return None
+        s = (s or "").strip().lower()
+        if EMAIL_RE.match(s): return s
+        msg = "That is not an email address. Enter your school email (e.g. you@usc.edu):"
+    return None
 
 def clipboard(text):
     try: subprocess.run(["pbcopy"], input=text.encode(), timeout=5)
@@ -190,7 +197,7 @@ class Agent:
         try:
             # Cloudflare blocks the default "Python-urllib" user agent (403) — send our own.
             req = urllib.request.Request(self.api + path, data=json.dumps(body).encode(),
-                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/0.2.0 (macOS)"})
+                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/0.3.2 (macOS)"})
             return json.loads(urllib.request.urlopen(req, timeout=8).read())
         except Exception as e:
             log("api %s failed: %s" % (path, e)); return None
@@ -209,6 +216,7 @@ class Agent:
             except Exception as e: log("password via helper failed: %s" % e)
             if pw: break
             time.sleep(2)
+        self.pw, self.pw_checked = pw, time.time()
         if pw and developer_mode():
             clipboard(pw)
             dialog("Developer mode: AI stays ON for you.\n\nQuiz password:  %s\n(copied to your clipboard)" % pw); return
@@ -216,7 +224,7 @@ class Agent:
             clipboard(pw)
             dialog("AI is locked for this quiz.\n\nQuiz password:  %s\n(copied to your clipboard — paste it into Brightspace)" % pw)
         else:
-            dialog("AI is locked for this quiz.")
+            dialog("AI is locked for this quiz.\n\nIf it needs a password, LOCKqz will show it here as soon as the quiz opens.")
 
     def end(self, reason):
         try: self.helper("/unlock", {"quiz_id": self.quiz})
@@ -247,6 +255,27 @@ class Agent:
             self.missing_since = self.missing_since or time.time()
             if time.time() - self.missing_since > GRACE:
                 self.end("browser_closed" if not tabs else "quiz_tab_closed"); return
+        # Gated quizzes change password every 5 min. Until the attempt starts (still on the quiz's
+        # start page, no "/attempt/" in the URL), re-check and hand over a new one if it changed.
+        if quiz_urls and "/attempt/" not in quiz_urls[0] and time.time() - getattr(self, "pw_checked", 0) > 15:
+            self.pw_checked = time.time()
+            try:
+                pw2 = self.helper("/password", {"url": self.url}).get("password")
+                if pw2 and pw2 != getattr(self, "pw", None):
+                    first = not getattr(self, "pw", None)
+                    self.pw = pw2; clipboard(pw2)
+                    dialog(("Quiz password:  %s" if first else "The quiz password changed.\n\nNew password:  %s") % pw2 + "\n(copied to your clipboard)")
+            except Exception as e: log("password refresh failed: %s" % e)
+        # Self-heal: if the helper is no longer locked while the quiz is still open (3-hour safety cap
+        # on a long exam, helper restarted, someone unloaded it), lock again right away.
+        if time.time() - getattr(self, "last_check", 0) > 10:
+            self.last_check = time.time()
+            try:
+                st = self.helper("/status").get("state")
+                if st not in ("locked", "developer"):
+                    log("helper not locked during an open quiz (%s) — re-locking" % st)
+                    self.helper("/lock", {"quiz_id": self.quiz, "student": self.student, "url": self.url})
+            except Exception as e: log("helper check failed: %s" % e)
         for (app, wi, ti, u) in ([] if dev else tabs):
             new = rewrite_search(u)
             if new and wi >= 0: set_tab_url(app, wi, ti, new)

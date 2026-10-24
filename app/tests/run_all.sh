@@ -23,7 +23,8 @@ else
   echo ""; echo "######## 12/14 Windows device signing ########"; echo "  skipped: PowerShell (pwsh) not installed here; runs on Windows CI"
 fi
 run "13/14 Access gate + teacher self-verify"               node   test_gate.mjs
-run "14/14 Signed self-update (real daemon, mock release site)" bash test_update.sh
+run "14/15 Signed self-update (real daemon, mock release site)" bash test_update.sh
+run "15/15 Professor Sync tab + quiz gate (real sync.js, simulated Brightspace)" node --no-warnings test_sync_gate.mjs
 
 echo ""
 echo "================================================"

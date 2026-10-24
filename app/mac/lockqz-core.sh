@@ -15,8 +15,8 @@ build_block_from() {
   local d
   while read -r d; do
     [ -z "$d" ] && continue
-    echo "0.0.0.0 $d"
-    case "$d" in *.*) [[ "$d" == www.* ]] || echo "0.0.0.0 www.$d";; esac
+    echo "0.0.0.0 $d"; echo ":: $d"            # IPv4 AND IPv6, so an AAAA lookup can't reach it
+    case "$d" in *.*) [[ "$d" == www.* ]] || { echo "0.0.0.0 www.$d"; echo ":: www.$d"; };; esac
   done < <(domains_from "$1")
   echo "$MARK_END"
 }
@@ -43,3 +43,6 @@ hosts_remove_block() {
   # collapse trailing blank lines to a single newline
   perl -0pi -e 's/\n+\z/\n/' "$hosts" 2>/dev/null || true
 }
+
+# app_re <name> -> regex matching ONLY a process launched from "<name>.app" (used with pkill -f).
+app_re() { printf '/%s\\.app/Contents/MacOS/' "$(printf '%s' "$1" | sed 's/[][\\.^$*+?(){}|]/\\&/g')"; }

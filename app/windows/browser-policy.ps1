@@ -43,6 +43,7 @@ function Do-Lock {
     Set-Val $root "GeminiSettings" 1
     Set-Val $root "BuiltInAIAPIsEnabled" 0
     Set-Val $root "DnsOverHttpsMode" "off" "String"
+    Set-Val $root "ProxyMode" "direct" "String"   # a proxy would resolve AI sites remotely, past the hosts block
     Set-Val $root "DefaultSearchProviderEnabled" 1
     Set-Val $root "DefaultSearchProviderName" "Google (Web)" "String"
     Set-Val $root "DefaultSearchProviderSearchURL" "https://www.google.com/search?udm=14&q={searchTerms}" "String"
@@ -60,6 +61,8 @@ function Do-Lock {
   Set-Val $Firefox $Mark 1
   Set-Val "$Firefox\DNSOverHTTPS" "Enabled" 0
   Set-Val "$Firefox\DNSOverHTTPS" "Locked" 1
+  Set-Val "$Firefox\Proxy" "Mode" "none" "String"
+  Set-Val "$Firefox\Proxy" "Locked" 1
   Set-List "$Firefox\WebsiteFilter\Block" $FfBlock
   Set-List "$Firefox\WebsiteFilter\Exceptions" $FfAllow
   Set-Val "$Firefox\Preferences" "browser.ml.chat.enabled" "false" "String"
@@ -72,7 +75,7 @@ function Do-Lock {
 function Do-Unlock {
   foreach ($root in $Chromium.Keys) {
     if ((Get-ItemProperty -Path $root).$Mark -eq 1) {
-      foreach ($n in @($Mark,"GenAiDefaultSettings","GeminiSettings","BuiltInAIAPIsEnabled","DnsOverHttpsMode",
+      foreach ($n in @($Mark,"GenAiDefaultSettings","GeminiSettings","BuiltInAIAPIsEnabled","DnsOverHttpsMode","ProxyMode",
                        "DefaultSearchProviderEnabled","DefaultSearchProviderName","DefaultSearchProviderSearchURL",
                        "DefaultSearchProviderSuggestURL","HubsSidebarEnabled","CopilotCDPPageContext",
                        "EdgeEntraCopilotPageContext","ComposeInlineEnabled","Microsoft365CopilotChatIconEnabled",
@@ -81,7 +84,7 @@ function Do-Unlock {
     }
   }
   if ((Get-ItemProperty -Path $Firefox).$Mark -eq 1) {
-    Remove-Item -Path "$Firefox\DNSOverHTTPS","$Firefox\WebsiteFilter","$Firefox\Preferences" -Recurse -Force
+    Remove-Item -Path "$Firefox\DNSOverHTTPS","$Firefox\Proxy","$Firefox\WebsiteFilter","$Firefox\Preferences" -Recurse -Force
     Remove-ItemProperty -Path $Firefox -Name $Mark
   }
   $wc = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot"

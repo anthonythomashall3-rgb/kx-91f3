@@ -20,7 +20,7 @@ if ($Api -and -not $Api.EndsWith("/api")) { $Api += "/api" }   # accept a bare s
 $Device= if ($Conf.device_id) { $Conf.device_id } else { "unknown" }
 $UserDir = "$env:APPDATA\LOCKqz"; New-Item -ItemType Directory -Force -Path $UserDir | Out-Null
 $StudentFile = "$UserDir\student.json"
-$Poll = 2; $PollLocked = 1; $Grace = 30; $Beat = 45
+$Poll = 2; $PollLocked = 1; $Grace = 30; $Beat = 120
 $BrowserClasses = @("Chrome_WidgetWin_1","MozillaWindowClass")
 
 function Log($m) { Add-Content -Path "$UserDir\agent.log" -Value ("{0} {1}" -f (Get-Date -Format s), $m) }
@@ -74,14 +74,20 @@ function Show-Message($text) {
 $Student = $null
 if (Test-Path $StudentFile) { $Student = (Get-Content $StudentFile -Raw | ConvertFrom-Json).student }
 if (-not $Student) {
-  $Student = [Microsoft.VisualBasic.Interaction]::InputBox("LOCKqz setup - enter your school email (the one Brightspace uses, e.g. you@usc.edu):", "LOCKqz", "")
+  # Must be a real email: the professor's roster and the quiz gate match students by it.
+  $msg = "LOCKqz setup - enter your school email (the one Brightspace uses, e.g. you@usc.edu):"
+  for ($t = 0; $t -lt 3; $t++) {
+    $Student = ([Microsoft.VisualBasic.Interaction]::InputBox($msg, "LOCKqz", "")).Trim().ToLower()
+    if ($Student -match '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$') { break }
+    $Student = $null; $msg = "That is not an email address. Enter your school email (e.g. you@usc.edu):"
+  }
   if ($Student) { @{ student = $Student } | ConvertTo-Json | Set-Content $StudentFile -Encoding UTF8 }
 }
 try { Helper "/student" @{ student = $Student } | Out-Null } catch { Log "helper not reachable yet" }
 Log "running (device $Device, student $Student)"
 
 # ---- main loop ----
-$Locked = $false; $Quiz = $null; $QuizTitle = $null; $MissingSince = $null; $LastBeat = Get-Date
+$Locked = $false; $Quiz = $null; $QuizTitle = $null; $QuizUrl = $null; $LastPw = $null; $PwChecked = Get-Date; $MissingSince = $null; $LastBeat = Get-Date; $LastCheck = Get-Date
 while ($true) {
   try {
     $wins = Get-BrowserWindows
@@ -93,20 +99,40 @@ while ($true) {
         $QuizTitle = ($quizWin.Title -replace " - (Google Chrome|Microsoft. Edge|Brave|Mozilla Firefox).*$","")
         $r = $null; try { $r = Helper "/lock" @{ quiz_id = $Quiz; student = $Student; url = $quizWin.Url } } catch {}
         if ($r -and $r.ok) {
+          $QuizUrl = $quizWin.Url; $LastCheck = Get-Date
           $Locked = $true; $MissingSince = $null; $LastBeat = Get-Date; Log "LOCKED $Quiz"
           $pw = $null
           for ($i = 0; ($i -lt 3) -and (-not $pw); $i++) {
             try { $pw = (Helper "/password" @{ url = $quizWin.Url }).password } catch { Log "password via helper failed: $_" }
             if (-not $pw) { Start-Sleep -Seconds 2 }
           }
+          $LastPw = $pw; $PwChecked = Get-Date
           if ($pw) { Set-Clipboard -Value $pw; Show-Message "AI is locked for this quiz.`n`nQuiz password:  $pw`n(copied to your clipboard - paste it into Brightspace)" }
-          else { Show-Message "AI is locked for this quiz." }
+          else { Show-Message "AI is locked for this quiz.`n`nIf it needs a password, LOCKqz will show it here as soon as the quiz opens." }
         } else { Show-Message "LOCKqz could not lock AI for this quiz. Is the LOCKqz app installed and running?"; Start-Sleep -Seconds 30 }
       }
     } else {
       $present = ($null -ne $quizWin) -or (($wins | Where-Object { $_.Tabs -contains $QuizTitle }).Count -gt 0)
       $reason = $null
-      if ($present) { $MissingSince = $null }
+      if ($present) {
+        $MissingSince = $null
+        # Gated quizzes change password every 5 min: until the attempt starts, re-check and hand over a new one.
+        if ($quizWin -and ($quizWin.Url -notmatch "/attempt/") -and (((Get-Date) - $PwChecked).TotalSeconds -gt 15)) {
+          $PwChecked = Get-Date
+          try {
+            $pw2 = (Helper "/password" @{ url = $QuizUrl }).password
+            if ($pw2 -and ($pw2 -ne $LastPw)) { $hdr = if ($LastPw) { "The quiz password changed.`n`nNew password:  " } else { "Quiz password:  " }; $LastPw = $pw2; Set-Clipboard -Value $pw2; Show-Message ($hdr + $pw2 + "`n(copied to your clipboard)") }
+          } catch { Log "password refresh failed: $_" }
+        }
+        # Self-heal: helper no longer locked while the quiz is open (3-hour cap, restart) -> lock again.
+        if (((Get-Date) - $LastCheck).TotalSeconds -gt 10) {
+          $LastCheck = Get-Date
+          try {
+            $hs = (Helper "/status" $null).state
+            if (($hs -ne "locked") -and ($hs -ne "developer")) { Log "helper not locked during an open quiz ($hs) - re-locking"; Helper "/lock" @{ quiz_id = $Quiz; student = $Student; url = $QuizUrl } | Out-Null }
+          } catch { Log "helper check failed: $_" }
+        }
+      }
       elseif ($leaving) { $reason = "submitted" }
       else {
         if (-not $MissingSince) { $MissingSince = Get-Date }

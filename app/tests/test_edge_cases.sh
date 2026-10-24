@@ -65,6 +65,14 @@ B="$(build_block_from "$BL")"
 chk "chatgpt" 'echo "$B" | grep -q "0.0.0.0 chatgpt.com"'
 chk "claude"  'echo "$B" | grep -q "0.0.0.0 claude.ai"'
 chk "gemini"  'echo "$B" | grep -q "0.0.0.0 gemini.google.com"'
+chk "IPv6 too (AAAA lookups blocked)" 'echo "$B" | grep -q "^:: chatgpt.com$"'
+
+echo "E9 closing AI apps matches ONLY that app (never a substring of some other process)"
+chk "Dia app matched"          'echo "/Applications/Dia.app/Contents/MacOS/Dia" | grep -qiE "$(app_re Dia)"'
+chk "mediaremoted NOT matched" '! echo "/usr/libexec/mediaremoted" | grep -qiE "$(app_re Dia)"'
+chk "browser helper with Media flags NOT matched" '! echo "/Applications/Google Chrome.app/Contents/Frameworks/x/Google Chrome Helper --enable-features=MediaFoundation,Dia" | grep -qiE "$(app_re Dia)"'
+chk "app with a space matched" 'echo "/Applications/LM Studio.app/Contents/MacOS/LM Studio" | grep -qiE "$(app_re "LM Studio")"'
+chk "Opera does not hit CoreOperations" '! echo "/System/Library/CoreServices/CoreOperations.app/x" | grep -qiE "$(app_re Opera)"'
 
 echo ""
 echo "RESULT: $PASS passed, $FAIL failed"

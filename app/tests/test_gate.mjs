@@ -61,6 +61,7 @@ function makeDb(oldSchema) {
   }
   sqlite.exec(schema);
   if (oldSchema) { sqlite.exec(readFileSync(join(CF, "migrate_010_gate_verify.sql"), "utf8")); sqlite.exec(readFileSync(join(CF, "migrate_011_lock_ip.sql"), "utf8")); }
+  for (const m of ["migrate_012_bs_code.sql", "migrate_013_sa_keep.sql"]) sqlite.exec(readFileSync(join(CF, m), "utf8"));
   return sqlite;
 }
 
@@ -213,13 +214,27 @@ async function suite(label, oldSchema) {
   const DEV9 = "mac-9999", K9 = randomBytes(32).toString("hex");
   await call(env, "/register", { device_id: DEV9, key: K9, student: "al@usc.edu", platform: "mac-15" });
   await call(env, "/report", { event: "lock", quiz_id: LOCK_ID, student: "al@usc.edu" }, { key: K9, device: DEV9 });
-  r = await call(env, "/password", { url: QUIZ_URL, device_id: DEV9 }, { key: K9, device: DEV9 });
   const seed = sqlite.prepare("SELECT password FROM quizzes WHERE qi=?").get(QI).password;
-  check("password released is a rotating code (seed + minute hash), not the bare seed", r.status === 200 && r.data?.password && r.data.password.startsWith(seed + "-") && r.data.password !== seed, JSON.stringify(r.data));
-  check("released code carries its seed + bucket", r.data?.seed === seed && Number.isFinite(r.data?.bucket), JSON.stringify(r.data));
+  r = await call(env, "/gate", { ou: OU, qi: QI, on: false }, { teacher: TOK });
+  r = await call(env, "/password", { url: QUIZ_URL, device_id: DEV9 }, { key: K9, device: DEV9 });
+  check("protected, NOT gated -> the fixed password (exactly what Brightspace holds)", r.status === 200 && r.data?.password === seed, JSON.stringify(r.data));
+  check("the seed is never sent separately to the device", !("seed" in (r.data || {})), JSON.stringify(r.data));
+  r = await call(env, "/gate", { ou: OU, qi: QI, on: true, keep: ["4100"] }, { teacher: TOK });
+  check("gate on records the accommodation list", JSON.stringify(r.data?.keep) === JSON.stringify(["4100"]), JSON.stringify(r.data));
+  r = await call(env, "/password", { url: QUIZ_URL, device_id: DEV9 }, { key: K9, device: DEV9 });
+  check("gated, Sync has not confirmed a code yet -> the fixed password", r.data?.password === seed, JSON.stringify(r.data));
   r = await call(env, "/rotating", { qis: [QI] }, { teacher: TOK });
-  check("/rotating gives cur and next, and cur matches the released code", r.data?.codes?.[QI]?.cur === (seed + "-" + /* same minute */ "" ) ? false : true);
-  check("/rotating cur != next (code changes each minute)", r.data?.codes?.[QI]?.cur !== r.data?.codes?.[QI]?.next, JSON.stringify(r.data?.codes?.[QI]));
+  const cur9 = r.data?.codes?.[QI]?.cur;
+  check("/rotating code differs from next", cur9 && cur9 !== r.data?.codes?.[QI]?.next, JSON.stringify(r.data?.codes?.[QI]));
+  r = await call(env, "/rotated", { ou: OU, qi: QI, code: cur9 }, { teacher: TOK });
+  check("Sync confirms the code it wrote", r.status === 200, JSON.stringify(r.data));
+  r = await call(env, "/password", { url: QUIZ_URL, device_id: DEV9 }, { key: K9, device: DEV9 });
+  check("student gets EXACTLY the confirmed code (still right if the Sync tab then closes)", r.data?.password === cur9, JSON.stringify(r.data));
+  r = await call(env, "/rotated", { ou: OU, qi: QI, code: "LQ-EVIL" }, { teacher: STOK });
+  check("a non-professor cannot set the code", r.status === 403, `got ${r.status}`);
+  r = await call(env, "/gate", { ou: OU, qi: QI, on: true, keep: ["999"] }, { teacher: TOK });
+  check("restarting the gate (tab reload) keeps the FIRST accommodation list", JSON.stringify(r.data?.keep) === JSON.stringify(["4100"]), JSON.stringify(r.data));
+  check("restarting the gate keeps the confirmed code", sqlite.prepare("SELECT bs_code FROM quizzes WHERE qi=?").get(QI).bs_code === cur9);
   r = await getc(env, "/live?quiz=" + LOCK_ID, { teacher: TOK });
   const row9 = (r.data?.rows || []).find(x => x.device_id === DEV9);
   check("/live row carries the locked device's IP field", row9 && ("ip" in row9), JSON.stringify(row9));
