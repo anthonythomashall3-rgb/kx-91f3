@@ -4,46 +4,77 @@
 <title>LOCKqz</title>
 <style>
   :root { --usc:#990000; }
-  html,body{height:100%} body{margin:0;display:grid;place-items:center;font:16px -apple-system,Segoe UI,sans-serif;background:#fafafa;color:#111}
-  .card{text-align:center;max-width:420px;padding:24px}
-  h1{color:var(--usc);font-size:42px;margin:0 0 28px;letter-spacing:-1px}
-  .step{margin:0 0 22px}
-  .n{display:inline-block;width:22px;height:22px;line-height:22px;border-radius:50%;background:var(--usc);color:#fff;font-weight:700;font-size:13px;margin-bottom:10px}
-  a.btn{display:inline-block;background:var(--usc);color:#fff;text-decoration:none;padding:14px 30px;border-radius:10px;font-weight:700;font-size:17px}
-  a.btn.ghost{background:#fff;color:var(--usc);border:2px solid var(--usc);padding:12px 28px}
-  small{display:block;margin-top:8px;color:#777}
-  .alt{margin-top:18px;font-size:13px;color:#777}
-  .alt code{display:block;margin-top:6px;background:#f1f1f1;border:1px solid #e3e3e3;border-radius:8px;padding:9px 10px;font-size:12.5px;color:#222;word-break:break-all;user-select:all;cursor:pointer}
-  .alt code:active{background:#e8e8e8}
-  footer{margin-top:18px;font-size:13px}
+  html,body{min-height:100%} body{margin:0;display:grid;place-items:center;font:16px -apple-system,Segoe UI,sans-serif;background:#fafafa;color:#111}
+  .card{text-align:center;max-width:460px;padding:24px 20px 32px;box-sizing:border-box;width:100%}
+  h1{color:var(--usc);font-size:42px;margin:0 0 6px;letter-spacing:-1px}
+  .tag{color:#777;font-size:14px;margin:0 0 26px}
+  .lead{font-weight:700;font-size:15px;margin:0 0 8px}
+  .cmd{display:flex;align-items:stretch;gap:0;border:1px solid #ddd;border-radius:10px;overflow:hidden;background:#fff}
+  .cmd code{flex:1;padding:13px 14px;font:13px ui-monospace,Menlo,Consolas,monospace;color:#222;text-align:left;word-break:break-all;user-select:all;background:#f6f6f6}
+  .cmd button{border:0;border-left:1px solid #ddd;background:var(--usc);color:#fff;font-weight:700;font-size:13px;padding:0 16px;cursor:pointer;white-space:nowrap}
+  .cmd button:active{opacity:.85}
+  .hint{color:#777;font-size:13px;margin:8px 0 0}
+  .or{margin:26px 0 0;border-top:1px solid #eee;padding-top:20px}
+  a.btn{display:inline-block;background:#fff;color:var(--usc);border:2px solid var(--usc);text-decoration:none;padding:11px 26px;border-radius:10px;font-weight:700;font-size:15px}
+  .warn{color:#777;font-size:12.5px;margin:9px 0 0;line-height:1.5}
+  footer{margin-top:24px;font-size:13px}
   footer a{color:#777}
+  .none{color:#777}
 </style></head>
 <body>
   <div class="card">
     <h1>LOCKqz</h1>
+    <p class="tag" id="os"></p>
 
-    <div class="step">
-      <a class="btn" id="dl" href="#">Download</a>
-      <small id="os"></small>
-      <div class="alt" id="alt" hidden>Or paste this in <span id="term"></span> (no security prompt):
-        <code id="cmd" title="Click to copy"></code></div>
+    <div id="install" hidden>
+      <p class="lead">Install in one step — no security warning:</p>
+      <p class="hint" id="how"></p>
+      <div class="cmd"><code id="cmd"></code><button id="copy" type="button">Copy</button></div>
+      <p class="hint" id="pw"></p>
+
+      <div class="or">
+        <a class="btn" id="dl" href="#">Or download the installer</a>
+        <p class="warn" id="warn"></p>
+      </div>
     </div>
+
+    <p class="none" id="nope" hidden>Open this page on the Mac or Windows computer you take quizzes on.</p>
 
     <footer><a href="/privacy.html">Privacy</a></footer>
   </div>
 <script>
-  var ua = navigator.userAgent, dl = document.getElementById("dl"), os = document.getElementById("os");
+  var ua = navigator.userAgent;
   var ipad = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
   var win = /Windows/.test(ua) && !/Windows Phone/.test(ua);
   var mac = /Macintosh|Mac OS X/.test(ua) && !ipad && !/iPhone|iPad|iPod/.test(ua);
-  var alt = document.getElementById("alt"), term = document.getElementById("term"), cmd = document.getElementById("cmd");
   var site = location.origin;
-  if (win) { dl.href = "/download/lockqz-win.exe"; os.textContent = "Windows"; term.textContent = "PowerShell (Run as administrator)"; cmd.textContent = "irm " + site + "/install.ps1 | iex"; alt.hidden = false; }
-  else if (mac) { dl.href = "/download/lockqz-mac.pkg"; os.textContent = "macOS"; term.textContent = "Terminal"; cmd.textContent = "curl -fsSL " + site + "/install.sh | sudo bash"; alt.hidden = false; }
-  else { dl.removeAttribute("href"); dl.style.opacity = .5; dl.style.pointerEvents = "none"; os.textContent = "Use a Mac or Windows computer"; }
-  cmd.onclick = function () {
-    var t = cmd.textContent;
-    (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { cmd.title = "Copied"; }, function () {});
-  };
+  var $ = function (id) { return document.getElementById(id); };
+
+  if (mac || win) {
+    $("install").hidden = false;
+    if (mac) {
+      $("os").textContent = "for macOS";
+      $("how").textContent = "Open Terminal (press ⌘+Space, type Terminal, press Return), paste this, press Return:";
+      $("cmd").textContent = "curl -fsSL " + site + "/install.sh | sudo bash";
+      $("pw").textContent = "It asks for your Mac password once (typing stays hidden) — that is macOS, not us.";
+      $("dl").href = "/download/lockqz-mac.pkg";
+      $("warn").textContent = "If macOS says “unidentified developer”: right-click the downloaded file → Open → Open. The command above skips this.";
+    } else {
+      $("os").textContent = "for Windows";
+      $("how").textContent = "Open PowerShell as administrator (press Start, type PowerShell, right-click it → Run as administrator), paste this, press Enter:";
+      $("cmd").textContent = "irm " + site + "/install.ps1 | iex";
+      $("pw").textContent = "";
+      $("dl").href = "/download/lockqz-win.exe";
+      $("warn").textContent = "If Windows shows “Windows protected your PC”: click More info → Run anyway. The command above skips this.";
+    }
+  } else {
+    $("nope").hidden = false;
+  }
+
+  $("copy") && ($("copy").onclick = function () {
+    var t = $("cmd").textContent, b = $("copy");
+    (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject())
+      .then(function () { b.textContent = "Copied"; setTimeout(function () { b.textContent = "Copy"; }, 1500); }, function () {});
+  });
 </script>
 </body></html>
