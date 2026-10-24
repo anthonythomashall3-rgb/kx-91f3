@@ -23,7 +23,8 @@ $exe = Join-Path $pkg.InstallLocation "LOCKqz.exe"
 try { Invoke-CommandInDesktopPackage -PackageFamilyName $pkg.PackageFamilyName -AppId "LOCKqz" -Command $exe -ErrorAction Stop; $inPkg = $true }
 catch { Write-Host "      (Invoke-CommandInDesktopPackage unavailable: $_) - running the exe directly"; $inPkg = $false; Start-Process $exe }
 # The launch returns at once: wait until setup has finished (both tasks registered).
-for ($i = 0; $i -lt 90 -and -not ((Get-ScheduledTask -TaskName 'LOCKqz' -ErrorAction SilentlyContinue) -and (Get-ScheduledTask -TaskName 'LOCKqz Agent' -ErrorAction SilentlyContinue))); $i++) { Start-Sleep 2 }
+function TasksReady { (Get-ScheduledTask -TaskName 'LOCKqz' -ErrorAction SilentlyContinue) -and (Get-ScheduledTask -TaskName 'LOCKqz Agent' -ErrorAction SilentlyContinue) }
+for ($i = 0; $i -lt 90 -and -not (TasksReady); $i++) { Start-Sleep 2 }
 Check "ran inside the package" $inPkg
 Start-Sleep 3
 Check "window still open (no crash)" ($null -ne (Get-Process LOCKqz -ErrorAction SilentlyContinue))
