@@ -219,13 +219,13 @@ function route(){
   if(v==="connect") return app.innerHTML = viewConnect();
   if(v==="activity") { app.innerHTML = viewActivity(); loadSessions(); return; }
   if(v==="admin" && ME.admin) { app.innerHTML = viewAdmin(); loadTeachers(); loadInvites(); return; }
-  app.innerHTML = viewHome();
+  app.innerHTML = viewHome(); loadPay();
 }
 
 // ---- HOME ----
 function viewHome(){
   let h = "";
-  if(!ME.active) h += `<div class="note warn"><span>Not active. LOCKqz turns on after payment — contact the LOCKqz admin. Until then no quiz is protected.</span></div>`;
+  h += `<div id="pay"></div>`;
   if(!BS.courses.length) return h + viewConnect(true);
   const all = BS.courses.map(classStats);
   const exams = all.reduce((n,s)=>n+s.cur.length,0), prot = all.reduce((n,s)=>n+s.prot.length,0), students = BS.courses.reduce((n,c)=>n+c.students.length,0);
@@ -359,11 +359,40 @@ function viewAdmin(){ return `${BACK('', 'Home')}
     <div id="newinvite"></div>
     <div style="overflow-x:auto;margin-top:12px"><table id="invites"><thead><tr><th>Email</th><th>Active until</th><th>Created</th><th>Status</th><th></th></tr></thead><tbody></tbody></table></div></section>
   <section class="card"><h2 style="margin:0 0 12px">Professors</h2>
-    <div style="overflow-x:auto"><table id="teachers"><thead><tr><th>Email</th><th>Name</th><th>Joined</th><th>Active until</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div style="overflow-x:auto"><table id="teachers"><thead><tr><th>Email</th><th>Name</th><th>Joined</th><th>All sections until</th><th>Paid sections</th><th>Venmo code</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div id="secpanel"></div>
     <p class="muted">Activate after payment. Pick the semester end date; the account turns off by itself after that.</p></section>`; }
 async function loadTeachers(){ const d = await get("/teachers"); const tb=document.querySelector("#teachers tbody"); if(!tb) return; tb.innerHTML=""; const today=new Date().toISOString().slice(0,10);
   (d.teachers||[]).forEach(t=>{ const on = t.active_until && t.active_until>=today;
-    tb.insertAdjacentHTML("beforeend",`<tr style="${on?'':'color:#888'}"><td>${esc(t.email)}</td><td>${esc(t.name||"")}</td><td>${when(t.created_at)}</td><td>${on?esc(t.active_until):"<b style='color:#990000'>off</b>"}</td><td style="white-space:nowrap"><input type="date" id="d_${esc(t.id)}" value="${esc(t.active_until||semEnd())}" style="padding:4px"> <button class="btn" style="min-height:32px;padding:4px 10px" onclick="activate('${esc(t.email)}','${esc(t.id)}')">Activate</button> <button class="btn" style="min-height:32px;padding:4px 10px" onclick="deactivate('${esc(t.email)}')">Off</button> <button class="btn" style="min-height:32px;padding:4px 10px" onclick="resetPw('${esc(t.email)}')">Reset pw</button></td></tr>`); }); }
+    tb.insertAdjacentHTML("beforeend",`<tr style="${on?'':'color:#888'}"><td>${esc(t.email)}</td><td>${esc(t.name||"")}</td><td>${when(t.created_at)}</td><td>${on?esc(t.active_until):"<b style='color:#990000'>off</b>"}</td><td>${t.paid_sections||0}</td><td>${esc(t.memo||"")}</td><td style="white-space:nowrap"><button class="btn" style="min-height:32px;padding:4px 10px" onclick="secAdmin('${esc(t.email)}')">Sections</button> <input type="date" id="d_${esc(t.id)}" value="${esc(t.active_until||semEnd())}" style="padding:4px"> <button class="btn" style="min-height:32px;padding:4px 10px" onclick="activate('${esc(t.email)}','${esc(t.id)}')">Activate</button> <button class="btn" style="min-height:32px;padding:4px 10px" onclick="deactivate('${esc(t.email)}')">Off</button> <button class="btn" style="min-height:32px;padding:4px 10px" onclick="resetPw('${esc(t.email)}')">Reset pw</button></td></tr>`); }); }
+// ---- per-section payment ($1,000 per section per semester, Venmo) ----
+let PAY=null, PAYSEL=null;
+const termName = t => { t=String(t||""); return (({1:"Spring",2:"Summer",3:"Fall"})[t.slice(4)]||"")+" "+t.slice(0,4); };
+const money = n => "$"+Number(n).toLocaleString("en-US");
+async function loadPay(name){ const el=$("pay"); if(!el) return;
+  const d = await get("/my-sections"+(name?("?name="+encodeURIComponent(name)):"")); if(!d || d.error){ el.innerHTML=""; return; }
+  PAY=d; PAYSEL=new Set(d.sections.filter(s=>!s.paid).map(s=>s.section)); renderPay(); }
+function paySel(s,on){ on?PAYSEL.add(s):PAYSEL.delete(s); renderPay(); }
+function renderPay(){ const d=PAY, el=$("pay"); if(!el||!d) return;
+  if(d.all_active || (d.sections.length && d.sections.every(s=>s.paid))){ el.innerHTML=""; return; }
+  const nameBox = `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><label for="pname" class="muted">Name in the USC Schedule of Classes</label><input id="pname" value="${esc(d.name||"")}" placeholder="First Last" style="padding:10px;border:1px solid #cfccc4;border-radius:8px;flex:1 1 200px"><button class="btn" onclick="loadPay($('pname').value)">Find my sections</button></div>`;
+  if(!d.sections.length){ el.innerHTML = `<section class="card" style="display:flex;flex-direction:column;gap:14px"><h2 style="margin:0">Activate LOCKqz</h2><p class="muted" style="margin:0">No ${termName(d.term)} sections found${d.name?" for "+esc(d.name):""}.</p>${nameBox}</section>`; return; }
+  const n=PAYSEL.size, total=n*d.price, note=`${d.memo} ${[...PAYSEL].join(" ")}`;
+  const link = d.venmo ? `https://venmo.com/?txn=pay&recipients=${encodeURIComponent(d.venmo)}&amount=${total}&note=${encodeURIComponent(note)}` : "";
+  el.innerHTML = `<section class="card" style="display:flex;flex-direction:column;gap:16px">
+    <div class="hrow"><h2>Activate LOCKqz</h2><span>${money(d.price)} per section · ${termName(d.term)}</span></div>
+    <ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px">${d.sections.map(s=>`<li><label style="display:flex;gap:12px;align-items:center;min-height:44px;padding:0 12px;border:1px solid #e3e0d8;border-radius:10px"><input type="checkbox" style="width:20px;height:20px" ${s.paid?"checked disabled":(PAYSEL.has(s.section)?"checked":"")} onchange="paySel('${esc(s.section)}',this.checked)"><b>${esc(s.course)}</b><span class="muted">Section ${esc(s.section)} · ${esc(s.registered??"")} students</span>${s.paid?'<b style="color:var(--ok);margin-left:auto">Paid</b>':""}</label></li>`).join("")}</ul>
+    <div class="hrow"><span>${n} section${n===1?"":"s"}</span><b style="font-size:28px">${money(total)}</b></div>
+    ${n ? (link ? `<a class="btn prime" style="text-align:center" href="${link}" target="_blank" rel="noopener">Pay ${money(total)} on Venmo</a>` : `<p style="margin:0">Venmo ${money(total)} to the LOCKqz admin.</p>`) + `<p class="muted" style="margin:0">Venmo note: <b>${esc(note)}</b></p>` : ""}
+    <details><summary class="muted">Not your sections?</summary>${nameBox}</details>
+  </section>`; }
+async function secAdmin(email){ const el=$("secpanel"); el.innerHTML="Loading…";
+  const d = await get("/teacher-sections?email="+encodeURIComponent(email)); if(d.error){ el.innerHTML=esc(d.error); return; }
+  el.innerHTML = `<div class="card" style="margin-top:12px;display:flex;flex-direction:column;gap:10px"><b>${esc(d.email)} · ${esc(d.name||"no name")} · ${termName(d.term)} · Venmo code ${esc(d.memo)}</b>
+    ${d.sections.length ? d.sections.map(s=>`<label style="display:flex;gap:10px;align-items:center"><input type="checkbox" class="secck" value="${esc(s.section)}" ${s.paid?"checked":""}> ${esc(s.course)} · ${esc(s.section)} · ${esc(s.registered??"")} students ${s.paid?"<b style='color:var(--ok)'>paid to "+esc(s.paid_until)+"</b>":""}</label>`).join("") : "<span class='muted'>No sections found for this name.</span>"}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="muted">paid until</span><input type="date" id="secuntil" value="${semEnd()}" style="padding:6px"><button class="btn prime" onclick="markSecs('${esc(d.email)}','${esc(d.term)}',false)">Mark ticked paid</button><button class="btn" onclick="markSecs('${esc(d.email)}','${esc(d.term)}',true)">Mark ticked unpaid</button></div></div>`; }
+async function markSecs(email,term,off){ const sections=[...document.querySelectorAll(".secck:checked")].map(x=>x.value); if(!sections.length) return;
+  const d=await post("/pay-sections",{email,term,sections,until:$("secuntil").value,off}); if(d.error) alert(d.error); secAdmin(email); loadTeachers(); }
 async function activate(email,id){ const d=await post("/activate",{email,until:$("d_"+id).value}); if(d.error) alert(d.error); loadTeachers(); }
 async function deactivate(email){ if(confirm("Turn off "+email+"?")){ await post("/activate",{email,until:null}); loadTeachers(); } }
 async function resetPw(email){ const d=await post("/reset",{email}); alert(d.error||("New password for "+email+": "+d.password)); }

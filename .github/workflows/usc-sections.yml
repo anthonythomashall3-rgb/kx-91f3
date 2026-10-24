@@ -1,0 +1,32 @@
+# Refresh LOCKqz's copy of USC's public Schedule of Classes (who teaches which section), used to bill
+# $1,000 per section and to list a professor's sections the moment they sign up. No AI, no login.
+# Runs once a day (enrollment and instructor changes), on demand, and when the builder changes. $0.
+name: USC sections
+on:
+  schedule: [ { cron: "17 10 * * *" } ]
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths: [ "app/usc/build_sections.py", "app/cloudflare/migrate_016_sections.sql", ".github/workflows/usc-sections.yml" ]
+concurrency: { group: usc-sections, cancel-in-progress: false }
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Build the section index from classes.usc.edu
+        run: python3 app/usc/build_sections.py "$RUNNER_TEMP/sections.sql"
+      - name: Load it into the LOCKqz database
+        working-directory: app/cloudflare
+        run: |
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::warning::missing CLOUDFLARE_API_TOKEN"; exit 0; }
+          npm ci --no-audit --no-fund
+          npx wrangler d1 execute lockqz --remote --file=migrate_016_sections.sql
+          npx wrangler d1 execute lockqz --remote --file="$RUNNER_TEMP/sections.sql"
+          npx wrangler d1 execute lockqz --remote --command "SELECT term, COUNT(*) AS rows FROM usc_sections GROUP BY term"

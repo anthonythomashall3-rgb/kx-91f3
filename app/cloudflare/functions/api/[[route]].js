@@ -193,6 +193,79 @@ export async function onRequest(context) {
       await db.prepare("DELETE FROM quizzes WHERE qi=? AND ou=? AND teacher_id=?").bind(q.qi, String(q.ou), tid).run();
     }
   }
+  // ---- per-section billing ($1,000 per section per semester) ----
+  // A Brightspace course (ou) is paid when the professor paid for the USC section(s) it holds.
+  // Admin and an account-wide activation (active_until) count as paid for everything.
+  const PRICE = 1000;
+  const secNums = txt => (String(txt).match(/(?<!\d)\d{5}(?!\d)/g) || []);
+  const courseKeys = txt => { const out = new Set(); const re = /(?<![A-Z])([A-Z]{2,5})[\s_\-]*(\d{3}[A-Z]?)(?![0-9])/g; let m; while ((m = re.exec(String(txt).toUpperCase()))) out.add(m[1] + m[2]); return [...out]; };
+  const ckey = c => String(c||"").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  async function paidOuFor(t, ou) {
+    if (!t) return false;
+    if (t.admin || t.active) return true;
+    const paid = (await db.prepare("SELECT term,section,course,first,last FROM paid_sections WHERE teacher_id=? AND until>=?").bind(t.id, laToday()).all().catch(()=>({results:[]}))).results;
+    if (!paid.length) return false;
+    const tc = await db.prepare("SELECT name,code FROM teacher_courses WHERE ou=? ORDER BY (teacher_id=?) DESC LIMIT 1").bind(String(ou), t.id).first();
+    if (!tc) return false;
+    const txt = `${tc.name||""} ${tc.code||""}`;
+    const paidSec = new Set(paid.map(x => String(x.section)));
+    const nums = secNums(txt);
+    if (nums.some(n => paidSec.has(n))) return true;
+    for (const c of courseKeys(txt)) {
+      const here = paid.filter(x => ckey(x.course) === c);
+      if (!here.length) continue;
+      // The shell names specific real sections of this course, none of them paid -> not paid.
+      if (nums.length) {
+        const ph = nums.map(()=>"?").join(",");
+        const real = (await db.prepare(`SELECT section,course FROM usc_sections WHERE section IN (${ph})`).bind(...nums).all()).results.filter(r => ckey(r.course) === c);
+        if (real.length) continue;
+      }
+      // Combined shell (no section numbers): every section of this course the professor teaches must be paid.
+      const h = here[0];
+      const all = (await db.prepare("SELECT DISTINCT section,course FROM usc_sections WHERE term=? AND lower(last)=lower(?) AND lower(first)=lower(?)").bind(h.term, h.last||"", h.first||"").all()).results.filter(r => ckey(r.course) === c);
+      if (!all.length || all.every(r => paidSec.has(String(r.section)))) return true;
+    }
+    return false;
+  }
+  const paidOu = ou => paidOuFor(me, ou);
+  // Release every quiz this professor protects in a course that is not paid (next Sync removes the
+  // password from Brightspace, so no student is locked out).
+  async function releaseUnpaid(t) {
+    const qs = (await db.prepare("SELECT qi,ou,password FROM quizzes WHERE teacher_id=? AND ou IS NOT NULL").bind(t.id).all()).results;
+    const cache = {};
+    for (const q of qs) {
+      const ou = String(q.ou);
+      if (!(ou in cache)) cache[ou] = await paidOuFor(t, ou);
+      if (cache[ou]) continue;
+      await db.prepare("INSERT OR REPLACE INTO pending_clear (ou,qi,password) VALUES (?,?,?)").bind(ou, String(q.qi), q.password).run();
+      await db.prepare("DELETE FROM quizzes WHERE qi=? AND ou=? AND teacher_id=?").bind(q.qi, ou, t.id).run();
+    }
+  }
+  const curTerms = () => { const d = laToday(), y = +d.slice(0,4), m = +d.slice(5,7), s = m <= 5 ? 1 : (m <= 7 ? 2 : 3); return [String(y*10+s), String(s < 3 ? y*10+s+1 : (y+1)*10+1)]; };
+  const splitName = n => { const w = String(n||"").trim().split(/\s+/).filter(Boolean); return w.length >= 2 ? { first: w[0], last: w[w.length-1] } : null; };
+  async function payCode(tid) {
+    const ex = await db.prepare("SELECT code FROM pay_codes WHERE teacher_id=?").bind(tid).first();
+    if (ex) return ex.code;
+    const code = "LQ" + rid(5).toUpperCase();
+    await db.prepare("INSERT OR IGNORE INTO pay_codes (teacher_id,code) VALUES (?,?)").bind(tid, code).run();
+    return (await db.prepare("SELECT code FROM pay_codes WHERE teacher_id=?").bind(tid).first()).code;
+  }
+  // The professor's USC sections (public Schedule of Classes), with what is paid.
+  async function sectionsFor(tid, name) {
+    const nm = splitName(name);
+    const [cur, nxt] = curTerms();
+    if (!nm) return { name: name||null, sections: [] };
+    let rows = (await db.prepare("SELECT term,section,course,title,first,last,seats,registered FROM usc_sections WHERE term IN (?,?) AND lower(last)=lower(?) AND lower(first)=lower(?) ORDER BY term,course,section").bind(cur, nxt, nm.last, nm.first).all()).results;
+    if (!rows.length) rows = (await db.prepare("SELECT term,section,course,title,first,last,seats,registered FROM usc_sections WHERE term IN (?,?) AND lower(last)=lower(?) AND lower(first) LIKE lower(?) ORDER BY term,course,section").bind(cur, nxt, nm.last, nm.first.slice(0,1) + "%").all()).results;
+    const paid = new Map((await db.prepare("SELECT term,section,until FROM paid_sections WHERE teacher_id=?").bind(tid).all()).results.map(r => [r.term + ":" + r.section, r.until]));
+    const today = laToday();
+    const seen = new Set(), sections = [];
+    for (const r of rows) { const k = r.term + ":" + r.section; if (seen.has(k)) continue; seen.add(k);
+      const u = paid.get(k); sections.push({ ...r, paid: !!u && u >= today, paid_until: u || null }); }
+    // Show the current term if it has sections, else the next one.
+    const term = sections.some(x => x.term === cur) ? cur : (sections.length ? nxt : cur);
+    return { name: `${nm.first} ${nm.last}`, term, sections: sections.filter(x => x.term === term) };
+  }
   async function trustedInstructor(ou) {
     if (!me || !EMAIL) return false;
     if (me.admin) return true;
@@ -478,7 +551,7 @@ export async function onRequest(context) {
     // admin hands the new password to the teacher).
     if (p === "/teachers") {
       if (!me?.admin) return json({ error:"admin only" }, 401);
-      const r = await db.prepare("SELECT id,email,name,created_at,active_until FROM teachers ORDER BY created_at DESC").all();
+      const r = await db.prepare("SELECT t.id,t.email,t.name,t.created_at,t.active_until,(SELECT COUNT(*) FROM paid_sections ps WHERE ps.teacher_id=t.id AND ps.until>=?) AS paid_sections,(SELECT code FROM pay_codes pc WHERE pc.teacher_id=t.id) AS memo FROM teachers t ORDER BY t.created_at DESC").bind(laToday()).all();
       return json({ teachers: r.results });
     }
     // Admin only: turn a teacher on (after payment) until a date, or off.
@@ -489,7 +562,7 @@ export async function onRequest(context) {
       const r = await db.prepare("UPDATE teachers SET active_until=? WHERE email=?").bind(until, email).run();
       if (r.meta.changes && (!until || until < laToday())) {
         const tt = await db.prepare("SELECT id FROM teachers WHERE email=?").bind(email).first();
-        if (tt) await releaseAll(tt.id);
+        if (tt) await releaseUnpaid({ id: tt.id, admin: false, active: false });
       }
       return r.meta.changes ? json({ email, active_until: until }) : json({ error:"no such professor" }, 404);
     }
@@ -520,6 +593,32 @@ export async function onRequest(context) {
       return json({ ok:true });
     }
 
+    // Admin: a professor's sections + mark sections paid / unpaid (after the Venmo payment arrives).
+    if (p === "/teacher-sections") {
+      if (!me?.admin) return json({ error:"admin only" }, 401);
+      const t = await db.prepare("SELECT id,email,name FROM teachers WHERE email=?").bind(String(url.searchParams.get("email")||"").toLowerCase()).first();
+      if (!t) return json({ error:"no such professor" }, 404);
+      const r = await sectionsFor(t.id, url.searchParams.get("name") || t.name);
+      return json({ ...r, email: t.email, memo: await payCode(t.id), price: PRICE });
+    }
+    if (p === "/pay-sections" && request.method === "POST") {
+      if (!me?.admin) return json({ error:"admin only" }, 401);
+      const t = await db.prepare("SELECT id FROM teachers WHERE email=?").bind(String(body.email||"").trim().toLowerCase()).first();
+      if (!t) return json({ error:"no such professor" }, 404);
+      const term = String(body.term||""), until = String(body.until||"").slice(0,10);
+      const secs = (Array.isArray(body.sections) ? body.sections : []).map(String).filter(x => /^\d{5}$/.test(x)).slice(0, 100);
+      if (!/^\d{5}$/.test(term) || !secs.length) return json({ error:"bad term or sections" }, 400);
+      for (const sec of secs) {
+        if (body.off) { await db.prepare("DELETE FROM paid_sections WHERE teacher_id=? AND term=? AND section=?").bind(t.id, term, sec).run(); continue; }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(until)) return json({ error:"bad until date" }, 400);
+        const r = await db.prepare("SELECT course,first,last FROM usc_sections WHERE term=? AND section=? LIMIT 1").bind(term, sec).first();
+        await db.prepare("INSERT OR REPLACE INTO paid_sections (teacher_id,term,section,course,first,last,until,paid_at,via) VALUES (?,?,?,?,?,?,?,?,?)")
+          .bind(t.id, term, sec, r?.course||null, r?.first||null, r?.last||null, until, now(), String(body.via||"admin").slice(0,40)).run();
+      }
+      if (body.off) await releaseUnpaid({ id: t.id, admin: false, active: false });
+      return json({ ok: true, sections: secs, until: body.off ? null : until });
+    }
+
     // ---- teacher endpoints (need a logged-in teacher or the admin key) ----
     if (!teacher()) return json({ error: "unauthorized" }, 401);
 
@@ -527,9 +626,20 @@ export async function onRequest(context) {
       return json({ error: "Verify you teach this course first: open Brightspace and click LOCKqz Sync." }, 403);
     // PAID ONLY: verification proves you are a professor; only the admin's Activate (after payment)
     // turns the tool on. Nothing that protects, gates or rotates a quiz works for an unpaid account.
-    if ((p === "/quiz" || p === "/course" || (p === "/protect" && body.on) || (p === "/gate" && body.on) || p === "/rotating") && request.method === "POST" && !me.active)
-      return json({ error: "Not active. LOCKqz turns on after payment — contact the LOCKqz admin." }, 402);
+    if ((p === "/quiz" || p === "/course" || (p === "/protect" && body.on) || (p === "/gate" && body.on) || p === "/rotating") && request.method === "POST") {
+      const u = String(body.url||"");
+      const payOu = p === "/quiz" ? ids(u).ou : p === "/course" ? (u.match(/ou=(\d+)/) || u.match(/\/home\/(\d+)/) || u.match(/\/(\d+)(?:\/|$)/) || [])[1] : String(body.ou||"");
+      if (!(await paidOu(payOu))) return json({ error: "This section is not paid. LOCKqz turns on after payment ($1,000 per section per semester)." }, 402);
+    }
 
+    // The professor's own USC sections this semester (public Schedule of Classes), what is paid, and
+    // how to pay: Venmo $1,000 per section with the memo code. Optional ?name= when the name differs.
+    if (p === "/my-sections") {
+      const nm = url.searchParams.get("name");
+      if (nm && splitName(nm)) await db.prepare("UPDATE teachers SET name=? WHERE id=?").bind(String(nm).trim().slice(0,80), me.id).run();
+      const r = await sectionsFor(me.id, nm || me.name);
+      return json({ ...r, price: PRICE, venmo: (env.VENMO_HANDLE || "").replace(/^@/, "") || null, memo: await payCode(me.id), all_active: !!me.active });
+    }
     if (p === "/quiz" && request.method === "POST") {
       const { qi, ou } = ids(String(body.url||""));
       if (!/^\d+$/.test(String(ou||"")) || !/^\d+$/.test(String(qi||""))) return json({ error:"could not find ou= and qi= in that link" }, 400);
@@ -636,7 +746,7 @@ export async function onRequest(context) {
       const today = now().slice(0, 10);
       for (const c of courses) {
         const ou = String(c.ou || ""); if (!/^\d+$/.test(ou) || !allowed[ou] || !Array.isArray(c.quizzes)) continue;
-        if (!me.active) continue;                                    // unpaid: never auto-protect
+        if (!(await paidOu(ou))) continue;                           // unpaid section: never auto-protect
         if (!me.admin && !(await trustedInstructor(ou))) continue;   // auto-protect only courses you instruct
         for (const q of c.quizzes) {
           const qi = String(q.qi || ""); if (!/^\d+$/.test(qi)) continue;
@@ -664,7 +774,7 @@ export async function onRequest(context) {
         const prof = myBs ? await db.prepare(`SELECT 1 FROM roster r JOIN teacher_courses tc ON tc.ou=r.ou JOIN teachers te ON te.id=tc.teacher_id WHERE lower(r.email)=? AND ${INSTR_SQL} AND r.user_id=? AND (te.role='admin' OR te.verified=1) LIMIT 1`).bind(myEmail, String(myBs)).first() : null;
         await db.prepare("UPDATE teachers SET verified=? WHERE id=?").bind(prof ? 1 : 0, me.id).run();
       }
-      if (!me.active) await releaseAll(me.id);
+      await releaseUnpaid(me);
       // Only hand back passwords for courses this caller instructs (never leak another course's).
       const ownOus = [];
       for (const c of courses) { const ou = String(c.ou||""); if (/^\d+$/.test(ou) && (me.admin || await trustedInstructor(ou))) ownOus.push(ou); }

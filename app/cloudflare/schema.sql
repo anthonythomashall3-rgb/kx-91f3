@@ -106,3 +106,15 @@ CREATE TABLE IF NOT EXISTS pending_clear (ou TEXT, qi TEXT, password TEXT, PRIMA
 
 -- One pending email code per device (hash only; 15 min; 5 tries). See migrate_014.
 CREATE TABLE IF NOT EXISTS email_codes (device_id TEXT PRIMARY KEY, email TEXT, code_hash TEXT, expires INTEGER, tries INTEGER DEFAULT 0, created_at TEXT);
+CREATE TABLE IF NOT EXISTS usc_sections (
+  term TEXT NOT NULL, section TEXT NOT NULL, course TEXT, title TEXT,
+  first TEXT, last TEXT, seats INTEGER, registered INTEGER,
+  PRIMARY KEY (term, section, last, first)
+);
+CREATE INDEX IF NOT EXISTS usc_sections_name ON usc_sections (last, first);
+CREATE TABLE IF NOT EXISTS paid_sections (
+  teacher_id TEXT NOT NULL, term TEXT NOT NULL, section TEXT NOT NULL, course TEXT,
+  first TEXT, last TEXT, until TEXT, paid_at TEXT, via TEXT,
+  PRIMARY KEY (teacher_id, term, section)
+);
+CREATE TABLE IF NOT EXISTS pay_codes (teacher_id TEXT PRIMARY KEY, code TEXT UNIQUE);
