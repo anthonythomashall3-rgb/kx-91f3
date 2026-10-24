@@ -16,10 +16,15 @@
 - Watcher: while a quiz is locked, re-applies the block every few seconds, reports
   tampering, refreshes the blocklist hourly, and AUTO-UNLOCKS at a hard maximum so a
   student is never left locked.
+- Self-update: every ~6h (and ~90s after start), while NO quiz is locked, fetches
+  <site>/download/update.json + update.sig, checks the RSA-SHA256 signature against the
+  public key shipped with the install (update.pub), downloads each listed file, checks its
+  SHA-256, swaps the files in atomically and restarts. Anything wrong (signature, hash, name,
+  network) leaves the install exactly as it was. Nobody has to touch a student's computer.
 - Set LOCKQZ_DRYRUN=1 in the environment to run unprivileged for testing (the engine
   makes no system changes).
 """
-import hashlib, hmac, json, os, platform, re, secrets, ssl, subprocess, threading, time
+import base64, hashlib, hmac, json, os, platform, re, secrets, shutil, ssl, subprocess, tempfile, threading, time
 import urllib.error, urllib.parse, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -29,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -59,6 +64,19 @@ KEY_PATH = os.environ.get("LOCKQZ_KEY_PATH") or "/Library/Application Support/LO
 # must survive the helper being killed: on restart we resume an unexpired lock instead of unlocking.
 LOCKFILE = os.environ.get("LOCKQZ_LOCKFILE") or "/Library/Application Support/LOCKqz/active_lock.json"
 NET = {"skew": 0.0, "registered": False}   # skew: server clock minus ours, learned from a 401
+
+# Self-update (signed). The site that serves the API also serves the release files.
+SITE = API[:-4] if API.endswith("/api") else API
+UPDATE_URL = (os.environ.get("LOCKQZ_UPDATE_URL") or (SITE + "/download" if SITE else "")).rstrip("/")
+UPDATE_DIR = os.environ.get("LOCKQZ_UPDATE_DIR") or HERE          # where this install's files live
+# Only a real install updates itself (or a test that names its own LOCKQZ_UPDATE_DIR): a daemon
+# started from a source checkout must never overwrite the checkout.
+UPDATE_OK = bool(os.environ.get("LOCKQZ_UPDATE_DIR")) or HERE == "/Library/Application Support/LOCKqz"
+PUBKEY = os.environ.get("LOCKQZ_UPDATE_PUB") or os.path.join(HERE, "update.pub")
+UPDATE_EVERY = max(12, int(os.environ.get("LOCKQZ_UPDATE_CYCLES", "4320")))   # 5 s cycles: 4320 = 6 h
+UPDATE_DELAY = float(os.environ.get("LOCKQZ_UPDATE_DELAY", "90"))           # seconds after start
+# Files an update may never touch: this install's identity and live state.
+UPDATE_NEVER = {"config.json", "device.key", "active_lock.json", "lockqzd.log", "developer.key"}
 
 STATE = {"state": "unlocked", "quiz_id": None, "student": CONF.get("student"),
          "locked_at": None, "locked_since": 0.0, "max_minutes": MAX_MIN}
@@ -252,6 +270,85 @@ def refresh_blocklist():
     except Exception as e:
         log("blocklist refresh failed: %s" % e)
 
+def _vtuple(v):
+    return tuple(int(x) for x in re.findall(r"\d+", str(v))[:3]) or (0,)
+
+def _fetch(url, limit=5_000_000):
+    r = urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=15, context=ssl.create_default_context())
+    data = r.read(limit + 1)
+    if len(data) > limit: raise ValueError("download too large: " + url)
+    return data
+
+def verify_manifest(body, sig_b64):
+    """RSA-SHA256 (PKCS#1 v1.5) check with /usr/bin/openssl - present on every Mac - against the
+    public key pinned in this install. False on any problem."""
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            b, sg = os.path.join(d, "m.json"), os.path.join(d, "m.sig")
+            with open(b, "wb") as f: f.write(body)
+            with open(sg, "wb") as f: f.write(base64.b64decode(sig_b64))
+            r = subprocess.run(["openssl", "dgst", "-sha256", "-verify", PUBKEY, "-signature", sg, b],
+                               capture_output=True, text=True, timeout=30)
+            return r.returncode == 0 and "Verified OK" in r.stdout
+    except Exception as e:
+        log("update: signature check error: %s" % e)
+        return False
+
+def restart_after_update():
+    """Restart the per-user agent, then exit: launchd (KeepAlive) starts the new helper code."""
+    if DRYRUN == "1":
+        log("update: (dry-run) would restart the agent and the helper"); return
+    try:
+        uid = subprocess.run(["stat", "-f", "%u", "/dev/console"], capture_output=True, text=True, timeout=5).stdout.strip()
+        if uid and uid != "0":
+            subprocess.run(["launchctl", "kickstart", "-k", "gui/%s/com.lockqz.agent" % uid], capture_output=True, timeout=20)
+    except Exception as e:
+        log("update: agent restart: %s" % e)
+    log("update: restarting helper on the new version"); os._exit(0)
+
+def check_update():
+    """Signed self-update; only while no quiz is locked. Returns True when an update was installed.
+    A bad signature, hash, file name or download leaves the install untouched. Never raises."""
+    if not UPDATE_OK or not UPDATE_URL or not os.path.isfile(PUBKEY): return False
+    stage = os.path.join(UPDATE_DIR, ".update")
+    try:
+        body = _fetch(UPDATE_URL + "/update.json", 200_000)
+        sig = _fetch(UPDATE_URL + "/update.sig", 10_000).decode("ascii", "ignore").strip()
+        if not verify_manifest(body, sig):
+            log("update: manifest signature INVALID - ignored"); return False
+        m = json.loads(body)
+        new = str(m.get("version", ""))
+        if _vtuple(new) <= _vtuple(VERSION): return False
+        files = (m.get("mac") or {}).get("files") or {}
+        if not isinstance(files, dict) or "lockqzd.py" not in files:
+            log("update: manifest lists no Mac helper - ignored"); return False
+        for name, want in files.items():
+            if name in UPDATE_NEVER or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}", name) \
+               or not re.fullmatch(r"[0-9a-f]{64}", str(want)):
+                log("update: refusing file entry %r" % name); return False
+        shutil.rmtree(stage, ignore_errors=True); os.makedirs(stage, mode=0o700)
+        for name, want in files.items():
+            data = _fetch(UPDATE_URL + "/mac/" + name)
+            if hashlib.sha256(data).hexdigest() != want:
+                log("update: SHA-256 mismatch for %s - ignored" % name); shutil.rmtree(stage, ignore_errors=True); return False
+            with open(os.path.join(stage, name), "wb") as f: f.write(data)
+        with LOCK:
+            if STATE["state"] == "locked":
+                log("update: quiz in progress - deferred"); shutil.rmtree(stage, ignore_errors=True); return False
+            for name in files:
+                dst = os.path.join(UPDATE_DIR, name)
+                os.replace(os.path.join(stage, name), dst)
+                os.chmod(dst, 0o755 if name.endswith((".sh", ".py")) else 0o644)
+        shutil.rmtree(stage, ignore_errors=True)
+        log("update: %s -> %s installed (%d files)" % (VERSION, new, len(files)))
+        report("update", {"from": VERSION, "to": new})
+        restart_after_update()
+        return True
+    except Exception as e:
+        log("update check failed: %s" % e)
+        shutil.rmtree(stage, ignore_errors=True)
+        return False
+
 def watcher():
     cycles = 0
     while True:
@@ -290,6 +387,8 @@ def watcher():
             refresh_blocklist()
         if cycles % 720 == 0 and not NET["registered"]:   # ~hourly until the server knows this key
             register()
+        if cycles % UPDATE_EVERY == 0:   # ~every 6h: signed self-update (skips itself during a quiz)
+            check_update()
 
 class H(BaseHTTPRequestHandler):
     def _auth(self): return self.headers.get("X-LOCKqz-Token") == TOKEN
@@ -379,6 +478,8 @@ def startup_network():
     register()
     report("install", {"platform": "mac-" + platform.mac_ver()[0], "version": VERSION})
     refresh_blocklist()
+    time.sleep(UPDATE_DELAY)
+    check_update()
 
 def main():
     rec = None if developer_mode() else load_lock()

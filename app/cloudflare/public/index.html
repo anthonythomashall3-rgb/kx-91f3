@@ -12,6 +12,9 @@
   a.btn{display:inline-block;background:var(--usc);color:#fff;text-decoration:none;padding:14px 30px;border-radius:10px;font-weight:700;font-size:17px}
   a.btn.ghost{background:#fff;color:var(--usc);border:2px solid var(--usc);padding:12px 28px}
   small{display:block;margin-top:8px;color:#777}
+  .alt{margin-top:18px;font-size:13px;color:#777}
+  .alt code{display:block;margin-top:6px;background:#f1f1f1;border:1px solid #e3e3e3;border-radius:8px;padding:9px 10px;font-size:12.5px;color:#222;word-break:break-all;user-select:all;cursor:pointer}
+  .alt code:active{background:#e8e8e8}
   footer{margin-top:18px;font-size:13px}
   footer a{color:#777}
 </style></head>
@@ -22,6 +25,8 @@
     <div class="step">
       <a class="btn" id="dl" href="#">Download</a>
       <small id="os"></small>
+      <div class="alt" id="alt" hidden>Or paste this in <span id="term"></span> (no security prompt):
+        <code id="cmd" title="Click to copy"></code></div>
     </div>
 
     <footer><a href="/privacy.html">Privacy</a></footer>
@@ -31,8 +36,14 @@
   var ipad = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
   var win = /Windows/.test(ua) && !/Windows Phone/.test(ua);
   var mac = /Macintosh|Mac OS X/.test(ua) && !ipad && !/iPhone|iPad|iPod/.test(ua);
-  if (win) { dl.href = "/download/lockqz-win.exe"; os.textContent = "Windows"; }
-  else if (mac) { dl.href = "/download/lockqz-mac.pkg"; os.textContent = "macOS"; }
+  var alt = document.getElementById("alt"), term = document.getElementById("term"), cmd = document.getElementById("cmd");
+  var site = location.origin;
+  if (win) { dl.href = "/download/lockqz-win.exe"; os.textContent = "Windows"; term.textContent = "PowerShell (Run as administrator)"; cmd.textContent = "irm " + site + "/install.ps1 | iex"; alt.hidden = false; }
+  else if (mac) { dl.href = "/download/lockqz-mac.pkg"; os.textContent = "macOS"; term.textContent = "Terminal"; cmd.textContent = "curl -fsSL " + site + "/install.sh | sudo bash"; alt.hidden = false; }
   else { dl.removeAttribute("href"); dl.style.opacity = .5; dl.style.pointerEvents = "none"; os.textContent = "Use a Mac or Windows computer"; }
+  cmd.onclick = function () {
+    var t = cmd.textContent;
+    (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { cmd.title = "Copied"; }, function () {});
+  };
 </script>
 </body></html>

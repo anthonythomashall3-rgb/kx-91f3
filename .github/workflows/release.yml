@@ -1,0 +1,155 @@
+name: Release
+
+# Every push to main: run every test suite, build + install-test the Mac .pkg and Windows .exe on
+# real runners, build the SIGNED update manifest, and deploy the site + API + database migrations
+# to Cloudflare. Installed helpers then pick up the new release on their own (signed self-update).
+# Nothing here costs money: GitHub Actions (public repo or free minutes) + Cloudflare free tier.
+#
+# One-time setup (repo Settings -> Secrets and variables -> Actions):
+#   LOCKQZ_UPDATE_KEY      the RSA private key (PEM) whose public half is app/mac/update.pub
+#   CLOUDFLARE_API_TOKEN   Cloudflare API token with Pages:Edit + D1:Edit on the account
+#   CLOUDFLARE_ACCOUNT_ID  the Cloudflare account id
+# Until those exist, the deploy job prints what is missing and does nothing else.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "0*_*/**"
+      - "LOCKqz-USC/**"
+      - "*.pdf"
+      - "*.xlsx"
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: All test suites (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Run every suite
+        run: bash app/tests/run_all.sh
+
+  mac:
+    name: Build + install-test the Mac package
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the .pkg, install it, lock/unlock, uninstall
+        run: bash app/tests/test_mac_install.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lockqz-mac
+          path: /tmp/lockqz-mac.pkg
+          if-no-files-found: error
+
+  windows:
+    name: Build + install-test the Windows installer
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Windows signing + self-update checks (PowerShell 5.1, what students run)
+        shell: powershell
+        run: |
+          & .\app\tests\test_windows_signing.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Windows signing + self-update checks (PowerShell 7)
+        shell: pwsh
+        run: |
+          & .\app\tests\test_windows_signing.ps1 -Port 8931
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Fresh local token for this build
+        shell: pwsh
+        run: |
+          $t = "lqz-" + [guid]::NewGuid().ToString("N").Substring(0,16)
+          "LQTOKEN=$t" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "LQVER=" + (Get-Content app/VERSION -Raw).Trim() | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Compile installer
+        working-directory: app/windows
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "/DLQTOKEN=$env:LQTOKEN" `
+            "/DLQAPI=https://lockqz.pages.dev/api" `
+            "/DLQVER=$env:LQVER" `
+            installer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install + test on this Windows machine (Windows PowerShell 5.1, like students)
+        shell: powershell
+        run: |
+          & .\app\tests\test_windows_install.ps1 -Exe "$PWD\app\windows\Output\lockqz-win.exe" -Token $env:LQTOKEN
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lockqz-win
+          path: app/windows/Output/lockqz-win.exe
+          if-no-files-found: error
+
+  deploy:
+    name: Sign the release + deploy to Cloudflare
+    needs: [mac, windows]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Check the one-time secrets
+        id: chk
+        env:
+          UPDATE_KEY: ${{ secrets.LOCKQZ_UPDATE_KEY }}
+        run: |
+          ok=true
+          [ -n "$UPDATE_KEY" ]            || { echo "::warning::missing secret LOCKQZ_UPDATE_KEY (release-signing private key)"; ok=false; }
+          [ -n "$CLOUDFLARE_API_TOKEN" ]  || { echo "::warning::missing secret CLOUDFLARE_API_TOKEN"; ok=false; }
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || { echo "::warning::missing secret CLOUDFLARE_ACCOUNT_ID"; ok=false; }
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+          [ "$ok" = true ] || echo "Deploy skipped: add the secrets above (see the header of this workflow), then re-run."
+      - uses: actions/download-artifact@v4
+        if: steps.chk.outputs.ok == 'true'
+        with:
+          name: lockqz-mac
+          path: app/cloudflare/public/download
+      - uses: actions/download-artifact@v4
+        if: steps.chk.outputs.ok == 'true'
+        with:
+          name: lockqz-win
+          path: app/cloudflare/public/download
+      - name: Build the signed update manifest + one-line installers
+        if: steps.chk.outputs.ok == 'true'
+        env:
+          UPDATE_KEY: ${{ secrets.LOCKQZ_UPDATE_KEY }}
+        run: |
+          umask 077; printf '%s\n' "$UPDATE_KEY" > "$RUNNER_TEMP/update_key.pem"
+          python3 app/release/make-manifest.py --key "$RUNNER_TEMP/update_key.pem" --out app/cloudflare/public/download
+          rm -f "$RUNNER_TEMP/update_key.pem"
+          cp app/mac/install.sh app/mac/uninstall.sh app/windows/install.ps1 app/cloudflare/public/
+          ls -la app/cloudflare/public/download app/cloudflare/public/download/mac app/cloudflare/public/download/windows
+      - name: Deploy (schema + migrations + site + API + teacher site + legacy forwarders)
+        if: steps.chk.outputs.ok == 'true'
+        working-directory: app/cloudflare
+        run: |
+          npm ci --no-audit --no-fund
+          bash deploy.sh
+      - name: Live check
+        if: steps.chk.outputs.ok == 'true'
+        run: |
+          set -e
+          curl -fsS -A "LOCKqz/ci" https://lockqz.pages.dev/download/update.json | head -c 200; echo
+          curl -fsS -A "LOCKqz/ci" https://lockqz.pages.dev/api/blocklist | python3 -c 'import sys,json; d=json.load(sys.stdin)["domains"]; assert len(d)>=90, len(d); print("blocklist ok:", len(d))'
+          curl -fsS -A "LOCKqz/ci" -o /dev/null -w "install.sh %{http_code}\n" https://lockqz.pages.dev/install.sh
+          curl -fsS -A "LOCKqz/ci" -o /dev/null -w "lockqz-mac.pkg %{http_code}\n" https://lockqz.pages.dev/download/lockqz-mac.pkg

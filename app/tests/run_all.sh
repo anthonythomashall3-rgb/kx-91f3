@@ -6,23 +6,24 @@ cd "$HERE"
 FAILED=0
 run(){ echo ""; echo "######## $1 ########"; shift; "$@" || FAILED=1; }
 
-run "1/13  Mac engine (block/unblock against fake hosts)"  bash   test_engine.sh
-run "2/13  API enforcement logic (password gate)"          node   test_api_logic.mjs
-run "3/13  Blocklist integrity (all AIs incl. Claude)"     node   test_blocklist.mjs
-run "4/13  Mac daemon control plane (dry-run)"             bash   test_daemon.sh
-run "5/13  Windows scripts structural lint"                python3 test_windows_lint.py
-run "6/13  Edge cases (power loss, messy data, custom hosts)" bash test_edge_cases.sh
-run "7/13  Brightspace URL parsing (all quiz URL shapes)"  node   test_url_parsing.mjs
-run "8/13  Live quiz-monitor status + heartbeat logic"     node   test_live_status.mjs
-run "9/13 Daemon reporting end-to-end (real HTTP, mock backend)" bash test_daemon_reporting.sh
-run "10/13 Mac agent + browser policy (extension replacement)" python3 test_agent.py
-run "11/13 Device authentication (real API, in-memory database)" node --no-warnings test_device_auth.mjs
+run "1/14  Mac engine (block/unblock against fake hosts)"  bash   test_engine.sh
+run "2/14  API enforcement logic (password gate)"          node   test_api_logic.mjs
+run "3/14  Blocklist integrity (all AIs incl. Claude)"     node   test_blocklist.mjs
+run "4/14  Mac daemon control plane (dry-run)"             bash   test_daemon.sh
+run "5/14  Windows scripts structural lint"                python3 test_windows_lint.py
+run "6/14  Edge cases (power loss, messy data, custom hosts)" bash test_edge_cases.sh
+run "7/14  Brightspace URL parsing (all quiz URL shapes)"  node   test_url_parsing.mjs
+run "8/14  Live quiz-monitor status + heartbeat logic"     node   test_live_status.mjs
+run "9/14 Daemon reporting end-to-end (real HTTP, mock backend)" bash test_daemon_reporting.sh
+run "10/14 Mac agent + browser policy (extension replacement)" python3 test_agent.py
+run "11/14 Device authentication (real API, in-memory database)" node --no-warnings test_device_auth.mjs
 if command -v pwsh >/dev/null 2>&1; then
-  run "12/13 Windows device signing (real lockqzd.ps1 code)" pwsh -NoProfile -File test_windows_signing.ps1
+  run "12/14 Windows device signing (real lockqzd.ps1 code)" pwsh -NoProfile -File test_windows_signing.ps1
 else
-  echo ""; echo "######## 12/13 Windows device signing ########"; echo "  skipped: PowerShell (pwsh) not installed here; runs on Windows CI"
+  echo ""; echo "######## 12/14 Windows device signing ########"; echo "  skipped: PowerShell (pwsh) not installed here; runs on Windows CI"
 fi
-run "13/13 Access gate + teacher self-verify"               node   test_gate.mjs
+run "13/14 Access gate + teacher self-verify"               node   test_gate.mjs
+run "14/14 Signed self-update (real daemon, mock release site)" bash test_update.sh
 
 echo ""
 echo "================================================"

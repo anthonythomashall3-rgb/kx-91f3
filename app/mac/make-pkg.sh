@@ -20,6 +20,9 @@ mkdir -p "$ROOT/$DESTREL"
 cp "$APP/lockqz.sh" "$APP/lockqzd.py" "$APP/lockqz-agent.py" "$APP/browser-policy.py" "$APP/blocklist.txt" "$APP/com.lockqz.pf.conf" "$ROOT/$DESTREL/"
 [ -f "$APP/lockqz-core.sh" ] && cp "$APP/lockqz-core.sh" "$ROOT/$DESTREL/" || true
 cp "$APP/extra-block.sh" "$ROOT/$DESTREL/"   # VPN/VM/remote/overlay/model/Apple Intelligence blockers (sourced by lockqz.sh)
+cp "$APP/ensure-python.sh" "$APP/lockqz-boot.sh" "$APP/update.pub" "$APP/install.sh" "$APP/uninstall.sh" "$ROOT/$DESTREL/"   # python repair, launchd entry, release key, (un)installer
+chmod 755 "$ROOT/$DESTREL"/*.sh "$ROOT/$DESTREL"/*.py
+VERSION="$(tr -d '[:space:]' < "$APP/../VERSION" 2>/dev/null || echo 0.0.0)"
 /usr/bin/python3 - "$ROOT/$DESTREL/config.json" "$TOKEN" "$API" <<'PY'
 import json,sys
 json.dump({"port":8787,"token":sys.argv[2],"api_base":sys.argv[3],
@@ -33,6 +36,7 @@ cat > "$SCRIPTS/postinstall" <<'POST'
 DEST="/Library/Application Support/LOCKqz"
 PLIST="/Library/LaunchDaemons/com.lockqz.helper.plist"
 DEVICE="mac-$(/usr/bin/uuidgen | tr 'A-Z' 'a-z')"
+bash "$DEST/ensure-python.sh" || true   # fresh Mac: install Apple's tools so python3 really runs (before we use it)
 /usr/bin/python3 - "$DEST/config.json" "$DEVICE" <<'PY'
 import json,sys
 p=sys.argv[1]; c=json.load(open(p)); c["device_id"]=sys.argv[2]; json.dump(c,open(p,"w"),indent=2)
@@ -45,7 +49,7 @@ cat > "$PLIST" <<PL
 <plist version="1.0"><dict>
   <key>Label</key><string>com.lockqz.helper</string>
   <key>ProgramArguments</key>
-  <array><string>/usr/bin/python3</string><string>$DEST/lockqzd.py</string></array>
+  <array><string>/bin/bash</string><string>$DEST/lockqz-boot.sh</string></array>
   <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>$DEST/lockqzd.log</string>
   <key>StandardErrorPath</key><string>$DEST/lockqzd.log</string>
@@ -79,6 +83,6 @@ POST
 chmod +x "$SCRIPTS/postinstall"
 
 pkgbuild --root "$ROOT" --scripts "$SCRIPTS" --identifier com.lockqz.helper \
-  --version 0.2.0 --install-location / "$OUT"
+  --version "$VERSION" --install-location / "$OUT"
 rm -rf "$ROOT" "$SCRIPTS"
 echo "Built: $OUT  (unsigned — sign + notarize per the header before distributing)"

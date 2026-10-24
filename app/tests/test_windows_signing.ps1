@@ -86,6 +86,73 @@ HTTPServer(("127.0.0.1", PORT), H).serve_forever()
   } finally { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue; Remove-Item $mock -ErrorAction SilentlyContinue }
 }
 
+Write-Host "T4 self-update: signature check, hash check, forbidden names, quiz-in-progress, real swap (mock site)"
+$k1 = New-Object System.Security.Cryptography.RSACryptoServiceProvider(2048)
+$k2 = New-Object System.Security.Cryptography.RSACryptoServiceProvider(2048)
+$pubXml = $k1.ToXmlString($false)
+$bodyBytes = [Text.Encoding]::UTF8.GetBytes('{"version":"9.9.9"}')
+$b64 = [Convert]::ToBase64String($k1.SignData($bodyBytes, "SHA256"))
+Check "valid signature accepted" (LQ-VerifySig $bodyBytes $b64 $pubXml)
+Check "wrong key refused" (-not (LQ-VerifySig $bodyBytes ([Convert]::ToBase64String($k2.SignData($bodyBytes, "SHA256"))) $pubXml))
+Check "tampered body refused" (-not (LQ-VerifySig ([Text.Encoding]::UTF8.GetBytes('{"version":"9.9.8"}')) $b64 $pubXml))
+Check "garbage signature refused, no throw" (-not (LQ-VerifySig $bodyBytes "not-base64!" $pubXml))
+$ossl = Get-Command openssl -ErrorAction SilentlyContinue
+if ($ossl -and $py) {
+  # Cross-check: a manifest signed the way CI signs it (openssl, PEM key) verifies here (.NET, XML key).
+  $t = Join-Path ([IO.Path]::GetTempPath()) ("lqz-upd-" + [guid]::NewGuid().ToString("N")); New-Item -ItemType Directory -Path $t | Out-Null
+  & $ossl.Source genrsa -out "$t/k.pem" 2048 2>$null
+  & $ossl.Source rsa -in "$t/k.pem" -pubout -out "$t/k.pub" 2>$null
+  $mod = ((& $ossl.Source rsa -pubin -in "$t/k.pub" -modulus -noout) -replace "^Modulus=", "")
+  $modBytes = [byte[]]::new($mod.Length / 2); for ($i = 0; $i -lt $modBytes.Length; $i++) { $modBytes[$i] = [Convert]::ToByte($mod.Substring($i * 2, 2), 16) }
+  $xml = "<RSAKeyValue><Modulus>" + [Convert]::ToBase64String($modBytes) + "</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>"
+  Set-Content -Path "$t/k.xml" -Value $xml -Encoding ASCII
+  # a "release": the real Windows files with the version bumped, published by the real builder
+  function Fresh($d) { Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Path $d | Out-Null; Copy-Item "$Win/*" $d -Recurse -Force }
+  $src = Join-Path $t "winsrc"; Fresh $src
+  (Get-Content "$src/lockqzd.ps1" -Raw) -replace '\$Version = "[^"]+"', '$$Version = "9.9.9"' | Set-Content "$src/lockqzd.ps1" -Encoding UTF8
+  Copy-Item "$t/k.xml" "$src/update.pub.xml" -Force
+  $site = Join-Path $t "site"; New-Item -ItemType Directory -Path "$site/download" -Force | Out-Null
+  & $py.Source (Join-Path $Here "../release/make-manifest.py") --key "$t/k.pem" --pub "$t/k.pub" --out "$site/download" --windows $src --version 9.9.9 | Out-Null
+  Check "release built by make-manifest.py" (Test-Path "$site/download/update.sig")
+  $mb = [IO.File]::ReadAllBytes("$site/download/update.json"); $ms = Get-Content "$site/download/update.sig" -Raw
+  Check "openssl-signed manifest verifies with the XML key (.NET)" (LQ-VerifySig $mb $ms $xml)
+  Check "openssl-signed manifest fails with another key" (-not (LQ-VerifySig $mb $ms $pubXml))
+  # an "installed" helper to update, served over a local mock site
+  $inst = Join-Path $t "inst"; Fresh $inst; Copy-Item "$t/k.xml" "$inst/update.pub.xml" -Force
+  $sp2 = @{ FilePath = $py.Source; ArgumentList = @("-m", "http.server", ($Port + 1), "--bind", "127.0.0.1", "--directory", $site); PassThru = $true; RedirectStandardError = "$t/srv.err"; RedirectStandardOutput = "$t/srv.out" }
+  if ($PSVersionTable.PSEdition -ne "Core" -or $IsWindows) { $sp2.WindowStyle = "Hidden" }
+  $srv = Start-Process @sp2
+  Start-Sleep -Seconds 2
+  try {
+    $env:LOCKQZ_UPDATE_DIR = $inst
+    $st = [hashtable]::Synchronized(@{ state = "locked" })
+    $r = LQ-CheckUpdate $st $inst "http://127.0.0.1:$($Port + 1)/download" "0.3.0"
+    Check "deferred while a quiz is locked" (-not $r)
+    Check "install untouched while locked" (((Get-Content "$inst/lockqzd.ps1" -Raw) -match '\$Version = "0\.3\.0"') -and -not (Test-Path "$inst/.update"))
+    $st.state = "unlocked"
+    $r = LQ-CheckUpdate $st $inst "http://127.0.0.1:$($Port + 1)/download" "0.3.0"
+    Check "update installed when unlocked" $r
+    Check "lockqzd.ps1 replaced by the new version" ((Get-Content "$inst/lockqzd.ps1" -Raw) -match '\$Version = "9\.9\.9"')
+    Check "staging folder cleaned" (-not (Test-Path "$inst/.update"))
+    $r = LQ-CheckUpdate $st $inst "http://127.0.0.1:$($Port + 1)/download" "9.9.9"
+    Check "same version: nothing to do" (-not $r)
+    # tamper with a served file -> whole update refused, install untouched
+    Add-Content -Path "$site/download/windows/blocklist.txt" -Value "#x"
+    Fresh $inst; Copy-Item "$t/k.xml" "$inst/update.pub.xml" -Force
+    $r = LQ-CheckUpdate $st $inst "http://127.0.0.1:$($Port + 1)/download" "0.3.0"
+    Check "hash mismatch refused" (-not $r)
+    Check "install untouched after hash mismatch" ((Get-Content "$inst/lockqzd.ps1" -Raw) -match '\$Version = "0\.3\.0"')
+    # wrong key -> refused
+    Fresh $inst; Set-Content "$inst/update.pub.xml" -Value $pubXml -Encoding ASCII
+    $r = LQ-CheckUpdate $st $inst "http://127.0.0.1:$($Port + 1)/download" "0.3.0"
+    Check "wrong signing key refused" (-not $r)
+    # a source checkout never updates itself
+    Remove-Item Env:LOCKQZ_UPDATE_DIR
+    $r = LQ-CheckUpdate $st $inst "http://127.0.0.1:$($Port + 1)/download" "0.3.0"
+    Check "non-install folder never updated" (-not $r)
+  } finally { Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue; Remove-Item Env:LOCKQZ_UPDATE_DIR -ErrorAction SilentlyContinue; Remove-Item $t -Recurse -Force -ErrorAction SilentlyContinue }
+} else { Write-Host "  (openssl/python not found: cross-check with a CI-style signed release skipped)" }
+
 Write-Host ""
 Write-Host "RESULT: $pass passed, $fail failed"
 if ($fail -gt 0) { exit 1 }

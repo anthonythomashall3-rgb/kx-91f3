@@ -98,3 +98,65 @@ The browser extension is retired (kept in `legacy/`). Everything it did now live
 - Safari has no policy layer → the agent rewrites any AI-answer search tab to Google Web (≤1 s).
 - Download page is ONE button. No extension, no Chrome Web Store, no $5, no profile approval.
 - Helper gained `POST /student`; backend accepts `source:"agent"` heartbeats.
+
+## 24 Oct 2026 — runs itself: signed self-update, CI deploy, python repair, one-line install ($0)
+
+What changed (all code, all tested: 14 suites; Windows updater proven under PowerShell 7 and on CI under 5.1):
+- **Signed self-update.** Every installed helper (Mac `lockqzd.py`, Windows `lockqzd.ps1`) checks
+  `https://lockqz.pages.dev/download/update.json` about 90 s after it starts and every 6 hours. The
+  manifest is signed in CI with an RSA key; the helper verifies the signature with the public key
+  shipped inside the install (`update.pub` / `update.pub.xml`), checks every file's SHA-256, swaps the
+  files in atomically and restarts itself and the agent. It never updates during a quiz, never
+  downgrades, never touches `config.json`, `device.key` or the active lock, and anything wrong
+  (signature, hash, bad name, network) leaves the install exactly as it was. A daemon started from
+  a source checkout never updates the checkout. Students never reinstall again.
+- **CI deploys on every push to `main`** (`.github/workflows/release.yml`): all suites on Linux ->
+  build + install-test the `.pkg` on a real Mac runner and the `.exe` on a real Windows runner ->
+  build the signed manifest (`app/release/make-manifest.py`) -> `deploy.sh` (schema, migrations,
+  site, API, teacher site, legacy forwarders) -> live checks. Until the three secrets below exist,
+  the deploy step prints what is missing and does nothing.
+- **Fresh Macs work.** `/usr/bin/python3` is only a stub until Apple's Command Line Tools exist, so
+  a LaunchDaemon would never have started on a brand-new Mac. `mac/ensure-python.sh` installs the
+  tools headlessly with `softwareupdate` (no Xcode, no Apple ID, nothing to click), and the daemon
+  now starts through `mac/lockqz-boot.sh`, which repairs python on every boot (macOS upgrades
+  remove the tools). The installer, the pkg and the daemon all use it.
+- **One-line install, no Gatekeeper / SmartScreen prompt, no Apple or Microsoft account:**
+  Mac `curl -fsSL https://lockqz.pages.dev/install.sh | sudo bash`, Windows (elevated PowerShell)
+  `irm https://lockqz.pages.dev/install.ps1 | iex`. Both fetch the current release, verify the
+  manifest signature against the key embedded in the script and every file's hash, then install.
+  The download page shows the line under the Download button for the visitor's OS.
+- Windows daemon task now restarts itself if it ever stops (`RestartCount 999`); the uninstaller
+  and installer ship inside every install; `app/VERSION` is the single release version
+  (`make-manifest.py` refuses to build if a daemon's VERSION constant disagrees).
+
+### Your one-time steps (about 10 minutes, all free)
+1. Copy the release private key: in Terminal run
+   `cat ~/Projects/LOCKqz/.secrets/update_key.pem` and copy everything from `-----BEGIN` to `-----END ... KEY-----`.
+   Keep this file; it is gitignored. If it is ever lost, generate a new pair, replace
+   `app/mac/update.pub` + `app/windows/update.pub.xml` + the key embedded in `app/mac/install.sh`
+   and `app/windows/install.ps1`, and students must reinstall once.
+2. Open https://github.com/anthonythomashall3-rgb/LOCKqz/settings/secrets/actions and click
+   **New repository secret**. Name: `LOCKQZ_UPDATE_KEY`. Secret: the key from step 1. Click **Add secret**.
+3. Open https://dash.cloudflare.com/profile/api-tokens and click **Create Token**, then
+   **Create Custom Token** (bottom). Name it `lockqz-ci`. Permissions: **Account** · **Cloudflare Pages** · **Edit**;
+   add a second row **Account** · **D1** · **Edit**. Click **Continue to summary**, then **Create Token**, then **Copy**.
+4. Back on the GitHub secrets page: **New repository secret**, Name `CLOUDFLARE_API_TOKEN`, Secret = the token. **Add secret**.
+5. Open https://dash.cloudflare.com, click **Workers & Pages**; the **Account ID** is in the right-hand column. Copy it.
+   GitHub: **New repository secret**, Name `CLOUDFLARE_ACCOUNT_ID`, Secret = that id. **Add secret**.
+6. Make sure everything you want live is committed on `main` (CI deploys the committed tree, not your
+   working folder — the dashboard redesign in progress on 23 Oct is still uncommitted).
+7. Open https://github.com/anthonythomashall3-rgb/LOCKqz/actions/workflows/release.yml and click
+   **Run workflow** → **Run workflow**. Green = live. From now on every push to `main` does this by itself.
+8. GitHub Actions minutes: a public repository has unlimited free minutes; a private one has 2,000/month
+   and the macOS runner counts 10x. If you keep it private, expect roughly 60-80 charged minutes per push.
+   Making the repo public costs nothing and removes that limit (the private key is not in the repo).
+
+### What still cannot be automated away (be honest with professors)
+- A professor must click the **LOCKqz Sync** bookmark once per term (and after adding a quiz) so LOCKqz
+  can read their courses and set quiz passwords. It runs inside their own Brightspace login; nothing
+  else is possible without USC registering an LTI tool (see 05_phase2_lti) or storing their USC
+  credentials, which LOCKqz will not do.
+- A student installs once (download, or the one-line command). After that: nothing, ever.
+- Apple Developer Program ($99/yr) is the only way to make the `.pkg` open with no warning on macOS;
+  Azure Trusted Signing (~$10/mo) does the same for the `.exe`. The one-line installs avoid both at $0.
+  The Microsoft Store and Mac App Store are not needed and could not host a system-level helper anyway.

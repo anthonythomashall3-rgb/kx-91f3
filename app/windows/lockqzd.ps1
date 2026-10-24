@@ -5,7 +5,12 @@
 # daemon registers it once and signs every report and password request (HMAC-SHA256), so a
 # script that never installed LOCKqz cannot fake a lock and read the quiz password. The agent
 # gets the password from POST /password here, only while this PC is locked for that quiz.
+# Self-update: ~90 s after start and every ~6 h, while NO quiz is locked, fetches
+# <site>/download/update.json + update.sig, checks the RSA-SHA256 signature against the public key
+# shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
+# the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
+$Version = "0.3.0"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = "$env:ProgramData\LOCKqz\config.json"
@@ -14,6 +19,8 @@ $Port   = if ($Conf.port) { [int]$Conf.port } else { 8787 }
 $Token  = if ($Conf.token) { $Conf.token } else { "lockqz-dev" }
 $Api    = if ($Conf.api_base) { $Conf.api_base.TrimEnd("/") } else { "" }
 if ($Api -and -not $Api.EndsWith("/api")) { $Api += "/api" }   # accept a bare site URL too
+$Site = if ($Api.EndsWith("/api")) { $Api.Substring(0, $Api.Length - 4) } else { $Api }
+$UpdateUrl = if ($env:LOCKQZ_UPDATE_URL) { $env:LOCKQZ_UPDATE_URL.TrimEnd("/") } elseif ($Site) { "$Site/download" } else { "" }
 $Device = if ($Conf.device_id) { $Conf.device_id } else { "unknown" }
 $MaxMin = if ($Conf.max_minutes) { [int]$Conf.max_minutes } else { 180 }
 $State  = [hashtable]::Synchronized(@{ state="unlocked"; quiz_id=$null; student=$Conf.student; locked_since=0; max_minutes=$MaxMin; skew=0; registered=$false })
@@ -64,9 +71,59 @@ function LQ-Call($api, $path, $obj, $device, $key, $state, [bool]$signed) {
 function LQ-Register($api, $device, $key, $state) {
   # Register the key of this install once (trust on first use).
   if ($state.registered -or -not $api -or -not $device -or $device -eq "unknown") { return $state.registered }
-  $r = LQ-Call $api "/register" @{ device_id = $device; key = $key; platform = "windows"; version = "0.2.0"; student = $state.student } $device $key $state $false
+  $r = LQ-Call $api "/register" @{ device_id = $device; key = $key; platform = "windows"; version = "0.3.0"; student = $state.student } $device $key $state $false
   if ($r.code -eq 200) { $state.registered = $true }
   return $state.registered
+}
+function LQ-VerifySig([byte[]]$body, [string]$sigB64, [string]$pubXml) {
+  # RSA-SHA256 (PKCS#1 v1.5) over the exact manifest bytes, public key in .NET XML form.
+  try {
+    $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider
+    $rsa.FromXmlString($pubXml)
+    return [bool]$rsa.VerifyData($body, "SHA256", [Convert]::FromBase64String($sigB64.Trim()))
+  } catch { return $false }
+}
+function LQ-CheckUpdate($state, [string]$here, [string]$updateUrl, [string]$version) {
+  # Signed self-update; only while no quiz is locked. Returns $true when an update was installed.
+  # A bad signature, hash, file name or download leaves the install untouched. Never throws.
+  $stage = Join-Path $here ".update"
+  try {
+    if (-not $updateUrl) { return $false }
+    $pubPath = Join-Path $here "update.pub.xml"
+    if (-not (Test-Path $pubPath)) { return $false }
+    # Only a real install updates itself (or a test that names LOCKQZ_UPDATE_DIR): never a source checkout.
+    if (-not $env:LOCKQZ_UPDATE_DIR -and $here.TrimEnd("\") -ne "$env:ProgramData\LOCKqz") { return $false }
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $wc = New-Object System.Net.WebClient
+    $wc.Headers["User-Agent"] = "LOCKqz/$version (Windows)"
+    $body = $wc.DownloadData("$updateUrl/update.json")
+    $sig = [Text.Encoding]::ASCII.GetString($wc.DownloadData("$updateUrl/update.sig"))
+    if (-not (LQ-VerifySig $body $sig (Get-Content $pubPath -Raw))) { Write-Host "update: manifest signature INVALID - ignored"; return $false }
+    $m = [Text.Encoding]::UTF8.GetString($body) | ConvertFrom-Json
+    if ([version]$m.version -le [version]$version) { return $false }
+    $files = $m.windows.files
+    if (-not $files -or -not $files.PSObject.Properties["lockqzd.ps1"]) { Write-Host "update: manifest lists no Windows helper - ignored"; return $false }
+    $never = @("config.json", "device.key", "active_lock.json")
+    foreach ($p in $files.PSObject.Properties) {
+      if ($never -contains $p.Name -or $p.Name -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$' -or ([string]$p.Value) -notmatch '^[0-9a-f]{64}$') {
+        Write-Host "update: refusing file entry $($p.Name)"; return $false
+      }
+    }
+    Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Path $stage -Force | Out-Null
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    foreach ($p in $files.PSObject.Properties) {
+      $data = $wc.DownloadData("$updateUrl/windows/$($p.Name)")
+      $got = LQ-Hex $sha.ComputeHash($data)
+      if ($got -ne [string]$p.Value) { Write-Host "update: SHA-256 mismatch for $($p.Name) - ignored"; Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue; return $false }
+      [IO.File]::WriteAllBytes((Join-Path $stage $p.Name), $data)
+    }
+    if ($state.state -eq "locked") { Write-Host "update: quiz in progress - deferred"; Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue; return $false }
+    foreach ($p in $files.PSObject.Properties) { Move-Item -Force (Join-Path $stage $p.Name) (Join-Path $here $p.Name) }
+    Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "update: $version -> $($m.version) installed ($($files.PSObject.Properties.Name.Count) files)"
+    return $true
+  } catch { Write-Host "update check failed: $_"; Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue; return $false }
 }
 '@
 . ([ScriptBlock]::Create($SignLib))
@@ -123,8 +180,16 @@ function Report($event, $detail, $source, $quiz) {
 # Watcher runspace: re-apply the block while locked; flag tamper.
 $watcher = [powershell]::Create()
 $watcher.AddScript({
-  param($State,$Engine,$Api,$Device,$Key,$SignLib)
+  param($State,$Engine,$Api,$Device,$Key,$SignLib,$Here,$UpdateUrl,$Version)
   . ([ScriptBlock]::Create($SignLib))
+  function WUpdate {
+    if (-not (LQ-CheckUpdate $State $Here $UpdateUrl $Version)) { return }
+    $b = @{ device_id=$Device; event="update"; detail=@{ from=$Version }; ts=(Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") }
+    LQ-Call $Api "/report" $b $Device $Key $State $true | Out-Null
+    if ($env:LOCKQZ_NO_RESTART) { Write-Host "update: (test) would restart the agent and the helper"; return }
+    # Restart both tasks from a detached process: stopping "LOCKqz" ends this very process.
+    Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoProfile -Command `"Stop-ScheduledTask -TaskName 'LOCKqz Agent'; Stop-ScheduledTask -TaskName 'LOCKqz'; Start-Sleep 3; Start-ScheduledTask -TaskName 'LOCKqz'; Start-ScheduledTask -TaskName 'LOCKqz Agent'`""
+  }
   function ELocked { (& powershell -ExecutionPolicy Bypass -File $Engine status) -match "LOCKED" }
   function WReport($event,$detail,$source) {
     $b = @{ device_id=$Device; event=$event; quiz_id=$State.quiz_id; student=$State.student;
@@ -154,8 +219,11 @@ $watcher.AddScript({
     }
     # ~hourly until the server knows this device's key
     if (($cycles % 720 -eq 0) -and -not $State.registered) { LQ-Register $Api $Device $Key $State | Out-Null }
+    # ~90 s after start, then every ~6 h: signed self-update (skips itself during a quiz)
+    $every = if ($env:LOCKQZ_UPDATE_CYCLES) { [int]$env:LOCKQZ_UPDATE_CYCLES } else { 4320 }
+    if ($cycles -eq [math]::Min(18, $every) -or ($cycles % $every -eq 0)) { WUpdate }
   }
-}).AddArgument($State).AddArgument($Engine).AddArgument($Api).AddArgument($Device).AddArgument($Key).AddArgument($SignLib) | Out-Null
+}).AddArgument($State).AddArgument($Engine).AddArgument($Api).AddArgument($Device).AddArgument($Key).AddArgument($SignLib).AddArgument($Here).AddArgument($UpdateUrl).AddArgument($Version) | Out-Null
 $watcher.BeginInvoke() | Out-Null
 
 # Fail safe on start: never leave a machine locked across a restart.
@@ -187,7 +255,7 @@ while ($listener.IsListening) {
   switch ($path) {
     "/lock"      { $State.state="locked"; $State.quiz_id=$body.quiz_id; if($body.student){$State.student=$body.student}; if($body.max_minutes){$State.max_minutes=[int]$body.max_minutes}; $State.locked_since=[int][double]::Parse((Get-Date -UFormat %s)); Engine "lock"; Save-Lock; Report "lock" $null; $out.state="locked" }
     "/unlock"    { $q = if ($State.quiz_id) { $State.quiz_id } else { $body.quiz_id }; $State.state="unlocked"; $State.quiz_id=$null; Engine "unlock"; Clear-Lock; Report "unlock" $null $null $q; $out.state="unlocked" }
-    "/student"   { if($body.student){$State.student=$body.student}; Report "install" @{ platform="windows"; version="0.2.0" }; $out.student=$State.student }
+    "/student"   { if($body.student){$State.student=$body.student}; Report "install" @{ platform="windows"; version=$Version }; $out.student=$State.student }
     "/heartbeat" { Report "heartbeat" $body "agent" }
     "/password"  {
       # The quiz password is released only to this helper, only while it holds the lock for THIS
@@ -207,7 +275,7 @@ while ($listener.IsListening) {
       }
     }
     "/event"     { if ($body.event -eq "quiz_left") { Report "quiz_left" $body.detail "agent" $body.quiz_id } else { $res.StatusCode = 400; $out = @{ error = "event not allowed" } } }
-    "/status"    { $out = @{ state=$State.state; quiz_id=$State.quiz_id; engine_locked=(EngineLocked); version="0.2.0" } }
+    "/status"    { $out = @{ state=$State.state; quiz_id=$State.quiz_id; engine_locked=(EngineLocked); version=$Version } }
     default      { $res.StatusCode = 404; $out = @{ error="not found" } }
   }
   $json = ($out | ConvertTo-Json -Compress)
