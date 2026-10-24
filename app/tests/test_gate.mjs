@@ -224,6 +224,41 @@ async function suite(label, oldSchema) {
   const row9 = (r.data?.rows || []).find(x => x.device_id === DEV9);
   check("/live row carries the locked device's IP field", row9 && ("ip" in row9), JSON.stringify(row9));
 
+  console.log("T11 TAs are locked + tracked like students; the admin (developer mode) is the only exception");
+  await call(env, "/sync", { courses: [ { ou: OU, name: "ECON 203", code: "ECON-203", role: "Teaching Assistant",
+      classlist: [ { id: "4000", name: "Prof", email: "prof@usc.edu", role: "Instructor" },
+                   { id: "4001", name: "Al Student", email: "al@usc.edu", role: "Student" },
+                   { id: "4002", name: "Bo Student", email: "bo@usc.edu", role: "Student" },
+                   { id: "4003", name: "Tia TA", email: "ta@usc.edu", role: "Teaching Assistant" },
+                   { id: "4004", name: "Admin TA", email: "admin@usc.edu", role: "Teaching Assistant" } ],
+      quizzes: [ { qi: QI, name: "Midterm", active: true } ] } ] }, { teacher: ADMIN_TOK });
+  r = await getc(env, "/bs", { teacher: TOK });
+  const st11 = (r.data?.courses || []).find(c => c.ou === OU)?.students || [];
+  check("professor's list includes the TA (must install)", st11.some(x => x.email === "ta@usc.edu" && x.ta === true), JSON.stringify(st11));
+  check("professor's list still includes learners", st11.some(x => x.email === "al@usc.edu" && x.ta === false));
+  check("admin is NOT listed (exempt)", !st11.some(x => x.email === "admin@usc.edu"));
+  check("instructor is NOT listed", !st11.some(x => x.email === "prof@usc.edu"));
+  const DTA = "mac-ta11", KTA = randomBytes(32).toString("hex");
+  await call(env, "/register", { device_id: DTA, key: KTA, student: "ta@usc.edu", platform: "mac-15" });
+  await call(env, "/report", { event: "lock", quiz_id: LOCK_ID, student: "ta@usc.edu" }, { key: KTA, device: DTA });
+  r = await call(env, "/password", { url: QUIZ_URL, device_id: DTA }, { key: KTA, device: DTA });
+  check("locked TA gets the quiz password", r.status === 200 && !!r.data?.password, JSON.stringify(r.data));
+  const DAD = "mac-admin11", KAD = randomBytes(32).toString("hex");
+  await call(env, "/register", { device_id: DAD, key: KAD, student: "admin@usc.edu", platform: "mac-15" });
+  await call(env, "/report", { event: "lock", quiz_id: LOCK_ID, student: "admin@usc.edu", detail: { developer: true } }, { key: KAD, device: DAD });
+  r = await call(env, "/password", { url: QUIZ_URL, device_id: DAD }, { key: KAD, device: DAD });
+  check("admin in developer mode still gets the quiz password", r.status === 200 && !!r.data?.password, JSON.stringify(r.data));
+  const DFK = "mac-fake11", KFK = randomBytes(32).toString("hex");
+  await call(env, "/register", { device_id: DFK, key: KFK, student: "bo@usc.edu", platform: "mac-15" });
+  await call(env, "/report", { event: "lock", quiz_id: LOCK_ID, student: "bo@usc.edu", detail: { developer: true } }, { key: KFK, device: DFK });
+  r = await call(env, "/password", { url: QUIZ_URL, device_id: DFK }, { key: KFK, device: DFK });
+  check("a student faking developer mode is refused the password", r.status === 403, JSON.stringify(r.data));
+  r = await getc(env, "/live?quiz=" + LOCK_ID, { teacher: TOK });
+  const rows11 = r.data?.rows || [], rw = id => rows11.find(x => x.device_id === id);
+  check("TA: locked + admitted by the gate", rw(DTA)?.status === "locked" && rw(DTA)?.eligible === true && rw(DTA)?.user_id === "4003", JSON.stringify(rw(DTA)));
+  check("admin: shown as developer + admitted", rw(DAD)?.status === "developer" && rw(DAD)?.eligible === true, JSON.stringify(rw(DAD)));
+  check("fake developer: tamper + NOT admitted", rw(DFK)?.status === "tamper" && rw(DFK)?.eligible === false, JSON.stringify(rw(DFK)));
+
   console.log("T10 PAID ONLY: turning a professor off stops LOCKqz for them and frees their quizzes");
   r = await call(env, "/activate", { email: "prof@usc.edu", until: null }, { teacher: ADMIN_TOK });
   check("admin turns professor off", r.status === 200, JSON.stringify(r.data));

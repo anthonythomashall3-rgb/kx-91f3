@@ -113,6 +113,8 @@ export async function onRequest(context) {
   // Anthony (admin) is the sole exception, handled by me.admin at each call site.
   const EMAIL = String(me && me.email || "").toLowerCase();
   const INSTR_SQL = "(r.role LIKE '%nstructor%' OR r.role LIKE '%rofessor%' OR r.role LIKE '%aculty%')";
+  // Roles LOCKqz locks during quizzes: everyone except the course's instructors (Learners and TAs).
+  const takesQuizzes = role => !/nstructor|rofessor|aculty/i.test(String(role||"")) && !!String(role||"").trim();
   async function hasTrustedOwner(ou) {
     return !!(await db.prepare("SELECT 1 FROM teacher_courses tc JOIN teachers te ON te.id=tc.teacher_id WHERE tc.ou=? AND (te.role='admin' OR te.verified=1) LIMIT 1").bind(String(ou)).first());
   }
@@ -212,6 +214,8 @@ export async function onRequest(context) {
       const lk = await db.prepare("SELECT last_lock, signed FROM locks WHERE device_id=? AND quiz_id=?").bind(device_id, lockId).first();
       const fresh = lk && (Date.now() - Date.parse(lk.last_lock) < 60000) && (!(strict || v.ok) || Number(lk.signed) === 1);
       if (!fresh) return json({ password: null, reason: "not locked" }, 403);
+      const devLk = await db.prepare("SELECT 1 FROM events e JOIN devices d ON d.device_id=e.device_id WHERE e.device_id=? AND e.quiz_id=? AND e.event='lock' AND e.detail LIKE '%\"developer\":true%' AND lower(COALESCE(d.student,'')) NOT IN (SELECT lower(email) FROM teachers WHERE role='admin') LIMIT 1").bind(device_id, lockId).first();
+      if (devLk) return json({ password: null, reason: "not locked" }, 403);   // dev mode is admin-only
       // Admit only at the quiz's scheduled start time -- even if the professor unhid it early.
       const sq = await db.prepare("SELECT start_date FROM bs_quizzes WHERE ou=? AND qi=?").bind(String(ou||""), String(qi||"")).first();
       if (sq && sq.start_date && Date.now() < Date.parse(sq.start_date)) return json({ password: null, reason: "not started", start: sq.start_date }, 403);
@@ -544,10 +548,13 @@ export async function onRequest(context) {
       const qz = (await db.prepare(`SELECT b.ou,b.qi,b.name,b.active,b.start_date,b.end_date,b.due_date,b.bs_has_password,b.bs_password_is_ours,q.password,q.lock_id,q.gated FROM bs_quizzes b LEFT JOIN quizzes q ON q.qi=b.qi WHERE b.ou IN (${ph}) ORDER BY b.name`).bind(...ous).all()).results;
       const devs = (await db.prepare(`SELECT device_id,lower(student) AS who,platform,version,last_seen FROM devices WHERE lower(student) IN (SELECT lower(email) FROM roster WHERE ou IN (${ph})) OR lower(student) IN (SELECT lower(name) FROM roster WHERE ou IN (${ph}))`).bind(...ous, ...ous).all()).results;
       const by = {}; devs.forEach(d => { (by[d.who] = by[d.who] || []).push(d); });
+      const adminEmails = new Set(((await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin'").all()).results).map(x => x.e));
       return json({ courses: cs.map(c => ({ ...c,
-        students: roster.filter(r => r.ou === c.ou && /learner|student/i.test(r.role||"")).map(r => {
+        // Everyone LOCKqz locks: Learners AND TAs (any non-instructor role). The admin is the one
+        // exempt person (developer mode), so he is never listed as someone who must install.
+        students: roster.filter(r => r.ou === c.ou && takesQuizzes(r.role) && !adminEmails.has((r.email||"").toLowerCase())).map(r => {
           const d = by[(r.email||"").toLowerCase()] || by[(r.name||"").toLowerCase()] || [];
-          return { name:r.name, email:r.email, installed: d.length > 0, platform: d[0]?.platform||null, last_seen: d[0]?.last_seen||null }; }),
+          return { name:r.name, email:r.email, ta: !/learner|student/i.test(r.role||""), installed: d.length > 0, platform: d[0]?.platform||null, last_seen: d[0]?.last_seen||null }; }),
         quizzes: qz.filter(q => q.ou === c.ou) })) });
     }
 
@@ -586,16 +593,22 @@ export async function onRequest(context) {
       const STALE = 90000, nowMs = Date.now(), age = t => t ? (nowMs - Date.parse(t)) : null;
       const locks = (await db.prepare(`SELECT l.device_id,l.quiz_id,l.last_lock,l.helper_seen,l.ext_seen,l.signed,l.ip,d.student,d.platform FROM locks l LEFT JOIN devices d ON d.device_id=l.device_id WHERE (l.quiz_id=? OR l.quiz_id LIKE ?) AND ${s.sql}`).bind(quiz, like, ...s.args).all()).results;
       const tamp = new Set(((await db.prepare("SELECT DISTINCT device_id FROM events WHERE (quiz_id=? OR quiz_id LIKE ?) AND event='tamper'").bind(quiz, like).all()).results).map(t=>t.device_id));
+      // Developer mode: only the admin's own Mac may hold a lock without blocking AI. A dev claim
+      // from any other device is a modified client -> tamper (never admitted).
+      const devClaim = new Set(((await db.prepare("SELECT DISTINCT device_id FROM events WHERE (quiz_id=? OR quiz_id LIKE ?) AND event='lock' AND detail LIKE '%\"developer\":true%'").bind(quiz, like).all()).results).map(t=>t.device_id));
+      const adminEm = new Set(((await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin'").all()).results).map(x => x.e));
       const done = (await db.prepare(`SELECT DISTINCT e.device_id,d.student,d.platform FROM events e LEFT JOIN devices d ON d.device_id=e.device_id WHERE (e.quiz_id=? OR e.quiz_id LIKE ?) AND e.event IN ('unlock','auto_unlock') AND ${s2.sql}`).bind(quiz, like, ...s2.args).all()).results;
       const active = new Set(locks.map(l=>l.device_id));
       const rows = locks.map(l => {
         const a = age(l.last_lock), h = age(l.helper_seen), e = age(l.ext_seen);
         let status = "locked";
-        if (tamp.has(l.device_id)) status = "tamper";
+        const dev = devClaim.has(l.device_id);
+        if (tamp.has(l.device_id) || (dev && !adminEm.has(String(l.student||"").toLowerCase()))) status = "tamper";
         else if (a !== null && a > STALE) {
           const helperDown = h === null || h > STALE, extDown = e === null || e > STALE;
           status = helperDown && !extDown ? "helper_killed" : (extDown && !helperDown ? "browser_closed" : "dark");
         }
+        else if (dev) status = "developer";
         return { device_id:l.device_id, student:l.student||null, platform:l.platform||null, status, last_lock:l.last_lock, age_ms:a, verified: Number(l.signed) === 1, ip: l.ip||null };
       });
       done.forEach(d => { if (!active.has(d.device_id)) rows.push({ device_id:d.device_id, student:d.student||null, platform:d.platform||null, status:"done" }); });
@@ -604,7 +617,7 @@ export async function onRequest(context) {
       const _qi = String(quiz).split("-").pop(), _ou = String(quiz).split("-")[0];
       const _sq = /^\d+$/.test(_qi) ? await db.prepare("SELECT start_date FROM bs_quizzes WHERE ou=? AND qi=?").bind(_ou, _qi).first() : null;
       const started = !(_sq && _sq.start_date) || Date.now() >= Date.parse(_sq.start_date);   // not before scheduled start
-      rows.forEach(r => { r.email = String(r.student||"").toLowerCase().includes("@") ? String(r.student).toLowerCase() : null; r.eligible = (started && r.status === "locked" && r.verified === true); });
+      rows.forEach(r => { r.email = String(r.student||"").toLowerCase().includes("@") ? String(r.student).toLowerCase() : null; r.eligible = (started && (r.status === "locked" || r.status === "developer") && r.verified === true); });
       const em = [...new Set(rows.map(r => r.email).filter(Boolean))];
       if (em.length) {
         const nm = (await db.prepare(`SELECT lower(email) AS e, name, user_id FROM roster WHERE lower(email) IN (${em.map(()=>"?").join(",")})`).bind(...em).all()).results;

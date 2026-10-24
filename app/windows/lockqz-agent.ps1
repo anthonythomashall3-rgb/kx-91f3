@@ -24,8 +24,9 @@ $Poll = 2; $PollLocked = 1; $Grace = 30; $Beat = 45
 $BrowserClasses = @("Chrome_WidgetWin_1","MozillaWindowClass")
 
 function Log($m) { Add-Content -Path "$UserDir\agent.log" -Value ("{0} {1}" -f (Get-Date -Format s), $m) }
-function Is-Quiz($u)    { ($u -match "/d2l/lms/quizzing/user/") -and ($u -match "qi=") -and -not ($u -match "quizzes_list|quiz_submissions|feedback|results|submission") }
-function Is-Leaving($u) { ($u -match "/d2l/lms/quizzing/user/") -and ($u -match "quizzes_list|quiz_submissions|feedback|results|submission") }
+function Is-QuizPath($u) { ($u -match "/d2l/lms/quizzing/user/") -or (($u -match "/d2l/lms/quizzing/") -and ($u -match "isprv=1|preview")) }
+function Is-Quiz($u)    { (Is-QuizPath $u) -and ($u -match "qi=") -and -not ($u -match "quizzes_list|quiz_submissions|feedback|results|submission") }
+function Is-Leaving($u) { (Is-QuizPath $u) -and ($u -match "quizzes_list|quiz_submissions|feedback|results|submission") }
 function Lock-Id($u) {
   $qi = if ($u -match "qi=(\d+)") { $Matches[1] } else { "x" }
   $ou = if ($u -match "ou=(\d+)") { $Matches[1] } else { "x" }

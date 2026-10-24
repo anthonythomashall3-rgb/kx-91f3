@@ -24,6 +24,11 @@ no = [B + "/d2l/lms/quizzing/user/quizzes_list.d2l?ou=123", B + "/d2l/lms/quizzi
 ok("attempt pages lock") if all(A.is_quiz(u) for u in yes) else bad("an attempt page did not lock")
 ok("non-attempt pages never lock") if not any(A.is_quiz(u) for u in no) else bad("a non-attempt page locked")
 ok("lock id = ou-qi") if A.lock_id(yes[0]) == "123-456" else bad("lock id " + A.lock_id(yes[0]))
+prv = [B + "/d2l/lms/quizzing/user/quiz_summary.d2l?qi=456&ou=123&isprv=1",
+       B + "/d2l/lms/quizzing/admin/modify/quiz_preview.d2l?ou=123&qi=456"]
+edit = [B + "/d2l/lms/quizzing/admin/modify/quiz_newedit_properties.d2l?ou=123&qi=456"]
+ok("TA/staff Preview of a quiz locks too") if all(A.is_quiz(u) for u in prv) else bad("a preview page did not lock")
+ok("quiz edit page (no preview) never locks") if not any(A.is_quiz(u) for u in edit) else bad("an edit page locked")
 
 print("T2 search backstop: AI-answer searches are sent to Google Web; clean ones are left alone")
 r = A.rewrite_search

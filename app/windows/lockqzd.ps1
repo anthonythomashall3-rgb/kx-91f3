@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.3.0"
+$Version = "0.3.1"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = "$env:ProgramData\LOCKqz\config.json"
@@ -71,7 +71,7 @@ function LQ-Call($api, $path, $obj, $device, $key, $state, [bool]$signed) {
 function LQ-Register($api, $device, $key, $state) {
   # Register the key of this install once (trust on first use).
   if ($state.registered -or -not $api -or -not $device -or $device -eq "unknown") { return $state.registered }
-  $r = LQ-Call $api "/register" @{ device_id = $device; key = $key; platform = "windows"; version = "0.3.0"; student = $state.student } $device $key $state $false
+  $r = LQ-Call $api "/register" @{ device_id = $device; key = $key; platform = "windows"; version = "0.3.1"; student = $state.student } $device $key $state $false
   if ($r.code -eq 200) { $state.registered = $true }
   return $state.registered
 }

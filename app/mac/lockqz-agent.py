@@ -31,7 +31,8 @@ def developer_mode():
     except Exception:
         return False
 
-QUIZ_RE = re.compile(r"/d2l/lms/quizzing/user/", re.I)
+# Taking a quiz (/quizzing/user/) OR previewing one (TAs/staff open quizzes via Preview).
+QUIZ_RE = re.compile(r"/d2l/lms/quizzing/(user/|.*(isprv=1|preview))", re.I)
 LEAVING_RE = re.compile(r"quizzes_list|quiz_submissions|feedback|results|submission", re.I)
 WEB_OK_UDM = {"14", "2", "12", "7", "36"}
 WEB_OK_TBM = {"isch", "nws", "vid", "bks"}
@@ -208,6 +209,9 @@ class Agent:
             except Exception as e: log("password via helper failed: %s" % e)
             if pw: break
             time.sleep(2)
+        if pw and developer_mode():
+            clipboard(pw)
+            dialog("Developer mode: AI stays ON for you.\n\nQuiz password:  %s\n(copied to your clipboard)" % pw); return
         if pw:
             clipboard(pw)
             dialog("AI is locked for this quiz.\n\nQuiz password:  %s\n(copied to your clipboard — paste it into Brightspace)" % pw)
@@ -226,13 +230,9 @@ class Agent:
         self.locked, self.quiz, self.url, self.missing_since = False, None, None, None
 
     def tick(self):
-        if developer_mode():
-            if self.locked:
-                try: self.helper("/unlock", {"quiz_id": self.quiz})
-                except Exception: pass
-                self.locked, self.quiz, self.url, self.missing_since = False, None, None, None
-                log("developer mode ON — AI stays available; not locking")
-            return
+        # Developer mode (admin only): same quiz flow (gate password, start/end reporting) but the
+        # daemon never blocks AI and search tabs are never rewritten.
+        dev = developer_mode()
         tabs = browser_tabs()
         quiz_urls = [u for (_, _, _, u) in tabs if is_quiz(u)]
         leaving = any(LEAVING_RE.search(u) and QUIZ_RE.search(u) for (_, _, _, u) in tabs)
@@ -247,7 +247,7 @@ class Agent:
             self.missing_since = self.missing_since or time.time()
             if time.time() - self.missing_since > GRACE:
                 self.end("browser_closed" if not tabs else "quiz_tab_closed"); return
-        for (app, wi, ti, u) in tabs:
+        for (app, wi, ti, u) in ([] if dev else tabs):
             new = rewrite_search(u)
             if new and wi >= 0: set_tab_url(app, wi, ti, new)
         if time.time() - self.last_beat > BEAT:

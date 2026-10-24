@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -362,6 +362,9 @@ def watcher():
                     log("developer mode ON — not locking on this Mac")
                     STATE.update(state="developer", quiz_id=None, locked_at=None, locked_since=0.0)
                     engine("unlock"); clear_lock()
+                elif STATE["quiz_id"]:
+                    # Admin in a quiz: keep the signed lock alive so the quiz gate admits him.
+                    qid = STATE["quiz_id"]; do_beat = (cycles % BEAT == 0)
             elif STATE["state"] == "developer":
                 STATE.update(state="unlocked", quiz_id=None)
             if STATE["state"] == "locked":
@@ -422,8 +425,9 @@ class H(BaseHTTPRequestHandler):
                                  student=body.get("student", STATE["student"]),
                                  locked_at=None, locked_since=0.0)
                     engine("unlock")
-                report("developer_mode", {"quiz_id": body.get("quiz_id"),
-                                          "detail": "admin developer mode — AI not locked"})
+                # Signed "lock" flagged developer: the server admits ONLY the admin's account with it
+                # (any other device sending this is shown as tamper and refused the password).
+                report("lock", {"quiz_id": body.get("quiz_id"), "detail": {"developer": True}})
                 return self._send(200, {"ok": True, "state": "developer", "developer": True})
             with LOCK:
                 STATE.update(state="locked", quiz_id=body.get("quiz_id"),
@@ -455,9 +459,9 @@ class H(BaseHTTPRequestHandler):
             url = str(body.get("url") or "")
             with LOCK:
                 st, qid = STATE["state"], STATE["quiz_id"]
-            if st != "locked" or qid != lock_id(url):
+            if st not in ("locked", "developer") or qid != lock_id(url):
                 return self._send(409, {"error": "not locked for this quiz"})
-            if not engine_ok():
+            if st == "locked" and not engine_ok():
                 engine("lock")
                 if not engine_ok():
                     report("tamper", {"quiz_id": qid, "detail": "block_missing_at_password"})

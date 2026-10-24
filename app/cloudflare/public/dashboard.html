@@ -291,13 +291,13 @@ function viewClass(ou){
     </section>
     <section class="card"><div class="hrow"><h2>Students</h2><span><b style="color:var(--ok)">${s.ready} ready</b>${s.missing.length?` · <b style="color:var(--warn)">${s.missing.length} not yet</b>`:""}</span></div>
       ${s.missing.length ? `<div class="note warn"><span>${s.missing.length} student${s.missing.length===1?" has":"s have"} not installed LOCKqz. They cannot open a protected exam until they do.</span><a class="btn warn" href="${mailMissing(c,s)}">Send them the install link</a></div>` : `<div class="note ok"><span>Every student has LOCKqz installed.</span></div>`}
-      <ul class="list">${[...s.missing, ...c.students.filter(x=>x.installed)].map(x=>`<li><span class="dot ${x.installed?'ok':'warn'}"></span><span class="grow"><span style="font-size:15px">${esc(x.name)}</span></span><span class="st ${x.installed?'ok':'warn'}">${x.installed?"Ready"+(x.platform?" · "+esc(x.platform):""):"Needs LOCKqz"}</span></li>`).join("") || `<li class="d">No students on the Brightspace roster.</li>`}</ul>
+      <ul class="list">${[...s.missing, ...c.students.filter(x=>x.installed)].map(x=>`<li><span class="dot ${x.installed?'ok':'warn'}"></span><span class="grow"><span style="font-size:15px">${esc(x.name)}</span>${x.ta?' <span class="sm" style="color:var(--muted,#777)">· TA</span>':""}</span><span class="st ${x.installed?'ok':'warn'}">${x.installed?"Ready"+(x.platform?" · "+esc(x.platform):""):"Needs LOCKqz"}</span></li>`).join("") || `<li class="d">No students on the Brightspace roster.</li>`}</ul>
     </section>
   </div>`;
 }
 
 // ---- LIVE ----
-const LBL = {locked:["ok","Locked · working"],tamper:["red","Tampering detected — AI may be open"],helper_killed:["red","LOCKqz was stopped — AI may be open"],dark:["red","Lost contact — AI may be open"],browser_closed:["warn","Browser closed"],done:["","Submitted · unlocked"]};
+const LBL = {locked:["ok","Locked · working"],tamper:["red","Tampering detected — AI may be open"],helper_killed:["red","LOCKqz was stopped — AI may be open"],dark:["red","Lost contact — AI may be open"],browser_closed:["warn","Browser closed"],done:["","Submitted · unlocked"],developer:["","Admin (developer mode)"]};
 function viewLive(id){
   const [ou,qi] = id.split("-"); const c = BS.courses.find(x=>x.ou===ou); const q = c && c.quizzes.find(x=>String(x.qi)===qi);
   const title = q ? q.name : (LEGACY.find(x=>(x.lock_id||x.quiz_id)===id)||{}).title || id;

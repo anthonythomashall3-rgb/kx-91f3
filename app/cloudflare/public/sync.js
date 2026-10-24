@@ -147,7 +147,7 @@
     var students = 0, nq = 0;
     var html = "";
     courses.forEach(function (c) {
-      var learners = (c.classlist || []).filter(function (s) { return /learner|student/i.test(s.role || ""); }).length;
+      var learners = (c.classlist || []).filter(function (s) { return !/nstructor|rofessor|aculty/i.test(s.role || "") && !!(s.role || "").trim(); }).length;
       students += learners; nq += c.quizzes.length;
       html += '<div style="margin:12px 0 4px;font-weight:700">' + esc(c.name.replace(/^\d+_\d+\s*/, "")) + '</div>' +
         '<div style="color:#666;font-size:12px;margin-bottom:4px">' + learners + " students &middot; " + esc(c.role) + "</div>";

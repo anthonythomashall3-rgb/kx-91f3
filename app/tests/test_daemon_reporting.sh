@@ -178,6 +178,37 @@ r=$(hpost /password "{\"url\":\"$QURL\"}")
 echo "$r" | grep -q 'LQ-TESTPASS' && ok "password still delivered with a skewed clock" || bad "skewed clock blocked the password: $r"
 CTRL_PORT=$CTRL1
 
+echo "T8 developer mode (admin only): AI NOT locked, but a signed developer lock keeps the quiz gate open"
+LOG3="$TMP/reports3.log"; mkdir -p "$TMP/c"; CTRL1=$CTRL_PORT; CTRL_PORT=$(free_port); M3=$(free_port)
+echo "test-dev-secret" > "$TMP/c/developer.key"
+H3=$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read().strip()).hexdigest())' "$TMP/c/developer.key")
+sed "s/^DEV_KEY_HASH = .*/DEV_KEY_HASH = \"$H3\"/" "$APP/mac/lockqzd.py" > "$TMP/c/lockqzd.py"   # test copy only
+python3 "$TMP/mock.py" "$M3" "$LOG3" 0 & MPID3=$!
+for i in $(seq 1 20); do curl -s -o /dev/null -m 1 "http://127.0.0.1:$M3/" && break; sleep 0.25; done
+cat > "$TMP/c/config.json" <<CFG
+{ "port": $CTRL_PORT, "token": "$TOKEN", "api_base": "http://127.0.0.1:$M3",
+  "device_id": "itest-admin", "student": "Admin", "max_minutes": 180, "beat_cycles": 1 }
+CFG
+cp "$APP/mac/blocklist.txt" "$TMP/c/blocklist.txt"
+LOCKQZ_DEV_KEY="$TMP/c/developer.key" LOCKQZ_DRYRUN=1 LOCKQZ_CONFIG="$TMP/c/config.json" LOCKQZ_KEY_PATH="$TMP/c/device.key" LOCKQZ_BLOCKLIST="$TMP/c/blocklist.txt" \
+  python3 "$TMP/c/lockqzd.py" >"$TMP/c/daemon.log" 2>&1 & DPID3=$!
+for i in $(seq 1 20); do curl -s -m 2 -H "X-LOCKqz-Token: $TOKEN" "http://127.0.0.1:$CTRL_PORT/status" >/dev/null 2>&1 && break; sleep 0.5; done
+st=$(curl -s -H "X-LOCKqz-Token: $TOKEN" "http://127.0.0.1:$CTRL_PORT/status")
+echo "$st" | grep -q '"developer": true' && ok "daemon reports developer mode" || bad "developer mode not on: $st"
+r=$(hpost /lock '{"quiz_id":"98765-12345","student":"Admin"}')
+echo "$r" | grep -q '"state": "developer"' && ok "/lock answers developer (AI stays on)" || bad "lock in dev mode: $r"
+st=$(curl -s -H "X-LOCKqz-Token: $TOKEN" "http://127.0.0.1:$CTRL_PORT/status")
+echo "$st" | grep -q '"engine_locked": false' && ok "engine NOT locked in developer mode" || bad "engine locked in dev mode: $st"
+grep '"event": "lock"' "$LOG3" | grep '"developer": true' | grep -q 'signed=1' && ok "signed lock flagged developer sent to server" || bad "no signed developer lock"
+r=$(hpost /password "{\"url\":\"$QURL\"}")
+echo "$r" | grep -q 'LQ-TESTPASS' && ok "admin gets the quiz password in developer mode" || bad "no password in dev mode: $r"
+sleep 7
+grep '"event": "heartbeat"' "$LOG3" | grep '"source": "helper"' | grep -q '98765-12345' && ok "helper heartbeats keep the admin's lock fresh" || bad "no dev heartbeat"
+hpost /unlock '{"quiz_id":"98765-12345"}' >/dev/null; sleep 1
+grep -q '"event": "unlock"' "$LOG3" && ok "unlock reported at quiz end" || bad "no unlock in dev mode"
+kill $DPID3 $MPID3 2>/dev/null
+CTRL_PORT=$CTRL1
+
 echo ""
 echo "RESULT: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
