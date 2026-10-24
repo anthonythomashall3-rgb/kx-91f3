@@ -27,7 +27,8 @@
     <p class="tag" id="os"></p>
 
     <div id="install" hidden>
-      <p class="lead">Install in one step:</p>
+      <div id="store" hidden style="margin:0 0 24px"><a class="btn" id="storebtn" href="#" style="background:var(--usc);color:#fff">Get LOCKqz from Microsoft Store</a></div>
+      <p class="lead" id="lead">Install in one step:</p>
       <p class="hint" id="how"></p>
       <div class="cmd"><code id="cmd"></code><button id="copy" type="button">Copy</button></div>
       <p class="hint" id="pw"></p>
@@ -48,6 +49,7 @@
   var win = /Windows/.test(ua) && !/Windows Phone/.test(ua);
   var mac = /Macintosh|Mac OS X/.test(ua) && !ipad && !/iPhone|iPad|iPod/.test(ua);
   var site = location.origin;
+  var STORE_ID = "";   // Microsoft Store product id (Partner Center -> Product identity), e.g. "9NXXXXXXXXXX"
   var $ = function (id) { return document.getElementById(id); };
 
   if (mac || win) {
@@ -66,6 +68,10 @@
       $("pw").textContent = "";
       $("dl").href = "/download/lockqz-win.exe";
       $("warn").textContent = "If Windows blocks it: More info → Run anyway.";
+      if (STORE_ID) {
+        $("store").hidden = false; $("storebtn").href = "https://apps.microsoft.com/detail/" + STORE_ID;
+        $("lead").textContent = "Or install with one command:";
+      }
     }
   } else {
     $("nope").hidden = false;

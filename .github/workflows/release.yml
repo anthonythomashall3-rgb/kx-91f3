@@ -96,6 +96,30 @@ jobs:
           path: app/windows/Output/lockqz-win.exe
           if-no-files-found: error
 
+  windows-store:
+    name: Build + install-test the Microsoft Store package (MSIX)
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test-signed MSIX - install, open inside the package, lock/unlock, Store update, remove
+        shell: powershell
+        run: |
+          & .\app\tests\test_windows_store.ps1 -Shot "$env:RUNNER_TEMP\store\screenshot-1366x768.png"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Store upload package (identity from Partner Center -> repo Variables MSIX_NAME / MSIX_PUBLISHER / MSIX_PUBLISHER_DISPLAY)
+        if: vars.MSIX_NAME != ''
+        shell: powershell
+        run: |
+          & .\app\windows\store\build-msix.ps1 -Name "${{ vars.MSIX_NAME }}" -Publisher "${{ vars.MSIX_PUBLISHER }}" -PublisherDisplay "${{ vars.MSIX_PUBLISHER_DISPLAY }}" -Out "$env:RUNNER_TEMP\store\lockqz-store.msix"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Copy-Item app\windows\store\Assets\StoreListing300.png "$env:RUNNER_TEMP\store\"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lockqz-store
+          path: ${{ runner.temp }}/store
+          if-no-files-found: error
+
   deploy:
     name: Sign the release + deploy to Cloudflare
     needs: [mac, windows]

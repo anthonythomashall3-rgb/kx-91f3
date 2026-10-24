@@ -7,7 +7,7 @@
 #     irm https://lockqz.pages.dev/install.ps1 | iex
 # With no files next to it, this script fetches the current release from the site, checks the
 # release manifest's RSA signature against the key below and every file's SHA-256, then installs.
-param([string]$Token, [string]$Api, [string]$Student = "")
+param([string]$Token, [string]$Api, [string]$Student = "", [string]$StorePackage = "")
 
 $ErrorActionPreference = "Stop"
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
@@ -67,6 +67,7 @@ if ((Resolve-Path $Here).Path.TrimEnd('\') -ne (Resolve-Path $Dest).Path.TrimEnd
 $device = "win-" + [guid]::NewGuid().ToString()
 $cfg = @{ port=8787; token=$Token; api_base=$Api; device_id=$device;
           student= if ($Student) { $Student } else { $null }; max_minutes=180 }
+if ($StorePackage) { $cfg.store_package = $StorePackage }   # Store install: updates come from the Store
 $cfg | ConvertTo-Json | Set-Content -Path "$Dest\config.json" -Encoding UTF8
 
 # Daemon at boot as SYSTEM.

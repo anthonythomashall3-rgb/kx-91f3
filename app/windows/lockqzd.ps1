@@ -20,7 +20,7 @@ $Token  = if ($Conf.token) { $Conf.token } else { "lockqz-dev" }
 $Api    = if ($Conf.api_base) { $Conf.api_base.TrimEnd("/") } else { "" }
 if ($Api -and -not $Api.EndsWith("/api")) { $Api += "/api" }   # accept a bare site URL too
 $Site = if ($Api.EndsWith("/api")) { $Api.Substring(0, $Api.Length - 4) } else { $Api }
-$UpdateUrl = if ($env:LOCKQZ_UPDATE_URL) { $env:LOCKQZ_UPDATE_URL.TrimEnd("/") } elseif ($Site) { "$Site/download" } else { "" }
+$UpdateUrl = if ($Conf.store_package) { "store:" + $Conf.store_package } elseif ($env:LOCKQZ_UPDATE_URL) { $env:LOCKQZ_UPDATE_URL.TrimEnd("/") } elseif ($Site) { "$Site/download" } else { "" }
 $Device = if ($Conf.device_id) { $Conf.device_id } else { "unknown" }
 $MaxMin = if ($Conf.max_minutes) { [int]$Conf.max_minutes } else { 180 }
 $State  = [hashtable]::Synchronized(@{ state="unlocked"; quiz_id=$null; student=$Conf.student; locked_since=0; max_minutes=$MaxMin; skew=0; registered=$false })
@@ -83,10 +83,33 @@ function LQ-VerifySig([byte[]]$body, [string]$sigB64, [string]$pubXml) {
     return [bool]$rsa.VerifyData($body, "SHA256", [Convert]::FromBase64String($sigB64.Trim()))
   } catch { return $false }
 }
+function LQ-StoreUpdate($state, [string]$here, [string]$pkgName, [string]$version) {
+  # Microsoft Store installs: never download code. When the Store has delivered a newer LOCKqz
+  # package, copy its (Microsoft-signed) payload into the install. Never throws.
+  try {
+    if (-not $env:LOCKQZ_UPDATE_DIR -and $here.TrimEnd("\") -ne "$env:ProgramData\LOCKqz") { return $false }
+    $pkg = Get-AppxPackage -AllUsers -Name $pkgName -ErrorAction SilentlyContinue | Sort-Object { [version]$_.Version } -Descending | Select-Object -First 1
+    if (-not $pkg) { return $false }
+    $src = Join-Path $pkg.InstallLocation "payload"
+    $vf = Join-Path $src "VERSION"
+    if (-not (Test-Path $vf)) { return $false }
+    $v = (Get-Content $vf -Raw).Trim()
+    if ([version]$v -le [version]$version) { return $false }
+    if ($state.state -eq "locked") { Write-Host "update: quiz in progress - deferred"; return $false }
+    $never = @("config.json", "device.key", "active_lock.json", "VERSION")
+    foreach ($f in Get-ChildItem $src -File) {
+      if ($never -contains $f.Name) { continue }
+      Copy-Item -Force $f.FullName (Join-Path $here $f.Name)
+    }
+    Write-Host "update: $version -> $v from the Store package"
+    return $true
+  } catch { Write-Host "store update check failed: $_"; return $false }
+}
 function LQ-CheckUpdate($state, [string]$here, [string]$updateUrl, [string]$version) {
   # Signed self-update; only while no quiz is locked. Returns $true when an update was installed.
   # A bad signature, hash, file name or download leaves the install untouched. Never throws.
   $stage = Join-Path $here ".update"
+  if ($updateUrl -like "store:*") { return (LQ-StoreUpdate $state $here $updateUrl.Substring(6) $version) }
   try {
     if (-not $updateUrl) { return $false }
     $pubPath = Join-Path $here "update.pub.xml"
