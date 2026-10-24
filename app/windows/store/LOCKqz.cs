@@ -97,10 +97,17 @@ static class LOCKqz {
     }
     public void DoInstall() {
       ShowAll("setup"); main.Enabled = false; Refresh();
-      int r = Install(); main.Enabled = true;
-      if (r == 0 && Installed) ShowAll("on");
-      else if (r == -2) msg.Text = "Click Set up, then Yes on the Windows prompt.";
-      else msg.Text = "Setup did not finish (code " + r + ").\nClick Set up to try again.";
+      // Run setup off the window thread so the window never shows "Not responding".
+      var t = new System.Threading.Thread(delegate () {
+        int r = Install();
+        BeginInvoke((MethodInvoker)delegate {
+          main.Enabled = true;
+          if (r == 0 && Installed) ShowAll("on");
+          else if (r == -2) msg.Text = "Click Set up, then Yes on the Windows prompt.";
+          else msg.Text = "Setup did not finish (code " + r + ").\nClick Set up to try again.";
+        });
+      });
+      t.SetApartmentState(System.Threading.ApartmentState.STA); t.IsBackground = true; t.Start();
     }
   }
 }

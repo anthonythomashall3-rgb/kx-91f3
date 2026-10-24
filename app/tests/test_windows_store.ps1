@@ -19,11 +19,15 @@ Check "package installed" ($null -ne $pkg)
 
 # 2) open it from inside the package (what clicking Open in the Store does)
 $exe = Join-Path $pkg.InstallLocation "LOCKqz.exe"
-try { Invoke-CommandInDesktopPackage -PackageFamilyName $pkg.PackageFamilyName -AppId "LOCKqz" -Command $exe -Args "/install" -ErrorAction Stop; $inPkg = $true }
-catch { Write-Host "      (Invoke-CommandInDesktopPackage unavailable: $_) - running the exe directly"; $inPkg = $false; Start-Process $exe "/install" -Wait }
+# Exactly what a student gets: the window opens and sets itself up (no flags).
+try { Invoke-CommandInDesktopPackage -PackageFamilyName $pkg.PackageFamilyName -AppId "LOCKqz" -Command $exe -ErrorAction Stop; $inPkg = $true }
+catch { Write-Host "      (Invoke-CommandInDesktopPackage unavailable: $_) - running the exe directly"; $inPkg = $false; Start-Process $exe }
 # The launch returns at once: wait until setup has finished (both tasks registered).
 for ($i = 0; $i -lt 90 -and -not ((Get-ScheduledTask -TaskName 'LOCKqz' -ErrorAction SilentlyContinue) -and (Get-ScheduledTask -TaskName 'LOCKqz Agent' -ErrorAction SilentlyContinue))); $i++) { Start-Sleep 2 }
 Check "ran inside the package" $inPkg
+Start-Sleep 3
+Check "window still open (no crash)" ($null -ne (Get-Process LOCKqz -ErrorAction SilentlyContinue))
+Get-Process LOCKqz -ErrorAction SilentlyContinue | Stop-Process -Force
 foreach ($f in 'lockqz.ps1','lockqzd.ps1','lockqz-agent.ps1','browser-policy.ps1','blocklist.txt','uninstall.ps1','config.json') { Check "installed $f" (Test-Path "$Dest\$f") }
 $cfg = Get-Content "$Dest\config.json" -Raw | ConvertFrom-Json
 Check "store mode recorded" ($cfg.store_package -eq "LOCKqz.Test")
