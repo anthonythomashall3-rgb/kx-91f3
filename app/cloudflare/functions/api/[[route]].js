@@ -87,6 +87,61 @@ async function verifyDevice(request, raw, db) {
 }
 const isRegistered = async (db, id) => !!(id && await db.prepare("SELECT 1 AS r FROM devices WHERE device_id=? AND device_key IS NOT NULL").bind(String(id)).first());
 
+// ---- Student email verification (25 Oct 2026) ----
+// A device's student email counts (quiz gate, professor's "Ready" list) only after the student
+// types the 6-digit code LOCKqz emailed to it. Codes: 15 minutes, 5 tries, only a hash is stored.
+// Mail goes out through Gmail SMTP (free, 500/day) using Pages secrets MAIL_USER + MAIL_APP_PASSWORD.
+// Without those secrets codes are off and an email is accepted after the roster check (old behaviour).
+const CODE_MS = 15 * 60000, CODE_TRIES = 5;
+const EMAIL_OK = e => /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(e);
+const b64 = s => btoa(String.fromCharCode(...enc.encode(s)));
+// Minimal SMTP client over a TLS socket. `open` returns { readable, writable } (cloudflare:sockets).
+async function smtpSend(open, { user, pass, to, subject, text, fromName = "LOCKqz" }) {
+  const sock = await open();
+  const w = sock.writable.getWriter(), r = sock.readable.getReader(), dec = new TextDecoder();
+  let buf = "";
+  const reply = async () => {             // one full (possibly multi-line) reply -> code
+    for (;;) {
+      const lines = buf.split("\r\n");
+      for (let i = 0; i < lines.length - 1; i++)
+        if (/^\d{3} /.test(lines[i])) { buf = lines.slice(i + 1).join("\r\n"); return Number(lines[i].slice(0, 3)); }
+      const { value, done } = await r.read();
+      if (done) throw new Error("smtp closed");
+      buf += dec.decode(value, { stream: true });
+    }
+  };
+  const say = async (line, want) => {
+    if (line !== null) await w.write(enc.encode(line + "\r\n"));
+    const c = await reply();
+    if (!want.includes(c)) throw new Error(`smtp ${c} after ${String(line || "greeting").split(" ")[0]}`);
+  };
+  try {
+    await say(null, [220]);
+    await say("EHLO lockqz.pages.dev", [250]);
+    await say("AUTH PLAIN " + b64("\0" + user + "\0" + pass), [235]);
+    await say(`MAIL FROM:<${user}>`, [250]);
+    await say(`RCPT TO:<${to}>`, [250, 251]);
+    await say("DATA", [354]);
+    const msg = [`From: ${fromName} <${user}>`, `To: <${to}>`, `Subject: ${subject}`,
+      `Date: ${new Date().toUTCString().replace("GMT", "+0000")}`,
+      `Message-ID: <${crypto.randomUUID()}@lockqz.pages.dev>`, "MIME-Version: 1.0",
+      "Content-Type: text/plain; charset=utf-8", "Content-Transfer-Encoding: 8bit", "",
+      ...text.split("\n").map(l => (l.startsWith(".") ? "." + l : l))].join("\r\n");
+    await say(msg + "\r\n.", [250]);
+    try { await w.write(enc.encode("QUIT\r\n")); } catch {}
+  } finally { try { await sock.close?.(); } catch {} }
+  return true;
+}
+async function sendCode(env, to, code) {
+  const subject = `Your LOCKqz code: ${code}`;
+  const text = `Your LOCKqz code is ${code}\n\nType it into the LOCKqz window on your computer. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
+  if (typeof env.MAIL_SINK === "function") return env.MAIL_SINK({ to, subject, text, code });   // tests
+  const open = typeof env.MAIL_OPEN === "function" ? env.MAIL_OPEN   // tests: fake SMTP server
+    : async () => (await import("cloudflare:sockets")).connect({ hostname: env.MAIL_HOST || "smtp.gmail.com", port: Number(env.MAIL_PORT || 465) },
+                                { secureTransport: "on", allowHalfOpen: false });
+  return smtpSend(open, { user: env.MAIL_USER, pass: String(env.MAIL_APP_PASSWORD).replace(/\s+/g, ""), to, subject, text });
+}
+
 export async function onRequest(context) {
   const { request, env } = context;
   const url = new URL(request.url);
@@ -98,6 +153,7 @@ export async function onRequest(context) {
   if (raw.length) { try { body = JSON.parse(new TextDecoder().decode(raw)); } catch { body = {}; } }
   if (!body || typeof body !== "object" || Array.isArray(body)) body = {};
   const strict = String(env.REQUIRE_SIGNED || "").trim() === "1";
+  const codesOn = typeof env.MAIL_SINK === "function" || !!(env.MAIL_USER && env.MAIL_APP_PASSWORD);
   const denied = (v, extra = {}) => json({ error: "unauthorized device", why: v.why, server_time: unixNow(), ...extra }, 401);
 
   // ---- who is calling? admin (master key) | teacher (session token) | nobody ----
@@ -181,6 +237,55 @@ export async function onRequest(context) {
       return d && sameHex(d.device_key, key) ? json({ ok: true, registered: true }) : json({ error: "device already registered" }, 409);
     }
 
+    // Student email setup (asked ONCE per computer). Signed by the device key, so nobody can bind an
+    // email to someone else's computer. ops: status | check (roster name) | send (email a code) | code.
+    if (p === "/verify" && request.method === "POST") {
+      const v = await verifyDevice(request, raw, db);
+      if (!v.ok) return denied(v);
+      const dev = v.id, op = String(body.op || ""), email = String(body.email || "").trim().toLowerCase();
+      const d = await db.prepare("SELECT student, student_verified FROM devices WHERE device_id=?").bind(dev).first();
+      if (op === "status") return json({ student: d?.student || null, verified: Number(d?.student_verified) === 1, codes: codesOn });
+      if (!EMAIL_OK(email)) return json({ error: "bad_email" }, 400);
+      const rosterName = async () => (await db.prepare("SELECT name FROM roster WHERE lower(email)=? AND name IS NOT NULL LIMIT 1").bind(email).first())?.name || null;
+      const since = ms => new Date(Date.now() - ms).toISOString();
+      const sent = async (ms, all) => (await db.prepare(`SELECT COUNT(*) AS n FROM events WHERE event='code_sent' AND ts>=?${all ? "" : " AND device_id=?"}`).bind(since(ms), ...(all ? [] : [dev])).first()).n;
+      const issue = async () => {             // email a fresh code (rate-limited) -> response
+        if ((await sent(3600000)) >= 5 || (await sent(86400000)) >= 15) return json({ error: "too_many_codes", retry_minutes: 60 }, 429);
+        if ((await sent(86400000, true)) >= Number(env.MAIL_DAILY_MAX || 480)) return json({ error: "mail_busy" }, 503);
+        const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, "0");
+        try { await sendCode(env, email, code); }
+        catch (e) { await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(dev, email, null, "code_send_failed", String(e).slice(0, 200), now()).run(); return json({ error: "send_failed" }, 502); }
+        await db.prepare("INSERT OR REPLACE INTO email_codes (device_id,email,code_hash,expires,tries,created_at) VALUES (?,?,?,?,0,?)")
+          .bind(dev, email, await sha256hex(enc.encode(dev + ":" + code)), Date.now() + CODE_MS, now()).run();
+        await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(dev, email, null, "code_sent", null, now()).run();
+        return null;
+      };
+      if (op === "check") return json({ email, name: await rosterName(), codes: codesOn });
+      if (op === "send") {
+        if (!codesOn) {                       // codes off: accept after the roster check (pre-25-Oct behaviour)
+          await db.prepare("UPDATE devices SET student=? WHERE device_id=? AND COALESCE(student_verified,0)=0").bind(email, dev).run();
+          return json({ ok: true, bound: true, name: await rosterName() });
+        }
+        return (await issue()) || json({ ok: true, sent: true, minutes: CODE_MS / 60000 });
+      }
+      if (op === "code") {
+        const row = await db.prepare("SELECT email, code_hash, expires, tries FROM email_codes WHERE device_id=?").bind(dev).first();
+        if (!row || row.email !== email) return (await issue()) || json({ error: "no_code", resent: true });
+        if (Date.now() > Number(row.expires)) return (await issue()) || json({ error: "expired", resent: true });
+        const given = String(body.code || "").replace(/\D/g, "");
+        if (!sameHex(await sha256hex(enc.encode(dev + ":" + given)), row.code_hash)) {
+          if (Number(row.tries) + 1 >= CODE_TRIES) return (await issue()) || json({ error: "too_many_tries", resent: true });
+          await db.prepare("UPDATE email_codes SET tries=tries+1 WHERE device_id=?").bind(dev).run();
+          return json({ error: "wrong_code", tries_left: CODE_TRIES - Number(row.tries) - 1 });
+        }
+        await db.prepare("UPDATE devices SET student=?, student_verified=1 WHERE device_id=?").bind(email, dev).run();
+        await db.prepare("DELETE FROM email_codes WHERE device_id=?").bind(dev).run();
+        await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(dev, email, null, "email_verified", null, now()).run();
+        return json({ ok: true, verified: true, name: await rosterName() });
+      }
+      return json({ error: "bad op" }, 400);
+    }
+
     if (p === "/install" && request.method === "POST") {
       const v = await verifyDevice(request, raw, db);
       if (!v.ok && (strict || await isRegistered(db, body.device_id))) return denied(v);
@@ -215,7 +320,7 @@ export async function onRequest(context) {
         await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)")
           .bind(device_id||null, (student?String(student).slice(0,200):null), qidOk, evName, detailStr, now()).run();
       if (device_id) await db.prepare("INSERT OR IGNORE INTO devices (device_id,installed_at) VALUES (?,?)").bind(device_id, now()).run();
-      await db.prepare("UPDATE devices SET last_seen=?, student=COALESCE(?,student) WHERE device_id=?").bind(now(), student||null, device_id||null).run();
+      await db.prepare("UPDATE devices SET last_seen=?, student=CASE WHEN student_verified=1 THEN student ELSE COALESCE(?,student) END WHERE device_id=?").bind(now(), student||null, device_id||null).run();
       const clientIp = request.headers.get("CF-Connecting-IP") || null;
       if (ev === "lock" && qidOk)
         await db.prepare("INSERT INTO locks (device_id,quiz_id,last_lock,helper_seen,signed,ip) VALUES (?,?,?,?,?,?) ON CONFLICT(device_id,quiz_id) DO UPDATE SET last_lock=excluded.last_lock,helper_seen=excluded.helper_seen,signed=excluded.signed,ip=excluded.ip").bind(device_id, qidOk, now(), now(), signed, clientIp).run();
@@ -633,7 +738,7 @@ export async function onRequest(context) {
       const sub = "SELECT ou FROM teacher_courses WHERE teacher_id=?";
       const roster = (await db.prepare(`SELECT ou,user_id,name,email,username,role FROM roster WHERE ou IN (${sub}) ORDER BY name`).bind(me.id).all()).results;
       const qz = (await db.prepare(`SELECT b.ou,b.qi,b.name,b.active,b.start_date,b.end_date,b.due_date,b.bs_has_password,b.bs_password_is_ours,q.password,q.lock_id,q.gated FROM bs_quizzes b LEFT JOIN quizzes q ON q.qi=b.qi AND q.ou=b.ou WHERE b.ou IN (${sub}) ORDER BY b.name`).bind(me.id).all()).results;
-      const devs = (await db.prepare(`SELECT device_id,lower(student) AS who,platform,version,last_seen FROM devices WHERE lower(student) IN (SELECT lower(email) FROM roster WHERE ou IN (${sub})) OR lower(student) IN (SELECT lower(name) FROM roster WHERE ou IN (${sub}))`).bind(me.id, me.id).all()).results;
+      const devs = (await db.prepare(`SELECT device_id,lower(student) AS who,platform,version,last_seen FROM devices WHERE (student_verified=1 OR ?=0) AND (lower(student) IN (SELECT lower(email) FROM roster WHERE ou IN (${sub})) OR lower(student) IN (SELECT lower(name) FROM roster WHERE ou IN (${sub})))`).bind(codesOn ? 1 : 0, me.id, me.id).all()).results;
       const by = {}; devs.forEach(d => { (by[d.who] = by[d.who] || []).push(d); });
       const adminEmails = new Set(((await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin'").all()).results).map(x => x.e));
       return json({ courses: cs.map(c => ({ ...c,
@@ -678,13 +783,13 @@ export async function onRequest(context) {
       if (!me.admin && !(await inCourse(_ou0)) && !(await trustedInstructor(_ou0))) return json({ error: "not your course" }, 403);
       const s = scope("l.quiz_id"), s2 = scope("e.quiz_id");
       const STALE = 90000, nowMs = Date.now(), age = t => t ? (nowMs - Date.parse(t)) : null;
-      const locks = (await db.prepare(`SELECT l.device_id,l.quiz_id,l.last_lock,l.helper_seen,l.ext_seen,l.signed,l.ip,d.student,d.platform FROM locks l LEFT JOIN devices d ON d.device_id=l.device_id WHERE (l.quiz_id=? OR l.quiz_id LIKE ?) AND ${s.sql}`).bind(quiz, like, ...s.args).all()).results;
+      const locks = (await db.prepare(`SELECT l.device_id,l.quiz_id,l.last_lock,l.helper_seen,l.ext_seen,l.signed,l.ip,d.student,d.platform,d.student_verified FROM locks l LEFT JOIN devices d ON d.device_id=l.device_id WHERE (l.quiz_id=? OR l.quiz_id LIKE ?) AND ${s.sql}`).bind(quiz, like, ...s.args).all()).results;
       const tamp = new Set(((await db.prepare("SELECT DISTINCT device_id FROM events WHERE (quiz_id=? OR quiz_id LIKE ?) AND event='tamper'").bind(quiz, like).all()).results).map(t=>t.device_id));
       // Developer mode: only the admin's own Mac may hold a lock without blocking AI. A dev claim
       // from any other device is a modified client -> tamper (never admitted).
       const devClaim = new Set(((await db.prepare("SELECT DISTINCT device_id FROM events WHERE (quiz_id=? OR quiz_id LIKE ?) AND event='lock' AND detail LIKE '%\"developer\":true%'").bind(quiz, like).all()).results).map(t=>t.device_id));
       const adminEm = new Set(((await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin'").all()).results).map(x => x.e));
-      const done = (await db.prepare(`SELECT DISTINCT e.device_id,d.student,d.platform FROM events e LEFT JOIN devices d ON d.device_id=e.device_id WHERE (e.quiz_id=? OR e.quiz_id LIKE ?) AND e.event IN ('unlock','auto_unlock') AND ${s2.sql}`).bind(quiz, like, ...s2.args).all()).results;
+      const done = (await db.prepare(`SELECT DISTINCT e.device_id,d.student,d.platform,d.student_verified FROM events e LEFT JOIN devices d ON d.device_id=e.device_id WHERE (e.quiz_id=? OR e.quiz_id LIKE ?) AND e.event IN ('unlock','auto_unlock') AND ${s2.sql}`).bind(quiz, like, ...s2.args).all()).results;
       const active = new Set(locks.map(l=>l.device_id));
       const rows = locks.map(l => {
         const a = age(l.last_lock), h = age(l.helper_seen), e = age(l.ext_seen);
@@ -699,9 +804,9 @@ export async function onRequest(context) {
           status = helperDown && agentAfterHelper ? "helper_killed" : (extDown && !helperDown ? "browser_closed" : "dark");
         }
         else if (dev) status = "developer";
-        return { device_id:l.device_id, student:l.student||null, platform:l.platform||null, status, last_lock:l.last_lock, age_ms:a, verified: Number(l.signed) === 1, ip: l.ip||null };
+        return { device_id:l.device_id, student:l.student||null, platform:l.platform||null, status, last_lock:l.last_lock, age_ms:a, verified: Number(l.signed) === 1, ip: l.ip||null, sv: Number(l.student_verified) === 1 };
       });
-      done.forEach(d => { if (!active.has(d.device_id)) rows.push({ device_id:d.device_id, student:d.student||null, platform:d.platform||null, status:"done" }); });
+      done.forEach(d => { if (!active.has(d.device_id)) rows.push({ device_id:d.device_id, student:d.student||null, platform:d.platform||null, status:"done", sv: Number(d.student_verified) === 1 }); });
       // A student is admitted ONLY when LOCKqz is holding a fresh, device-signed lock (status "locked",
       // verified). The gate loop reads r.eligible + r.user_id to grant/revoke Brightspace special access.
       const _qi = String(quiz).split("-").pop(), _ou = String(quiz).split("-")[0];
@@ -714,6 +819,8 @@ export async function onRequest(context) {
       const byEmail = {}, byName = {}, byUser = {};
       rl.forEach(x => { if (x.e) byEmail[x.e] = x; if (x.n) byName[x.n] = x; if (x.u) byUser[x.u] = x; });
       rows.forEach(r => {
+        // Once email codes are on, only a CONFIRMED email (typed code) admits a student.
+        if (codesOn && !r.sv) { r.user_id = null; r.email = null; return; }
         const who = String(r.student||"").toLowerCase();
         const hit = byEmail[who] || byName[who] || byUser[who];
         if (hit) { r.user_id = hit.user_id || null; if (hit.display) r.student = hit.display; }

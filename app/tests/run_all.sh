@@ -22,10 +22,16 @@ if command -v pwsh >/dev/null 2>&1; then
 else
   echo ""; echo "######## 12/14 Windows device signing ########"; echo "  skipped: PowerShell (pwsh) not installed here; runs on Windows CI"
 fi
-run "13/16 Access gate + teacher self-verify"               node   test_gate.mjs
-run "14/16 Signed self-update (real daemon, mock release site)" bash test_update.sh
-run "15/16 Professor Sync tab + quiz gate (real sync.js, simulated Brightspace)" node --no-warnings test_sync_gate.mjs
-run "16/16 Security regressions (cross-course, D1 limits, auth, rate limits)" node --no-warnings test_security.mjs
+run "13/18 Access gate + teacher self-verify"               node   test_gate.mjs
+run "14/18 Signed self-update (real daemon, mock release site)" bash test_update.sh
+run "15/18 Professor Sync tab + quiz gate (real sync.js, simulated Brightspace)" node --no-warnings test_sync_gate.mjs
+run "16/18 Security regressions (cross-course, D1 limits, auth, rate limits)" node --no-warnings test_security.mjs
+run "17/18 Student email code (once per computer; real API + fake SMTP)" node --no-warnings test_email_verify.mjs
+if command -v pwsh >/dev/null 2>&1; then
+  run "18/18 Windows email setup (real Setup-Identity, scripted dialogs)" pwsh -NoProfile -File test_windows_email_setup.ps1
+else
+  echo ""; echo "######## 18/18 Windows email setup ########"; echo "  skipped: PowerShell (pwsh) not installed here; runs on Windows CI"
+fi
 
 echo ""
 echo "================================================"

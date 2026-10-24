@@ -57,9 +57,9 @@ $tmp = Join-Path $env:TEMP ("lqup-" + [guid]::NewGuid().ToString("N")); New-Item
 Set-Content "$tmp\config.json" '{"keep":"me"}'
 $env:LOCKQZ_UPDATE_DIR = $tmp
 $st = @{ state = "locked" }
-Check "store update deferred during a quiz" (-not (LQ-CheckUpdate $st $tmp "store:LOCKqz.Test" "0.3.3"))
+Check "store update deferred during a quiz" (-not (LQ-CheckUpdate $st $tmp "store:LOCKqz.Test" "0.3.4"))
 $st = @{ state = "unlocked" }
-Check "store update applies a newer package" (LQ-CheckUpdate $st $tmp "store:LOCKqz.Test" "0.3.3")
+Check "store update applies a newer package" (LQ-CheckUpdate $st $tmp "store:LOCKqz.Test" "0.3.4")
 Check "store update copied the helper" (Test-Path "$tmp\lockqzd.ps1")
 Check "store update kept config.json" ((Get-Content "$tmp\config.json" -Raw) -match 'keep')
 Check "store update no-op when current" (-not (LQ-CheckUpdate $st $tmp "store:LOCKqz.Test" "9.9.9"))

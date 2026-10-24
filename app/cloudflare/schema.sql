@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS devices (
   device_key  TEXT,            -- per-install signing key (set once by /register)
   registered_at TEXT,
   reg_ip      TEXT,
-  revoked     INTEGER DEFAULT 0
+  revoked     INTEGER DEFAULT 0,
+  student_verified INTEGER DEFAULT 0   -- 1 = student typed the code emailed to `student`
 );
 
 -- qi = the Brightspace quiz-id parsed from the pasted link (auto-detect, no title tag).
@@ -97,3 +98,6 @@ CREATE TABLE IF NOT EXISTS roster (ou TEXT, user_id TEXT, name TEXT, email TEXT,
 CREATE INDEX IF NOT EXISTS idx_roster_email ON roster(email);
 CREATE TABLE IF NOT EXISTS bs_quizzes (ou TEXT, qi TEXT, name TEXT, active INTEGER, start_date TEXT, end_date TEXT, due_date TEXT, bs_has_password INTEGER, bs_password_is_ours INTEGER, synced_at TEXT, PRIMARY KEY (ou, qi));
 CREATE TABLE IF NOT EXISTS pending_clear (ou TEXT, qi TEXT, password TEXT, PRIMARY KEY (ou, qi));
+
+-- One pending email code per device (hash only; 15 min; 5 tries). See migrate_014.
+CREATE TABLE IF NOT EXISTS email_codes (device_id TEXT PRIMARY KEY, email TEXT, code_hash TEXT, expires INTEGER, tries INTEGER DEFAULT 0, created_at TEXT);

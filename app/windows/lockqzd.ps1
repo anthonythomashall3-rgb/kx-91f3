@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.3.3"
+$Version = "0.3.4"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = "$env:ProgramData\LOCKqz\config.json"
@@ -71,7 +71,7 @@ function LQ-Call($api, $path, $obj, $device, $key, $state, [bool]$signed) {
 function LQ-Register($api, $device, $key, $state) {
   # Register the key of this install once (trust on first use).
   if ($state.registered -or -not $api -or -not $device -or $device -eq "unknown") { return $state.registered }
-  $r = LQ-Call $api "/register" @{ device_id = $device; key = $key; platform = "windows"; version = "0.3.3"; student = $state.student } $device $key $state $false
+  $r = LQ-Call $api "/register" @{ device_id = $device; key = $key; platform = "windows"; version = $Version; student = $state.student } $device $key $state $false
   if ($r.code -eq 200) { $state.registered = $true }
   return $state.registered
 }
@@ -289,6 +289,21 @@ while ($listener.IsListening) {
     "/lock"      { $State.state="locked"; $State.quiz_id=$body.quiz_id; if($body.student){$State.student=$body.student}; if($body.max_minutes){$State.max_minutes=[int]$body.max_minutes}; $State.locked_since=[int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); Engine "lock"; Save-Lock; Report "lock" $null; $out.state="locked" }
     "/unlock"    { $q = if ($State.quiz_id) { $State.quiz_id } else { $body.quiz_id }; $State.state="unlocked"; $State.quiz_id=$null; Engine "unlock"; Clear-Lock; Report "unlock" $null $null $q; $out.state="unlocked" }
     "/student"   { if($body.student){$State.student=$body.student}; Report "install" @{ platform="windows"; version=$Version }; $out.student=$State.student }
+    "/verify"    {
+      # One-time student email setup (status | check | send | code), signed with the SYSTEM-only key
+      # so an email can only ever be bound to THIS computer.
+      $op = [string]$body.op
+      if (@("status","check","send","code") -notcontains $op) { $res.StatusCode = 400; $out = @{ error = "bad op" } }
+      else {
+        $q = @{ op = $op; device_id = $Device }
+        if ($body.email) { $em = [string]$body.email; $q.email = $em.Substring(0, [Math]::Min(200, $em.Length)) }
+        if ($body.code)  { $q.code = [string]$body.code }
+        $r = LQ-Call $Api "/verify" $q $Device $Key $State $true
+        $out = @{ status = $r.code }
+        if ($r.data) { foreach ($pp in $r.data.PSObject.Properties) { $out[$pp.Name] = $pp.Value } }
+        if ($out.verified) { $State.student = if ($out.student) { $out.student } else { $q.email } }
+      }
+    }
     "/heartbeat" { Report "heartbeat" $body "agent" }
     "/password"  {
       # The quiz password is released only to this helper, only while it holds the lock for THIS

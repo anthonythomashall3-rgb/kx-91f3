@@ -69,6 +69,11 @@ jobs:
         run: |
           & .\app\tests\test_windows_signing.ps1 -Port 8931
           if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Windows one-time email setup (real Setup-Identity, PowerShell 5.1)
+        shell: powershell
+        run: |
+          & .\app\tests\test_windows_email_setup.ps1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: Fresh local token for this build
         shell: pwsh
         run: |

@@ -11,7 +11,8 @@ Chromium, Vivaldi, Arc, Safari via Apple Events; Firefox via its session file) a
     any Google/Bing/DDG/... search tab onto Google "Web" results (no AI answer) —
     the backstop for Safari, which has no policy layer
   * when the quiz page is gone (submitted / left) -> tells the helper to UNLOCK
-First run asks the student's name once so the professor's roster shows who is locked.
+First run asks the student's school email ONCE (confirmed by an emailed code) so the
+professor's roster and the quiz gate know who is locked.
 """
 import hashlib, json, os, re, subprocess, threading, time, urllib.request, urllib.parse, glob
 NOPROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))   # never go through a system proxy
@@ -163,18 +164,87 @@ def dialog(text, title="LOCKqz"):
     threading.Thread(target=run, daemon=True).start()
 
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
-def ask_name():
-    # Must be a real email: the professor's roster and the quiz gate match students by it.
-    msg = "LOCKqz setup - enter your school email (the one Brightspace uses, e.g. you@usc.edu):"
-    for _ in range(3):
-        try:
-            s = osa('on run argv\n return text returned of (display dialog (item 1 of argv) default answer "" with title "LOCKqz" buttons {"OK"} default button 1 giving up after 280)\nend run',
-                    "AppleScript", timeout=300, args=[msg])
-        except Exception: return None
-        s = (s or "").strip().lower()
-        if EMAIL_RE.match(s): return s
-        msg = "That is not an email address. Enter your school email (e.g. you@usc.edu):"
-    return None
+
+# ---------- student email: asked ONCE per computer, confirmed by an emailed code ----------
+# The quiz gate admits a student by their Brightspace email, so it must be theirs: LOCKqz shows the
+# roster name ("Is this you?") and binds the email only after the 6-digit code sent to it is typed.
+# A typo or a classmate's email can never stick. An expired code is resent automatically.
+class MacUI:
+    SCRIPT = ('on run argv\n set btns to items 4 thru -1 of argv\n'
+              ' if item 3 of argv is "1" then\n'
+              '  set r to display dialog (item 1 of argv) default answer (item 2 of argv) buttons btns default button (count of btns) with title "LOCKqz" giving up after 1800\n'
+              '  if gave up of r then return ""\n'
+              '  return (button returned of r) & linefeed & (text returned of r)\n'
+              ' else\n'
+              '  set r to display dialog (item 1 of argv) buttons btns default button (count of btns) with title "LOCKqz" giving up after 1800\n'
+              '  if gave up of r then return ""\n'
+              '  return (button returned of r) & linefeed\n'
+              ' end if\nend run')
+    def ask(self, msg, buttons, default="", answer=True):
+        """Dialog that waits for the student (up to 30 min). -> (button, text) or (None, None)."""
+        try: out = osa(self.SCRIPT, "AppleScript", timeout=1900, args=[msg, default or "", "1" if answer else "0"] + list(buttons))
+        except Exception as e:
+            log("dialog failed: %s" % e); out = ""
+        if not out: return (None, None)
+        b, _, t = out.partition("\n")
+        return (b, t.strip())
+    def say(self, msg): self.ask(msg, ["OK"], answer=False)
+
+ASK = "Enter your school email (the one Brightspace uses, e.g. you@usc.edu):"
+def _err(r):
+    e = (r or {}).get("error")
+    if not r: return "LOCKqz can't reach the internet right now. It will ask again later."
+    if e == "too_many_codes": return "Too many codes were sent. LOCKqz will ask again in an hour."
+    if e in ("send_failed", "mail_busy"): return "LOCKqz couldn't send the email right now. It will ask again later."
+    return "Something went wrong. LOCKqz will ask again later."
+
+def setup_identity(call, ui, saved=""):
+    """call(op, **kw) -> server reply dict ({} = no answer). Returns (email, verified) or None
+    (not finished: ask again later)."""
+    st = call("status")
+    if not st: return None
+    if st.get("verified") and st.get("student"): return (st["student"], True)
+    if not st.get("codes") and st.get("student"): return (st["student"], False)   # codes off on server
+    email, msg = saved or "", "LOCKqz setup (one time only)\n\n" + ASK
+    while True:
+        b, typed = ui.ask(msg, ["OK"], email)
+        if b is None: return None
+        email = (typed or "").strip().lower()
+        if not EMAIL_RE.match(email):
+            msg = "That is not an email address.\n\n" + ASK; continue
+        chk = call("check", email=email)
+        if not chk: ui.say(_err(chk)); return None
+        if chk.get("name"):
+            b, _ = ui.ask("Is this you?\n\n%s\n%s" % (chk["name"], email), ["No, retype", "Yes"], answer=False)
+        else:
+            b, _ = ui.ask("%s is not on a LOCKqz class list yet.\n\nCheck the spelling." % email, ["Retype", "Use it"], answer=False)
+        if b is None: return None
+        if b in ("No, retype", "Retype"):
+            msg = ASK; continue
+        r = call("send", email=email)
+        if r.get("bound"): return (email, False)          # server has codes off: roster check only
+        if not r.get("sent"): ui.say(_err(r)); return None
+        note = ""
+        while True:
+            b, code = ui.ask(note + "We emailed a 6-digit code to\n%s\n\nType it here (check Junk/Spam if you don't see it):" % email,
+                             ["Change email", "Send new code", "OK"])
+            if b is None: return None
+            if b == "Change email":
+                msg = ASK; break
+            if b == "Send new code":
+                r = call("send", email=email)
+                if not r.get("sent"): ui.say(_err(r)); return None
+                note = "New code sent.\n\n"; continue
+            r = call("code", email=email, code=code or "")
+            if r.get("verified"):
+                ui.say("Done. LOCKqz is set up and won't ask again."); return (email, True)
+            e = r.get("error")
+            if r.get("resent"):
+                note = {"expired": "That code expired. We sent a new one.\n\n",
+                        "too_many_tries": "Too many wrong tries. We sent a new code.\n\n"}.get(e, "We sent a new code.\n\n"); continue
+            if e == "wrong_code":
+                note = "That code is wrong (%s tries left).\n\n" % r.get("tries_left"); continue
+            ui.say(_err(r)); return None
 
 def clipboard(text):
     try: subprocess.run(["pbcopy"], input=text.encode(), timeout=5)
@@ -189,12 +259,31 @@ class Agent:
         if self.api and not self.api.endswith("/api"): self.api += "/api"   # accept a bare site URL too
         os.makedirs(USER_DIR, exist_ok=True)
         u = load(USER_CONF)
-        if not u.get("student"):
-            u["student"] = ask_name()
-            if u["student"]:
-                with open(USER_CONF, "w") as f: json.dump(u, f)
-        self.student = u.get("student")
+        self.student, self.verified = u.get("student"), bool(u.get("verified"))
+        self.id_busy, self.id_tried = False, 0.0
         self.locked, self.quiz, self.url, self.missing_since, self.last_beat = False, None, None, None, 0.0
+
+    def verify_call(self, op, **kw):
+        try: r = self.helper("/verify", dict(kw, op=op))
+        except Exception as e: log("verify %s: helper unreachable: %s" % (op, e)); return {}
+        return r if isinstance(r, dict) and r.get("status") else {}
+
+    def ensure_identity(self, force=False):
+        """Run the one-time email setup in the background (never blocks quiz watching)."""
+        if self.id_busy or (self.verified and not force) or time.time() - self.id_tried < 60: return
+        self.id_busy, self.id_tried = True, time.time()
+        def run():
+            try:
+                got = setup_identity(self.verify_call, MacUI(), self.student or "")
+                if got:
+                    self.student, self.verified = got
+                    with open(USER_CONF, "w") as f: json.dump({"student": self.student, "verified": self.verified}, f)
+                    try: self.helper("/student", {"student": self.student})
+                    except Exception: pass
+                    log("student %s (%s)" % (self.student, "verified" if self.verified else "unconfirmed"))
+            except Exception as e: log("identity setup error: %s" % e)
+            finally: self.id_busy = False
+        threading.Thread(target=run, daemon=True).start()
 
     def helper(self, path, body=None, timeout=90):
         req = urllib.request.Request("http://127.0.0.1:%d%s" % (self.port, path),
@@ -209,7 +298,7 @@ class Agent:
             # Cloudflare blocks the default "Python-urllib" user agent (403) — send our own. Bypass any
             # system proxy, which could block or MITM the call.
             req = urllib.request.Request(self.api + path, data=json.dumps(body).encode(),
-                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/0.3.3 (macOS)"})
+                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/0.3.4 (macOS)"})
             return json.loads(NOPROXY.open(req, timeout=8).read())
         except Exception as e:
             log("api %s failed: %s" % (path, e)); return None
@@ -256,6 +345,8 @@ class Agent:
         tabs = browser_tabs()
         quiz_urls = [u for (_, _, _, u) in tabs if is_quiz(u)]
         leaving = any(LEAVING_RE.search(u) and QUIZ_RE.search(u) for (_, _, _, u) in tabs)
+        if not self.verified and (quiz_urls or time.time() - self.id_tried > 6 * 3600):
+            self.ensure_identity()
         if not self.locked:
             if quiz_urls: self.start(quiz_urls[0])
             return
@@ -309,6 +400,7 @@ class Agent:
                 log("adopted existing lock %s at startup" % self.quiz)
         except Exception as e: log("startup status check failed: %s" % e)
         log("running (device %s, student %s)" % (self.device, self.student))
+        self.ensure_identity(force=True)   # checks the server once per login; asks only if not yet confirmed
         while True:
             try: self.tick()
             except Exception as e: log("tick error: %s" % e)

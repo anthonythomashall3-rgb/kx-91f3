@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.3.3"
+VERSION = "0.3.4"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -468,6 +468,20 @@ class H(BaseHTTPRequestHandler):
             with LOCK: STATE["student"] = body.get("student") or STATE["student"]
             report_async("install", {"platform": "mac-" + platform.mac_ver()[0], "version": VERSION})
             return self._send(200, {"ok": True, "student": STATE["student"]})
+        if self.path == "/verify":
+            # One-time student email setup (status | check | send | code), signed with the device key
+            # so an email can only ever be bound to THIS computer.
+            op = str(body.get("op") or "")
+            if op not in ("status", "check", "send", "code"): return self._send(400, {"error": "bad op"})
+            req = {"op": op, "device_id": DEVICE}
+            for k in ("email", "code"):
+                if body.get(k) is not None: req[k] = str(body[k])[:200]
+            code, j = call("/verify", req)
+            out = dict(j) if isinstance(j, dict) else {}
+            if out.get("verified"):
+                with LOCK: STATE["student"] = out.get("student") or req.get("email") or STATE["student"]
+            out["status"] = code
+            return self._send(200, out)
         if self.path == "/heartbeat":
             report("heartbeat", {"quiz_id": STATE["quiz_id"], "source": "agent", "detail": body})
             return self._send(200, {"ok": True})

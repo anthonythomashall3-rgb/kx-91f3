@@ -70,6 +70,10 @@ class H(BaseHTTPRequestHandler):
             t = LOCKS.get((dev, lid))
             if t and now() - t < 60: return self.reply(200, {"password": "LQ-TESTPASS", "lockId": lid})
             return self.reply(403, {"password": None, "reason": "not locked"})
+        if path.endswith("/verify"):
+            if b.get("op") == "code":
+                return self.reply(200, {"ok": True, "verified": True, "name": "Al Student"} if b.get("code") == "246810" else {"error": "wrong_code", "tries_left": 4})
+            return self.reply(200, {"student": None, "verified": False, "codes": True})
         return self.reply(200, {"ok": True})
     def do_GET(self):
         if self.path.split("?")[0].endswith("/blocklist"):   # a SHORT server list + one new AI
@@ -152,6 +156,15 @@ echo "$r" | grep -q '"password": "LQ-TESTPASS"' && ok "locked for this quiz -> p
 c=$(hcode /password '{"url":"https://usc.brightspace.com/d2l/lms/quizzing/user/quiz_summary.d2l?ou=98765&qi=99999"}')
 [ "$c" = "409" ] && ok "another quiz -> 409" || bad "other quiz answered $c"
 grep '/api/password' "$LOG" | grep -q 'signed=1' && ok "password request was signed" || bad "password request not signed"
+r=$(hpost /verify '{"op":"code","email":"al@usc.edu","code":"000000"}')
+echo "$r" | grep -q '"wrong_code"' && echo "$r" | grep -q '"status": 200' && ok "email code forwarded by the helper (wrong code answered)" || bad "verify not forwarded: $r"
+r=$(hpost /verify '{"op":"code","email":"al@usc.edu","code":"246810"}')
+echo "$r" | grep -q '"verified": true' && ok "right code -> verified" || bad "verify code: $r"
+grep '/api/verify' "$LOG" | grep -q 'signed=1' && ok "email setup request was signed with the device key" || bad "verify request not signed"
+st=$(curl -s -H "X-LOCKqz-Token: $TOKEN" "http://127.0.0.1:$CTRL_PORT/status")
+echo "$st" | grep -q '"student": "al@usc.edu"' && ok "helper now reports the confirmed email" || bad "helper student after verify: $st"
+c=$(hcode /verify '{"op":"delete"}')
+[ "$c" = "400" ] && ok "helper refuses unknown verify ops (400)" || bad "verify op allowlist missing (got $c)"
 hpost /event '{"event":"quiz_left","quiz_id":"98765-12345","detail":"quiz_tab_closed"}' >/dev/null
 grep '"event": "quiz_left"' "$LOG" | grep -q 'signed=1' && ok "quiz_left forwarded by the helper, signed" || bad "quiz_left not forwarded/signed"
 c=$(hcode /event '{"event":"unlock"}')

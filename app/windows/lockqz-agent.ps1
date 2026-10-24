@@ -7,9 +7,12 @@
 #     SYSTEM-only device key), shows it and copies it to the clipboard
 #   * while locked                       -> pings the backend (teacher's live monitor)
 #   * when the quiz tab is gone (submitted / left) -> tells the helper to UNLOCK
-# First run asks the student's name once so the teacher's roster shows who is locked.
+# First run asks the student's school email ONCE (confirmed by an emailed code) so the
+# professor's roster and the quiz gate know who is locked. -Setup runs that dialog in its own
+# process so quiz watching never waits on it.
+param([switch]$Setup)
 $ErrorActionPreference = "SilentlyContinue"
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms, Microsoft.VisualBasic
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms, System.Drawing, Microsoft.VisualBasic
 
 $ConfPath = "$env:ProgramData\LOCKqz\config.json"
 $Conf  = if (Test-Path $ConfPath) { Get-Content $ConfPath -Raw | ConvertFrom-Json } else { @{} }
@@ -73,19 +76,127 @@ function Show-Message($text) {
   Start-Process powershell -ArgumentList "-WindowStyle Hidden -EncodedCommand $enc" -WindowStyle Hidden
 }
 
-# ---- student name (once) ----
-$Student = $null
-if (Test-Path $StudentFile) { $Student = (Get-Content $StudentFile -Raw | ConvertFrom-Json).student }
-if (-not $Student) {
-  # Must be a real email: the professor's roster and the quiz gate match students by it.
-  $msg = "LOCKqz setup - enter your school email (the one Brightspace uses, e.g. you@usc.edu):"
-  for ($t = 0; $t -lt 3; $t++) {
-    $Student = ([Microsoft.VisualBasic.Interaction]::InputBox($msg, "LOCKqz", "")).Trim().ToLower()
-    if ($Student -match '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$') { break }
-    $Student = $null; $msg = "That is not an email address. Enter your school email (e.g. you@usc.edu):"
+# ---- student email: asked ONCE per computer, confirmed by an emailed code ----
+# The quiz gate admits a student by their Brightspace email, so it must be theirs: LOCKqz shows the
+# roster name ("Is this you?") and binds the email only after the 6-digit code sent to it is typed.
+# A typo or a classmate's email can never stick. An expired code is resent automatically.
+$EmailRe = '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+$Ask = "Enter your school email (the one Brightspace uses, e.g. you@usc.edu):"
+function Ask-Box($msg, $buttons, $default, [bool]$answer) {
+  # Modal dialog that waits for the student (closes itself after 30 min). -> @{ b; t } or $null
+  $f = New-Object System.Windows.Forms.Form
+  $f.Text = "LOCKqz"; $f.TopMost = $true; $f.StartPosition = "CenterScreen"; $f.FormBorderStyle = "FixedDialog"
+  $f.MaximizeBox = $false; $f.MinimizeBox = $false; $f.ClientSize = New-Object System.Drawing.Size(440, 220)
+  $f.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+  $l = New-Object System.Windows.Forms.Label; $l.Text = $msg; $l.SetBounds(16, 12, 408, 116); $f.Controls.Add($l)
+  $tb = $null
+  if ($answer) { $tb = New-Object System.Windows.Forms.TextBox; $tb.Text = [string]$default; $tb.SetBounds(16, 132, 408, 26); $f.Controls.Add($tb) }
+  $script:BoxPick = $null
+  $x = 424
+  for ($i = $buttons.Count - 1; $i -ge 0; $i--) {
+    $btn = New-Object System.Windows.Forms.Button; $btn.Text = $buttons[$i]; $btn.Tag = $buttons[$i]
+    $w = [Math]::Max(80, [System.Windows.Forms.TextRenderer]::MeasureText($buttons[$i], $f.Font).Width + 24)
+    $x -= $w; $btn.SetBounds($x, 176, $w, 30); $x -= 8
+    $btn.Add_Click({ $script:BoxPick = $this.Tag; $this.FindForm().Close() })
+    $f.Controls.Add($btn)
+    if ($i -eq $buttons.Count - 1) { $f.AcceptButton = $btn }
   }
-  if ($Student) { @{ student = $Student } | ConvertTo-Json | Set-Content $StudentFile -Encoding UTF8 }
+  $tm = New-Object System.Windows.Forms.Timer; $tm.Interval = 1800000; $tm.Tag = $f
+  $tm.Add_Tick({ $this.Stop(); $this.Tag.Close() }); $tm.Start()
+  $f.Add_Shown({ $this.Activate() })
+  [void]$f.ShowDialog(); $tm.Stop(); $tm.Dispose()
+  $t = if ($tb) { $tb.Text.Trim() } else { "" }
+  $f.Dispose()
+  if (-not $script:BoxPick) { return $null }
+  return @{ b = $script:BoxPick; t = $t }
 }
+function Say($msg) { Ask-Box $msg @("OK") "" $false | Out-Null }
+function Verify($op, $extra) {
+  $b = @{ op = $op }
+  if ($extra) { foreach ($k in $extra.Keys) { $b[$k] = $extra[$k] } }
+  $r = $null
+  try { $r = Helper "/verify" $b } catch { Log "verify $op unreachable: $_"; return $null }
+  if ($r -and $r.status) { return $r }
+  return $null
+}
+function Err-Text($r) {
+  if (-not $r) { return "LOCKqz can't reach the internet right now. It will ask again later." }
+  if ($r.error -eq "too_many_codes") { return "Too many codes were sent. LOCKqz will ask again in an hour." }
+  if (($r.error -eq "send_failed") -or ($r.error -eq "mail_busy")) { return "LOCKqz couldn't send the email right now. It will ask again later." }
+  return "Something went wrong. LOCKqz will ask again later."
+}
+function Setup-Identity($saved) {
+  # -> @{ student; verified } to save, or $null (not finished: ask again later)
+  $st = Verify "status" $null
+  if (-not $st) { return $null }
+  if ($st.verified -and $st.student) { return @{ student = $st.student; verified = $true } }
+  if ((-not $st.codes) -and $st.student) { return @{ student = $st.student; verified = $false } }
+  $email = [string]$saved; $msg = "LOCKqz setup (one time only)`n`n" + $Ask
+  while ($true) {
+    $a = Ask-Box $msg @("OK") $email $true
+    if (-not $a) { return $null }
+    $email = ([string]$a.t).Trim().ToLower()
+    if ($email -notmatch $EmailRe) { $msg = "That is not an email address.`n`n" + $Ask; continue }
+    $chk = Verify "check" @{ email = $email }
+    if (-not $chk) { Say (Err-Text $null); return $null }
+    if ($chk.name) { $a = Ask-Box ("Is this you?`n`n" + $chk.name + "`n" + $email) @("No, retype", "Yes") "" $false }
+    else { $a = Ask-Box ($email + " is not on a LOCKqz class list yet.`n`nCheck the spelling.") @("Retype", "Use it") "" $false }
+    if (-not $a) { return $null }
+    if (($a.b -eq "No, retype") -or ($a.b -eq "Retype")) { $msg = $Ask; continue }
+    $r = Verify "send" @{ email = $email }
+    if ($r -and $r.bound) { return @{ student = $email; verified = $false } }
+    if (-not ($r -and $r.sent)) { Say (Err-Text $r); return $null }
+    $note = ""
+    while ($true) {
+      $a = Ask-Box ($note + "We emailed a 6-digit code to`n" + $email + "`n`nType it here (check Junk/Spam if you don't see it):") @("Change email", "Send new code", "OK") "" $true
+      if (-not $a) { return $null }
+      if ($a.b -eq "Change email") { $msg = $Ask; break }
+      if ($a.b -eq "Send new code") {
+        $r = Verify "send" @{ email = $email }
+        if (-not ($r -and $r.sent)) { Say (Err-Text $r); return $null }
+        $note = "New code sent.`n`n"; continue
+      }
+      $r = Verify "code" @{ email = $email; code = $a.t }
+      if ($r -and $r.verified) { Say "Done. LOCKqz is set up and won't ask again."; return @{ student = $email; verified = $true } }
+      if ($r -and $r.resent) {
+        if ($r.error -eq "expired") { $note = "That code expired. We sent a new one.`n`n" }
+        elseif ($r.error -eq "too_many_tries") { $note = "Too many wrong tries. We sent a new code.`n`n" }
+        else { $note = "We sent a new code.`n`n" }
+        continue
+      }
+      if ($r -and ($r.error -eq "wrong_code")) { $note = "That code is wrong (" + $r.tries_left + " tries left).`n`n"; continue }
+      Say (Err-Text $r); return $null
+    }
+  }
+}
+
+if ($Setup) {
+  # One setup window at a time per user session.
+  $mtx = New-Object System.Threading.Mutex($false, "Local\LOCKqzSetup")
+  if (-not $mtx.WaitOne(0)) { exit }
+  $saved = $null; if (Test-Path $StudentFile) { $saved = (Get-Content $StudentFile -Raw | ConvertFrom-Json).student }
+  $got = Setup-Identity $saved
+  if ($got) {
+    @{ student = $got.student; verified = $got.verified } | ConvertTo-Json | Set-Content $StudentFile -Encoding UTF8
+    try { Helper "/student" @{ student = $got.student } | Out-Null } catch {}
+    Log "student $($got.student) verified=$($got.verified)"
+  }
+  $mtx.ReleaseMutex(); exit
+}
+
+$Student = $null; $Verified = $false; $StudentRead = Get-Date "2000-01-01"; $SetupAt = Get-Date "2000-01-01"
+function Load-Student {
+  if (Test-Path $StudentFile) {
+    $j = Get-Content $StudentFile -Raw | ConvertFrom-Json
+    $script:Student = $j.student; $script:Verified = [bool]$j.verified; $script:StudentRead = (Get-Item $StudentFile).LastWriteTime
+  }
+}
+function Start-Setup {
+  $script:SetupAt = Get-Date
+  Start-Process powershell.exe -WindowStyle Hidden -ArgumentList "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Setup"
+}
+Load-Student
+Start-Setup   # checks the server once per login; asks only if not yet confirmed
 try { Helper "/student" @{ student = $Student } 8 | Out-Null } catch { Log "helper not reachable yet" }
 Log "running (device $Device, student $Student)"
 
@@ -105,6 +216,11 @@ while ($true) {
     $wins = Get-BrowserWindows
     $quizWin = $wins | Where-Object { Is-Quiz $_.Url } | Select-Object -First 1
     $leaving = @($wins | Where-Object { Is-Leaving $_.Url }).Count -gt 0
+    if (-not $Verified) {
+      if ((Test-Path $StudentFile) -and ((Get-Item $StudentFile).LastWriteTime -gt $StudentRead)) { Load-Student; if ($Student) { try { Helper "/student" @{ student = $Student } | Out-Null } catch {} } }
+      $since = ((Get-Date) - $SetupAt).TotalSeconds
+      if ((-not $Verified) -and ((($null -ne $quizWin) -and ($since -gt 60)) -or ($since -gt 21600))) { Start-Setup }
+    }
     if (-not $Locked) {
       if ($quizWin) {
         $Quiz = Lock-Id $quizWin.Url
