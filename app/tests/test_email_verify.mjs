@@ -39,7 +39,7 @@ function makeDb(oldSchema) {
   let schema = readFileSync(join(CF, "schema.sql"), "utf8");
   if (oldSchema) schema = schema.replace(/,\n  student_verified INTEGER DEFAULT 0[^\n]*/, "").replace(/\n-- One pending email code[^\n]*\nCREATE TABLE IF NOT EXISTS email_codes[^\n]*/, "");
   sqlite.exec(schema);
-  for (const m of ["migrate_012_bs_code.sql", "migrate_013_sa_keep.sql", ...(oldSchema ? ["migrate_015_student_verify.sql"] : [])]) sqlite.exec(readFileSync(join(CF, m), "utf8"));
+  for (const m of ["migrate_012_bs_code.sql", "migrate_013_sa_keep.sql", "migrate_015_student_verify.sql", "migrate_016_bs_user.sql"]) { try { sqlite.exec(readFileSync(join(CF, m), "utf8")); } catch (e) { /* already in schema.sql */ } }
   const t = new Date().toISOString();
   for (const [id, name, email, role] of [["4001", "Al Student", "al@usc.edu", "Student"], ["4002", "Bo Student", "bo@usc.edu", "Student"]])
     sqlite.prepare("INSERT INTO roster (ou,user_id,name,email,role,synced_at) VALUES (?,?,?,?,?,?)").run(OU, id, name, email, role, t);

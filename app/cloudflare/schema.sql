@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS teachers (
   active_until TEXT,
   sync_key  TEXT,
   verified  INTEGER DEFAULT 0,  -- proven instructor/TA via their own Brightspace login
-  bs_user_id TEXT               -- their own Brightspace user id (whoami), captured on first sync (migrate_015)
+  bs_user_id TEXT               -- their own Brightspace user id (whoami), captured on first sync (migrate_016)
 );
 CREATE INDEX IF NOT EXISTS idx_teachers_token ON teachers(token);
 
