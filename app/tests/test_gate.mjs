@@ -123,6 +123,26 @@ async function suite(label, oldSchema) {
   r = await getc(env, "/me", { teacher: TOK });
   check("teacher is now verified", r.data?.verified === true, JSON.stringify(r.data));
 
+  console.log("T3a PAID ONLY: a verified professor who has not paid gets nothing");
+  check("verified but unpaid is not active", r.data?.active === false, JSON.stringify(r.data));
+  check("unpaid: sync did NOT auto-protect", !sqlite.prepare("SELECT 1 FROM quizzes WHERE qi=?").get(QI));
+  r = await call(env, "/protect", { ou: OU, qi: QI, on: true }, { teacher: TOK });
+  check("unpaid /protect refused (402)", r.status === 402, `got ${r.status}`);
+  r = await call(env, "/gate", { ou: OU, qi: QI, on: true }, { teacher: TOK });
+  check("unpaid /gate refused (402)", r.status === 402, `got ${r.status}`);
+  r = await call(env, "/rotating", { qis: [QI] }, { teacher: TOK });
+  check("unpaid /rotating refused (402)", r.status === 402, `got ${r.status}`);
+  r = await call(env, "/activate", { email: "student-nobody@usc.edu", until: "2099-12-31" }, { teacher: TOK });
+  check("a professor cannot activate anyone (admin only)", r.status === 401, `got ${r.status}`);
+  r = await call(env, "/activate", { email: "prof@usc.edu", until: "2099-12-31" }, { teacher: ADMIN_TOK });
+  check("admin activates after payment", r.status === 200, JSON.stringify(r.data));
+  r = await call(env, "/sync", { courses: [ { ou: OU, name: "ECON 203", code: "ECON-203", role: "Instructor",
+      classlist: [ { id: "4000", name: "Prof", email: "prof@usc.edu", role: "Instructor" },
+                   { id: "4001", name: "Al Student", email: "al@usc.edu", role: "Student" },
+                   { id: "4002", name: "Bo Student", email: "bo@usc.edu", role: "Student" } ],
+      quizzes: [ { qi: QI, name: "Midterm", active: true } ] } ] }, { sync: SYNC });
+  check("paid re-sync accepted", r.status === 200, JSON.stringify(r.data));
+
   console.log("T3b protect-by-default: the active synced quiz was auto-protected");
   check("active quiz auto-protected on sync", !!sqlite.prepare("SELECT 1 FROM quizzes WHERE qi=?").get(QI), "no quizzes row");
 
@@ -203,6 +223,17 @@ async function suite(label, oldSchema) {
   r = await getc(env, "/live?quiz=" + LOCK_ID, { teacher: TOK });
   const row9 = (r.data?.rows || []).find(x => x.device_id === DEV9);
   check("/live row carries the locked device's IP field", row9 && ("ip" in row9), JSON.stringify(row9));
+
+  console.log("T10 PAID ONLY: turning a professor off stops LOCKqz for them and frees their quizzes");
+  r = await call(env, "/activate", { email: "prof@usc.edu", until: null }, { teacher: ADMIN_TOK });
+  check("admin turns professor off", r.status === 200, JSON.stringify(r.data));
+  check("their protected quizzes are released", !sqlite.prepare("SELECT 1 FROM quizzes WHERE teacher_id=(SELECT id FROM teachers WHERE email='prof@usc.edu')").get());
+  check("passwords queued for removal from Brightspace (students never stranded)", !!sqlite.prepare("SELECT 1 FROM pending_clear WHERE qi=?").get(QI));
+  r = await call(env, "/protect", { ou: OU, qi: QI, on: true }, { teacher: TOK });
+  check("turned-off professor cannot protect (402)", r.status === 402, `got ${r.status}`);
+  r = await call(env, "/activate", { email: "prof@usc.edu", until: "2020-01-01" }, { teacher: ADMIN_TOK });
+  r = await getc(env, "/me", { teacher: TOK });
+  check("an expired paid date is not active", r.data?.active === false, JSON.stringify(r.data));
 }
 
 await suite("fresh schema", false);

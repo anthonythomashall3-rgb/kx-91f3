@@ -98,12 +98,12 @@ export async function onRequest(context) {
   const hdr = (request.headers.get("X-LOCKqz-Teacher") || "").trim();
   const adminKey = (env.TEACHER_KEY || "").trim();
   let me = null;                                   // { id, email, name, admin }
-  if (hdr && adminKey && hdr === adminKey) me = { id:"admin", email:"admin", name:"Admin", admin:true, verified:true };
+  if (hdr && adminKey && hdr === adminKey) me = { id:"admin", email:"admin", name:"Admin", admin:true, verified:true, active:true };
   else {
     const syncKey = (request.headers.get("X-LOCKqz-Sync") || "").trim();
     const t = hdr ? await db.prepare("SELECT id,email,name,role,active_until,verified FROM teachers WHERE token=?").bind(hdr).first().catch(()=>null)
           : syncKey ? await db.prepare("SELECT id,email,name,role,active_until,verified FROM teachers WHERE sync_key=?").bind(syncKey).first().catch(()=>null) : null;
-    if (t) me = { id:t.id, email:t.email, name:t.name, admin: t.role === "admin", verified: t.role === "admin" || t.verified === 1, active: t.role === "admin" || t.verified === 1 || (!!t.active_until && t.active_until >= now().slice(0,10)), active_until: t.active_until||null };
+    if (t) me = { id:t.id, email:t.email, name:t.name, admin: t.role === "admin", verified: t.role === "admin" || t.verified === 1, active: t.role === "admin" || (!!t.active_until && t.active_until >= now().slice(0,10)), active_until: t.active_until||null };
   }
   const teacher = () => !!me;
   const mine = (col="teacher_id") => me.admin ? { sql:"1=1", args:[] } : { sql:`${col}=?`, args:[me.id] };
@@ -115,6 +115,15 @@ export async function onRequest(context) {
   const INSTR_SQL = "(r.role LIKE '%nstructor%' OR r.role LIKE '%rofessor%' OR r.role LIKE '%aculty%')";
   async function hasTrustedOwner(ou) {
     return !!(await db.prepare("SELECT 1 FROM teacher_courses tc JOIN teachers te ON te.id=tc.teacher_id WHERE tc.ou=? AND (te.role='admin' OR te.verified=1) LIMIT 1").bind(String(ou)).first());
+  }
+  // Unpaid or expired professor: queue every quiz they protect for password removal (their next
+  // LOCKqz Sync takes it out of Brightspace, so no student is ever locked out of a quiz).
+  async function releaseAll(tid) {
+    const qs = (await db.prepare("SELECT qi,ou,password FROM quizzes WHERE teacher_id=? AND ou IS NOT NULL").bind(tid).all()).results;
+    for (const q of qs) {
+      await db.prepare("INSERT OR REPLACE INTO pending_clear (ou,qi,password) VALUES (?,?,?)").bind(String(q.ou), String(q.qi), q.password).run();
+      await db.prepare("DELETE FROM quizzes WHERE qi=?").bind(q.qi).run();
+    }
   }
   async function trustedInstructor(ou) {
     if (!me || !EMAIL) return false;
@@ -307,6 +316,10 @@ export async function onRequest(context) {
       const email = String(body.email||"").trim().toLowerCase();
       const until = body.until ? String(body.until).slice(0,10) : null;   // "YYYY-MM-DD" or null = off
       const r = await db.prepare("UPDATE teachers SET active_until=? WHERE email=?").bind(until, email).run();
+      if (r.meta.changes && (!until || until < now().slice(0,10))) {
+        const tt = await db.prepare("SELECT id FROM teachers WHERE email=?").bind(email).first();
+        if (tt) await releaseAll(tt.id);
+      }
       return r.meta.changes ? json({ email, active_until: until }) : json({ error:"no such professor" }, 404);
     }
     if (p === "/reset" && request.method === "POST") {
@@ -341,8 +354,10 @@ export async function onRequest(context) {
 
     if ((p === "/quiz" || p === "/course" || p === "/protect" || p === "/gate") && request.method === "POST" && !me.admin && !me.verified)
       return json({ error: "Verify you teach this course first: open Brightspace and click LOCKqz Sync." }, 403);
-    if ((p === "/quiz" || p === "/course" || (p === "/protect" && body.on)) && request.method === "POST" && !me.active)
-      return json({ error: "Your account is not active yet. Contact the LOCKqz admin to activate it." }, 402);
+    // PAID ONLY: verification proves you are a professor; only the admin's Activate (after payment)
+    // turns the tool on. Nothing that protects, gates or rotates a quiz works for an unpaid account.
+    if ((p === "/quiz" || p === "/course" || (p === "/protect" && body.on) || (p === "/gate" && body.on) || p === "/rotating") && request.method === "POST" && !me.active)
+      return json({ error: "Not active. LOCKqz turns on after payment — contact the LOCKqz admin." }, 402);
 
     if (p === "/quiz" && request.method === "POST") {
       const quiz_id = body.quiz_id || rid(8);
@@ -436,6 +451,7 @@ export async function onRequest(context) {
       const today = now().slice(0, 10);
       for (const c of courses) {
         const ou = String(c.ou || ""); if (!/^\d+$/.test(ou) || !allowed[ou] || !Array.isArray(c.quizzes)) continue;
+        if (!me.active) continue;                                    // unpaid: never auto-protect
         if (!me.admin && !(await trustedInstructor(ou))) continue;   // auto-protect only courses you instruct
         for (const q of c.quizzes) {
           const qi = String(q.qi || ""); if (!/^\d+$/.test(qi)) continue;
@@ -461,6 +477,7 @@ export async function onRequest(context) {
           if (prof) await db.prepare("UPDATE teachers SET verified=1 WHERE id=?").bind(me.id).run();
         }
       }
+      if (!me.active) await releaseAll(me.id);
       return json(await bsState(courses.map(c => c.ou)));
     }
     if (p === "/sync-result" && request.method === "POST") {

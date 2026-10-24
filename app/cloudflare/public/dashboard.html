@@ -225,7 +225,7 @@ function route(){
 // ---- HOME ----
 function viewHome(){
   let h = "";
-  if(!ME.active) h += `<div class="note warn"><span>Your account is not active yet. The LOCKqz admin activates it for the semester; until then exams are not protected.</span></div>`;
+  if(!ME.active) h += `<div class="note warn"><span>Not active. LOCKqz turns on after payment — contact the LOCKqz admin. Until then no quiz is protected.</span></div>`;
   if(!BS.courses.length) return h + viewConnect(true);
   const all = BS.courses.map(classStats);
   const exams = all.reduce((n,s)=>n+s.cur.length,0), prot = all.reduce((n,s)=>n+s.prot.length,0), students = BS.courses.reduce((n,c)=>n+c.students.length,0);
