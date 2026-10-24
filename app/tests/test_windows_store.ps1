@@ -6,12 +6,12 @@ param([string]$Shot = "$env:TEMP\lqmsix\screenshot.png")
 $ErrorActionPreference = "Continue"
 $fail = 0
 function Check($name, $cond) { if ($cond) { Write-Host "PASS  $name" } else { Write-Host "FAIL  $name"; $script:fail++ } }
-$S = Join-Path (Split-Path -Parent $PSScriptRoot) "windows\store"
+$StoreDir = Join-Path (Split-Path -Parent $PSScriptRoot) "windows\store"
 $Dest = "$env:ProgramData\LOCKqz"
 $Out = "$env:TEMP\lqmsix\lockqz.msix"
 
 # 1) build + install the package
-& powershell -NoProfile -ExecutionPolicy Bypass -File "$S\build-msix.ps1" -TestSign -Out $Out
+& powershell -NoProfile -ExecutionPolicy Bypass -File "$StoreDir\build-msix.ps1" -TestSign -Out $Out
 Check "package built" (Test-Path $Out)
 Add-AppxPackage -Path $Out
 $pkg = Get-AppxPackage -Name "LOCKqz.Test"
@@ -42,7 +42,7 @@ $hosts = Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw
 Check "UNLOCK cleans hosts" (-not ($hosts -match 'LOCKqz START'))
 
 # 4) update from a newer Store package: copies the package payload, downloads nothing
-& powershell -NoProfile -ExecutionPolicy Bypass -File "$S\build-msix.ps1" -TestSign -Out "$env:TEMP\lqmsix2\lockqz.msix" -VersionOverride "9.9.9"
+& powershell -NoProfile -ExecutionPolicy Bypass -File "$StoreDir\build-msix.ps1" -TestSign -Out "$env:TEMP\lqmsix2\lockqz.msix" -VersionOverride "9.9.9"
 Add-AppxPackage -Path "$env:TEMP\lqmsix2\lockqz.msix"
 $src = Get-Content (Join-Path (Split-Path -Parent $PSScriptRoot) "windows\lockqzd.ps1") -Raw
 $lib = [regex]::Match($src, "(?s)\`$SignLib = @'\r?\n(.*?)\r?\n'@").Groups[1].Value
