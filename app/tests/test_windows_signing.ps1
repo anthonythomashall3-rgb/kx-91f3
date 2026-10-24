@@ -99,6 +99,10 @@ Check "garbage signature refused, no throw" (-not (LQ-VerifySig $bodyBytes "not-
 $ossl = Get-Command openssl -ErrorAction SilentlyContinue
 if ($ossl -and $py) {
   # Cross-check: a manifest signed the way CI signs it (openssl, PEM key) verifies here (.NET, XML key).
+  # Windows PowerShell 5.1 turns a native command's stderr into a terminating error under
+  # ErrorActionPreference=Stop, and openssl writes "writing RSA key" to stderr on a normal run,
+  # so soften it to Continue for this block (the checks below assert on return values, not on throws).
+  $savedEAP = $ErrorActionPreference; $ErrorActionPreference = "Continue"
   $t = Join-Path ([IO.Path]::GetTempPath()) ("lqz-upd-" + [guid]::NewGuid().ToString("N")); New-Item -ItemType Directory -Path $t | Out-Null
   & $ossl.Source genrsa -out "$t/k.pem" 2048 2>$null
   & $ossl.Source rsa -in "$t/k.pem" -pubout -out "$t/k.pub" 2>$null
@@ -150,7 +154,7 @@ if ($ossl -and $py) {
     Remove-Item Env:LOCKQZ_UPDATE_DIR
     $r = LQ-CheckUpdate $st $inst "http://127.0.0.1:$($Port + 1)/download" "0.3.0"
     Check "non-install folder never updated" (-not $r)
-  } finally { Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue; Remove-Item Env:LOCKQZ_UPDATE_DIR -ErrorAction SilentlyContinue; Remove-Item $t -Recurse -Force -ErrorAction SilentlyContinue }
+  } finally { Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue; Remove-Item Env:LOCKQZ_UPDATE_DIR -ErrorAction SilentlyContinue; Remove-Item $t -Recurse -Force -ErrorAction SilentlyContinue; $ErrorActionPreference = $savedEAP }
 } else { Write-Host "  (openssl/python not found: cross-check with a CI-style signed release skipped)" }
 
 Write-Host ""
