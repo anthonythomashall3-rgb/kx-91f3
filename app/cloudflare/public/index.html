@@ -27,7 +27,7 @@
     <p class="tag" id="os"></p>
 
     <div id="install" hidden>
-      <p class="lead">Install in one step — no security warning:</p>
+      <p class="lead">Install in one step:</p>
       <p class="hint" id="how"></p>
       <div class="cmd"><code id="cmd"></code><button id="copy" type="button">Copy</button></div>
       <p class="hint" id="pw"></p>
@@ -58,14 +58,14 @@
       $("cmd").textContent = "curl -fsSL " + site + "/install.sh | sudo bash";
       $("pw").textContent = "It asks for your Mac password once (typing stays hidden) — that is macOS, not us.";
       $("dl").href = "/download/lockqz-mac.pkg";
-      $("warn").textContent = "If macOS says “unidentified developer”: right-click the downloaded file → Open → Open. The command above skips this.";
+      $("warn").textContent = "If macOS blocks it: System Settings → Privacy & Security → Open Anyway.";
     } else {
       $("os").textContent = "for Windows";
       $("how").textContent = "Open PowerShell as administrator (press Start, type PowerShell, right-click it → Run as administrator), paste this, press Enter:";
       $("cmd").textContent = "irm " + site + "/install.ps1 | iex";
       $("pw").textContent = "";
       $("dl").href = "/download/lockqz-win.exe";
-      $("warn").textContent = "If Windows shows “Windows protected your PC”: click More info → Run anyway. The command above skips this.";
+      $("warn").textContent = "If Windows blocks it: More info → Run anyway.";
     }
   } else {
     $("nope").hidden = false;
