@@ -67,3 +67,4 @@ Check "offline: nothing saved, no dialog" (($null -eq $r) -and $script:Shown.Cou
 
 Write-Host ""; Write-Host "RESULT: $pass passed, $fail failed"
 if ($fail) { exit 1 }
+exit 0
