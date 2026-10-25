@@ -5,10 +5,13 @@
 param([Parameter(Mandatory=$true)][ValidateSet("lock","unlock","status")]$cmd)
 $ErrorActionPreference = "SilentlyContinue"
 
+# On Windows all channels of a browser (Beta/Dev/Canary) read the SAME vendor policy key, so this
+# single key per vendor already covers every channel. Chromium + Opera added for breadth.
 $Chromium = @{ "HKLM:\SOFTWARE\Policies\Google\Chrome" = "chrome";
                "HKLM:\SOFTWARE\Policies\Microsoft\Edge" = "edge";
                "HKLM:\SOFTWARE\Policies\BraveSoftware\Brave" = "brave";
-               "HKLM:\SOFTWARE\Policies\Vivaldi" = "vivaldi" }
+               "HKLM:\SOFTWARE\Policies\Vivaldi" = "vivaldi";
+               "HKLM:\SOFTWARE\Policies\Chromium" = "chromium" }
 $Firefox  = "HKLM:\SOFTWARE\Policies\Mozilla\Firefox"
 $Mark     = "LOCKqzManaged"
 

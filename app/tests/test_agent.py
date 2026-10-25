@@ -57,8 +57,11 @@ print("T4 browser policy: lock writes every browser, unlock removes only ours, n
 import plistlib
 with open(os.path.join(tmp, "com.apple.Other.plist"), "wb") as f: plistlib.dump({"x": 1}, f)
 P.lock()
-written = sorted(os.listdir(tmp))
-ok("7 browsers + untouched file present") if len(written) == 8 else bad("files: " + str(written))
+written = [f for f in os.listdir(tmp) if f.endswith(".plist")]
+nonours = [f for f in written if f == "com.apple.Other.plist"]
+ours = [f for f in written if f != "com.apple.Other.plist"]
+ok("every managed browser channel written (>=15) + foreign file untouched") if len(ours) >= 15 and len(nonours) == 1 else bad("files: " + str(sorted(written)))
+ok("all channels of Chrome/Edge/Brave covered") if all(x in ours for x in ["com.google.Chrome.plist","com.google.Chrome.beta.plist","com.microsoft.Edge.plist","com.microsoft.Edge.Dev.plist","com.brave.Browser.plist","com.brave.Browser.nightly.plist","com.operasoftware.OperaGX.plist"]) else bad("missing a channel: " + str(sorted(ours)))
 with open(os.path.join(tmp, "com.google.Chrome.plist"), "rb") as f: ch = plistlib.load(f)
 ok("Chrome: AI off + Web search pinned") if ch["GeminiSettings"] == 1 and ch["GenAiDefaultSettings"] == 2 and "udm=14" in ch["DefaultSearchProviderSearchURL"] else bad("chrome policy wrong")
 ok("Chrome: Web allowed beats search blocked") if "google.com/search" in ch["URLBlocklist"] and "google.com/search@udm=14" in ch["URLAllowlist"] else bad("url lists wrong")

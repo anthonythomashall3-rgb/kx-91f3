@@ -156,5 +156,28 @@ await call("/report", { event:"tamper", quiz_id:"100-5100", detail:{ big:"x".rep
 const det = sqlite.prepare("SELECT length(detail) AS n FROM events WHERE device_id='devjunk' AND event='tamper'").get();
 check("event detail is capped (<=2000 chars)", det && det.n <= 2000, JSON.stringify(det));
 
+console.log("SEC12 a forced unlock is NOT a clean done until the server confirms the Brightspace submit");
+// profa's course 100 quiz 5100: a student locks, gets admitted, then the student force-unlocks
+// (as a token-holder would). Until the professor's Sync session confirms a real submission, the
+// student shows red "left_early" and is NOT eligible (gate revokes). After /submitted, it is "done".
+const DS = "dev-sub1", KS = randomBytes(32).toString("hex");
+await call("/register", { device_id:DS, key:KS, student:"stu100@usc.edu", platform:"mac" });
+await call("/report", { event:"lock", quiz_id:"100-5100", student:"stu100@usc.edu" }, { key:KS, device:DS });
+let lv = await call("/live?quiz=100-5100", {}, { teacher: A, get:true });
+let row = (lv.data?.rows||[]).find(x => x.device_id === DS);
+check("locked student is eligible", row && row.status === "locked" && row.eligible === true, JSON.stringify(row));
+await call("/report", { event:"unlock", quiz_id:"100-5100", student:"stu100@usc.edu" }, { key:KS, device:DS });
+lv = await call("/live?quiz=100-5100", {}, { teacher: A, get:true });
+row = (lv.data?.rows||[]).find(x => x.device_id === DS);
+check("after a forced unlock with no confirmed submit -> 'left_early', not 'done'", row && row.status === "left_early" && row.eligible !== true, JSON.stringify(row));
+// resolve the student's Brightspace user_id (roster id 2100 for stu100) and confirm the submission
+r = await call("/submitted", { ou:"100", qi:"5100", user_ids:["2100"] }, { teacher: A });
+check("professor (trusted session) can confirm a submission", r.status === 200, JSON.stringify(r.data));
+lv = await call("/live?quiz=100-5100", {}, { teacher: A, get:true });
+row = (lv.data?.rows||[]).find(x => x.device_id === DS);
+check("once Brightspace confirms the submit -> clean 'done'", row && row.status === "done" && row.submitted === true, JSON.stringify(row));
+r = await call("/submitted", { ou:"100", qi:"5100", user_ids:["2100"] }, { teacher: IMP });
+check("a professor cannot confirm submissions for a course they do not instruct", r.status === 403, `got ${r.status}`);
+
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

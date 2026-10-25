@@ -38,7 +38,10 @@ QUIZ_RE = re.compile(r"/d2l/lms/quizzing/(user/|.*(isprv=1|preview))", re.I)
 LEAVING_RE = re.compile(r"quizzes_list|quiz_submissions|feedback|results|submission", re.I)
 WEB_OK_UDM = {"14", "2", "12", "7", "36"}
 WEB_OK_TBM = {"isch", "nws", "vid", "bks"}
-JXA_BROWSERS = ["Google Chrome", "Microsoft Edge", "Brave Browser", "Chromium", "Vivaldi", "Arc", "Safari"]
+JXA_BROWSERS = ["Google Chrome", "Google Chrome Beta", "Google Chrome Dev", "Google Chrome Canary",
+                "Microsoft Edge", "Microsoft Edge Beta", "Microsoft Edge Dev", "Microsoft Edge Canary",
+                "Brave Browser", "Brave Browser Beta", "Brave Browser Nightly", "Chromium",
+                "Vivaldi", "Opera", "Opera GX", "Arc", "Safari"]
 
 _LOGF = os.path.expanduser("~/Library/Logs/LOCKqz-agent.log")
 def log(m):
@@ -298,7 +301,7 @@ class Agent:
             # Cloudflare blocks the default "Python-urllib" user agent (403) — send our own. Bypass any
             # system proxy, which could block or MITM the call.
             req = urllib.request.Request(self.api + path, data=json.dumps(body).encode(),
-                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/0.3.4 (macOS)"})
+                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/0.3.5 (macOS)"})
             return json.loads(NOPROXY.open(req, timeout=8).read())
         except Exception as e:
             log("api %s failed: %s" % (path, e)); return None

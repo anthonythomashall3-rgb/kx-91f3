@@ -297,7 +297,7 @@ function viewClass(ou){
 }
 
 // ---- LIVE ----
-const LBL = {locked:["ok","Locked · working"],tamper:["red","Tampering detected — AI may be open"],helper_killed:["red","LOCKqz was stopped — AI may be open"],dark:["red","Lost contact — AI may be open"],browser_closed:["warn","Browser closed"],done:["","Submitted · unlocked"],developer:["","Admin (developer mode)"]};
+const LBL = {locked:["ok","Locked · working"],tamper:["red","Tampering detected — AI may be open"],helper_killed:["red","LOCKqz was stopped — AI may be open"],dark:["red","Lost contact — AI may be open"],browser_closed:["warn","Browser closed"],done:["","Submitted · unlocked"],left_early:["red","AI unblocked before submitting — verify"],developer:["","Admin (developer mode)"]};
 function viewLive(id){
   const [ou,qi] = id.split("-"); const c = BS.courses.find(x=>x.ou===ou); const q = c && c.quizzes.find(x=>String(x.qi)===qi);
   const title = q ? q.name : (LEGACY.find(x=>(x.lock_id||x.quiz_id)===id)||{}).title || id;

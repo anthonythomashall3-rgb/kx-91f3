@@ -170,7 +170,7 @@ export async function onRequest(context) {
   // The sync key (in the bookmarklet URL, readable by any script on the Brightspace page) authorizes
   // ONLY the Brightspace-connector endpoints. Account management needs the real session token.
   const viaSyncKey = !!(request.headers.get("X-LOCKqz-Sync") || "").trim() && !(hdr && adminKey && sameHex(hdr, adminKey)) && !(hdr);
-  const SYNC_OK = new Set(["/sync","/sync-result","/protect","/gate","/rotating","/rotated","/live","/synckey","/me","/bs"]);
+  const SYNC_OK = new Set(["/sync","/sync-result","/protect","/gate","/rotating","/rotated","/submitted","/live","/synckey","/me","/bs"]);
   const teacher = () => !!me;
   const mine = (col="teacher_id") => me.admin ? { sql:"1=1", args:[] } : { sql:`${col}=?`, args:[me.id] };
   const inCourse = async ou => me && (me.admin || !!(await db.prepare("SELECT 1 FROM teacher_courses WHERE teacher_id=? AND ou=?").bind(me.id, String(ou)).first()));
@@ -840,6 +840,19 @@ export async function onRequest(context) {
       await db.prepare("UPDATE quizzes SET bs_code=? WHERE qi=? AND ou=? AND gated=1").bind(code, qi, ou).run();
       return json({ ok: true });
     }
+    // The Sync tab (the professor's own trusted Brightspace session) reports which students Brightspace
+    // shows as having SUBMITTED the quiz. This is the only unforgeable proof a quiz actually ended, so
+    // a device's "unlock" counts as a clean "done" only when the student is on this list; any other
+    // unlock is flagged and the gate keeps their access revoked.
+    if (p === "/submitted" && request.method === "POST") {
+      const ou = String(body.ou||""), qi = String(body.qi||"");
+      if (!/^\d+$/.test(ou) || !/^\d+$/.test(qi)) return json({ error:"bad quiz" }, 400);
+      if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this course." }, 403);
+      const uids = (Array.isArray(body.user_ids) ? body.user_ids : []).map(String).filter(x => /^\d+$/.test(x)).slice(0, 3000);
+      for (let i = 0; i < uids.length; i += 1)
+        await db.prepare("INSERT OR IGNORE INTO submissions (ou,qi,user_id,at) VALUES (?,?,?,?)").bind(ou, qi, uids[i], now()).run();
+      return json({ ok: true, count: uids.length });
+    }
     // Current rotating code(s) for quizzes the teacher protects -- the Sync tab writes these into
     // Brightspace each cycle so the live password changes every minute. Returns current + next so a
     // write is valid right up to the tick.
@@ -950,6 +963,18 @@ export async function onRequest(context) {
         const hit = byEmail[who] || byName[who] || byUser[who];
         if (hit) { r.user_id = hit.user_id || null; if (hit.display) r.student = hit.display; }
         r.email = who.includes("@") ? who : (hit && hit.e) || null;
+      });
+      // Server-confirmed submissions (reported by the professor's trusted Sync session). A device that
+      // reported "unlock" is a clean "done" ONLY if Brightspace shows its student submitted; otherwise,
+      // while the quiz is still open, it is "left_early" (AI unblocked without a real submit) -- a red
+      // flag, never a quiet green done. A forced local unlock therefore cannot pose as a submission.
+      const subs = new Set(((await db.prepare("SELECT user_id FROM submissions WHERE ou=? AND qi=?").bind(_ou, _qi).all()).results).map(x => String(x.user_id)));
+      rows.forEach(r => {
+        if (r.status === "done") {
+          const submitted = r.user_id && subs.has(String(r.user_id));
+          if (submitted) r.submitted = true;
+          else if (started) { r.status = "left_early"; r.submitted = false; }
+        }
       });
       return json({ quiz, now: now(), stale_ms: STALE, rows });
     }

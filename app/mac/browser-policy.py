@@ -18,8 +18,14 @@ Usage: browser-policy.py {lock|unlock|status}   (root; LOCKQZ_POLICY_DIR for tes
 import os, plistlib, subprocess, sys
 
 DIR = os.environ.get("LOCKQZ_POLICY_DIR", "/Library/Managed Preferences")
-CHROMIUM = ["com.google.Chrome", "com.microsoft.Edge", "com.brave.Browser",
-            "org.chromium.Chromium", "com.vivaldi.Vivaldi", "company.thebrowser.Browser"]
+# Every Chromium browser + channel that reads managed prefs on macOS. All take the same policy keys,
+# so a student can't dodge the search/AI/DoH policy by using a beta/dev channel or a less common build.
+CHROMIUM = ["com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.dev", "com.google.Chrome.canary",
+            "com.microsoft.Edge", "com.microsoft.Edge.Beta", "com.microsoft.Edge.Dev", "com.microsoft.Edge.Canary",
+            "com.brave.Browser", "com.brave.Browser.beta", "com.brave.Browser.nightly",
+            "org.chromium.Chromium", "com.vivaldi.Vivaldi",
+            "com.operasoftware.Opera", "com.operasoftware.OperaGX", "com.operasoftware.OperaDeveloper",
+            "company.thebrowser.Browser", "ai.perplexity.comet", "com.sigmaos.sigmaos.macos"]
 FIREFOX = "org.mozilla.firefox"
 MARK = "LOCKqzManaged"
 
@@ -43,12 +49,12 @@ def chromium_policy(domain):
          "DefaultSearchProviderSearchURL": WEB_SEARCH,
          "DefaultSearchProviderSuggestURL": "https://www.google.com/complete/search?output=chrome&q={searchTerms}",
          "ExtensionInstallBlocklist": ["*"]}
-    if domain == "com.microsoft.Edge":
+    if domain.startswith("com.microsoft.Edge"):
         p.update({"HubsSidebarEnabled": False, "CopilotCDPPageContext": False,
                   "EdgeEntraCopilotPageContext": False, "ComposeInlineEnabled": False,
                   "Microsoft365CopilotChatIconEnabled": False,
                   "GenAILocalFoundationalModelSettings": 1})
-    if domain == "com.brave.Browser":
+    if domain.startswith("com.brave.Browser"):
         p.update({"BraveAIChatEnabled": False})
     return p
 

@@ -118,3 +118,7 @@ CREATE TABLE IF NOT EXISTS paid_sections (
   PRIMARY KEY (teacher_id, term, section)
 );
 CREATE TABLE IF NOT EXISTS pay_codes (teacher_id TEXT PRIMARY KEY, code TEXT UNIQUE);
+
+-- Server-confirmed Brightspace submissions (migrate_017): a trusted Sync session reports who
+-- actually submitted, so a forced client unlock cannot masquerade as a clean submit.
+CREATE TABLE IF NOT EXISTS submissions (ou TEXT, qi TEXT, user_id TEXT, at TEXT, PRIMARY KEY (ou, qi, user_id));

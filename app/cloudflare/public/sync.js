@@ -180,10 +180,39 @@
     //    always hands out exactly what Brightspace holds.
     var GATES = {};   // qi -> { ou, timer, busy, keep:{uid:true}, end }
     var GPW = {};     // qi -> last code written to Brightspace
-    var REVOKE = { tamper: 1, helper_killed: 1, done: 1 };
+    var REVOKE = { tamper: 1, helper_killed: 1, done: 1, left_early: 1 };
+    // Best-effort read of who Brightspace shows as having SUBMITTED this quiz. Returns a list of user
+    // ids. Tries the Valence quiz-attempts endpoint; only counts an attempt with a real completion
+    // timestamp. Any error or unknown shape -> [] (so the server clears nobody by mistake).
+    async function submittedUserIds(ou, qi) {
+      var out = {}, next = "/d2l/api/le/" + LE + "/" + ou + "/quizzes/" + qi + "/attempts/";
+      try {
+        for (var guard = 0; next && guard < 50; guard++) {
+          var d = await get(next).catch(function () { return null; });
+          if (!d) break;
+          var list = Array.isArray(d) ? d : (d.Objects || d.Items || []);
+          list.forEach(function (a) {
+            if (!a) return;
+            var uid = a.UserId != null ? a.UserId : (a.User && a.User.Identifier);
+            var doneAt = a.CompletionDate || a.TimeCompleted || a.SubmittedDate || a.DateCompleted ||
+                         (a.CompletionInfo && (a.CompletionInfo.CompletionDate || a.CompletionInfo.DateCompleted));
+            var isDone = !!doneAt || a.IsGraded === true || a.Completed === true;
+            if (uid != null && isDone) out[String(uid)] = true;
+          });
+          next = (d && d.Next) || null;
+        }
+      } catch (e) { return []; }
+      return Object.keys(out);
+    }
     async function gateStep(ou, qi) {
       var g = GATES[qi], live = await lqget("/live?quiz=" + ou + "-" + qi);
       if (!live || !live.rows) throw new Error("LOCKqz not reachable");
+      // Confirm real submissions to the server (so an unlocked student is "done" only if they truly
+      // submitted). Throttled to once per ~20s per quiz.
+      if (!g.nextSub || Date.now() >= g.nextSub) {
+        g.nextSub = Date.now() + 20000;
+        try { var subs = await submittedUserIds(ou, qi); if (subs.length) await lqpost("/submitted", { ou: ou, qi: qi, user_ids: subs }); } catch (e) {}
+      }
       var want = {}, revoke = {};
       live.rows.forEach(function (r) { if (!r.user_id) return; var u = String(r.user_id);
         if (r.eligible) want[u] = true; else if (REVOKE[r.status]) revoke[u] = true; });
