@@ -135,7 +135,7 @@ What changed (all code, all tested: 14 suites; Windows updater proven under Powe
    Keep this file; it is gitignored. If it is ever lost, generate a new pair, replace
    `app/mac/update.pub` + `app/windows/update.pub.xml` + the key embedded in `app/mac/install.sh`
    and `app/windows/install.ps1`, and students must reinstall once.
-2. Open https://github.com/anthonythomashall3-rgb/LOCKqz/settings/secrets/actions and click
+2. Open https://github.com/anthonythomashall3-rgb/kx-91f3/settings/secrets/actions and click
    **New repository secret**. Name: `LOCKQZ_UPDATE_KEY`. Secret: the key from step 1. Click **Add secret**.
 3. Open https://dash.cloudflare.com/profile/api-tokens and click **Create Token**, then
    **Create Custom Token** (bottom). Name it `lockqz-ci`. Permissions: **Account** · **Cloudflare Pages** · **Edit**;
@@ -145,7 +145,7 @@ What changed (all code, all tested: 14 suites; Windows updater proven under Powe
    GitHub: **New repository secret**, Name `CLOUDFLARE_ACCOUNT_ID`, Secret = that id. **Add secret**.
 6. Make sure everything you want live is committed on `master` (CI deploys the committed tree, not your
    working folder — the dashboard redesign in progress on 23 Oct is still uncommitted).
-7. Open https://github.com/anthonythomashall3-rgb/LOCKqz/actions/workflows/release.yml and click
+7. Open https://github.com/anthonythomashall3-rgb/kx-91f3/actions/workflows/release.yml and click
    **Run workflow** → **Run workflow**. Green = live. From now on every push to `master` does this by itself.
 8. GitHub Actions minutes: a public repository has unlimited free minutes; a private one has 2,000/month
    and the macOS runner counts 10x. If you keep it private, expect roughly 60-80 charged minutes per push.
