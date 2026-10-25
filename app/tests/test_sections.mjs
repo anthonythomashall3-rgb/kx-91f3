@@ -100,7 +100,7 @@ async function getc(env, path, { teacher=null, sync=null } = {}) {
   console.log("S1 the professor's sections come straight from the public schedule (no AI, instant)");
   r = await getc(env, "/my-sections", { teacher: TOK });
   check("finds exactly Bristow's 3 sections this term", r.status === 200 && r.data?.sections?.length === 3 && r.data.term === CUR, JSON.stringify(r.data));
-  check("$1,000 per section", r.data?.price === 1000);
+  check("$5,000 flat per professor", r.data?.price === 5000);
   check("Venmo handle + memo code returned", r.data?.venmo === "lockqz-test" && /^LQ[A-Z0-9]{5}$/.test(r.data?.memo||""), JSON.stringify(r.data));
   check("nothing paid yet", r.data?.sections?.every(s => !s.paid));
   const MEMO = r.data.memo;

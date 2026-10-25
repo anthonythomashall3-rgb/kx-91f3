@@ -196,7 +196,7 @@ export async function onRequest(context) {
   // ---- per-section billing ($1,000 per section per semester) ----
   // A Brightspace course (ou) is paid when the professor paid for the USC section(s) it holds.
   // Admin and an account-wide activation (active_until) count as paid for everything.
-  const PRICE = 1000;
+  const PRICE = 5000;   // flat, per professor per semester (all their sections); paid = admin Activate until the semester end
   const secNums = txt => (String(txt).match(/(?<!\d)\d{5}(?!\d)/g) || []);
   const courseKeys = txt => { const out = new Set(); const re = /(?<![A-Z])([A-Z]{2,5})[\s_\-]*(\d{3}[A-Z]?)(?![0-9])/g; let m; while ((m = re.exec(String(txt).toUpperCase()))) out.add(m[1] + m[2]); return [...out]; };
   const ckey = c => String(c||"").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -629,7 +629,7 @@ export async function onRequest(context) {
     if ((p === "/quiz" || p === "/course" || (p === "/protect" && body.on) || (p === "/gate" && body.on) || p === "/rotating") && request.method === "POST") {
       const u = String(body.url||"");
       const payOu = p === "/quiz" ? ids(u).ou : p === "/course" ? (u.match(/ou=(\d+)/) || u.match(/\/home\/(\d+)/) || u.match(/\/(\d+)(?:\/|$)/) || [])[1] : String(body.ou||"");
-      if (!(await paidOu(payOu))) return json({ error: "This section is not paid. LOCKqz turns on after payment ($1,000 per section per semester)." }, 402);
+      if (!(await paidOu(payOu))) return json({ error: "Not active. LOCKqz turns on after payment ($5,000 per semester)." }, 402);
     }
 
     // The professor's own USC sections this semester (public Schedule of Classes), what is paid, and

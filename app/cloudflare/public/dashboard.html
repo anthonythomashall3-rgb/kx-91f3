@@ -374,22 +374,21 @@ async function loadPay(name){ const el=$("pay"); if(!el) return;
   PAY=d; PAYSEL=new Set(d.sections.filter(s=>!s.paid).map(s=>s.section)); renderPay(); }
 function paySel(s,on){ on?PAYSEL.add(s):PAYSEL.delete(s); renderPay(); }
 function renderPay(){ const d=PAY, el=$("pay"); if(!el||!d) return;
-  if(d.all_active || (d.sections.length && d.sections.every(s=>s.paid))){ el.innerHTML=""; return; }
+  if(d.all_active){ el.innerHTML=""; return; }
   const nameBox = `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><label for="pname" class="muted">Name in the USC Schedule of Classes</label><input id="pname" value="${esc(d.name||"")}" placeholder="First Last" style="padding:10px;border:1px solid #cfccc4;border-radius:8px;flex:1 1 200px"><button class="btn" onclick="loadPay($('pname').value)">Find my sections</button></div>`;
-  if(!d.sections.length){ el.innerHTML = `<section class="card" style="display:flex;flex-direction:column;gap:14px"><h2 style="margin:0">Activate LOCKqz</h2><p class="muted" style="margin:0">No ${termName(d.term)} sections found${d.name?" for "+esc(d.name):""}.</p>${nameBox}</section>`; return; }
-  const n=PAYSEL.size, total=n*d.price, note=`${d.memo} ${[...PAYSEL].join(" ")}`;
+  const total=d.price, note=d.memo;
   const link = d.venmo ? `https://venmo.com/?txn=pay&recipients=${encodeURIComponent(d.venmo)}&amount=${total}&note=${encodeURIComponent(note)}` : "";
   el.innerHTML = `<section class="card" style="display:flex;flex-direction:column;gap:16px">
-    <div class="hrow"><h2>Activate LOCKqz</h2><span>${money(d.price)} per section · ${termName(d.term)}</span></div>
-    <ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px">${d.sections.map(s=>`<li><label style="display:flex;gap:12px;align-items:center;min-height:44px;padding:0 12px;border:1px solid #e3e0d8;border-radius:10px"><input type="checkbox" style="width:20px;height:20px" ${s.paid?"checked disabled":(PAYSEL.has(s.section)?"checked":"")} onchange="paySel('${esc(s.section)}',this.checked)"><b>${esc(s.course)}</b><span class="muted">Section ${esc(s.section)} · ${esc(s.registered??"")} students</span>${s.paid?'<b style="color:var(--ok);margin-left:auto">Paid</b>':""}</label></li>`).join("")}</ul>
-    <div class="hrow"><span>${n} section${n===1?"":"s"}</span><b style="font-size:28px">${money(total)}</b></div>
-    ${n ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
+    <div class="hrow"><h2>Activate LOCKqz</h2><span>${termName(d.term)}</span></div>
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b style="font-size:44px">${money(total)}</b><span class="muted">per semester · all your sections</span></div>
+    ${d.sections.length ? `<ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px">${d.sections.map(s=>`<li style="display:flex;gap:12px;align-items:center;min-height:40px;padding:0 12px;border:1px solid #e3e0d8;border-radius:10px"><b>${esc(s.course)}</b><span class="muted">Section ${esc(s.section)} · ${esc(s.registered??"")} students</span></li>`).join("")}</ul>` : nameBox}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
       ${d.zelle ? `<div style="padding:14px;border:1px solid #e3e0d8;border-radius:10px"><span class="muted">Zelle</span><br><b>${esc(d.zelle)}</b></div>` : ""}
       ${link ? `<a class="btn prime" style="text-align:center;display:flex;align-items:center;justify-content:center" href="${link}" target="_blank" rel="noopener">Venmo ${money(total)}</a>` : ""}
-      ${d.invoice ? `<a class="btn" style="text-align:center;display:flex;align-items:center;justify-content:center" href="mailto:${esc(d.invoice)}?subject=${encodeURIComponent("LOCKqz invoice "+d.memo)}&body=${encodeURIComponent("Please send an invoice for "+n+" section(s), "+money(total)+": "+[...PAYSEL].join(", "))}">Bank transfer (invoice)</a>` : ""}
+      ${d.invoice ? `<a class="btn" style="text-align:center;display:flex;align-items:center;justify-content:center" href="mailto:${esc(d.invoice)}?subject=${encodeURIComponent("LOCKqz invoice "+d.memo)}&body=${encodeURIComponent("Please send an invoice for LOCKqz, "+termName(d.term)+", "+money(total)+".")}">Bank transfer (invoice)</a>` : ""}
       ${!d.zelle && !link && !d.invoice ? `<p style="margin:0">Pay ${money(total)} to the LOCKqz admin.</p>` : ""}
-    </div><p class="muted" style="margin:0">Memo: <b>${esc(note)}</b></p>` : ""}
-    <details><summary class="muted">Not your sections?</summary>${nameBox}</details>
+    </div><p class="muted" style="margin:0">Memo: <b>${esc(note)}</b></p>
+    ${d.sections.length ? `<details><summary class="muted">Not your sections?</summary>${nameBox}</details>` : ""}
   </section>`; }
 async function secAdmin(email){ const el=$("secpanel"); el.innerHTML="Loading…";
   const d = await get("/teacher-sections?email="+encodeURIComponent(email)); if(d.error){ el.innerHTML=esc(d.error); return; }
