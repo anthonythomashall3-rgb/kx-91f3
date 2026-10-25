@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- (none)
+- 2026-10-25 16:35 PT — 01CsgBZK: Content-frame quizzes moved to their own page so submission is visible (Mac + Windows agents), Firefox frame URL from session store, v0.4.5. Files: app/mac/lockqz-agent.py, app/windows/lockqz-agent.ps1, tests/test_agent.py, VERSION + helper versions.
 
 ## Recently finished
 - 2026-10-25 15:45 PT — 01CsgBZK: quizzes opened from Content/Lessons now lock (fullscreen ViewLocation ?location= decoded by Mac/Windows agents + server ids()); Brightspace's own AI chat widget chat.learnwise.ai blocked; v0.4.4. ONE deploy at 5 pm: 01CsgBZK has scheduled sessions at 17:10/17:12 PT that run release-local.sh + deploy.sh and SKIP if /api/version already shows HEAD's version (e.g. a Release workflow_dispatch ran first).
