@@ -275,12 +275,26 @@ def mozlz4_json(path):
     if raw[:8] != b"mozLz40\0": return None
     return json.loads(lz4_block(raw[12:]).decode("utf-8", "replace"))
 
+def _frame_quiz_url(entry):
+    """A quiz running in a frame of the page (Brightspace Content/Lessons view): the frame's CURRENT URL,
+    from the session store's child entries (it changes to the submission page when the quiz is turned in)."""
+    for c in (entry or {}).get("children", []) or []:
+        u = str(c.get("url", "") or "")
+        if QUIZ_ANY_PATH_RE.search(url_parts(u)[0]): return u
+        deeper = _frame_quiz_url(c)
+        if deeper: return deeper
+    return ""
+
 def firefox_urls(session):
     out = []
     for w in (session or {}).get("windows", []):
         for t in w.get("tabs", []):
             ents = t.get("entries", [])
-            if ents: out.append(ents[min(max(t.get("index", 1), 1), len(ents)) - 1].get("url", ""))
+            if not ents: continue
+            e = ents[min(max(t.get("index", 1), 1), len(ents)) - 1]
+            u = e.get("url", "")
+            if CONTENT_VIEW_RE.search(url_parts(u)[0]): u = _frame_quiz_url(e) or u   # quiz inside Content
+            out.append(u)
     return out
 
 # ---------- live browser access ----------
@@ -844,6 +858,14 @@ class Agent:
         # daemon never blocks AI and search tabs are never rewritten.
         dev = developer_mode() if dev is None else dev
         tabs = browser_tabs() if tabs is None else tabs
+        # A quiz opened from Brightspace Content/Lessons runs in a frame, so its submission never shows
+        # in the address bar. Move it to its own page (same quiz, same attempt): from then on the address
+        # bar shows every quiz page, including "submitted", and AI comes back the moment it is turned in.
+        for (a, w, t, u) in tabs:
+            inner = inner_url(u)
+            if w >= 0 and inner != u and is_quiz(inner):
+                log("quiz opened from Content: moved to its own page (%s)" % lock_id(inner))
+                set_tab_url(a, w, t, inner)
         tabs = [(a, w, t, inner_url(u)) for (a, w, t, u) in tabs]   # quizzes opened from Content/Lessons
         now = time.time()
         urls = [u for (_, _, _, u) in tabs]

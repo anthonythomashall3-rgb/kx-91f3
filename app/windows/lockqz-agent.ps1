@@ -111,6 +111,25 @@ $Root = [System.Windows.Automation.AutomationElement]::RootElement
 $TS   = [System.Windows.Automation.TreeScope]
 $CT   = [System.Windows.Automation.ControlType]
 $AE   = [System.Windows.Automation.AutomationElement]
+$script:Moved = @{}
+function Move-ToQuiz($edit, [string]$url) {
+  # Types the quiz URL into that window's own address bar (UI Automation) and presses Enter, only when
+  # the address bar really has the keyboard focus; at most once every 10 s per URL.
+  $now = Get-Date
+  if ($script:Moved.ContainsKey($url) -and (($now - $script:Moved[$url]).TotalSeconds -lt 10)) { return $false }
+  $script:Moved[$url] = $now
+  try {
+    $vp = $null
+    if (-not $edit.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { return $false }
+    $edit.SetFocus(); Start-Sleep -Milliseconds 150
+    $vp.SetValue($url); Start-Sleep -Milliseconds 100
+    $f = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if (-not $f -or -not [System.Windows.Automation.Automation]::Compare($f, $edit)) { return $false }
+    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+    Log "quiz opened from Content: moved to its own page ($(Lock-Id $url))"
+    return $true
+  } catch { return $false }
+}
 function Get-BrowserWindows {
   # -> objects { Title, Url (active tab), Tabs (all tab titles) } for every browser window.
   $out = @(); $names = @{}
@@ -122,7 +141,11 @@ function Get-BrowserWindows {
     $url = ""
     $edit = $w.FindFirst($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Edit)))
     if ($edit) { $vp = $null; if ($edit.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { $url = $vp.Current.Value } }
-    $url = Inner-Url $url   # a quiz opened from Content/Lessons
+    # A quiz opened from Brightspace Content/Lessons runs in a frame, so its submission never shows in
+    # the address bar: move it to its own page (same quiz, same attempt), then every quiz page shows.
+    $inner = Inner-Url $url
+    if ($edit -and ($inner -ne $url) -and (Is-Quiz $inner)) { [void](Move-ToQuiz $edit $inner) }
+    $url = $inner
     $tabs = @()
     foreach ($t in $w.FindAll($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::TabItem)))) { $tabs += $t.Current.Name }
     $out += [pscustomobject]@{ Title = $w.Current.Name; Url = $url; Tabs = $tabs; Proc = $names[$wpid] }

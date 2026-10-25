@@ -515,6 +515,20 @@ g.last_check = 0; T(g, [tab(ATT)]); g.capped["123-456"] = _t.time() - A.GRACE - 
 h.status = {"state": "unlocked", "capped_quiz": "123-456", "capped_at": _t.time() + 1}   # a NEW release later
 g.last_check = 0; T(g, [])
 ok("a later release of the same quiz is honored again") if "123-456" in g.capped else bad("new release ignored")
+print("T23 a quiz opened from Brightspace Content (quiz in a frame) is moved to its own page, so submitting shows")
+CV = B + "/d2l/le/content/123/fullscreen/77/ViewLocation?title=Q&location=%2fd2l%2flms%2fquizzing%2fuser%2fquiz_summary.d2l%3fqi%3d456%26ou%3d123"
+moved = []; _st = A.set_tab_url; A.set_tab_url = lambda a, w, t, u: moved.append((a, w, t, u))
+try:
+    g, h = agent(); T(g, [tab(CV)])
+finally: A.set_tab_url = _st
+ok("Content view tab -> its tab is sent to the quiz's own page") if any(u == SUMM for (_, _, _, u) in moved) else bad("not moved: %r" % moved)
+ok("... and the quiz locks at once (same lock id)") if g.locked and any(p == "/lock" and b.get("quiz_id") == "123-456" for (p, b) in h.calls) else bad("not locked: %r" % h.calls)
+moved = []; A.set_tab_url = lambda a, w, t, u: moved.append(u)
+try: g, h = agent(); T(g, [tab(B + "/d2l/le/content/123/fullscreen/77/ViewLocation?location=%2fcontent%2fnotes.pdf")])
+finally: A.set_tab_url = _st
+ok("a Content view of a file is left alone") if not moved and not g.locked else bad("moved/locked a file view: %r" % moved)
+fx = {"windows": [{"tabs": [{"index": 1, "entries": [{"url": CV, "children": [{"url": SUBM}]}]}]}]}
+ok("Firefox: the frame's current page (submitted) is read from the session store") if A.firefox_urls(fx) == [SUBM] else bad("firefox: %r" % A.firefox_urls(fx))
 """)
 
 print(""); print(f"RESULT: {passed} passed, {failed} failed"); sys.exit(0 if failed == 0 else 1)
