@@ -425,7 +425,7 @@ async function makeInvite(){ const d = await post("/invite",{email:$("iemail").v
 async function loadInvites(){ const d = await get("/invites"); const tb=document.querySelector("#invites tbody"); if(!tb) return; tb.innerHTML="";
   (d.invites||[]).forEach(i=>tb.insertAdjacentHTML("beforeend",`<tr style="${i.used_at?'color:#888':''}"><td>${esc(i.email||"(anyone with link)")}</td><td>${esc(i.active_until||"—")}</td><td>${when(i.created_at)}</td><td>${i.used_at?"joined":"pending"}</td><td>${i.used_at?"":`<button class="btn" style="min-height:32px;padding:4px 10px" onclick="cancelInvite('${esc(i.code)}')">Cancel</button>`}</td></tr>`));
   if(!(d.invites||[]).length) tb.innerHTML=`<tr><td colspan="5" class="muted">No invites yet.</td></tr>`; }
-async function cancelInvite(code){ if(confirm("Cancel this invite?")){ await post("/uninvite",{code}); loadInvites(); } }
+async function cancelInvite(code){ if(!confirm("Cancel this invite?")) return; const d=await post("/uninvite",{code}); if(d.error){ alert(d.error); return; } if((window._ilink||"").endsWith("="+code)){ $("newinvite").innerHTML=""; window._ilink=window._imail=null; } loadInvites(); }
 
 // An invite link (/?invite=CODE or /dashboard?invite=CODE) opens the sign-up form; without one, only Sign in shows.
 (async function initInvite(){

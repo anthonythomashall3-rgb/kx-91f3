@@ -657,8 +657,8 @@ export async function onRequest(context) {
     }
     if (p === "/uninvite" && request.method === "POST") {
       if (!me?.admin) return json({ error:"admin only" }, 401);
-      await db.prepare("DELETE FROM invites WHERE code=? AND used_at IS NULL").bind(String(body.code||"")).run();
-      return json({ ok:true });
+      const r = await db.prepare("DELETE FROM invites WHERE code=? AND used_at IS NULL").bind(String(body.code||"")).run();
+      return r.meta.changes ? json({ ok:true }) : json({ error:"invite not found or already used" }, 404);
     }
 
     // Admin: a professor's sections + mark sections paid / unpaid (after the Venmo payment arrives).
