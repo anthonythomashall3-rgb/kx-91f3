@@ -24,6 +24,11 @@ jobs:
         working-directory: app/cloudflare
         run: |
           [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::warning::missing CLOUDFLARE_API_TOKEN"; exit 0; }
+          # Daily only while instructors change (registration: Apr 1-May 15, Nov 1-Dec 15; first 3 weeks
+          # of a term: Jan 8-31, May 15-Jun 7, Aug 20-Sep 14); otherwise only on Mondays. Manual runs always.
+          md=$(TZ=America/Los_Angeles date +%m%d); dow=$(TZ=America/Los_Angeles date +%u)
+          busy=0; for r in 0401-0515 1101-1215 0108-0131 0515-0607 0820-0914; do [ "$md" -ge "${r%-*}" ] && [ "$md" -le "${r#*-}" ] && busy=1; done
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$busy" = 0 ] && [ "$dow" != 1 ]; then echo "quiet period, not Monday: skipped"; exit 0; fi
           npm ci --no-audit --no-fund
           # What D1 already holds (reads are cheap; writes are the free-plan limit).
           npx wrangler d1 execute lockqz --remote --json --command "SELECT term,section,course,title,first,last FROM usc_sections" > "$RUNNER_TEMP/current.json"
