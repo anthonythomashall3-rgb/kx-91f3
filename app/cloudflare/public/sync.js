@@ -211,7 +211,11 @@
       // submitted). Throttled to once per ~20s per quiz.
       if (!g.nextSub || Date.now() >= g.nextSub) {
         g.nextSub = Date.now() + 20000;
-        try { var subs = await submittedUserIds(ou, qi); if (subs.length) await lqpost("/submitted", { ou: ou, qi: qi, user_ids: subs }); } catch (e) {}
+        try {   // send only students not reported yet (each report is a database write)
+          g.subsSent = g.subsSent || {};
+          var subs = (await submittedUserIds(ou, qi)).filter(function (u) { return !g.subsSent[u]; });
+          if (subs.length) { await lqpost("/submitted", { ou: ou, qi: qi, user_ids: subs }); subs.forEach(function (u) { g.subsSent[u] = true; }); }
+        } catch (e) {}
       }
       var want = {}, revoke = {};
       live.rows.forEach(function (r) { if (!r.user_id) return; var u = String(r.user_id);

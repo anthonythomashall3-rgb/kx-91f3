@@ -20,7 +20,7 @@ NOPROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))   # never
 SYS_CONF = "/Library/Application Support/LOCKqz/config.json"
 USER_DIR = os.path.expanduser("~/Library/Application Support/LOCKqz")
 USER_CONF = os.path.join(USER_DIR, "student.json")
-POLL, POLL_LOCKED, GRACE, BEAT = 2, 1, 30, 120   # agent beat only proves the agent runs; 120s saves Cloudflare requests
+POLL, POLL_LOCKED, GRACE, BEAT = 2, 1, 30, 300   # agent beat only proves the agent runs; 300s keeps Cloudflare requests + writes inside the free plan
 DEV_KEY = os.path.join(USER_DIR, "developer.key")
 DEV_KEY_HASH = "4695a520432e105e967dd2703366c24c039fe0a850fe35db03b73b6b9506aecd"
 
@@ -320,7 +320,7 @@ class Agent:
             # Cloudflare blocks the default "Python-urllib" user agent (403) — send our own. Bypass any
             # system proxy, which could block or MITM the call.
             req = urllib.request.Request(self.api + path, data=json.dumps(body).encode(),
-                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/0.3.7 (macOS)"})
+                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/0.3.8 (macOS)"})
             return json.loads(NOPROXY.open(req, timeout=8).read())
         except Exception as e:
             log("api %s failed: %s" % (path, e)); return None

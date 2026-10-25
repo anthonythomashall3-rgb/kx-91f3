@@ -23,7 +23,7 @@ if ($Api -and -not $Api.EndsWith("/api")) { $Api += "/api" }   # accept a bare s
 $Device= if ($Conf.device_id) { $Conf.device_id } else { "unknown" }
 $UserDir = "$env:APPDATA\LOCKqz"; New-Item -ItemType Directory -Force -Path $UserDir | Out-Null
 $StudentFile = "$UserDir\student.json"
-$Poll = 2; $PollLocked = 1; $Grace = 30; $Beat = 120
+$Poll = 2; $PollLocked = 1; $Grace = 30; $Beat = 300
 $BrowserClasses = @("Chrome_WidgetWin_1","MozillaWindowClass")
 
 function Log($m) { Add-Content -Path "$UserDir\agent.log" -Value ("{0} {1}" -f (Get-Date -Format s), $m) }

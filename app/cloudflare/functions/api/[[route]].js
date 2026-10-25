@@ -460,7 +460,12 @@ export async function onRequest(context) {
         await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)")
           .bind(device_id||null, (student?String(student).slice(0,200):null), qidOk, evName, detailStr, now()).run();
       if (device_id) await db.prepare("INSERT OR IGNORE INTO devices (device_id,installed_at) VALUES (?,?)").bind(device_id, now()).run();
-      await db.prepare("UPDATE devices SET last_seen=?, student=CASE WHEN student_verified=1 THEN student ELSE COALESCE(?,student) END WHERE device_id=?").bind(now(), student||null, device_id||null).run();
+      // D1 free plan = 100k row writes/day: a heartbeat refreshes last_seen at most every 10 minutes
+      // (an UPDATE that matches no row writes nothing). Real events always update it.
+      if (ev === "heartbeat")
+        await db.prepare("UPDATE devices SET last_seen=? WHERE device_id=? AND (last_seen IS NULL OR last_seen < ?)").bind(now(), device_id||null, new Date(Date.now() - 600000).toISOString()).run();
+      else
+        await db.prepare("UPDATE devices SET last_seen=?, student=CASE WHEN student_verified=1 THEN student ELSE COALESCE(?,student) END WHERE device_id=?").bind(now(), student||null, device_id||null).run();
       const clientIp = request.headers.get("CF-Connecting-IP") || null;
       if (ev === "lock" && qidOk)
         await db.prepare("INSERT INTO locks (device_id,quiz_id,last_lock,helper_seen,signed,ip) VALUES (?,?,?,?,?,?) ON CONFLICT(device_id,quiz_id) DO UPDATE SET last_lock=excluded.last_lock,helper_seen=excluded.helper_seen,signed=excluded.signed,ip=excluded.ip").bind(device_id, qidOk, now(), now(), signed, clientIp).run();
@@ -1024,7 +1029,7 @@ export async function onRequest(context) {
       const _ou0 = String(quiz).split("-")[0];
       if (!me.admin && !(await inCourse(_ou0)) && !(await trustedInstructor(_ou0))) return json({ error: "not your course" }, 403);
       const s = scope("l.quiz_id"), s2 = scope("e.quiz_id");
-      const STALE = 90000, nowMs = Date.now(), age = t => t ? (nowMs - Date.parse(t)) : null;
+      const STALE = 420000, nowMs = Date.now(), age = t => t ? (nowMs - Date.parse(t)) : null;
       const locks = (await db.prepare(`SELECT l.device_id,l.quiz_id,l.last_lock,l.helper_seen,l.ext_seen,l.signed,l.ip,d.student,d.platform,d.student_verified FROM locks l LEFT JOIN devices d ON d.device_id=l.device_id WHERE (l.quiz_id=? OR l.quiz_id LIKE ?) AND ${s.sql}`).bind(quiz, like, ...s.args).all()).results;
       const tamp = new Set(((await db.prepare("SELECT DISTINCT device_id FROM events WHERE (quiz_id=? OR quiz_id LIKE ?) AND event='tamper'").bind(quiz, like).all()).results).map(t=>t.device_id));
       // Developer mode: only the admin's own Mac may hold a lock without blocking AI. A dev claim
@@ -1041,7 +1046,7 @@ export async function onRequest(context) {
         else if (a !== null && a > STALE) {
           // "helper_killed" needs PROOF: the agent kept reporting after the helper went silent. A wifi
           // drop silences both -> "dark" (never treated as cheating; access is kept).
-          const helperDown = h === null || h > STALE, extDown = e === null || e > 300000;   // agent beats every 120s
+          const helperDown = h === null || h > STALE, extDown = e === null || e > 720000;   // agent beats every 300s
           const agentAfterHelper = e !== null && (h === null || e < h - 30000);
           status = helperDown && agentAfterHelper ? "helper_killed" : (extDown && !helperDown ? "browser_closed" : "dark");
         }

@@ -30,8 +30,26 @@ jobs:
   test:
     name: All test suites (Linux)
     runs-on: ubuntu-latest
+    # Cheaper builds (25 Oct 2026): the macOS runner bills 10x and Windows 2x, so the Mac / Windows
+    # build jobs run ONLY when a push changes what goes into them. A site/API-only push = Linux only;
+    # the deploy then reuses the installers already live on lockqz.pages.dev.
+    outputs:
+      mac: ${{ steps.chg.outputs.mac }}
+      win: ${{ steps.chg.outputs.win }}
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: What changed (decides which platform builds run)
+        id: chg
+        env: { BEFORE: "${{ github.event.before }}" }
+        run: |
+          if [ "${{ github.event_name }}" != "push" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "mac=true" >> "$GITHUB_OUTPUT"; echo "win=true" >> "$GITHUB_OUTPUT"; echo "full build"; exit 0; fi
+          files=$(git diff --name-only "$BEFORE" "$GITHUB_SHA")
+          echo "$files"
+          common='^(app/release/|app/VERSION$|\.github/)'
+          echo "$files" | grep -qE "$common|^app/mac/|^app/tests/test_mac_" && echo "mac=true" >> "$GITHUB_OUTPUT" || echo "mac=false" >> "$GITHUB_OUTPUT"
+          echo "$files" | grep -qE "$common|^app/windows/|^app/tests/test_windows_" && echo "win=true" >> "$GITHUB_OUTPUT" || echo "win=false" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - name: Run every suite
@@ -40,6 +58,7 @@ jobs:
   mac:
     name: Build + install-test the Mac package
     needs: test
+    if: needs.test.outputs.mac == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,6 +73,7 @@ jobs:
   windows:
     name: Build + install-test the Windows installer
     needs: test
+    if: needs.test.outputs.win == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -104,6 +124,7 @@ jobs:
   windows-store:
     name: Build + install-test the Microsoft Store package (MSIX)
     needs: test
+    if: needs.test.outputs.win == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -127,9 +148,14 @@ jobs:
 
   deploy:
     name: Sign the release + deploy to Cloudflare
-    needs: [mac, windows]
+    needs: [test, mac, windows]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # Runs when tests passed and each platform build either passed or was skipped (nothing changed).
+    if: >-
+      always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      needs.test.result == 'success' &&
+      (needs.mac.result == 'success' || needs.mac.result == 'skipped') &&
+      (needs.windows.result == 'success' || needs.windows.result == 'skipped')
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -149,15 +175,25 @@ jobs:
           echo "ok=$ok" >> "$GITHUB_OUTPUT"
           [ "$ok" = true ] || echo "Deploy skipped: add the secrets above (see the header of this workflow), then re-run."
       - uses: actions/download-artifact@v4
-        if: steps.chk.outputs.ok == 'true'
+        if: steps.chk.outputs.ok == 'true' && needs.mac.result == 'success'
         with:
           name: lockqz-mac
           path: app/cloudflare/public/download
       - uses: actions/download-artifact@v4
-        if: steps.chk.outputs.ok == 'true'
+        if: steps.chk.outputs.ok == 'true' && needs.windows.result == 'success'
         with:
           name: lockqz-win
           path: app/cloudflare/public/download
+      - name: Reuse the live installers for any platform that was not rebuilt
+        if: steps.chk.outputs.ok == 'true'
+        run: |
+          set -e; d=app/cloudflare/public/download; mkdir -p "$d"
+          get(){ [ -s "$d/$1" ] && return 0
+                 curl -fsS -A "LOCKqz/ci" -o "$d/$1" "https://lockqz.pages.dev/download/$1"
+                 head -c 4 "$d/$1" | grep -q "$2" || { echo "::error::live $1 is not a real installer"; exit 1; }
+                 echo "reused live $1"; }
+          get lockqz-mac.pkg xar!
+          get lockqz-win.exe MZ
       - name: Build the signed update manifest + one-line installers
         if: steps.chk.outputs.ok == 'true'
         env:
