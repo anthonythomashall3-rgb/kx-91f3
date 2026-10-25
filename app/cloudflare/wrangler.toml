@@ -22,4 +22,4 @@ ZELLE_TO = "(858) 900-4347"
 VENMO_HANDLE = "LOCKqz"
 INVOICE_EMAIL = "athall@usc.edu"
 # Student fee ($5/semester): set a start date (YYYY-MM-DD) to turn it on. Empty = off.
-STUDENT_FEE_FROM = ""
+STUDENT_FEE_FROM = "2026-10-25"
