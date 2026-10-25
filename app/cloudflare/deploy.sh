@@ -31,7 +31,8 @@ except Exception: pass')
 echo "== new migrations only =="
 for m in migrate_*.sql; do
   if printf '%s\n' "$done_list" | grep -qx "$m"; then continue; fi
-  out=$(npx wrangler d1 execute "$DB" --remote --command "$(grep -v '^[[:space:]]*--' "$m")" 2>&1); rc=$?
+  # "|| rc=$?" keeps set -e from aborting on an already-applied migration ("duplicate column").
+  rc=0; out=$(npx wrangler d1 execute "$DB" --remote --command "$(grep -v '^[[:space:]]*--' "$m")" 2>&1) || rc=$?
   if [ $rc -eq 0 ] || printf '%s' "$out" | grep -qiE "duplicate column|already exists"; then
     q "INSERT OR IGNORE INTO _migrations (name, at) VALUES ('$m', datetime('now'))" >/dev/null
     [ $rc -eq 0 ] && echo "  applied $m" || echo "  $m was already in place"
