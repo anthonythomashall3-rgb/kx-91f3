@@ -30,6 +30,9 @@ PORT, ROOT, LOG = int(sys.argv[1]), sys.argv[2], sys.argv[3]
 class H(SimpleHTTPRequestHandler):
     def __init__(self, *a, **k): super().__init__(*a, directory=ROOT, **k)
     def log_message(self, *a): pass
+    def do_GET(self):
+        open(LOG, "a").write("GET " + self.path + "\n")
+        return super().do_GET()
     def do_POST(self):
         n = int(self.headers.get("Content-Length", 0) or 0); raw = self.rfile.read(n) if n else b"{}"
         open(LOG, "a").write(self.path + " " + raw.decode("utf-8", "ignore") + "\n")
@@ -95,6 +98,14 @@ grep -q "would restart" "$D/daemon.log" && ok "restart requested (dry-run)" || b
 grep -q '"event": "update"' "$TMP/posts.log" && ok "update reported to the server" || bad "update not reported"
 grep -q '"to": "9.9.9"' "$TMP/posts.log" && ok "report names the new version" || bad "report lacks new version"
 grep -q '"device_id": "utest-dev"' "$D/config.json" && [ -f "$D/device.key" ] && ok "config and device key untouched" || bad "identity files changed"
+[ -f "$D/.pending" ] && grep -q '^to=9.9.9$' "$D/.pending" && ok "rollback marker .pending written (to=9.9.9)" || bad "no .pending marker"
+cmp -s "$D/.prev/lockqzd.py" "$APP/mac/lockqzd.py" && grep -qx 'new-tool.sh' "$D/.prev/.added" && ok "replaced files kept in .prev, added names listed" || bad "no rollback kit in .prev"
+kill $DPID_ 2>/dev/null; wait $DPID_ 2>/dev/null
+echo "T1b the new helper proves it starts: its own /status answer clears .pending"
+start_daemon "$D" "$P"
+for i in $(seq 1 30); do [ -f "$D/.pending" ] || break; sleep 0.5; done
+[ ! -f "$D/.pending" ] && ok "healthy update confirmed (.pending removed)" || bad ".pending still there: $(tail -3 "$D/daemon.log")"
+grep -q "update confirmed: 9.9.9" "$D/daemon.log" && ok "confirmation logged" || bad "no confirmation line"
 kill $DPID_ 2>/dev/null
 
 echo "T2 a release signed with the WRONG key is ignored"
@@ -128,9 +139,10 @@ kill $DPID_ 2>/dev/null
 
 echo "T6 a quiz in progress defers the update; the student is never interrupted"
 publish 9.9.9 "$TMP/good.pem" ""
-D="$TMP/i6"; P=$(free_port); fresh_install "$D" "$P"; start_daemon "$D" "$P" "LOCKQZ_UPDATE_DELAY=3"
+D="$TMP/i6"; P=$(free_port); fresh_install "$D" "$P"; : > "$TMP/posts.log"; start_daemon "$D" "$P" "LOCKQZ_UPDATE_DELAY=3"
 curl -s -m 10 -X POST -H "X-LOCKqz-Token: $TOKEN" -H "Content-Type: application/json" -d '{"quiz_id":"1-2","student":"T"}' "http://127.0.0.1:$P/lock" >/dev/null
-wait_log "$D" "quiz in progress - deferred" && ok "update deferred during the quiz" || bad "not deferred: $(tail -3 "$D/daemon.log")"
+sleep 5
+! grep -q "GET /download/update" "$TMP/posts.log" && ok "nothing downloaded during the quiz (E12: checked before fetching)" || bad "update fetched during a quiz: $(grep GET "$TMP/posts.log" | head -3)"
 unchanged "$D" && ok "install untouched during the quiz" || bad "install CHANGED during a quiz"
 curl -s -m 10 -H "X-LOCKqz-Token: $TOKEN" "http://127.0.0.1:$P/status" | grep -q '"state": "locked"' && ok "still locked" || bad "lock lost"
 kill $DPID_ 2>/dev/null
@@ -154,7 +166,7 @@ kill $DPID_ 2>/dev/null
 echo "T8 the real release builder + the one-line installer's fetch path (signature + hashes)"
 rm -rf "$SITE/download"; mkdir -p "$SITE/download"
 MACSRC="$TMP/macsrc"; rm -rf "$MACSRC"; cp -R "$APP/mac" "$MACSRC"; cp "$TMP/good.pub" "$MACSRC/update.pub"
-python3 "$APP/release/make-manifest.py" --key "$TMP/good.pem" --pub "$TMP/good.pub" --out "$SITE/download" --mac "$MACSRC" --version 9.9.9 >/dev/null \
+python3 "$APP/release/make-manifest.py" --key "$TMP/good.pem" --pub "$TMP/good.pub" --out "$SITE/download" --mac "$MACSRC" --version 9.9.9 --live none >/dev/null \
   && ok "release built and self-verified" || bad "make-manifest failed"
 [ -s "$SITE/download/update.json" ] && [ -s "$SITE/download/update.sig" ] && [ -f "$SITE/download/mac/lockqzd.py" ] && [ -f "$SITE/download/windows/lockqzd.ps1" ] \
   && ok "manifest, signature, mac + windows files published" || bad "release files missing"
@@ -188,6 +200,56 @@ diff <(sed -n '/-----BEGIN PUBLIC KEY-----/,/-----END PUBLIC KEY-----/p' "$APP/m
 python3 - "$APP/windows/install.ps1" "$APP/windows/update.pub.xml" <<'PYX' && ok "install.ps1 embeds the same key as windows/update.pub.xml" || bad "install.ps1 key differs"
 import sys; s=open(sys.argv[1]).read(); k=open(sys.argv[2]).read().strip(); assert k in s
 PYX
+
+echo "T9 a signed release whose helper cannot start is rolled back after 3 starts and never retried"
+cp "$NEW/lockqzd.py" "$TMP/good-9.9.9.py"
+printf 'import does_not_exist_module\n' | cat - "$TMP/good-9.9.9.py" > "$NEW/lockqzd.py"
+publish 9.9.9 "$TMP/good.pem" ""
+D="$TMP/i9"; P=$(free_port); fresh_install "$D" "$P"; start_daemon "$D" "$P"
+wait_log "$D" "installed (3 files)" && ok "broken release installed (signature + hashes fine)" || bad "broken release not installed: $(tail -3 "$D/daemon.log")"
+kill $DPID_ 2>/dev/null; wait $DPID_ 2>/dev/null
+python3 "$D/lockqzd.py" >/dev/null 2>&1 && bad "(test setup) the broken helper starts" || ok "(the new helper really cannot start)"
+for i in 1 2 3; do LQ_MAX_STARTS=3 bash "$D/lockqz-boot.sh" --rollback-check; done
+grep -q does_not_exist_module "$D/lockqzd.py" && [ -f "$D/.pending" ] && ok "3 failed starts: still the new code, still pending" || bad "rolled back too early"
+LQ_MAX_STARTS=3 bash "$D/lockqz-boot.sh" --rollback-check
+cmp -s "$D/lockqzd.py" "$APP/mac/lockqzd.py" && ok "4th start: previous lockqzd.py restored" || bad "lockqzd.py not restored"
+[ ! -f "$D/new-tool.sh" ] && ok "file the update added is removed" || bad "added file left behind"
+[ "$(cat "$D/.bad_version" 2>/dev/null)" = "9.9.9" ] && [ ! -e "$D/.pending" ] && [ ! -e "$D/.prev" ] && ok "9.9.9 marked bad; marker and kit cleaned" || bad "rollback state wrong"
+grep -q '"device_id": "utest-dev"' "$D/config.json" && [ -f "$D/device.key" ] && ok "config and device key untouched by the rollback" || bad "identity changed by rollback"
+: > "$TMP/posts.log"; start_daemon "$D" "$P"; sleep 4
+cmp -s "$D/lockqzd.py" "$APP/mac/lockqzd.py" && ! grep -q "installed (" "$D/daemon.log" && ok "the bad 9.9.9 is never installed again" || bad "bad release re-installed"
+kill $DPID_ 2>/dev/null; wait $DPID_ 2>/dev/null
+sed 's/^VERSION = ".*"/VERSION = "9.9.10"/' "$APP/mac/lockqzd.py" > "$NEW/lockqzd.py"
+publish 9.9.10 "$TMP/good.pem" ""
+start_daemon "$D" "$P"
+wait_log "$D" "installed (3 files)" && grep -q '^VERSION = "9.9.10"' "$D/lockqzd.py" && ok "the next (fixed) release 9.9.10 installs normally" || bad "fixed release not installed: $(tail -3 "$D/daemon.log")"
+kill $DPID_ 2>/dev/null
+cp "$TMP/good-9.9.9.py" "$NEW/lockqzd.py"
+
+echo "T10 release builder refuses a bad release candidate (E2 check, E10)"
+OUT="$TMP/rc"; mm(){ python3 "$APP/release/make-manifest.py" --key "$TMP/good.pem" --pub "$TMP/good.pub" --out "$OUT" --mac "$MACSRC" "$@" >"$TMP/mm.log" 2>&1; }
+mm --version 9.9.9 --live none && ok "clean candidate builds" || bad "clean candidate refused: $(cat "$TMP/mm.log")"
+cp "$OUT/update.json" "$TMP/live.json"
+mm --version 9.9.9 --live "$TMP/live.json" && ok "same version, same files: rebuild allowed" || bad "identical rebuild refused: $(cat "$TMP/mm.log")"
+printf '# x\n' >> "$MACSRC/lockqz-agent.py"
+mm --version 9.9.9 --live "$TMP/live.json" && bad "changed file with the same version accepted" || { grep -q "mac/lockqz-agent.py" "$TMP/mm.log" && ok "changed file with unchanged version refused (names the file)" || bad "refused for another reason: $(cat "$TMP/mm.log")"; }
+mm --version 9.9.10 --live "$TMP/live.json" && ok "... and accepted once the version goes up" || bad "bumped version refused: $(cat "$TMP/mm.log")"
+mm --version 9.9.8 --live "$TMP/live.json" && bad "older version than live accepted" || ok "older version than the live one refused"
+cp "$MACSRC/lockqz-agent.py" "$TMP/agent.bak"
+printf 'def f(x):\n    match x:\n        case 1: return 1\n' >> "$MACSRC/lockqz-agent.py"
+mm --version 9.9.10 --live none && bad "python 3.10 match statement accepted" || ok "python 3.10+ syntax refused (Apple python is 3.9)"
+cp "$TMP/agent.bak" "$MACSRC/lockqz-agent.py"
+printf 'def g(x: int | None): pass\n' >> "$MACSRC/lockqz-agent.py"
+mm --version 9.9.10 --live none && bad "X | Y annotation accepted" || ok "'int | None' annotation refused"
+cp "$TMP/agent.bak" "$MACSRC/lockqz-agent.py"
+WINSRC="$TMP/winsrc"; rm -rf "$WINSRC"; cp -R "$APP/windows" "$WINSRC"
+printf '# caf\xc3\xa9\n' >> "$WINSRC/lockqz-agent.ps1"
+mm --version 9.9.10 --live none --windows "$WINSRC" && bad "non-ASCII .ps1 accepted" || ok "non-ASCII .ps1 refused (PowerShell 5.1)"
+if command -v pwsh >/dev/null 2>&1; then
+  cp "$APP/windows/lockqz-agent.ps1" "$WINSRC/lockqz-agent.ps1"; printf 'function broken {\n' >> "$WINSRC/lockqz-agent.ps1"
+  mm --version 9.9.10 --live none --windows "$WINSRC" && bad "unparsable .ps1 accepted" || ok "unparsable .ps1 refused"
+fi
+[ ! -f "$OUT/mac/new-tool.sh" ] || true
 
 echo ""
 echo "update: $pass passed, $fail failed"

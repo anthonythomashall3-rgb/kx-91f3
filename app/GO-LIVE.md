@@ -21,7 +21,9 @@ reach a live pilot needs YOUR accounts/hardware — it isn't code. Do these in o
 - Added an end-to-end test that runs the real daemon against a mock backend over HTTP and
   proves lock / helper-heartbeat / unlock actually report (suite 9).
 - Built the actual installable artifacts (no account needed): cloudflare/public/download/
-  lockqz-mac-unsigned.pkg (works today via right-click→Open; sign later to drop the warning)
+  lockqz-mac-unsigned.pkg (unsigned: on current macOS, right-click→Open no longer works - the student must
+  open it, then System Settings > Privacy & Security > Open Anyway; the one-line install.sh avoids this;
+  sign + notarize to drop the warning)
   and lockqz-extension.zip (the exact Chrome Web Store upload / sideload package).
 - Browser block now covers the FULL 96-domain list (was 27): the extension blocks all AI
   in-browser even if the helper is killed. bing.com / huggingface.co correctly NOT over-blocked.

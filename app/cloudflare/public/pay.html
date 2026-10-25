@@ -35,7 +35,9 @@
     <a class="btn prime" id="venmo" href="#" target="_blank" rel="noopener" hidden>Venmo</a>
     <div class="box" id="zelle" hidden><span class="muted" id="zamt">Zelle</span><b id="zto"></b></div>
     <p class="memo">Memo: <b id="code"></b></p>
+    <p class="muted" id="got" hidden></p>
     <p class="muted" id="wait">Waiting for payment…</p>
+    <button class="btn" id="again" type="button" style="background:#fff;border:1px solid #ccc">Check again</button>
   </section>
 
   <p class="ok" id="done" hidden>Paid ✓</p>
@@ -43,26 +45,45 @@
   <p class="muted" id="err" hidden></p>
 </main>
 <script>
-const API = "/api", $ = id => document.getElementById(id);
-let timer = null;
+const API = /\.pages\.dev$/.test(location.hostname) ? "https://lockqz.pages.dev/api" : "/api", $ = id => document.getElementById(id);
+const money = n => "$" + Number(n).toLocaleString("en-US");
+// Polling: 10 s, slowing to 60 s; stops after 15 min or while the tab is hidden ("Check again" restarts it).
+let poll = null, polls = 0, since = 0, who = null;
+function stopPoll(){ clearTimeout(poll); poll = null; }
+function schedule(){ stopPoll();
+  if (document.visibilityState === "hidden") return;
+  if (Date.now() - since > 15 * 60000) { $("wait").textContent = "Paid already? Check again."; return; }
+  poll = setTimeout(check, Math.min(60000, 10000 * Math.pow(1.5, polls++))); }
+function startPoll(){ polls = 0; since = Date.now(); $("wait").textContent = "Waiting for payment…"; schedule(); }
+function showGot(got, due){ got = Number(got) || 0; $("got").hidden = !(got > 0); if (got > 0) $("got").textContent = "Received " + money(got) + " of " + money(due); }
+async function check(){
+  if (!who) return;
+  try { const s = await (await fetch(API + "/pay/status?email=" + encodeURIComponent(who.email) + "&code=" + encodeURIComponent(who.code || ""))).json();
+    if (s.paid) return paid();
+    showGot(s.received, s.amount ?? who.amount);
+  } catch {}
+  schedule();
+}
 async function start(email){
   $("err").hidden = true;
   let d; try { d = await (await fetch(API + "/pay/start", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ email }) })).json(); } catch { d = { error:"No connection. Try again." }; }
   if (d.error) { $("err").textContent = d.error; $("err").hidden = false; return; }
   history.replaceState(null, "", "?email=" + encodeURIComponent(email));
-  if (!d.required) { clearInterval(timer); $("f").hidden = true; $("pay").hidden = true; $("free").hidden = false; return; }   // fee not on yet
-  const amt = "$" + Number(d.amount).toLocaleString("en-US");
+  if (!d.required) { stopPoll(); $("f").hidden = true; $("pay").hidden = true; $("free").hidden = false; return; }   // fee not on yet
+  const amt = money(d.amount);
   $("amt").textContent = amt; $("price").hidden = false;
   if (d.paid) return paid();
+  who = { email, code: d.code, amount: d.amount };
   $("code").textContent = d.code;
+  showGot(d.received, d.amount);
   if (d.venmo) { $("venmo").href = `https://venmo.com/?txn=pay&recipients=${encodeURIComponent(d.venmo)}&amount=${encodeURIComponent(d.amount)}&note=${encodeURIComponent(d.code)}`; $("venmo").textContent = `Venmo ${amt} to @${d.venmo}`; $("venmo").hidden = false; }
   if (d.zelle) { $("zamt").textContent = "Zelle " + amt; $("zto").textContent = d.zelle; $("zelle").hidden = false; }
   $("f").hidden = true; $("pay").hidden = false;
-  clearInterval(timer); timer = setInterval(async () => {
-    try { const s = await (await fetch(API + "/pay/status?email=" + encodeURIComponent(email))).json(); if (s.paid) paid(); } catch {}
-  }, 10000);
+  startPoll();
 }
-function paid(){ clearInterval(timer); $("f").hidden = true; $("pay").hidden = true; $("done").hidden = false; }
+function paid(){ stopPoll(); who = null; $("f").hidden = true; $("pay").hidden = true; $("done").hidden = false; }
+$("again").addEventListener("click", () => { since = Date.now(); polls = 0; stopPoll(); check(); });
+document.addEventListener("visibilitychange", () => { if (!who) return; if (document.visibilityState === "hidden") stopPoll(); else { since = Date.now(); polls = 0; stopPoll(); check(); } });
 $("f").addEventListener("submit", e => { e.preventDefault(); start($("em").value.trim().toLowerCase()); });
 const q = new URLSearchParams(location.search).get("email");
 if (q) { $("em").value = q; start(q.trim().toLowerCase()); }

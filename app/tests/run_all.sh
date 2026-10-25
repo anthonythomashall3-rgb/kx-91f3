@@ -31,6 +31,9 @@ run "Per-section billing (\$1,000 per USC section, Venmo code)" node --no-warnin
 run "Student fee + automatic Venmo/Zelle matching" node --no-warnings test_pay.mjs
 run "Gmail payment script parser (forged alerts refused)" node test_pay_script.mjs
 run "API audit regressions (query/row budgets, auth, identity)" node --no-warnings test_api_audit.mjs
+run "Round-2 API regressions (verify, FERPA, capacity, submissions, payments, deploy contracts)" node --no-warnings test_round2_api.mjs
+run "Round-2 front-end regressions (Sync gate safety, saved settings, polling)" node --no-warnings test_round2_frontend.mjs
+run "Deploy secrets check (Production + Preview, both projects)" bash test_deploy_secrets.sh
 run "Front-end audit regressions (dashboard + Sync panel)" node --no-warnings test_frontend_fixes.mjs
 if command -v pwsh >/dev/null 2>&1; then
   run "Windows agent/engine logic (titles, unlock retry, policy restore)" pwsh -NoProfile -File test_windows_logic.ps1

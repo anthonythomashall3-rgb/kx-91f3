@@ -64,12 +64,22 @@ class H(BaseHTTPRequestHandler):
             if b.get("event") == "lock" or (b.get("event") == "heartbeat" and b.get("source") == "helper"):
                 LOCKS[(dev, b.get("quiz_id"))] = now()
             if b.get("event") == "unlock": LOCKS.pop((dev, b.get("quiz_id")), None)
+            if b.get("event") in ("heartbeat", "lock"):
+                try: why = open(LOG + ".unlock").read().strip()   # C9: the test says "this student submitted"
+                except Exception: why = ""
+                if why: return self.reply(200, {"ok": True, "unlock": True, "reason": why})
             return self.reply(200, {"ok": True})
         if path.endswith("/password"):
-            u = b.get("url", ""); qi = re.search(r"qi=(\d+)", u); ou = re.search(r"ou=(\d+)", u)
+            u = b.get("url", ""); qi = re.search(r"[?&]qi=(\d+)", u); ou = re.search(r"[?&]ou=(\d+)", u)
             lid = "%s-%s" % (ou.group(1) if ou else "x", qi.group(1) if qi else "x")
+            iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(t))
+            if qi and qi.group(1) == "44444": return self.reply(403, {"reason": "other_school"})
             t = LOCKS.get((dev, lid))
-            if t and now() - t < 60: return self.reply(200, {"password": "LQ-TESTPASS", "lockId": lid})
+            if t and now() - t < 60:
+                if qi and qi.group(1) == "33333": return self.reply(403, {"reason": "not started", "start": iso(now() + 600)})
+                LOCKS[(dev, lid)] = now()   # C1: a signed /password refreshes the lock row itself
+                end = iso(now() - 7200) if qi and qi.group(1) == "22222" else iso(now() + 3600)
+                return self.reply(200, {"password": "LQ-TESTPASS", "lockId": lid, "end": end})
             return self.reply(403, {"password": None, "reason": "not locked"})
         if path.endswith("/verify"):
             if b.get("op") == "code":
@@ -78,7 +88,7 @@ class H(BaseHTTPRequestHandler):
         return self.reply(200, {"ok": True})
     def do_GET(self):
         if self.path.split("?")[0].endswith("/blocklist"):   # a SHORT server list + one new AI
-            short = ["chatgpt.com", "claude.ai", "gemini.google.com"] + ["ai%d.example" % i for i in range(20)] + ["new-ai.example"]
+            short = ["chatgpt.com", "claude.ai", "gemini.google.com"] + ["ai%d.example" % i for i in range(20)] + ["new-ai.example", "new-ai.example/chat"]
             return self.reply(200, {"domains": short})
         self.send_response(404); self.end_headers()
 HTTPServer(("127.0.0.1", PORT), H).serve_forever()
@@ -176,7 +186,8 @@ c=$(hcode /password "{\"url\":\"$QURL\"}")
 
 echo "T6 a blocklist refresh can only ADD domains (a short server list never shrinks the Mac's list)"
 orig=$(grep -cvE '^\s*(#|$)' "$APP/mac/blocklist.txt"); now=$(grep -cvE '^\s*(#|$)' "$TMP/a/blocklist.txt")
-[ "$now" -eq $((orig + 21)) ] && ok "list grew $orig -> $now (20 test domains + new-ai.example), nothing removed" || bad "list went $orig -> $now"
+[ "$now" -eq $((orig + 22)) ] && ok "list grew $orig -> $now (20 test domains + new-ai.example + its /chat path), nothing removed" || bad "list went $orig -> $now"
+grep -qx 'new-ai.example/chat' "$TMP/a/blocklist.txt" && ok "server path entry kept (the browser policy enforces paths)" || bad "server path entry dropped"
 grep -qx 'new-ai.example' "$TMP/a/blocklist.txt" && ok "new AI from the server added" || bad "server addition missing"
 grep -qx 'chat.deepseek.com' "$TMP/a/blocklist.txt" && ok "shipped domains kept (chat.deepseek.com)" || bad "shipped domain dropped"
 [ "$(cksum < "$APP/mac/blocklist.txt")" = "$BL_SUM" ] && ok "repo blocklist untouched by the test" || bad "test modified app/mac/blocklist.txt"
@@ -248,6 +259,127 @@ st=$(curl -s -H "X-LOCKqz-Token: $TOKEN" "http://127.0.0.1:$CTRL_PORT/status")
 echo "$st" | grep -q '"state": "unlocked"' && echo "$st" | grep -q '"capped_quiz": "98765-12345"' && ok "status tells the agent which quiz the cap released" || bad "status after cap: $st"
 [ ! -f "$TMP/d/active_lock.json" ] && ok "cap clears the lock record" || bad "lock record left after cap"
 kill $DPID4 $MPID4 2>/dev/null
+CTRL_PORT=$CTRL1
+
+# ---------------- round 2 (0.4.1): contracts C1 C2 C6 C9 C10, config moves, log rotation ----------------
+# run_d <dir> <ctrl port> [env...]: the real daemon on the config already in <dir>
+run_d(){ local d="$1" p="$2"; shift 2
+  env "$@" LOCKQZ_TOKEN_FILE="$d/helper.token" LOCKQZ_TOKEN_DIR="$d/tokens" LOCKQZ_LOCKFILE="$d/active_lock.json" LOCKQZ_NO_DEVMODE=1 LOCKQZ_DRYRUN=1 \
+    LOCKQZ_CONFIG="$d/config.json" LOCKQZ_KEY_PATH="$d/device.key" LOCKQZ_BLOCKLIST="$d/blocklist.txt" LOCKQZ_UPDATE_DELAY=99999 \
+    python3 "$APP/mac/lockqzd.py" >>"$d/daemon.log" 2>&1 & DPID_=$!
+  for i in $(seq 1 20); do curl -s -m 2 -H "X-LOCKqz-Token: $TOKEN" "http://127.0.0.1:$p/status" >/dev/null 2>&1 && break; sleep 0.5; done; }
+mk_d(){ mkdir -p "$1"; cp "$APP/mac/blocklist.txt" "$1/blocklist.txt"; printf %s "$TOKEN" > "$1/helper.token"
+  printf '{ "port": %s, "api_base": "http://127.0.0.1:%s", "device_id": "%s", "student": "T", "beat_cycles": %s }\n' "$2" "$3" "$4" "$5" > "$1/config.json"; }
+stj(){ curl -s -H "X-LOCKqz-Token: $TOKEN" "http://127.0.0.1:$CTRL_PORT/status" | python3 -c "import sys,json,time;s=json.load(sys.stdin);print($1)" 2>/dev/null; }
+CTRL1=$CTRL_PORT; CTRL_PORT=$(free_port); M5=$(free_port); LOG5="$TMP/reports5.log"
+python3 "$TMP/mock.py" "$M5" "$LOG5" 0 & MPID5=$!
+for i in $(seq 1 20); do curl -s -o /dev/null -m 1 "http://127.0.0.1:$M5/" && break; sleep 0.25; done
+mk_d "$TMP/e" "$CTRL_PORT" "$M5" itest-r2 60; run_d "$TMP/e" "$CTRL_PORT"; DPID5=$DPID_
+sleep 2
+
+echo "T10 C1: no separate heartbeat right before /password (the signed /password refreshes the lock)"
+hpost /lock '{"quiz_id":"98765-12345","student":"T"}' >/dev/null
+r=$(hpost /password "{\"url\":\"$QURL\"}")
+echo "$r" | grep -q 'LQ-TESTPASS' && ok "password released right after the lock (lock report awaited, no race)" || bad "no password: $r"
+prev=$(grep -B1 -m1 '^/api/password' "$LOG5" | head -1)
+echo "$prev" | grep -q '"event": "heartbeat"' && bad "a heartbeat was sent right before /password: $prev" || ok "the line before /password is not a heartbeat"
+n_hb=$(grep -c '"event": "heartbeat"' "$LOG5"); [ "$n_hb" -eq 0 ] && ok "no heartbeat at all for a lock + password (budget)" || bad "$n_hb heartbeat(s) sent"
+
+echo "T11 C2: the server's quiz end sets the safety cap to end + 15 min (no fixed 3 hours)"
+v=$(stj 's["end_known"] and abs(s["cap_at"]-(time.time()+3600+900))<90')
+[ "$v" = "True" ] && ok "cap = quiz end + 15 min" || bad "cap not from the end: $(stj 's.get("cap_at"),s.get("end_known")')"
+v=$(python3 -c "import json,time;r=json.load(open('$TMP/e/active_lock.json'));print(r['end_known'] and abs(r['cap_at']-(time.time()+4500))<90)")
+[ "$v" = "True" ] && ok "lock record carries the new cap (survives a restart)" || bad "lock record cap: $(cat "$TMP/e/active_lock.json")"
+hpost /unlock '{"quiz_id":"98765-12345","reason":"quiz_submitted"}' >/dev/null
+Q2='https://usc.brightspace.com/d2l/lms/quizzing/user/quiz_summary.d2l?ou=98765&qi=22222'
+hpost /lock '{"quiz_id":"98765-22222","student":"T"}' >/dev/null; hpost /password "{\"url\":\"$Q2\"}" >/dev/null
+v=$(stj '(not s["end_known"]) and abs(s["cap_at"]-(s["locked_since"]+6*3600))<5')
+[ "$v" = "True" ] && ok "an end already over is ignored: unknown-end cap 6 h stays" || bad "past end changed the cap: $(stj 's.get("cap_at"),s.get("locked_since")')"
+hpost /unlock '{"quiz_id":"98765-22222","reason":"quiz_submitted"}' >/dev/null
+
+echo "T12 C2: 'not started' is passed to the agent with the seconds until the quiz opens"
+Q3='https://usc.brightspace.com/d2l/lms/quizzing/user/quiz_summary.d2l?ou=98765&qi=33333'
+hpost /lock '{"quiz_id":"98765-33333","student":"T"}' >/dev/null
+c=$(hcode /password "{\"url\":\"$Q3\"}"); r=$(hpost /password "{\"url\":\"$Q3\"}")
+[ "$c" = "200" ] && echo "$r" | grep -q '"reason": "not started"' && ok "not started -> 200 with reason (not a 502 failure)" || bad "not started answer: $c $r"
+si=$(echo "$r" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("start_in"))')
+[ "${si:-0}" -ge 540 ] 2>/dev/null && [ "$si" -le 610 ] && ok "start_in ~600 s ($si)" || bad "start_in $si"
+hpost /unlock '{"quiz_id":"98765-33333","reason":"quiz_left"}' >/dev/null
+
+echo "T13 C10: another school's Brightspace -> AI back at once, quiz not re-locked"
+Q4='https://other.brightspace.com/d2l/lms/quizzing/user/quiz_summary.d2l?ou=98765&qi=44444'
+hpost /lock '{"quiz_id":"98765-44444","student":"T"}' >/dev/null
+r=$(hpost /password "{\"url\":\"$Q4\"}")
+echo "$r" | grep -q '"reason": "other_school"' && ok "agent told other_school" || bad "other school: $r"
+[ "$(stj 's["state"],s["capped_quiz"],s["capped_reason"]')" = "unlocked 98765-44444 other_school" ] && ok "helper unlocked and marks the quiz released" || bad "status: $(stj 's')"
+sleep 1; grep '"event": "unlock"' "$LOG5" | grep -q '"reason": "other_school"' && ok "unlock reported, reason other_school" || bad "no other_school unlock report"
+
+echo "T14 C6: the install report is sent only when the version/student changed or after 24 h"
+n1=$(grep -c '"event": "install"' "$LOG5")
+[ "$n1" -eq 1 ] && ok "first start: one install report" || bad "install reports at first start: $n1"
+kill $DPID5; wait $DPID5 2>/dev/null; run_d "$TMP/e" "$CTRL_PORT"; DPID5=$DPID_; sleep 2
+hpost /student '{"student":"T"}' >/dev/null; sleep 1
+n2=$(grep -c '"event": "install"' "$LOG5")
+[ "$n2" -eq 1 ] && ok "restart + same student: no new install report" || bad "install reports now $n2"
+hpost /student '{"student":"new@usc.edu"}' >/dev/null; sleep 1
+n3=$(grep -c '"event": "install"' "$LOG5")
+[ "$n3" -eq 2 ] && ok "student changed: reported once" || bad "install reports after student change: $n3"
+python3 -c "import json;r=json.load(open('$TMP/e/install_report.json'));r['at']-=90000;json.dump(r,open('$TMP/e/install_report.json','w'))"
+hpost /student '{"student":"new@usc.edu"}' >/dev/null; sleep 1
+[ "$(grep -c '"event": "install"' "$LOG5")" -eq 3 ] && ok "24 h later: reported again" || bad "no daily install report"
+kill $DPID5 $MPID5 2>/dev/null
+
+echo "T15 C9: the server says the student submitted -> the helper unlocks at once and never re-locks it"
+M6=$(free_port); LOG6="$TMP/reports6.log"; CTRL_PORT=$(free_port)
+python3 "$TMP/mock.py" "$M6" "$LOG6" 0 & MPID6=$!
+for i in $(seq 1 20); do curl -s -o /dev/null -m 1 "http://127.0.0.1:$M6/" && break; sleep 0.25; done
+mk_d "$TMP/f" "$CTRL_PORT" "$M6" itest-c9 1; run_d "$TMP/f" "$CTRL_PORT"; DPID6=$DPID_
+hpost /lock '{"quiz_id":"98765-12345","student":"T"}' >/dev/null; sleep 1
+[ "$(stj 's["state"]')" = "locked" ] && ok "locked" || bad "not locked"
+echo quiz_submitted > "$LOG6.unlock"
+for i in $(seq 1 30); do [ "$(stj 's["state"]')" = "unlocked" ] && break; sleep 0.5; done
+[ "$(stj 's["state"],s["capped_quiz"],s["capped_reason"]')" = "unlocked 98765-12345 quiz_submitted" ] && ok "heartbeat reply unlock:true -> unlocked, quiz marked released" || bad "status: $(stj 's')"
+[ ! -f "$TMP/f/active_lock.json" ] && ok "lock record cleared" || bad "lock record left"
+grep '"event": "unlock"' "$LOG6" | grep -q '"reason": "quiz_submitted"' && ok "unlock reported with the server's reason" || bad "no quiz_submitted unlock report"
+hpost /lock '{"quiz_id":"98765-12345","student":"T"}' >/dev/null
+for i in $(seq 1 20); do [ "$(stj 's["state"]')" = "unlocked" ] && break; sleep 0.5; done
+[ "$(stj 's["state"]')" = "unlocked" ] && ok "a lock for an already-submitted quiz is released from the lock report's answer" || bad "re-locked a submitted quiz"
+echo maybe > "$LOG6.unlock"; rm -f "$LOG6.unlock"
+echo "T15b round-2 #4: the agent's /uncap (page closed / new attempt) makes the released quiz lockable again"
+[ "$(stj 's["capped_quiz"]')" = "98765-12345" ] && ok "precondition: quiz marked released" || bad "not marked: $(stj 's')"
+hpost /uncap '{"quiz_id":"98765-12345"}' >/dev/null
+[ "$(stj 's["capped_quiz"]')" = "None" ] && [ ! -f "$TMP/f/capped.json" ] && ok "/uncap: helper forgets the release (status + capped.json)" || bad "still released: $(stj 's') $(ls $TMP/f)"
+hpost /lock '{"quiz_id":"98765-12345","student":"T"}' >/dev/null; sleep 1
+[ "$(stj 's["state"]')" = "locked" ] && ok "... and a new attempt locks" || bad "new attempt not locked"
+hpost /unlock '{"quiz_id":"98765-12345","reason":"quiz_submitted"}' >/dev/null
+kill $DPID6 2>/dev/null; sleep 0.5
+python3 -c "import json,time;json.dump({'quiz_id':'98765-12345','at':time.time()-120,'reason':'cap'},open('$TMP/f/capped.json','w'))"
+run_d "$TMP/f" "$CTRL_PORT" LOCKQZ_CAP_FORGET=60; DPID6=$DPID_
+[ "$(stj 's["capped_quiz"]')" = "None" ] && ok "a release older than the forget window (30 min; 60 s here) is not reported (was 24 h)" || bad "old release still reported: $(stj 's')"
+kill $DPID6 2>/dev/null; sleep 0.5
+python3 -c "import json,time;json.dump({'quiz_id':'98765-12345','at':time.time()-10,'reason':'cap'},open('$TMP/f/capped.json','w'))"
+run_d "$TMP/f" "$CTRL_PORT" LOCKQZ_CAP_FORGET=60; DPID6=$DPID_
+[ "$(stj 's["capped_quiz"]')" = "98765-12345" ] && ok "a fresh release survives a helper restart" || bad "fresh release lost: $(stj 's')"
+kill $DPID6 $MPID6 2>/dev/null
+
+echo "T16 E1/E6: an old lockdownqz api_base and a placeholder device id are fixed once; nothing else changes"
+CTRL_PORT=$(free_port); mkdir -p "$TMP/g"; cp "$APP/mac/blocklist.txt" "$TMP/g/"; printf %s "$TOKEN" > "$TMP/g/helper.token"
+printf '{ "port": %s, "api_base": "http://lockdownqz.pages.dev.invalid/api", "device_id": "set-at-install", "student": "S", "keep": "me" }\n' "$CTRL_PORT" > "$TMP/g/config.json"
+run_d "$TMP/g" "$CTRL_PORT"; DPID7=$DPID_
+v=$(python3 -c "import json,re;c=json.load(open('$TMP/g/config.json'));print(c['api_base']=='http://lockqz.pages.dev.invalid/api' and bool(re.fullmatch(r'mac-[0-9a-f-]{36}',c['device_id'])) and c['keep']=='me' and c['student']=='S' and c['port']==$CTRL_PORT)")
+[ "$v" = "True" ] && ok "api_base -> lockqz.pages.dev, device id -> mac-<uuid>, other keys kept" || bad "config: $(cat "$TMP/g/config.json")"
+d1=$(python3 -c "import json;print(json.load(open('$TMP/g/config.json'))['device_id'])")
+kill $DPID7; wait $DPID7 2>/dev/null; run_d "$TMP/g" "$CTRL_PORT"; DPID7=$DPID_
+[ "$(python3 -c "import json;print(json.load(open('$TMP/g/config.json'))['device_id'])")" = "$d1" ] && ok "the new device id is kept on the next start" || bad "device id changed again"
+kill $DPID7 2>/dev/null
+
+echo "T17 the helper log is rotated at its size limit (never fills the disk)"
+CTRL_PORT=$(free_port); mkdir -p "$TMP/h"; cp "$APP/mac/blocklist.txt" "$TMP/h/"; printf %s "$TOKEN" > "$TMP/h/helper.token"
+printf '{ "port": %s, "api_base": "", "device_id": "itest-log" }\n' "$CTRL_PORT" > "$TMP/h/config.json"
+head -c 5000 /dev/zero | tr '\0' 'x' > "$TMP/h/daemon.log"
+run_d "$TMP/h" "$CTRL_PORT" LOCKQZ_LOG="$TMP/h/daemon.log" LOCKQZ_LOG_MAX=2000; DPID8=$DPID_; sleep 1
+[ -f "$TMP/h/daemon.log.1" ] && [ "$(wc -c < "$TMP/h/daemon.log")" -lt 2000 ] && grep -q "log rotated" "$TMP/h/daemon.log" && ok "old log moved to .1, new lines go to a fresh file" || bad "not rotated: $(ls -la "$TMP/h")"
+kill $DPID8 2>/dev/null
 CTRL_PORT=$CTRL1
 echo ""
 echo "RESULT: $pass passed, $fail failed"

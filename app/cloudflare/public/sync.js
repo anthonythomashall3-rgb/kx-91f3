@@ -3,13 +3,18 @@
    1. reads every course where they are an instructor / TA: class list + quizzes
    2. saves them to LOCKqz
    3. writes each protected quiz's LOCKqz password into Brightspace (and removes released ones)
-   4. shows a panel to choose which quizzes LOCKqz protects */
+   4. shows a panel to choose which quizzes LOCKqz protects
+   Brightspace API shapes used here (docs.valence.desire2learn.com): ObjectListPage {Objects, Next}
+   (basic/apicall.html), PagedResultSet {Items, PagingInfo} (myenrollments, res/enroll.html),
+   QuizAttemptData.Completed = UTCDateTime|null, SpecialAccessData {StartDate, EndDate, DueDate,
+   SubmissionTimeLimit, AttemptsAllowed} (res/quiz.html). XSRF: D2L's own frau-xsrf-token reads
+   localStorage "XSRF.Token", else GET /d2l/lp/auth/xsrf-tokens -> {referrerToken}. */
 (async function () {
   var open = document.getElementById("lqz-sync");
   if (open) { open.style.display = ""; return; }      // already running here: show it again (never a 2nd copy)
   var SRC = (document.currentScript && document.currentScript.src) || "";
   var KEY = SRC ? new URL(SRC).searchParams.get("k") : "";
-  var API = SRC ? new URL(SRC).origin + "/api" : "";
+  var API = SRC ? (/\.pages\.dev$/.test(new URL(SRC).hostname) ? "https://lockqz.pages.dev/api" : new URL(SRC).origin + "/api") : "";   // one API (main site secrets)
   var DASH = SRC ? new URL(SRC).origin + "/dashboard" : "";
 
   var box = document.createElement("div");
@@ -20,8 +25,9 @@
     'LOCKqz Sync<span id="lqz-x" style="cursor:pointer;padding:0 4px">&#10005;</span></div><div id="lqz-b" style="padding:12px 14px">Starting...</div>';
   document.body.appendChild(box);
   var B = box.querySelector("#lqz-b");
-  var GATES = {};   // qi -> { ou, timer, tick, busy, keep:{uid:true}, end, note }
-  var GPW = {};     // qi -> last code written to Brightspace
+  var GATES = {};   // qi -> { ou, timer, tick, busy, keep:{uid:true}, qs:[every quiz-date version seen], endMs, note, written }
+  var GPW = {};     // qi -> last gate code Brightspace holds AND LOCKqz confirmed
+  var ORIG = {};    // qi -> {password, hidden}: the professor's own quiz settings before LOCKqz changed them
   // X: with a gate on, only hide (the gate must keep running; clicking the bookmark shows it again).
   box.querySelector("#lqz-x").onclick = function () {
     if (!Object.keys(GATES).length) { box.remove(); return; }
@@ -30,25 +36,67 @@
   var say = function (h) { B.innerHTML = h; };
   var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
   var day = function (t) { return t ? new Date(t).toLocaleDateString([], { month: "short", day: "numeric" }) : ""; };
+  var dt = function (s) { var t = s ? Date.parse(s) : NaN; return isNaN(t) ? null : t; };
+  var EXPIRED = "Brightspace session expired — reload Brightspace and click Sync again.";
+  var expired = function () { var e = new Error(EXPIRED); e.expired = true; return e; };
+  // Staff roles (any school's names) and the LIS context roles Brightspace sends (not institution roles).
+  var STAFF = /instructor|teach|professor|faculty|lecturer|tutor|course leader|\bta\b|assistant|grader|designer/i;
+  var INSTR = /instructor|teacher|professor|faculty|lecturer|course leader/i;
+  var LIS_STAFF = /^(urn:lti:role:ims\/lis\/(Instructor|TeachingAssistant)|http:\/\/purl\.imsglobal\.org\/vocab\/lis\/v2\/membership(#Instructor|\/Instructor#TeachingAssistant))/;
+  var GRACE = 15 * 60000;   // a gate stops by itself this long after the quiz's end
 
   try {
     if (!/\/d2l\//.test(location.pathname)) throw new Error("Open Brightspace first, then click LOCKqz Sync.");
     if (!KEY) throw new Error("This bookmark has no LOCKqz key. Drag a fresh one from your LOCKqz dashboard.");
 
+    // Brightspace GET. A login page / HTML answer (session ended) is never parsed as data.
     var get = async function (u) {
       var r = await fetch(u, { credentials: "include" });
-      if (!r.ok) throw new Error("Brightspace answered " + r.status + " for " + u.split("?")[0]);
-      return r.json();
+      if (r.status === 401) throw expired();
+      if (!r.ok) { var e = new Error("Brightspace answered " + r.status + " for " + String(u).split("?")[0]); e.status = r.status; throw e; }
+      if (/text\/html/i.test((r.headers && r.headers.get && r.headers.get("Content-Type")) || "")) throw expired();
+      try { return await r.json(); } catch (x) { throw expired(); }
     };
-    var csrf = localStorage.getItem("XSRF.Token") || "";
-    var put = function (u, b) {
-      return fetch(u, { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json", "X-Csrf-Token": csrf }, body: JSON.stringify(b) });
+    // Every page of an ObjectListPage, or an error. Never a silent partial list.
+    var pages = async function (u, max) {
+      var all = [], next = u, n = 0;
+      while (next) {
+        if (++n > (max || 200)) throw new Error("too many pages from Brightspace");
+        var d = await get(next);
+        if (Array.isArray(d)) return all.concat(d);
+        if (!d || typeof d !== "object" || !Array.isArray(d.Objects)) throw new Error("unexpected Brightspace answer for " + String(u).split("?")[0]);
+        all = all.concat(d.Objects); next = d.Next || null;
+      }
+      return all;
+    };
+    var csrf = ""; try { csrf = localStorage.getItem("XSRF.Token") || ""; } catch (e) {}
+    var csrfAt = 0;
+    var xsrf = async function (force) {
+      if (csrf && !(force && Date.now() - csrfAt > 5000)) return csrf;   // after a 403: at most one refetch per 5 s
+      if (force) csrfAt = Date.now();
+      try { var r = await fetch("/d2l/lp/auth/xsrf-tokens", { credentials: "include" }); if (r.ok) { var j = await r.json(); if (j && j.referrerToken) csrf = j.referrerToken; } } catch (e) {}
+      return csrf;
+    };
+    var send = async function (method, u, b) {
+      var used = "";
+      var go = async function () {
+        used = await xsrf(); var h = { "X-Csrf-Token": used }; if (b) h["Content-Type"] = "application/json";
+        return fetch(u, { method: method, credentials: "include", headers: h, body: b ? JSON.stringify(b) : undefined });
+      };
+      var r = await go();
+      if (r.status === 403) { var old = used; await xsrf(true); if (csrf && csrf !== old) r = await go(); }   // stale token: once more with the new one
+      return r;
+    };
+    var put = function (u, b) { return send("PUT", u, b); };
+    var lqErr = function (d, status) {
+      if (d && d.reason === "other_school") return new Error("LOCKqz is not set up for this school yet.");
+      if (status === 401) return new Error("This LOCKqz Sync bookmark is no longer valid. Drag a fresh one from your dashboard.");
+      return d && d.error ? new Error(d.error) : null;
     };
     var lq = async function (path, body) {
       var r = await fetch(API + path, { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Sync": KEY }, body: JSON.stringify(body || {}) });
       var d = await r.json().catch(function () { return { error: "LOCKqz answered " + r.status }; });
-      if (r.status === 401) throw new Error("This LOCKqz Sync bookmark is no longer valid. Drag a fresh one from your dashboard.");
-      if (d.error) throw new Error(d.error);
+      var e = lqErr(d, r.status); if (e) throw e;
       return d;
     };
     var lqget = async function (path) {
@@ -59,22 +107,33 @@
       var r = await fetch(API + path, { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Sync": KEY }, body: JSON.stringify(body || {}) });
       return r.json().catch(function () { return {}; });
     };
+    var lqres = async function (path, body) {   // {ok, status, data}: for writes whose success matters
+      try { var r = await fetch(API + path, { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Sync": KEY }, body: JSON.stringify(body || {}) });
+        var d = await r.json().catch(function () { return {}; }); return { ok: r.ok && !d.error, status: r.status, data: d }; }
+      catch (e) { return { ok: false, status: 0, data: {} }; }
+    };
+    // N at a time (Brightspace special-access writes are one user per call).
+    var pool = async function (list, n, fn) {
+      var i = 0, w = [];
+      var run = async function () { while (i < list.length) { var x = list[i++]; await fn(x); } };
+      for (var k = 0; k < Math.min(n, list.length); k++) w.push(run());
+      await Promise.all(w);
+    };
     // Brightspace special-access helpers (one user at a time). PUT grants/keeps, DELETE removes.
     var saUrl = function (ou, qi, uid) { return "/d2l/api/le/" + LE + "/" + ou + "/quizzes/" + qi + "/specialaccess/" + uid; };
-    // Brightspace returns special access as a PAGED object {Objects:[{UserId,SpecialAccess}],Next} (verified live
-    // on USC Brightspace 23 Oct 2026), not a bare array. Follow Next and return a flat array.
-    var saList = async function (ou, qi) {
-      var all = [], next = "/d2l/api/le/" + LE + "/" + ou + "/quizzes/" + qi + "/specialaccess/";
-      while (next) {
-        var d = await get(next).catch(function () { return null; });
-        if (!d) break;
-        if (Array.isArray(d)) { all = all.concat(d); break; }
-        all = all.concat(d.Objects || []); next = d.Next || null;
-      }
-      return all;
+    var saList = function (ou, qi) { return pages("/d2l/api/le/" + LE + "/" + ou + "/quizzes/" + qi + "/specialaccess/"); };   // throws on any error
+    var qd = function (q) { return { StartDate: (q && q.StartDate) || null, EndDate: (q && q.EndDate) || null, DueDate: (q && q.DueDate) || null }; };
+    // A LOCKqz grant only makes the hidden quiz visible: the quiz's OWN dates, no time limit, no attempts.
+    var saPut = function (ou, qi, uid, q) { var d = qd(q); return put(saUrl(ou, qi, uid), { StartDate: d.StartDate, EndDate: d.EndDate, DueDate: d.DueDate, SubmissionTimeLimit: null, AttemptsAllowed: null }); };
+    var saDel = function (ou, qi, uid) { return send("DELETE", saUrl(ou, qi, uid)); };
+    // Is this special access one LOCKqz made? (same dates as the quiz -- or 0.4.0's null start/due -- and no
+    // time limit / attempts). An accommodation always differs, so it is never removed.
+    var ourGrant = function (sa, qs) {
+      if (!sa) return false;
+      var tl = sa.SubmissionTimeLimit; if ((tl && tl.IsEnforced !== false) || sa.AttemptsAllowed) return false;
+      return (qs || []).some(function (q) { return dt(sa.EndDate) === dt(q.EndDate) &&
+        ((dt(sa.StartDate) === dt(q.StartDate) && dt(sa.DueDate) === dt(q.DueDate)) || (dt(sa.StartDate) === null && dt(sa.DueDate) === null)); });
     };
-    var saPut = function (ou, qi, uid, endIso) { return put(saUrl(ou, qi, uid), { StartDate: null, EndDate: endIso, DueDate: null, SubmissionTimeLimit: null, AttemptsAllowed: null }); };
-    var saDel = function (ou, qi, uid) { return fetch(saUrl(ou, qi, uid), { method: "DELETE", credentials: "include", headers: { "X-Csrf-Token": csrf } }); };
 
     // ---- 1. read Brightspace ----
     say("Reading your Brightspace courses...");
@@ -82,34 +141,55 @@
     var ver = function (c) { var v = vers.filter(function (x) { return x.ProductCode === c; })[0]; return v ? v.LatestVersion : null; };
     var LE = ver("le"), LP = ver("lp");
     var me = await get("/d2l/api/lp/" + LP + "/users/whoami");
-    var items = [], bm = "";
-    do {
-      var d = await get("/d2l/api/lp/" + LP + "/enrollments/myenrollments/?orgUnitTypeId=3" + (bm ? "&bookmark=" + encodeURIComponent(bm) : ""));
+    // Newest courses first and active ones only, so a long teaching history never pushes this term out.
+    var items = [], bm = "", sortQ = "&isActive=true&sortBy=-StartDate";
+    for (var pg = 0; pg < 100; pg++) {
+      var d;
+      try { d = await get("/d2l/api/lp/" + LP + "/enrollments/myenrollments/?orgUnitTypeId=3" + sortQ + (bm ? "&bookmark=" + encodeURIComponent(bm) : "")); }
+      catch (e) { if (e.status === 400 && sortQ && !pg) { sortQ = ""; pg--; continue; } throw e; }   // a Brightspace without these filters
       items = items.concat(d.Items || []);
       bm = d.PagingInfo && d.PagingInfo.HasMoreItems ? d.PagingInfo.Bookmark : "";
-    } while (bm);
-    var STAFF = /instructor|teach|professor|faculty|\bta\b|assistant|grader|designer/i;
-    var staff = items.filter(function (i) { return i.Access && i.Access.IsActive !== false && STAFF.test(i.Access.ClasslistRoleName || ""); });
+      if (!bm) break;
+    }
+    var ended = function (i) { var e = dt(i.Access && i.Access.EndDate); return e !== null && e < Date.now() - 14 * 86400000; };
+    var lisStaff = function (i) { return ((i.Access && i.Access.LISRoles) || []).some(function (r) { return LIS_STAFF.test(String(r)); }); };
+    var staff = items.filter(function (i) { return i.Access && i.Access.IsActive !== false && !ended(i) && (STAFF.test(i.Access.ClasslistRoleName || "") || lisStaff(i)); });
+    staff.sort(function (a, b) { return (dt(b.Access.StartDate) || Date.now()) - (dt(a.Access.StartDate) || Date.now()); });
+    staff = staff.slice(0, 80);   // LOCKqz reads at most 80 courses per Sync
     if (!staff.length) throw new Error("You are not an instructor or TA in any active Brightspace course.");
 
-    var courses = [];
+    var courses = [], OWNPW = {};
+    var LQFMT = /^LQ-([0-9A-F]{10}|[A-HJ-NP-Z2-9]{8})$/;   // passwords LOCKqz makes (fixed / gate code): never the professor's own
     for (var n = 0; n < staff.length; n++) {
       var ou = staff[n].OrgUnit.Id;
       say("Reading course " + (n + 1) + " of " + staff.length + "<br><b>" + esc(staff[n].OrgUnit.Name) + "</b>");
-      var cl = await get("/d2l/api/le/" + LE + "/" + ou + "/classlist/").catch(function () { return null; });
-      var qs = [], next = "/d2l/api/le/" + LE + "/" + ou + "/quizzes/";
-      while (next) { var q = await get(next).catch(function () { return null; }); if (!q) break; qs = qs.concat(q.Objects || []); next = q.Next || null; }
+      var cl = null, qs = null;
+      try { cl = await pages("/d2l/api/le/" + LE + "/" + ou + "/classlist/paged/"); }
+      catch (e) { if (e.expired) throw e; cl = await get("/d2l/api/le/" + LE + "/" + ou + "/classlist/").catch(function (e2) { if (e2.expired) throw e2; return null; }); }
+      if (cl && !Array.isArray(cl)) cl = null;
+      // A failed or partial quiz list is sent as null: LOCKqz then keeps what it had (never wipes a course).
+      try { qs = await pages("/d2l/api/le/" + LE + "/" + ou + "/quizzes/"); } catch (e) { if (e.expired) throw e; qs = null; }
+      (qs || []).forEach(function (x) { if (x.Password && !LQFMT.test(x.Password)) OWNPW[String(x.QuizId)] = true; });
       courses.push({
         ou: ou, name: staff[n].OrgUnit.Name, code: staff[n].OrgUnit.Code, role: staff[n].Access.ClasslistRoleName,
+        lis_roles: (staff[n].Access.LISRoles || []).map(String),
         classlist: cl ? cl.map(function (s) { return { id: s.Identifier, name: s.DisplayName || ((s.FirstName || "") + " " + (s.LastName || "")).trim(),
-          email: s.Email, username: s.Username, org_id: s.OrgDefinedId, role: s.ClasslistRoleDisplayName }; }) : null,
-        quizzes: qs.map(function (x) { return { qi: x.QuizId, name: x.Name, active: x.IsActive, start: x.StartDate, end: x.EndDate, due: x.DueDate, has_password: !!x.Password }; })
+          email: s.Email, username: s.Username, org_id: s.OrgDefinedId, role: s.ClasslistRoleDisplayName, role_id: s.RoleId == null ? undefined : s.RoleId }; }) : null,
+        quizzes: qs ? qs.map(function (x) { return { qi: x.QuizId, name: x.Name, active: x.IsActive, start: x.StartDate, end: x.EndDate, due: x.DueDate, has_password: !!x.Password, lq_password: !!x.Password && LQFMT.test(x.Password) }; }) : null
       });
     }
 
     // ---- 2. save to LOCKqz ----
     say("Saving to LOCKqz...");
-    var state = await lq("/sync", { whoami: { id: me.Identifier, name: ((me.FirstName || "") + " " + (me.LastName || "")).trim() }, courses: courses });
+    var state = await lq("/sync", { host: location.host, whoami: { id: me.Identifier, name: ((me.FirstName || "") + " " + (me.LastName || "")).trim() }, courses: courses });
+    // What the SERVER confirms it saved (C3): orig_password_saved / orig_hidden_saved. A row with neither
+    // saved -> null (nothing known yet), so saveOrig still saves the professor's settings first.
+    var origOf = function (row) {
+      if (!row) return null;
+      var pwS = row.orig_password_saved === true, hS = row.orig_hidden_saved === true || (row.orig_hidden_saved === undefined && row.orig_hidden != null);
+      return pwS || hS ? { password: pwS ? (row.orig_password || null) : null, hidden: hS ? !!row.orig_hidden : false, pwSaved: pwS, hiddenSaved: hS } : null;
+    };
+    (state.protect || []).concat(state.clear || []).forEach(function (r) { var o = origOf(r); if (o) ORIG[String(r.qi)] = o; });
 
     // ---- 3. passwords into / out of Brightspace ----
     var rt = function (o) { var t = o && o.Text; return { Text: { Content: (t && (t.Html || t.Text)) || "", Type: (t && t.Html) ? "Html" : "Text" }, IsDisplayed: !!(o && o.IsDisplayed) }; };
@@ -124,193 +204,244 @@
       if (!r.ok) throw new Error("Brightspace " + r.status + ": " + (await r.text()).slice(0, 140));
       var after = await get(quizUrl(ou, qi));
       if ((after.Password || null) !== (pw || null)) throw new Error("password did not stick");
+      return after;
+    }
+    // Ours = the fixed LOCKqz password, or a gate code (LQ- + 10 hex, or the last one this tab wrote).
+    var ROT = /^LQ-[0-9A-F]{10}$/;
+    var isGate = function (p, qi) { return !!p && (ROT.test(p) || p === GPW[qi] || (GATES[qi] && GATES[qi].written === p)); };
+    var ours = function (p, qi) { return !!p && (isGate(p, qi) || p === PW[String(qi)] || /^LQ-[A-HJ-NP-Z2-9]{8}$/.test(p)); };
+    // Save the professor's own password / hidden setting ONCE, before LOCKqz first changes the quiz.
+    // Skipped only for what the server has confirmed saved (ORIG[qi].pwSaved / hiddenSaved); a failed
+    // save throws, so LOCKqz never overwrites a setting it could not save first.
+    async function saveOrig(ou, qi, cur) {
+      qi = String(qi);
+      var o = { password: ours(cur.Password, qi) ? null : (cur.Password || null), hidden: !!cur.AllowOnlyUsersWithSpecialAccess && !isGate(cur.Password, qi) };
+      var k = ORIG[qi] || {}, item = { ou: String(ou), qi: qi, status: "orig" };
+      if (!k.pwSaved && o.password != null) item.orig_password = o.password;
+      if (!k.hiddenSaved && o.hidden) item.orig_hidden = true;
+      var sent = "orig_password" in item || "orig_hidden" in item;
+      if (sent) await lq("/sync-result", { results: [item] });
+      ORIG[qi] = { password: k.pwSaved ? k.password : o.password, hidden: k.hiddenSaved ? !!k.hidden : o.hidden,
+                   pwSaved: !!k.pwSaved || "orig_password" in item, hiddenSaved: !!k.hiddenSaved || "orig_hidden" in item };
     }
     async function protect(ou, qi, pw) {          // put LOCKqz's password on the quiz
       var cur = await get(quizUrl(ou, qi));
       if (cur.Password === pw) return "already";
+      await saveOrig(ou, qi, cur);
       await writePw(ou, qi, pw); return "set";
     }
-    // Ours = the fixed LOCKqz password, or a gate code (LQ- + 10 hex, or the last one this tab wrote).
-    var ROT = /^LQ-[0-9A-F]{10}$/;
-    async function release(ou, qi, oldPw) {      // remove ONLY our password (never a professor's own)
-      var cur = await get(quizUrl(ou, qi));
-      var ours = !!cur.Password && (cur.Password === oldPw || cur.Password === GPW[qi] || ROT.test(cur.Password));
-      if (ours) await writePw(ou, qi, null, { AllowOnlyUsersWithSpecialAccess: false });   // a gate may have hidden it
-      delete GPW[qi];
+    async function release(ou, qi, oldPw, orig) {      // remove ONLY our password; put the professor's own settings back
+      qi = String(qi);
+      var cur = await get(quizUrl(ou, qi)), o = orig || ORIG[qi] || null;
+      var mine = !!cur.Password && (cur.Password === oldPw || ours(cur.Password, qi));
+      if (mine) {
+        var extra = {};
+        if (o) extra.AllowOnlyUsersWithSpecialAccess = !!o.hidden;
+        else if (isGate(cur.Password, qi)) extra.AllowOnlyUsersWithSpecialAccess = false;   // our gate hid it
+        await writePw(ou, qi, o ? o.password : null, extra);
+      }
+      delete GPW[qi]; delete ORIG[qi];
       return "cleared";
     }
+    var PW = {};   // qi -> current LOCKqz password, filled when protected
+    (state.protect || []).forEach(function (p) { PW[String(p.qi)] = p.password; });
+    function pw_of(qi) { return PW[String(qi)]; }
     var results = [], errors = [];
     var todo = (state.protect || []).length + (state.clear || []).length, done = 0;
     for (var i = 0; i < (state.protect || []).length; i++) {
       var x = state.protect[i]; say("Setting LOCKqz passwords in Brightspace... " + (++done) + "/" + todo);
       if (Number(x.gated) === 1) continue;   // gate on: the gate owns this quiz's password (resumed below)
       try { results.push({ ou: x.ou, qi: x.qi, status: await protect(x.ou, x.qi, x.password) }); }
-      catch (e) { results.push({ ou: x.ou, qi: x.qi, status: "error", msg: e.message }); errors.push((x.title || x.qi) + ": " + e.message); }
+      catch (e) { if (e.expired) throw e; results.push({ ou: x.ou, qi: x.qi, status: "error", msg: e.message }); errors.push((x.title || x.qi) + ": " + e.message); }
     }
     for (var k = 0; k < (state.clear || []).length; k++) {
       var y = state.clear[k]; say("Removing released passwords... " + (++done) + "/" + todo);
-      try { results.push({ ou: y.ou, qi: y.qi, status: await release(y.ou, y.qi, y.password) }); }
-      catch (e) { results.push({ ou: y.ou, qi: y.qi, status: "error", msg: e.message }); errors.push(y.qi + ": " + e.message); }
+      try { results.push({ ou: y.ou, qi: y.qi, status: await release(y.ou, y.qi, y.password, origOf(y)) }); }
+      catch (e) { if (e.expired) throw e; results.push({ ou: y.ou, qi: y.qi, status: "error", msg: e.message }); errors.push(y.qi + ": " + e.message); }
     }
     if (results.length) await lq("/sync-result", { results: results });
 
     // ---- 4. panel: choose protected quizzes ----
     var prot = {}; (state.protect || []).forEach(function (p) { prot[String(p.qi)] = true; });
-    var students = 0, nq = 0;
+    var students = 0, nq = 0, unread = 0;
     var html = "";
     courses.forEach(function (c) {
-      var learners = (c.classlist || []).filter(function (s) { return !/nstructor|rofessor|aculty/i.test(s.role || "") && !!(s.role || "").trim(); }).length;
-      students += learners; nq += c.quizzes.length;
+      var learners = (c.classlist || []).filter(function (s) { return !INSTR.test(s.role || "") && !!(s.role || "").trim(); }).length;
+      students += learners; nq += (c.quizzes || []).length;
       html += '<div style="margin:12px 0 4px;font-weight:700">' + esc(c.name.replace(/^\d+_\d+\s*/, "")) + '</div>' +
-        '<div style="color:#666;font-size:12px;margin-bottom:4px">' + learners + " students &middot; " + esc(c.role) + "</div>";
+        '<div style="color:#666;font-size:12px;margin-bottom:4px">' + (c.classlist ? learners + " students" : "class list not read") + " &middot; " + esc(c.role) + "</div>";
+      if (!c.quizzes) { unread++; html += '<div style="color:#990000;font-size:13px">Could not read quizzes from Brightspace. Click Sync again.</div>'; return; }
       if (!c.quizzes.length) html += '<div style="color:#888;font-size:13px">No quizzes.</div>';
       c.quizzes.forEach(function (q) {
-        var on = !!prot[String(q.qi)];
+        var on = !!prot[String(q.qi)], own = !on && OWNPW[String(q.qi)];
         html += '<div style="padding:4px 0;border-bottom:1px solid #eee">' +
           '<label style="display:flex;gap:8px;align-items:center;cursor:pointer">' +
           '<input type="checkbox" data-ou="' + c.ou + '" data-qi="' + q.qi + '"' + (on ? " checked" : "") + '>' +
           '<span style="flex:1">' + esc(q.name) + (q.start ? ' <span style="color:#888;font-size:12px">' + day(q.start) + "</span>" : "") + "</span>" +
-          '<span data-st="' + q.qi + '" style="font-size:12px;color:' + (on ? "#1a7f37" : "#888") + '">' + (on ? "protected" : "") + "</span></label>" +
+          '<span data-st="' + q.qi + '" style="font-size:12px;color:' + (on ? "#1a7f37" : "#888") + '">' + (on ? "protected" : own ? "has its own password" : "") + "</span></label>" +
           '<div style="margin:4px 0 0 26px;font-size:12px"><button data-gate="' + c.ou + ":" + q.qi + '" ' + (on ? "" : "disabled ") + 'style="font:12px -apple-system;padding:2px 10px;border:1px solid #990000;border-radius:6px;background:#fff;color:#990000;cursor:pointer">Start gate</button> <span data-gst="' + q.qi + '" style="color:#888">off</span> <span style="color:#aaa">— while on, only students LOCKqz is locking can open the quiz</span></div></div>';
       });
     });
     say('<div style="background:#eafbea;padding:8px 10px;border-radius:8px">Synced ' + courses.length + " course" + (courses.length === 1 ? "" : "s") +
       ", " + students + " students, " + nq + " quizzes.</div>" +
+      (unread ? '<div style="color:#990000;margin-top:8px">' + unread + " course" + (unread === 1 ? "" : "s") + " not read: LOCKqz kept the quizzes it had.</div>" : "") +
       (errors.length ? '<div style="color:#990000;margin-top:8px">Could not update: ' + esc(errors.join("; ")) + "</div>" : "") +
       '<div style="margin-top:10px;font-weight:700">Protect with LOCKqz (blocks AI during the quiz):</div>' + html +
       '<div style="margin-top:12px"><a href="' + DASH + '" target="_blank" style="color:#990000;font-weight:700">Open LOCKqz dashboard</a></div>');
 
     // ---- live access gate: only students LOCKqz is actively locking can see the quiz ----
     // Professor clicks Start and leaves this tab open. Every 10s we read who is locked (device-signed,
-    // fresh) and grant Brightspace special access to exactly them. Safety rules (24 Oct 2026):
-    //  * special access that existed BEFORE the gate (accommodations) is never changed or removed;
-    //  * a grant lasts until the quiz's own end (not 90s), so a sleeping/closed tab or a student's
-    //    wifi blip never locks an honest student out mid-quiz; grants are removed only on positive
-    //    evidence (tamper, LOCKqz stopped, submitted/left);
-    //  * no IP lock (IPv6 / campus NAT pools would reject honest students);
-    //  * the password is changed only when its code changes, then confirmed to LOCKqz, so the app
-    //    always hands out exactly what Brightspace holds.
+    // fresh) and grant Brightspace special access to exactly them. Safety rules (25 Oct 2026):
+    //  * special access that existed BEFORE the gate, or that LOCKqz did not create (accommodations,
+    //    even ones added while the gate runs), is never changed or removed;
+    //  * a grant copies the quiz's own Start/Due/End dates and is given the moment a student locks once
+    //    the quiz has started per Brightspace; a sleeping/closed tab or a wifi blip never locks an
+    //    honest student out; grants are removed only on positive evidence (tamper, stopped, submitted);
+    //  * the special-access list must be read in full, or nothing is granted/removed this round;
+    //  * the quiz is hidden only after Brightspace accepted a test grant, and shown again by itself if
+    //    every grant keeps failing; the gate stops by itself 15 min after the quiz's end;
+    //  * no IP lock; the password changes only when its code changes, and counts only once LOCKqz has
+    //    confirmed it, so the app always hands out exactly what Brightspace holds.
     var REVOKE = { tamper: 1, helper_killed: 1, done: 1, left_early: 1 };
-    // Best-effort read of who Brightspace shows as having SUBMITTED this quiz. Returns a list of user
-    // ids. Tries the Valence quiz-attempts endpoint; only counts an attempt with a real completion
-    // timestamp. Any error or unknown shape -> [] (so the server clears nobody by mistake).
-    async function submittedUserIds(ou, qi) {
-      var out = {}, next = "/d2l/api/le/" + LE + "/" + ou + "/quizzes/" + qi + "/attempts/";
+    // Who Brightspace shows as having SUBMITTED this quiz, with when (QuizAttemptData.Completed, a
+    // UTCDateTime, null while in progress). A student with an attempt still open is not counted.
+    async function submittedUsers(ou, qi) {
+      var by = {};
       try {
-        for (var guard = 0; next && guard < 50; guard++) {
-          var d = await get(next).catch(function () { return null; });
-          if (!d) break;
-          var list = Array.isArray(d) ? d : (d.Objects || d.Items || []);
-          list.forEach(function (a) {
-            if (!a) return;
-            var uid = a.UserId != null ? a.UserId : (a.User && a.User.Identifier);
-            var doneAt = a.CompletionDate || a.TimeCompleted || a.SubmittedDate || a.DateCompleted ||
-                         (a.CompletionInfo && (a.CompletionInfo.CompletionDate || a.CompletionInfo.DateCompleted));
-            var isDone = !!doneAt || a.IsGraded === true || a.Completed === true;
-            if (uid != null && isDone) out[String(uid)] = true;
-          });
-          next = (d && d.Next) || null;
-        }
-      } catch (e) { return []; }
-      return Object.keys(out);
+        (await pages("/d2l/api/le/" + LE + "/" + ou + "/quizzes/" + qi + "/attempts/", 100)).forEach(function (a) {
+          if (!a || a.UserId == null) return;
+          var c0 = [a.Completed, a.TimeCompleted, a.CompletionDate].filter(function (v) { return typeof v === "string" && dt(v) !== null; })[0];   // documented: Completed
+          var u = String(a.UserId), c = c0 || null, b = by[u] = by[u] || { at: null, open: false };
+          if (c) { if (!b.at || dt(c) > dt(b.at)) b.at = c; } else b.open = true;
+        });
+      } catch (e) { if (e.expired) throw e; return []; }
+      return Object.keys(by).filter(function (u) { return by[u].at && !by[u].open; }).map(function (u) { return { id: u, completed: by[u].at }; });
     }
     async function gateStep(ou, qi) {
       var g = GATES[qi], live = await lqget("/live?quiz=" + ou + "-" + qi);
       if (!live || !live.rows) throw new Error("LOCKqz not reachable");
-      // Confirm real submissions to the server (so an unlocked student is "done" only if they truly
-      // submitted). Throttled to once per ~20s per quiz.
+      // Brightspace dates changed during the gate (professor moved the start / extended the end): the
+      // server's start check and quiz end follow (/gate on keeps the gate's accommodation list).
+      if (g.datesNew) { var nd = g.datesNew;
+        if ((await lqres("/gate", { ou: ou, qi: qi, on: true, start: nd.StartDate, end: nd.EndDate })).ok && g.datesNew === nd) g.datesNew = null; }
+      // Confirm real submissions to the server, throttled to once per ~20s; each student sent once.
       if (!g.nextSub || Date.now() >= g.nextSub) {
-        g.nextSub = Date.now() + 20000;
-        try {   // send only students not reported yet (each report is a database write)
-          g.subsSent = g.subsSent || {};
-          var subs = (await submittedUserIds(ou, qi)).filter(function (u) { return !g.subsSent[u]; });
-          if (subs.length) { await lqpost("/submitted", { ou: ou, qi: qi, user_ids: subs }); subs.forEach(function (u) { g.subsSent[u] = true; }); }
-        } catch (e) {}
+        g.nextSub = Date.now() + 20000; g.subsSent = g.subsSent || {};
+        var subs = (await submittedUsers(ou, qi)).filter(function (s) { return !g.subsSent[s.id]; });
+        if (subs.length && (await lqres("/submitted", { ou: ou, qi: qi, quiz: ou + "-" + qi, users: subs, user_ids: subs.map(function (s) { return s.id; }) })).ok)
+          subs.forEach(function (s) { g.subsSent[s.id] = true; });
       }
       var want = {}, revoke = {};
+      // Admitted the moment they lock once the quiz has started per Brightspace's own (fresh) start date.
+      var q0 = g.qs[g.qs.length - 1], begun = dt(q0 && q0.StartDate) === null || Date.now() >= dt(q0.StartDate);
       live.rows.forEach(function (r) { if (!r.user_id) return; var u = String(r.user_id);
-        if (r.eligible) want[u] = true; else if (REVOKE[r.status]) revoke[u] = true; });
-      var have = await saList(ou, qi), haveSet = {};
-      (Array.isArray(have) ? have : []).forEach(function (x) { if (x && x.UserId != null) haveSet[String(x.UserId)] = true; });
-      var res = { n: 0, bad: 0, stuck: 0 };   // admitted, could not admit, could not remove
-      for (var uid in want) {
-        if (g.keep[uid] || haveSet[uid]) { res.n++; continue; }
-        var pr = await saPut(ou, qi, uid, g.end).catch(function () { return null; });
+        if (r.eligible || (begun && r.verified === true && r.status === "locked")) want[u] = true; else if (REVOKE[r.status]) revoke[u] = true; });
+      var have = await saList(ou, qi), haveMap = {};
+      have.forEach(function (x) { if (x && x.UserId != null) haveMap[String(x.UserId)] = x.SpecialAccess || {}; });
+      var res = { n: 0, bad: 0, stuck: 0, tried: 0 };   // admitted, could not admit, could not remove
+      var add = Object.keys(want).filter(function (u) { if (g.keep[u] || haveMap[u]) { res.n++; return false; } return true; });
+      await pool(add, 8, async function (u) {
+        res.tried++; var pr = await saPut(ou, qi, u, g.qs[g.qs.length - 1]).catch(function () { return null; });
         if (pr && pr.ok) res.n++; else res.bad++;
-      }
-      for (var u2 in revoke) {
-        if (!haveSet[u2] || g.keep[u2] || want[u2]) continue;
-        var dr = await saDel(ou, qi, u2).catch(function () { return null; });
+      });
+      // Only a grant that still looks exactly like LOCKqz's (one the professor edited is theirs now).
+      var del = Object.keys(revoke).filter(function (u) { return haveMap[u] && !g.keep[u] && !want[u] && ourGrant(haveMap[u], g.qs); });
+      await pool(del, 8, async function (u) {
+        var dr = await saDel(ou, qi, u).catch(function () { return null; });
         if (!dr || !dr.ok) res.stuck++;
-      }
+      });
+      g.allFail = res.tried && res.bad === res.tried && !res.n ? (g.allFail || 0) + 1 : 0;
       if (g.nextRot && Date.now() < g.nextRot) return res;   // code changes every 5 min
       try {
         var rot = await lqpost("/rotating", { ou: ou, qis: [qi] });
-        var code = rot && rot.codes && rot.codes[qi] ? rot.codes[qi].cur : null;
-        if (rot && rot.codes && rot.codes[qi]) g.nextRot = (rot.codes[qi].bucket + 1) * 300000 + 2000;
+        var c = rot && rot.codes && rot.codes[qi], code = c ? c.cur : null;
+        if (c) g.nextRot = (c.bucket + 1) * 300000 + 2000;
         if (code && GPW[qi] !== code) {
-          await writePw(ou, qi, code, { AllowOnlyUsersWithSpecialAccess: true });
-          GPW[qi] = code;
-          await lqpost("/rotated", { ou: ou, qi: qi, code: code });
+          if (g.written !== code) { var after = await writePw(ou, qi, code, { AllowOnlyUsersWithSpecialAccess: true }); g.written = code; addDates(g, after); }
+          var cf = await lqres("/rotated", { ou: ou, qi: qi, code: code });   // the app hands out a code only once LOCKqz has it
+          if (cf.ok) { GPW[qi] = code; g.rotNote = ""; } else { g.nextRot = 0; g.rotNote = "new code not confirmed by LOCKqz, retrying"; }
         }
-      } catch (e) { g.nextRot = 0; }
+      } catch (e) { if (e.expired) throw e; g.nextRot = 0; }
       return res;
+    }
+    // Every version of the quiz's dates seen while gating (grants made under any of them stay "ours").
+    // A change after the gate started is sent to the server (its start check / end) on the next round.
+    function addDates(g, q) {
+      var d = qd(q), last = g.qs[g.qs.length - 1];
+      if (last && (dt(last.StartDate) !== dt(d.StartDate) || dt(last.EndDate) !== dt(d.EndDate))) g.datesNew = d;
+      if (!g.qs.some(function (x) { return JSON.stringify(x) === JSON.stringify(d); })) g.qs.push(d);
+      g.endMs = dt(d.EndDate);
+    }
+    // Brightspace must accept AND remove one grant before the quiz is hidden (a role that cannot give
+    // special access would otherwise lock the whole class out). Tried on a learner with no special access.
+    async function testGrant(ou, qi, cur, before) {
+      var c = courses.filter(function (x) { return String(x.ou) === String(ou); })[0], skip = {};
+      before.forEach(function (u) { skip[u] = true; });
+      var t = ((c && c.classlist) || []).filter(function (s) { return s.id != null && !skip[String(s.id)] && String(s.id) !== String(me.Identifier) && !STAFF.test(s.role || ""); })[0];
+      if (!t) return;
+      var r = await saPut(ou, qi, t.id, cur);
+      if (!r.ok) throw new Error("Brightspace refused special access (" + r.status + "). Quiz not hidden.");
+      var d = await saDel(ou, qi, t.id);
+      if (!d.ok) d = await saDel(ou, qi, t.id);
+      if (!d.ok) throw new Error("Brightspace refused removing special access (" + d.status + "). Quiz not hidden.");
     }
     async function startGate(ou, qi, pw, st, resume) {
       st.textContent = "starting..."; st.style.color = "#666";
       if (!pw) throw new Error("protect this quiz first");
       var cur = await get(quizUrl(ou, qi));
-      var before = (await saList(ou, qi)).map(function (x) { return String(x.UserId); });
+      var have = await saList(ou, qi);   // must read in full: this is the accommodation list LOCKqz never touches
+      var before = have.filter(function (x) { return resume || cur.AllowOnlyUsersWithSpecialAccess || !ourGrant(x.SpecialAccess, [qd(cur)]); })
+        .map(function (x) { return String(x.UserId); });
       var g;
-      if (resume) g = await lq("/gate", { ou: ou, qi: qi, on: true, keep: before });
+      var when = { start: cur.StartDate || null, end: cur.EndDate || null };   // current dates for the server's start check
+      if (resume) g = await lq("/gate", { ou: ou, qi: qi, on: true, keep: before, start: when.start, end: when.end });
       else {
+        await saveOrig(ou, qi, cur);
+        await testGrant(ou, qi, cur, have.map(function (x) { return String(x.UserId); }));
         await writePw(ou, qi, pw, { AllowOnlyUsersWithSpecialAccess: true });   // hide quiz from everyone else
-        try { g = await lq("/gate", { ou: ou, qi: qi, on: true, keep: before }); }   // server keeps the FIRST list
-        catch (e) { try { await writePw(ou, qi, pw, { AllowOnlyUsersWithSpecialAccess: false }); } catch (e2) {} throw e; }
+        try { g = await lq("/gate", { ou: ou, qi: qi, on: true, keep: before, start: when.start, end: when.end }); }   // server keeps the FIRST list
+        catch (e) { try { await writePw(ou, qi, pw, { AllowOnlyUsersWithSpecialAccess: !!(ORIG[qi] && ORIG[qi].hidden) }); } catch (e2) {} throw e; }
       }
       var keep = {}; (g.keep || []).forEach(function (u) { keep[String(u)] = true; });
-      var end = cur.EndDate || new Date(Date.now() + 12 * 3600000).toISOString();
       var tick = async function () {
         var G = GATES[qi]; if (!G || G.busy) return; G.busy = true;
         try {
+          if (G.endMs !== null && Date.now() > G.endMs + GRACE) { G.busy = false; await stopGate(ou, qi, st, "quiz ended"); showGateBtn(ou, qi); return; }
           var r = await gateStep(ou, qi);
+          if (G.allFail >= 3) { G.busy = false; await stopGate(ou, qi, st, "stopped: Brightspace refused special access, quiz shown again"); showGateBtn(ou, qi); return; }
           st.textContent = "LIVE — " + r.n + " locked in" + (r.bad ? " · " + r.bad + " not admitted (Brightspace error)" : "") +
-            (r.stuck ? " · " + r.stuck + " not removed (Brightspace error)" : "") + (G.note ? " · " + G.note : "");
-          st.style.color = r.bad || r.stuck || G.note ? "#990000" : "#1a7f37";
+            (r.stuck ? " · " + r.stuck + " not removed (Brightspace error)" : "") + (G.rotNote ? " · " + G.rotNote : "") + (G.note ? " · " + G.note : "");
+          st.style.color = r.bad || r.stuck || G.note || G.rotNote ? "#990000" : "#1a7f37";
         }
-        catch (e) { st.textContent = "gate error: " + e.message.slice(0, 50) + " (retrying)"; st.style.color = "#990000"; }
+        catch (e) { st.textContent = (e.expired ? e.message : "gate error: " + e.message.slice(0, 50)) + " (retrying)"; st.style.color = "#990000"; }
         G.busy = false;
       };
-      GATES[qi] = { ou: ou, busy: false, keep: keep, end: end, tick: tick, timer: setInterval(tick, 10000) };
+      GATES[qi] = { ou: ou, busy: false, keep: keep, qs: [], endMs: null, tick: tick, timer: setInterval(tick, 10000) };
+      addDates(GATES[qi], cur);
       tick();
     }
     // Errors are thrown (not hidden). On failure the gate is put back on, so Brightspace and LOCKqz agree.
-    async function stopGate(ou, qi, st) {
+    async function stopGate(ou, qi, st, why) {
       var g = GATES[qi]; if (g) { clearInterval(g.timer); delete GATES[qi]; }
       st.textContent = "stopping..."; st.style.color = "#666";
       var stuck = 0;
       try {
         var keep = (g && g.keep) || {};
-        var have = await saList(ou, qi);
-        for (var i = 0; i < (have || []).length; i++) {
-          var u = String(have[i].UserId); if (keep[u]) continue;
-          var dr = await saDel(ou, qi, u).catch(function () { return null; });
-          if (!dr || !dr.ok) stuck++;
-        }
-        await writePw(ou, qi, pw_of(qi), { AllowOnlyUsersWithSpecialAccess: false, RestrictIPAddressRange: null });   // quiz open again (password still applies)
+        var have = await saList(ou, qi), cur = await get(quizUrl(ou, qi)), qs = ((g && g.qs) || []).concat([qd(cur)]);
+        var del = have.filter(function (x) { var u = String(x.UserId); return !keep[u] && ourGrant(x.SpecialAccess, qs); });
+        await pool(del, 8, async function (x) { var dr = await saDel(ou, qi, String(x.UserId)).catch(function () { return null; }); if (!dr || !dr.ok) stuck++; });
+        var o = ORIG[String(qi)];   // quiz open again as the professor had it (LOCKqz password still applies)
+        await writePw(ou, qi, pw_of(qi) || (o && o.password) || null, { AllowOnlyUsersWithSpecialAccess: o ? !!o.hidden : false, RestrictIPAddressRange: null });
         delete GPW[qi];
         await lq("/gate", { ou: ou, qi: qi, on: false });
       } catch (e) {
         delete GPW[qi];
-        if (g) { g.busy = false; g.nextRot = 0; g.note = "stop failed: " + e.message.slice(0, 60); g.timer = setInterval(g.tick, 10000); GATES[qi] = g; g.tick(); }
+        if (g) { g.busy = false; g.nextRot = 0; g.written = null; g.note = "stop failed: " + e.message.slice(0, 60); g.timer = setInterval(g.tick, 10000); GATES[qi] = g; if (!why) g.tick(); }
         throw e;
       }
-      st.textContent = stuck ? "off · " + stuck + " LOCKqz access not removed (Brightspace error)" : "off";
-      st.style.color = stuck ? "#990000" : "#888";
+      st.textContent = (why ? why + " · " : "") + (stuck ? "off · " + stuck + " LOCKqz access not removed (Brightspace error)" : "off");
+      st.style.color = stuck || /refused/.test(why || "") ? "#990000" : "#888";
     }
-    var PW = {};   // qi -> current LOCKqz password, filled when protected
-    (state.protect || []).forEach(function (p) { PW[String(p.qi)] = p.password; });
-    function pw_of(qi) { return PW[String(qi)]; }
 
     var CBS = {};   // qi -> its checkbox
     var gateBtn = function (ou, qi) { return B.querySelector('[data-gate="' + ou + ":" + qi + '"]'); };
@@ -329,7 +460,7 @@
           if (!cb.checked && GATES[qi]) await stopGate(ou, qi, gst);   // turning LOCKqz off: stop its gate first
           var r = await lq("/protect", { ou: ou, qi: qi, on: cb.checked });
           if (cb.checked) PW[String(qi)] = r.password;
-          var status = cb.checked ? await protect(ou, qi, r.password) : await release(ou, qi, r.clear);
+          var status = cb.checked ? await protect(ou, qi, r.password) : await release(ou, qi, r.clear, origOf(r));
           if (!cb.checked) delete PW[String(qi)];
           await lq("/sync-result", { results: [{ ou: ou, qi: qi, status: status }] });
           st.style.color = cb.checked ? "#1a7f37" : "#888"; st.textContent = cb.checked ? "protected" : "";
@@ -350,20 +481,21 @@
           if (!stopping) await startGate(ou, qi, pw_of(qi), st);
           else await stopGate(ou, qi, st);
         } catch (e) {
-          var msg = (stopping ? "stop failed: " : "start failed: ") + e.message.slice(0, 60);
+          var msg = (stopping ? "stop failed: " : "start failed: ") + e.message.slice(0, 80);
           if (GATES[qi]) GATES[qi].note = msg;
           st.textContent = msg + (GATES[qi] ? " (gate still on)" : ""); st.style.color = "#990000";
         }
         showGateBtn(ou, qi);
       };
     });
-    // Resume any gate that was on before this tab was (re)opened, so a reload never strands a class.
+    // Resume any gate that was on before this tab was (re)opened, so a reload never strands a class
+    // (a gate whose quiz has ended stops on its first tick).
     (state.protect || []).forEach(function (p) {
       if (Number(p.gated) !== 1) return;
       var gb = B.querySelector('[data-gate="' + p.ou + ":" + p.qi + '"]'), st = B.querySelector('[data-gst="' + p.qi + '"]');
       if (!gb || !st || GATES[String(p.qi)]) return;
       startGate(String(p.ou), String(p.qi), pw_of(p.qi), st, true).then(function () { showGateBtn(String(p.ou), String(p.qi)); })
-        .catch(function (e) { st.textContent = "resume failed: " + e.message.slice(0, 40); st.style.color = "#990000"; });
+        .catch(function (e) { st.textContent = "resume failed: " + e.message.slice(0, 60); st.style.color = "#990000"; });
     });
   } catch (e) {
     say('<b style="color:#990000">' + esc(e.message) + "</b>");

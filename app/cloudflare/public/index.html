@@ -32,10 +32,12 @@
       <p class="hint" id="how"></p>
       <div class="cmd"><code id="cmd"></code><button id="copy" type="button">Copy</button></div>
       <p class="hint" id="pw"></p>
+      <p class="hint" id="ok">Click OK or Allow on every prompt it shows.</p>
 
       <div class="or">
         <a class="btn" id="dl" href="#">Or download the installer</a>
         <p class="warn" id="warn"></p>
+        <p class="warn" id="rm" hidden>To remove LOCKqz: <code id="rmcmd" style="user-select:all"></code></p>
       </div>
     </div>
 
@@ -58,7 +60,7 @@
       $("os").textContent = "for macOS";
       $("how").textContent = "Open Terminal (press ⌘+Space, type Terminal, press Return), paste this, press Return:";
       $("cmd").textContent = "curl -fsSL " + site + "/install.sh | sudo bash";
-      $("pw").textContent = "It asks for your Mac password once (typing stays hidden) — that is macOS, not us.";
+      $("pw").textContent = "It asks for your Mac password once (typing stays hidden) — that is macOS, not us. A first install may download Apple's Command Line Tools (one time).";
       $("dl").href = "/download/lockqz-mac.pkg";
       $("warn").textContent = "If macOS blocks it: System Settings → Privacy & Security → Open Anyway.";
     } else {
@@ -79,7 +81,11 @@
     };
     var one = mac ? "install.sh" : "install.ps1", rel = "/download/" + (mac ? "mac/" : "windows/") + one;
     served("/" + one, function (ok) { if (!ok) served(rel, function (ok2) { if (ok2) $("cmd").textContent = $("cmd").textContent.replace(site + "/" + one, site + rel); }); });
-    served($("dl").getAttribute("href"), function (ok) { if (!ok) $("dl").parentNode.hidden = true; });
+    served($("dl").getAttribute("href"), function (ok) { if (!ok) { $("dl").hidden = true; $("warn").hidden = true; } });
+    // Uninstall: the one-line remover, wherever it is published.
+    var un = mac ? "uninstall.sh" : "uninstall.ps1", unRel = "/download/" + (mac ? "mac/" : "windows/") + un;
+    var showRm = function (path) { $("rmcmd").textContent = mac ? "curl -fsSL " + site + path + " | sudo bash" : "irm " + site + path + " | iex"; $("rm").hidden = false; };
+    served("/" + un, function (ok) { if (ok) showRm("/" + un); else served(unRel, function (ok2) { if (ok2) showRm(unRel); else if (win) { $("rm").textContent = "To remove LOCKqz: Settings → Apps → LOCKqz → Uninstall."; $("rm").hidden = false; } }); });
   } else {
     $("nope").hidden = false;
   }

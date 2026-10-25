@@ -53,7 +53,7 @@ The browser extension is retired (kept in `legacy/`). Everything it did now live
   over (then releases after the 30 s grace) any lock the helper resumed with no quiz open; the
   helper finishes any unlock that did not complete (hosts file busy, policy write failed).
 - **Every unlock is reported** with `detail.reason`: `quiz_submitted`, `quiz_left`,
-  `quiz_tab_closed` (agent), `cap` (3-hour auto-unlock), `local_request` (any other caller).
-- No CORS on 127.0.0.1:8787; `max_minutes` is capped at 180; heartbeat every 120 s of wall time.
+  `quiz_tab_closed` (agent), `cap` (safety cap: quiz end + 15 min, 6 h if the end is unknown, never > 24 h), `quiz_submitted`/`quiz_ended` from the server (C9), `other_school`, `local_request` (any other caller).
+- No CORS on 127.0.0.1:8787; a `/lock` can only ask for a shorter cap; heartbeat every 120 s of wall time.
 - SIDs instead of English account names (works on non-English Windows).
 - Off-Windows logic tests: `pwsh tests/test_windows_logic.ps1`.

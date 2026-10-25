@@ -56,7 +56,11 @@ const pyPol = readFileSync(join(DIR, "../mac/browser-policy.py"), "utf8");
 const psPol = readFileSync(join(DIR, "../windows/browser-policy.ps1"), "utf8");
 const polMust = ["google.com/search@udm=14", "GeminiSettings", "GenAiDefaultSettings", "DnsOverHttpsMode",
               "ExtensionInstallBlocklist", "bing.com/search", "duckduckgo.com", "copilot.microsoft.com",
-              "udm=14&q={searchTerms}", "WebsiteFilter", "browser.ml.chat.enabled"];
+              "udm=14&q={searchTerms}", "WebsiteFilter", "browser.ml.chat.enabled",
+              // round 2: Brave Tor/VPN, Firefox Smart Window + built-in VPN, safe-extension allowlist,
+              // DuckDuckGo no-AI site, every blocklist host mirrored into the browsers' own filters
+              "TorDisabled", "BraveVPNDisabled", "SmartWindow", "SidebarChatbot", "IPProtectionAvailable",
+              "ExtensionInstallAllowlist", "noai.duckduckgo.com", "nngceckbapebfimnlniiiahkandclblb"];
 let polMiss = polMust.filter(m => !pyPol.includes(m));
 polMiss.length === 0 ? ok("mac policy has every rule") : bad("mac policy missing: " + polMiss.join(", "));
 polMiss = polMust.filter(m => !psPol.includes(m));
@@ -64,6 +68,52 @@ polMiss.length === 0 ? ok("windows policy has every rule") : bad("windows policy
 // bing.com / huggingface.co must never be whole-domain blocked (only their AI paths).
 const over = ["\"bing.com\"", "\"huggingface.co\""].filter(d => pyPol.includes(d) || psPol.includes(d));
 over.length === 0 ? ok("no whole-domain over-block of bing.com / huggingface.co") : bad("over-blocks: " + over.join(", "));
+
+console.log("T7b Office Copilot + Notepad AI policies");
+pyPol.includes("OfficeExperiencesAnalyzingContentPreference") && pyPol.includes('"com.microsoft.office"')
+  ? ok("mac: Office 'experiences that analyze content' off (com.microsoft.office)") : bad("mac Office Copilot policy missing");
+/office\\16\.0\\common\\privacy" "usercontentdisabled" 2/.test(psPol)
+  ? ok("windows: per-user Office usercontentdisabled = 2") : bad("windows Office Copilot policy missing");
+psPol.includes('"$PolicyRoot\\WindowsNotepad" "DisableAIFeatures" 1')
+  ? ok("windows: Notepad DisableAIFeatures = 1") : bad("windows Notepad AI policy missing");
+!/"Default"\s*:\s*\{/.test(pyPol) && !/AIControls\\Default/.test(psPol)
+  ? ok("Firefox AIControls never uses Default (it deletes on-device models)") : bad("AIControls Default used");
+
+console.log("T9 every hosts entry is a valid host name; path entries are host/path");
+const HOST = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
+const hostsE = mac.filter(d => !d.includes("/")), pathsE = mac.filter(d => d.includes("/"));
+const badHost = hostsE.filter(d => !HOST.test(d) || /^[0-9.]+$/.test(d));
+badHost.length === 0 ? ok(`all ${hostsE.length} hosts entries are valid lowercase host names`) : bad("invalid host entries: " + badHost.join(", "));
+// the exact filters the engines and policies use (Mac core sed/grep, browser-policy.py path regex)
+const MAC_HOSTS = /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/, PY_PATH = /^[A-Za-z0-9.-]+\.[A-Za-z]{2,}\/[A-Za-z0-9._~%\/-]*$/;
+const lost = hostsE.filter(d => !MAC_HOSTS.test(d));
+lost.length === 0 ? ok("every host entry reaches the Mac hosts block") : bad("dropped by the Mac hosts filter: " + lost.join(", "));
+const badPath = pathsE.filter(d => !PY_PATH.test(d) || !HOST.test(d.split("/")[0]));
+badPath.length === 0 ? ok(`all ${pathsE.length} path entries are routed to the browser policies (${pathsE.join(", ")})`)
+  : bad("path entries the policies would drop: " + badPath.join(", "));
+
+console.log("T10 open-note resources are never blocked (hosts entries also match subdomains in Chromium)");
+const notes = ["docs.google.com", "drive.google.com", "www.google.com", "quizlet.com", "studocu.com", "www.studocu.com",
+  "knowunity.com", "onedrive.live.com", "www.office.com", "m365.cloud.microsoft", "www.onenote.com", "github.com",
+  "huggingface.co", "www.bing.com", "x.com", "brightspace.usc.edu", "usc.brightspace.com", "www.khanacademy.org",
+  "www.desmos.com", "en.wikipedia.org", "www.notion.so", "outlook.office.com", "www.icloud.com", "superhuman.com"];
+const hits = notes.filter(n => hostsE.some(e => n === e || n.endsWith("." + e)));
+hits.length === 0 ? ok(`none of ${notes.length} notes/Brightspace hosts is blocked`) : bad("over-block: " + hits.join(", "));
+!hostsE.includes("m365.cloud.microsoft") && pathsE.includes("m365.cloud.microsoft/chat")
+  ? ok("Microsoft 365 home stays open; only its Copilot Chat page is blocked") : bad("m365.cloud.microsoft handling wrong");
+
+console.log("T11 round-2 coverage present (homework AI, coding AI, regional, model APIs, remote web clients, DoH)");
+const need2 = ["gauthmath.com","questionai.com","studyx.ai","brainly.com","chegg.com","coursehero.com","genspark.ai",
+  "lumo.proton.me","yuanbao.tencent.com","qianwen.com","dola.com","api2.cursor.sh","api.githubcopilot.com","github.com/copilot",
+  "windsurf.com","cloudcode-pa.googleapis.com","dashscope.aliyuncs.com","api.fireworks.ai","router.huggingface.co",
+  "chat.webllm.ai","remotedesktop.google.com","sider.ai","harpa.ai","google.com/ai","google.com/aimode",
+  "edgeservices.bing.com","mask.icloud.com","dns.adguard-dns.com","doh.mullvad.net"];
+const miss2 = need2.filter(d => !mac.includes(d));
+miss2.length === 0 ? ok(`all ${need2.length} round-2 entries present`) : bad("missing: " + miss2.join(", "));
+
+console.log("T12 browser filters stay under their 1000-entry limits (Chromium URLBlocklist, Firefox WebsiteFilter)");
+const est = hostsE.length + 2 * pathsE.length + 20;
+est < 900 ? ok(`~${est} entries per browser list (limit 1000, room left for a school's own)`) : bad(`~${est} entries: too close to 1000`);
 
 console.log("T8 the server sends the full list (helpers refresh from it every 12 h)");
 const route = readFileSync(join(DIR, "../cloudflare/functions/api/[[route]].js"), "utf8");

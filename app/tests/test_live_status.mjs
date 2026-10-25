@@ -30,7 +30,8 @@ const db = { prepare(sql) { const st = sqlite.prepare(sql); let args = [];
     first: async () => st.get(...args) ?? null, all: async () => ({ results: st.all(...args) }),
     run: async () => ({ meta: { changes: Number(st.run(...args).changes) } }), _run: () => st.run(...args) };
   return s; }, async batch(sts) { for (const s of sts) s._run(); } };
-const env = { DB: db, TEACHER_KEY: "live-admin-key", REQUIRE_SIGNED: "1" };
+// LIVE_CACHE_MS=0: this suite edits the database directly between /live calls (no shared cache).
+const env = { DB: db, TEACHER_KEY: "live-admin-key", REQUIRE_SIGNED: "1", LIVE_CACHE_MS: "0" };
 const sign = (key, path, ts, raw) => createHmac("sha256", key).update(`POST\n${path}\n${ts}\n${createHash("sha256").update(raw).digest("hex")}`).digest("hex");
 async function api(path, body, dev) {
   const raw = JSON.stringify(body ?? {}), h = { "Content-Type": "application/json" };
@@ -85,13 +86,16 @@ for (const src of ["helper", undefined]) {
   eq(`source '${src}' -> helper_seen + last_lock refreshed`, Date.now() - Date.parse(c.helper_seen) < 5_000 && Date.now() - Date.parse(c.last_lock) < 5_000, true);
 }
 
-console.log("T4 the 60s password gate is met by the helper's beat right before asking");
+console.log("T4 C1: the helper's SIGNED password request is itself fresh proof of the lock (no heartbeat first)");
 sqlite.prepare("INSERT INTO quizzes (quiz_id,password,created_at,qi,ou,lock_id) VALUES ('LIVEQ','LQ-LIVE1234',?,?,?,?)").run(iso(0), QI, OU, Q);
 const url = `https://usc.brightspace.com/d2l/lms/quizzing/user/quiz_summary.d2l?qi=${QI}&ou=${OU}`;
 sqlite.prepare("UPDATE locks SET last_lock=? WHERE device_id=?").run(iso(90_000), dev.id);
-eq("a lock 90s old gets no password", (await api("/password", { url }, dev)).data?.password ?? null, null);
-await api("/report", { event: "heartbeat", quiz_id: Q, source: "helper" }, dev);
-eq("after a fresh helper beat the password is released", (await api("/password", { url }, dev)).data?.password, "LQ-LIVE1234");
+eq("a signed request on a 90s-old lock row gets the password", (await api("/password", { url }, dev)).data?.password, "LQ-LIVE1234");
+eq("... and refreshes the lock row itself", Date.now() - Date.parse(cols().last_lock) < 5_000, true);
+sqlite.prepare("DELETE FROM locks WHERE device_id=?").run(dev.id);
+eq("no lock row at all -> no password", (await api("/password", { url }, dev)).data?.password ?? null, null);
+await api("/report", { event: "lock", quiz_id: Q }, dev);
+eq("after a lock the password is released", (await api("/password", { url }, dev)).data?.password, "LQ-LIVE1234");
 
 console.log("");
 console.log(`RESULT: ${pass} passed, ${fail} failed`);

@@ -1,6 +1,10 @@
 # LOCKqz browser policy (Windows). No extension, no Web Store, no domain join.
 # Writes HKLM policies that Chrome, Edge, Brave and Firefox honour on any PC, ONLY while a
-# quiz is locked, plus Windows Copilot / Recall / Click to Do off.
+# quiz is locked, plus Windows Copilot / Recall / Click to Do / Notepad AI off, and (per signed-in
+# user, HKU) Office "connected experiences that analyze content" off = Copilot off in Word, Excel,
+# PowerPoint, OneNote, Outlook (Office reads it when an app starts).
+# Every blocklist host is also blocked inside the browsers (URLBlocklist / WebsiteFilter), so a
+# browser-level bypass of the hosts file (--host-resolver-rules, proxy add-on, Tor) still fails.
 #   powershell -ExecutionPolicy Bypass -File .\browser-policy.ps1 lock|unlock|status
 # NEVER DESTROYS the student's or their organisation's own policies:
 #   * before the first change, every value LOCKqz will touch is saved to
@@ -33,7 +37,8 @@ $SearchBlock = @("google.com/search","google.com/webhp","bing.com/search","bing.
                  "copilot.microsoft.com","duckduckgo.com","duck.ai","search.yahoo.com","search.brave.com",
                  "you.com","kagi.com","yandex.com/search","ecosia.org/search","startpage.com")
 # Google verticals with no AI answer: Web (udm=14), Images, News, Video, Books.
-$SearchAllow = @("google.com/search@udm=14","google.com/search@udm=2","google.com/search@udm=12",
+# + DuckDuckGo's no-AI site (Search Assist, Duck.ai and AI images off).
+$SearchAllow = @("noai.duckduckgo.com","google.com/search@udm=14","google.com/search@udm=2","google.com/search@udm=12",
                  "google.com/search@udm=7","google.com/search@udm=36","google.com/search@tbm=isch",
                  "google.com/search@tbm=nws","google.com/search@tbm=vid","google.com/search@tbm=bks")
 $FfBlock = @("https://www.google.com/search*","https://www.google.com/webhp*","https://www.bing.com/*search*",
@@ -44,7 +49,14 @@ $FfAllow = @("https://www.google.com/search?*udm=14*","https://www.google.com/se
              "https://www.google.com/search?*udm=7*","https://www.google.com/search?*udm=36*","https://www.google.com/search?*tbm=isch*",
              "https://www.google.com/search?*tbm=nws*","https://www.google.com/search?*tbm=vid*","https://www.google.com/search?*tbm=bks*")
 # Firefox AI prefs, set through the documented Preferences policy (one REG_MULTI_SZ JSON value).
-$FfPrefs = [ordered]@{ "browser.ml.chat.enabled" = $false; "browser.ml.enable" = $false; "browser.ml.linkPreview.enabled" = $false }
+$FfPrefs = [ordered]@{ "browser.ml.chat.enabled" = $false; "browser.ml.enable" = $false; "browser.ml.linkPreview.enabled" = $false; "browser.smartwindow.enabled" = $false }
+# Extensions that stay ON during the quiz (no AI in them): Bitwarden, 1Password, LastPass, Dashlane,
+# Proton Pass, iCloud Passwords, Google Docs Offline, Zotero Connector (Chrome Web Store ids) and
+# Bitwarden, 1Password, LastPass, Dashlane (Edge Add-ons ids). Fixed list, never read from the user.
+$SafeExtensions = @("nngceckbapebfimnlniiiahkandclblb","aeblfdkhhhdcdjpifhhbdiojplfjncoa","hdokiejnpimakedhajhdlcegeplioahd",
+                    "fdjamakpfbbddfjaooikfcpapjohcfmg","ghmbeldphafepmbegfdlkpapadhbakde","pejdijmoenmkgeppbflobdenhhabjlaj",
+                    "ghbmnnjooekpmoecnnnilnnbdlolhkhi","ekhagklcjbdpajgpjgmbionohlpdbjgc","jbkfoedolllekgbhcbcoahefnbanhhlh",
+                    "dppgmdbiimibapkepcbdbmkaabgiofem","bbcinlkgjjkejfdpemiealijmmooekmp","gehmmocbbkpblljhkekmfhjpfbkclbph")
 
 # ---------------- registry layer (the only code that touches the registry) ----------------
 function RG-KeyExists($path) { Test-Path -LiteralPath $path }
@@ -67,22 +79,59 @@ function Get-PathEntries {
   if (-not (Test-Path $BlockFile)) { return @() }
   @(Get-Content $BlockFile | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith("#") -and $_ -like "*/*" })
 }
-function Get-PolicyPlan {
+function Get-HostEntries {
+  # Plain host lines of blocklist.txt (the hosts-file entries), mirrored into the browsers' own URL
+  # filters. Chromium matches subdomains too. URLBlocklist / WebsiteFilter take <= 1000 entries.
+  if (-not (Test-Path $BlockFile)) { return @() }
+  @(Get-Content $BlockFile | ForEach-Object { $_.Trim().ToLower() } | Where-Object { $_ -match '^[a-z0-9-]+(\.[a-z0-9-]+)+$' } | Select-Object -Unique)
+}
+function Get-ConsoleUserSids {
+  # SIDs of the users signed in at this PC (owners of explorer.exe), for per-user (HKU) policies.
+  $out = @()
+  try {
+    foreach ($p in @(Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" -ErrorAction Stop)) {
+      try { $o = Invoke-CimMethod -InputObject $p -MethodName GetOwnerSid -ErrorAction Stop; if ($o.Sid) { $out += [string]$o.Sid } } catch { }
+    }
+  } catch { }
+  @($out | Where-Object { $_ -match '^S-1-(5-21|12-1)-[0-9-]+$' } | Select-Object -Unique)
+}
+function Test-DirectInternet {
+  # $true when the internet answers WITHOUT a proxy (any HTTP reply counts, even an error page).
+  try {
+    $r = [Net.WebRequest]::Create("http://www.gstatic.com/generate_204"); $r.Proxy = $null; $r.Timeout = 6000
+    $resp = $r.GetResponse(); $resp.Close(); return $true
+  } catch [Net.WebException] { if ($_.Exception.Response) { return $true }; return $false } catch { return $false }
+}
+function Test-KeepProxy {
+  # Keep the browsers' proxy setting ONLY when a signed-in user has a system proxy AND the internet
+  # does not answer without it (campus / workplace proxy): forcing "direct" would stop Brightspace.
+  $any = $false
+  foreach ($sid in Get-ConsoleUserSids) {
+    $is = "Registry::HKEY_USERS\$sid\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+    $pe = RG-Read $is "ProxyEnable"; $ac = RG-Read $is "AutoConfigURL"
+    if (($pe -and ([int]$pe.value) -eq 1) -or ($ac -and [string]$ac.value)) { $any = $true }
+  }
+  if (-not $any) { return $false }
+  return (-not (Test-DirectInternet))
+}
+function Get-PolicyPlan([bool]$KeepProxy = $false) {
   # Every change LOCKqz makes, as data: @{ op = "v"; path; name; value; kind } | @{ op = "list"; path; items }
-  # | @{ op = "ffprefs"; path; name; prefs }.
+  # | @{ op = "rlist"; path; items } (list REPLACED for the quiz, restored after) | @{ op = "ffprefs"; path; name; prefs }.
   $paths = Get-PathEntries
-  $cBlock = @($SearchBlock + $paths | Select-Object -Unique)
-  $fBlock = @($FfBlock + @($paths | ForEach-Object { "*://*." + $_ + "*" }) | Select-Object -Unique)
+  $hosts = Get-HostEntries
+  $cBlock = @($SearchBlock + $paths + $hosts | Select-Object -Unique)
+  $fBlock = @($FfBlock + @($paths | ForEach-Object { "*://*." + $_ + "*" }) + @($hosts | ForEach-Object { "*://*." + $_ + "/*" }) | Select-Object -Unique)
   $plan = New-Object System.Collections.ArrayList
   function V($p, $n, $v, $k = "DWord") { [void]$plan.Add(@{ op = "v"; path = $p; name = $n; value = $v; kind = $k }) }
   function L($p, $items) { [void]$plan.Add(@{ op = "list"; path = $p; items = @($items) }) }
+  function RL($p, $items) { [void]$plan.Add(@{ op = "rlist"; path = $p; items = @($items) }) }
   foreach ($root in $Chromium.Keys) {
     V $root $Mark 1
     V $root "GenAiDefaultSettings" 2
     V $root "GeminiSettings" 1
     V $root "BuiltInAIAPIsEnabled" 0
     V $root "DnsOverHttpsMode" "off" "String"
-    V $root "ProxyMode" "direct" "String"   # a proxy would resolve AI sites remotely, past the hosts block
+    if (-not $KeepProxy) { V $root "ProxyMode" "direct" "String" }   # a proxy would resolve AI sites remotely, past the hosts block
     V $root "DefaultSearchProviderEnabled" 1
     V $root "DefaultSearchProviderName" "Google (Web)" "String"
     V $root "DefaultSearchProviderSearchURL" "https://www.google.com/search?udm=14&q={searchTerms}" "String"
@@ -91,40 +140,60 @@ function Get-PolicyPlan {
     L "$root\URLAllowlist" $SearchAllow
     # Chromium only DISABLES blocklisted extensions and re-enables them when the entry is removed.
     L "$root\ExtensionInstallBlocklist" @("*")
+    # Only the fixed safe list is exempt during the quiz (an existing allowlist could exempt an AI
+    # extension): replaced for the quiz, put back exactly at unlock.
+    RL "$root\ExtensionInstallAllowlist" $SafeExtensions
     if ($Chromium[$root] -eq "edge") {
       V $root "HubsSidebarEnabled" 0; V $root "CopilotCDPPageContext" 0
       V $root "EdgeEntraCopilotPageContext" 0; V $root "ComposeInlineEnabled" 0
       V $root "Microsoft365CopilotChatIconEnabled" 0; V $root "GenAILocalFoundationalModelSettings" 1
     }
-    if ($Chromium[$root] -eq "brave") { V $root "BraveAIChatEnabled" 0 }
+    # Brave: Leo AI off; Tor windows and Brave VPN off (both look names up remotely, past hosts).
+    if ($Chromium[$root] -eq "brave") { V $root "BraveAIChatEnabled" 0; V $root "TorDisabled" 1; V $root "BraveVPNDisabled" 1 }
   }
   V $Firefox $Mark 1
   V "$Firefox\DNSOverHTTPS" "Enabled" 0
   V "$Firefox\DNSOverHTTPS" "Locked" 1
-  V "$Firefox\Proxy" "Mode" "none" "String"
-  V "$Firefox\Proxy" "Locked" 1
+  if (-not $KeepProxy) { V "$Firefox\Proxy" "Mode" "none" "String"; V "$Firefox\Proxy" "Locked" 1 }
+  V $Firefox "IPProtectionAvailable" 0   # Firefox's built-in VPN (149+)
   L "$Firefox\WebsiteFilter\Block" $fBlock
   L "$Firefox\WebsiteFilter\Exceptions" $FfAllow
-  # GenerativeAI (Firefox 144+): chatbot, link previews, smart tab groups off.
-  foreach ($n in @("Enabled","Chatbot","LinkPreviews","TabGroups")) { V "$Firefox\GenerativeAI" $n 0 }
+  # GenerativeAI (Firefox 144+): chatbot, link previews, smart tab groups, Smart Window off.
+  # Firefox IGNORES GenerativeAI when AIControls is set, so AIControls repeats the chatbot + Smart Window.
+  foreach ($n in @("Enabled","Chatbot","LinkPreviews","TabGroups","SmartWindow")) { V "$Firefox\GenerativeAI" $n 0 }
   V "$Firefox\GenerativeAI" "Locked" 1
-  # AIControls (Firefox 149+): only the cloud sidebar chatbot ("blocked" also deletes downloaded
-  # on-device models for the other features, so those are left alone).
-  V "$Firefox\AIControls\SidebarChatbot" "Value" "blocked" "String"
-  V "$Firefox\AIControls\SidebarChatbot" "Locked" 1
+  # AIControls (Firefox 149+): sidebar chatbot + Smart Window. Never "Default" ("blocked" deletes
+  # downloaded on-device models); the on-device features are off through the prefs ($FfPrefs).
+  foreach ($f in @("SidebarChatbot","SmartWindow")) {
+    V "$Firefox\AIControls\$f" "Value" "blocked" "String"
+    V "$Firefox\AIControls\$f" "Locked" 1
+  }
   [void]$plan.Add(@{ op = "ffprefs"; path = $Firefox; name = "Preferences"; prefs = $FfPrefs })
   V "$PolicyRoot\Microsoft\Windows\WindowsCopilot" "TurnOffWindowsCopilot" 1
   V "$PolicyRoot\Microsoft\Windows\WindowsAI" "DisableAIDataAnalysis" 1
   V "$PolicyRoot\Microsoft\Windows\WindowsAI" "DisableClickToDo" 1
+  # Notepad Write / Rewrite / Summarize (policy DisableAIFeaturesInNotepad, Notepad 11.2503.16+).
+  V "$PolicyRoot\WindowsNotepad" "DisableAIFeatures" 1
+  # Office Copilot (per user): "connected experiences that analyze content" = 2 (disabled).
+  foreach ($sid in Get-ConsoleUserSids) {
+    if (RG-KeyExists "Registry::HKEY_USERS\$sid\Software") {
+      V "Registry::HKEY_USERS\$sid\Software\Policies\Microsoft\office\16.0\common\privacy" "usercontentdisabled" 2
+    }
+  }
   return ,$plan
 }
 
 function Get-Ancestors($path) {
   # "HKLM:\SOFTWARE\Policies\A\B" -> @("...\Policies\A", "...\Policies\A\B"), never above Policies.
+  # A user's "Registry::HKEY_USERS\<SID>\Software\Policies\..." also lists that Policies key itself.
   $out = @()
-  if (-not $path.StartsWith($PolicyRoot + "\")) { return $out }
-  $cur = $PolicyRoot
-  foreach ($seg in $path.Substring($PolicyRoot.Length + 1).Split("\")) { $cur = "$cur\$seg"; $out += $cur }
+  $m = [regex]::Match([string]$path, '^(Registry::HKEY_USERS\\S-1-[0-9-]+\\Software\\Policies)(\\.+)?$')
+  if ($m.Success) { $root = $m.Groups[1].Value; $out += $root }
+  elseif ($path.StartsWith($PolicyRoot + "\")) { $root = $PolicyRoot }
+  else { return $out }
+  if ($path.Length -le $root.Length) { return $out }
+  $cur = $root
+  foreach ($seg in $path.Substring($root.Length + 1).Split("\")) { $cur = "$cur\$seg"; $out += $cur }
   return $out
 }
 function Ensure-Key($path) { foreach ($k in Get-Ancestors $path) { if (-not (RG-KeyExists $k)) { RG-CreateKey $k } } }
@@ -137,13 +206,13 @@ function New-PolicyBackup($plan) {
   $seenK = @{}; $seenV = @{}
   foreach ($op in $plan) {
     foreach ($k in Get-Ancestors $op.path) { if (-not $seenK.ContainsKey($k)) { $seenK[$k] = 1; if (-not (RG-KeyExists $k)) { [void]$keys.Add($k) } } }
-    if ($op.op -eq "list") { [void]$lists.Add(@{ path = $op.path; values = @(Snapshot $op.path) }); continue }
+    if ($op.op -eq "list" -or $op.op -eq "rlist") { [void]$lists.Add(@{ path = $op.path; values = @(Snapshot $op.path) }); continue }
     $id = $op.path + "|" + $op.name
     if ($seenV.ContainsKey($id)) { continue }
     $seenV[$id] = 1
     [void]$vals.Add(@{ path = $op.path; name = $op.name; prev = (RG-Read $op.path $op.name) })
   }
-  return @{ version = 1; created_keys = @($keys); values = @($vals); lists = @($lists) }
+  return @{ version = 1; created_keys = @($keys); values = @($vals); lists = @($lists); keep_proxy = $false }
 }
 function Save-Backup($b) {
   try {
@@ -184,6 +253,13 @@ function Apply-Op($op) {
       $have = @(Snapshot $op.path)
       $data = @($have | ForEach-Object { [string]$_.value })
       $n = 0; foreach ($h in $have) { $i = 0; if ([int]::TryParse([string]$h.name, [ref]$i) -and $i -gt $n) { $n = $i } }
+      foreach ($it in $op.items) { if ($data -notcontains $it) { $n++; RG-Write $op.path "$n" $it "String"; $data += $it } }
+    }
+    "rlist" {
+      # Only our entries during the quiz; the backup holds theirs and Restore-Backup puts them back.
+      foreach ($h in @(Snapshot $op.path)) { if ($op.items -notcontains [string]$h.value) { RG-Remove $op.path $h.name } }
+      $data = @(Snapshot $op.path | ForEach-Object { [string]$_.value })
+      $n = 0; foreach ($h in @(Snapshot $op.path)) { $i = 0; if ([int]::TryParse([string]$h.name, [ref]$i) -and $i -gt $n) { $n = $i } }
       foreach ($it in $op.items) { if ($data -notcontains $it) { $n++; RG-Write $op.path "$n" $it "String"; $data += $it } }
     }
     "ffprefs" { RG-Write $op.path $op.name ([string[]]@(Merge-FfPrefs (RG-Read $op.path $op.name) $op.prefs)) "MultiString" }
@@ -251,17 +327,19 @@ function Get-FirefoxFamilyDirs {
   }
   return $dirs
 }
-function FirefoxPoliciesJson([string]$existing) {
+function FirefoxPoliciesJson([string]$existing, [bool]$KeepProxy = $false) {
   $paths = Get-PathEntries
+  $hosts = Get-HostEntries
   $prefs = @{}; foreach ($k in $FfPrefs.Keys) { $prefs[$k] = @{ Value = $FfPrefs[$k]; Status = "locked" } }
   $ours = @{
       DNSOverHTTPS = @{ Enabled = $false; Locked = $true }
-      Proxy = @{ Mode = "none"; Locked = $true }
-      WebsiteFilter = @{ Block = @($FfBlock + @($paths | ForEach-Object { "*://*." + $_ + "*" })); Exceptions = $FfAllow }
-      GenerativeAI = @{ Enabled = $false; Chatbot = $false; LinkPreviews = $false; TabGroups = $false; Locked = $true }
-      AIControls = @{ SidebarChatbot = @{ Value = "blocked"; Locked = $true } }
+      IPProtectionAvailable = $false
+      WebsiteFilter = @{ Block = @(@($FfBlock + @($paths | ForEach-Object { "*://*." + $_ + "*" }) + @($hosts | ForEach-Object { "*://*." + $_ + "/*" })) | Select-Object -Unique); Exceptions = $FfAllow }
+      GenerativeAI = @{ Enabled = $false; Chatbot = $false; LinkPreviews = $false; TabGroups = $false; SmartWindow = $false; Locked = $true }
+      AIControls = @{ SidebarChatbot = @{ Value = "blocked"; Locked = $true }; SmartWindow = @{ Value = "blocked"; Locked = $true } }
       Preferences = $prefs
   }
+  if (-not $KeepProxy) { $ours.Proxy = @{ Mode = "none"; Locked = $true } }
   $base = $null
   if ($existing) { try { $base = $existing | ConvertFrom-Json } catch { $base = $null } }
   if (-not $base) { $base = New-Object PSObject }
@@ -271,7 +349,7 @@ function FirefoxPoliciesJson([string]$existing) {
   return ($base | ConvertTo-Json -Depth 12)
 }
 function Write-Utf8NoBom($path, $text) { [IO.File]::WriteAllText($path, $text, (New-Object Text.UTF8Encoding $false)) }
-function Apply-FirefoxForkFiles {
+function Apply-FirefoxForkFiles([bool]$KeepProxy = $false) {
   foreach ($d in Get-FirefoxFamilyDirs) {
     try {
       $dist = Join-Path $d "distribution"
@@ -283,7 +361,7 @@ function Apply-FirefoxForkFiles {
         if ($existing -match '"_lockqz"') { continue }   # already ours (lock re-run)
         Copy-Item $pj "$pj.lockqzbak" -Force -ErrorAction Stop
       }
-      Write-Utf8NoBom $pj (FirefoxPoliciesJson $existing)
+      Write-Utf8NoBom $pj (FirefoxPoliciesJson $existing $KeepProxy)
     } catch { }
   }
 }
@@ -302,16 +380,36 @@ function Remove-FirefoxForkFiles {
 }
 
 function Do-Lock {
-  $plan = Get-PolicyPlan
   # Back up FIRST, and only once per quiz: a re-run must never back up LOCKqz's own values.
-  if (-not (Load-Backup)) {
+  $b = Load-Backup
+  if (-not $b) {
+    $keep = [bool](Test-KeepProxy)   # decided once per quiz, kept in the backup
+    $plan = Get-PolicyPlan $keep
     if (Test-Path $BackupFile) { Remove-Item $BackupFile -Force }   # unreadable leftover
-    if (-not (Save-Backup (New-PolicyBackup $plan))) { "LOCKqz browser policy: FAILED (backup could not be written; nothing changed)"; return }
+    $nb = New-PolicyBackup $plan; $nb.keep_proxy = $keep
+    if (-not (Save-Backup $nb)) { "LOCKqz browser policy: FAILED (backup could not be written; nothing changed)"; return }
+  } else {
+    $keep = [bool]$b.keep_proxy
+    $plan = Get-PolicyPlan $keep
+    # Values this quiz's backup does not cover yet (a user who signed in later, a policy added by an
+    # update while a restore was pending) were never set by LOCKqz, so their current state is the
+    # owner's: add it to the backup first. If that cannot be saved, those values are left alone.
+    $have = @{}
+    foreach ($v in @($b.values)) { $have["v|" + [string]$v.path + "|" + [string]$v.name] = 1 }
+    foreach ($l in @($b.lists)) { $have["l|" + [string]$l.path] = 1 }
+    $missing = @($plan | Where-Object { if ($_.op -eq "list" -or $_.op -eq "rlist") { -not $have.ContainsKey("l|" + $_.path) } else { -not $have.ContainsKey("v|" + $_.path + "|" + $_.name) } })
+    if ($missing.Count -gt 0) {
+      $add = New-PolicyBackup $missing
+      $nb = @{ version = 1; created_keys = @(@($b.created_keys) + @($add.created_keys) | Where-Object { $_ } | Select-Object -Unique)
+               values = @(@($b.values) + @($add.values)); lists = @(@($b.lists) + @($add.lists)); keep_proxy = $keep }
+      if (-not (Save-Backup $nb)) { $plan = @($plan | Where-Object { $missing -notcontains $_ }) }
+    }
   }
   $fails = 0
   foreach ($op in $plan) { try { Apply-Op $op } catch { $fails++ } }
-  Apply-FirefoxForkFiles
-  if ($fails) { "LOCKqz browser policy: LOCKED ($fails values could not be set)" } else { "LOCKqz browser policy: LOCKED" }
+  Apply-FirefoxForkFiles $keep
+  $note = ""; if ($keep) { $note = " (network needs its proxy: browser proxy setting kept)" }
+  if ($fails) { "LOCKqz browser policy: LOCKED ($fails values could not be set)$note" } else { "LOCKqz browser policy: LOCKED$note" }
 }
 
 function Do-Unlock {

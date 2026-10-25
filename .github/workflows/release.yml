@@ -198,7 +198,7 @@ jobs:
           umask 077; printf '%s\n' "$UPDATE_KEY" > "$RUNNER_TEMP/update_key.pem"
           python3 app/release/make-manifest.py --key "$RUNNER_TEMP/update_key.pem" --out app/cloudflare/public/download
           rm -f "$RUNNER_TEMP/update_key.pem"
-          cp app/mac/install.sh app/mac/uninstall.sh app/windows/install.ps1 app/cloudflare/public/
+          cp app/mac/install.sh app/mac/uninstall.sh app/windows/install.ps1 app/windows/uninstall.ps1 app/cloudflare/public/
           ls -la app/cloudflare/public/download app/cloudflare/public/download/mac app/cloudflare/public/download/windows
       - name: Deploy (schema + migrations + site + API + teacher site + legacy forwarders)
         if: steps.chk.outputs.ok == 'true'
@@ -212,5 +212,17 @@ jobs:
           set -e
           curl -fsS -A "LOCKqz/ci" https://lockqz.pages.dev/download/update.json | head -c 200; echo
           curl -fsS -A "LOCKqz/ci" https://lockqz.pages.dev/api/blocklist | python3 -c 'import sys,json; d=json.load(sys.stdin)["domains"]; assert len(d)>=90, len(d); print("blocklist ok:", len(d))'
-          curl -fsS -A "LOCKqz/ci" -o /dev/null -w "install.sh %{http_code}\n" https://lockqz.pages.dev/install.sh
-          curl -fsS -A "LOCKqz/ci" -o /dev/null -w "lockqz-mac.pkg %{http_code}\n" https://lockqz.pages.dev/download/lockqz-mac.pkg
+          # Real content, not just "200": a deploy without installers serves the HTML page instead.
+          t=$(mktemp -d)
+          magic(){ curl -fsSL -A "LOCKqz/ci" -o "$t/f" -D "$t/h" "$1"; ct=$(grep -i '^content-type:' "$t/h" | tail -1 | tr -d '\r')
+                   [ "$(head -c ${#2} "$t/f")" = "$2" ] || { echo "::error::$1 is not $3 ($ct)"; exit 1; }
+                   if echo "$ct" | grep -qi 'text/html'; then echo "::error::$1 served as HTML"; exit 1; fi; echo "ok $1 ($ct)"; }
+          magic https://lockqz.pages.dev/download/lockqz-mac.pkg 'xar!' "a .pkg"
+          magic https://lockqz.pages.dev/download/lockqz-win.exe 'MZ' "an .exe"
+          magic https://lockqz.pages.dev/install.sh '#!' "a shell script"
+          for f in install.ps1 uninstall.sh uninstall.ps1; do curl -fsSL -A "LOCKqz/ci" -o "$t/f" "https://lockqz.pages.dev/$f"; ! grep -qi '<html' "$t/f" || { echo "::error::$f is HTML"; exit 1; }; done
+          curl -fsS -A "LOCKqz/ci" -o "$t/u.json" https://lockqz.pages.dev/download/update.json
+          curl -fsS -A "LOCKqz/ci" -o "$t/u.sig" https://lockqz.pages.dev/download/update.sig
+          openssl base64 -d -A -in "$t/u.sig" -out "$t/u.bin"
+          openssl dgst -sha256 -verify app/mac/update.pub -signature "$t/u.bin" "$t/u.json"
+          for h in lockqz.pages.dev lockdownqz.pages.dev; do curl -fsS -A "LOCKqz/ci" "https://$h/api/version"; echo; done

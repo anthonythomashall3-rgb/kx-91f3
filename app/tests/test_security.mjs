@@ -28,7 +28,7 @@ function d1(sqlite) {
 const sqlite = new DatabaseSync(":memory:");
 sqlite.exec(readFileSync(join(CF, "schema.sql"), "utf8"));
 for (const m of ["migrate_012_bs_code.sql","migrate_013_sa_keep.sql","migrate_014_lockqz_off.sql","migrate_016_bs_user.sql"]) { try { sqlite.exec(readFileSync(join(CF, m), "utf8")); } catch (e) { /* already in schema.sql */ } }
-const env = { DB: d1(sqlite), TEACHER_KEY: "admin-key", REQUIRE_SIGNED: "1", ADMIN_EMAIL: "admin@usc.edu", ROT_SECRET: "test-rot-secret" };
+const env = { DB: d1(sqlite), TEACHER_KEY: "admin-key", REQUIRE_SIGNED: "1", ADMIN_EMAIL: "admin@usc.edu", ROT_SECRET: "test-rot-secret", LIVE_CACHE_MS: "0" };   // /live right after each event (sharing is tested in test_round2_api)
 const BASE = "https://lockqz.test";
 const sign = (key, path, ts, raw) => createHmac("sha256", key).update(`POST\n${path}\n${ts}\n${createHash("sha256").update(raw).digest("hex")}`).digest("hex");
 async function call(path, body, { teacher=null, sync=null, key=null, device=null, get=false } = {}) {

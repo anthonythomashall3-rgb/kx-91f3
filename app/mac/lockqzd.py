@@ -34,27 +34,74 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
+
+def _int(v, default):
+    try: return int(v)
+    except Exception: return default
+
+OLD_HOST, NEW_HOST = "lockdownqz.pages.dev", "lockqz.pages.dev"
+PLACEHOLDER_IDS = ("", "unknown", "set-at-install")
+
+def migrate_conf_text(raw):
+    """-> (new text, changes). The only two config changes the helper ever makes itself:
+    api_base on the retired lockdownqz.pages.dev address moves to lockqz.pages.dev, and a
+    placeholder device id (a package whose postinstall failed) gets a fresh 'mac-<uuid>'.
+    Every other key and value is kept as it is."""
+    c = json.loads(raw)
+    if not isinstance(c, dict): return raw, []
+    changes = []
+    if OLD_HOST in str(c.get("api_base") or ""):
+        c["api_base"] = str(c["api_base"]).replace(OLD_HOST, NEW_HOST); changes.append("api_base")
+    if str(c.get("device_id") or "").strip() in PLACEHOLDER_IDS:
+        import uuid
+        c["device_id"] = "mac-" + str(uuid.uuid4()); changes.append("device_id")
+    return (json.dumps(c, indent=2) + "\n" if changes else raw), changes
 
 def load_conf():
     for p in CONF_PATHS:
         try:
-            with open(p) as f: return json.load(f)
-        except Exception: pass
+            with open(p) as f: raw = f.read()
+            c = json.loads(raw)
+        except Exception: continue
+        try:
+            new, changes = migrate_conf_text(raw)
+            if changes:
+                # world-readable on purpose (the per-user agent reads it; it holds no secret)
+                _write_private(p, new, 0o644)
+                print("LOCKqzd: config updated (%s)" % ", ".join(changes), flush=True)
+                c = json.loads(new)
+        except Exception as e:
+            print("LOCKqzd: config migration skipped: %s" % e, flush=True)
+        return c
     return {}
+
+def _write_private(path, text, mode=0o600):
+    """Atomic write of a root-owned file; never follows a symlink planted at the temp name."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    try: os.unlink(tmp)
+    except FileNotFoundError: pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), mode)
+    with os.fdopen(fd, "w") as f: f.write(text)
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
 
 CONF = load_conf()
 PORT    = int(CONF.get("port", 8787))
 API     = CONF.get("api_base", "").rstrip("/")
 if API and not API.endswith("/api"): API += "/api"   # accept a bare site URL too
 DEVICE  = CONF.get("device_id", "unknown")
-CAP_MIN = 180                                  # absolute ceiling: no lock may ever outlive this
-def _int(v, default):
-    try: return int(v)
-    except Exception: return default
-MAX_MIN = max(1, min(_int(CONF.get("max_minutes", CAP_MIN), CAP_MIN), CAP_MIN))   # hard cap: auto-unlock after this
+# Safety cap (OWNER DECISION, round 2): AI comes back the moment the quiz is submitted; the cap is
+# only a failsafe for a broken agent. Quiz end known (from the server's /password answer) ->
+# end + 15 min; unknown -> 6 h; never more than 24 h. (The old fixed 3-hour cap and the config's
+# "max_minutes": 180 are gone; "cap_minutes" replaces the 6 h default, for tests only.)
+CEIL_MIN = 1440
+END_GRACE = 15 * 60
+CAP_MIN = max(1, min(_int(CONF.get("cap_minutes", 360), 360), CEIL_MIN))   # cap while the end is unknown
+MAX_MIN = CAP_MIN
 BEAT    = max(1, _int(CONF.get("beat_cycles", 60), 60))
 # Helper liveness ping, timed on the WALL CLOCK (a watcher cycle can take far longer than 5 s while
 # the engine closes apps): ~300 s apart (free-plan budget); the server's STALE is 660 s.
@@ -70,9 +117,14 @@ KEY_PATH = os.environ.get("LOCKQZ_KEY_PATH") or "/Library/Application Support/LO
 # must survive the helper being killed: on restart we resume an unexpired lock instead of unlocking.
 LOCKFILE = os.environ.get("LOCKQZ_LOCKFILE") or "/Library/Application Support/LOCKqz/active_lock.json"
 NET = {"skew": 0.0, "registered": False}   # skew: server clock minus ours, learned from a 401
-# Quiz that hit the hard cap (root-only record): the agent is told not to re-lock it, so a student is
-# never re-blocked for another 3 hours right after the safety cap released them.
+# Quiz released by the safety cap or by the server (submitted / ended / other school) - root-only
+# record: the agent is told not to re-lock it while its page stays open.
 CAPFILE = os.path.join(os.path.dirname(LOCKFILE), "capped.json")
+# A release is remembered at most this long (or until the agent reports the quiz page closed): after
+# that the same quiz - a new attempt, a makeup - always locks again.
+CAP_FORGET = max(60, _int(os.environ.get("LOCKQZ_CAP_FORGET", "1800"), 1800))
+# Last "install" report (C6): sent again only when the version or student changed, or after 24 h.
+INSTFILE = os.path.join(os.path.dirname(LOCKFILE), "install_report.json")
 
 # Loopback control token: random per install, never baked into the package. The master copy is
 # root-only (0600). Each console user gets a read-only copy in a root-owned folder (see
@@ -80,17 +132,6 @@ CAPFILE = os.path.join(os.path.dirname(LOCKFILE), "capped.json")
 TOKEN_FILE = os.environ.get("LOCKQZ_TOKEN_FILE") or "/Library/Application Support/LOCKqz/helper.token"
 TOKEN_DIR = os.environ.get("LOCKQZ_TOKEN_DIR") or "/Library/Application Support/LOCKqz/tokens"
 TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{16,128}")
-
-def _write_private(path, text, mode=0o600):
-    """Atomic write of a root-owned file; never follows a symlink planted at the temp name."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    try: os.unlink(tmp)
-    except FileNotFoundError: pass
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), mode)
-    with os.fdopen(fd, "w") as f: f.write(text)
-    os.chmod(tmp, mode)
-    os.replace(tmp, path)
 
 def load_token():
     try:
@@ -150,37 +191,74 @@ UPDATE_OK = bool(os.environ.get("LOCKQZ_UPDATE_DIR")) or HERE == "/Library/Appli
 PUBKEY = os.environ.get("LOCKQZ_UPDATE_PUB") or os.path.join(HERE, "update.pub")
 UPDATE_EVERY = max(12, int(os.environ.get("LOCKQZ_UPDATE_CYCLES", "4320")))   # 5 s cycles: 4320 = 6 h
 UPDATE_DELAY = float(os.environ.get("LOCKQZ_UPDATE_DELAY", "90"))           # seconds after start
+PENDING = os.path.join(UPDATE_DIR, ".pending")   # "this update has not proven it starts yet" (see lockqz-boot.sh)
+# Helper log (launchd's StandardOutPath). Rotated at 1 MB so it can never fill a disk.
+LOGFILE = os.environ.get("LOCKQZ_LOG") or (os.path.join(HERE, "lockqzd.log") if UPDATE_OK else "")
+LOG_MAX = int(os.environ.get("LOCKQZ_LOG_MAX", "1000000"))
 # Files an update may never touch: this install's identity and live state.
 UPDATE_NEVER = {"config.json", "device.key", "active_lock.json", "lockqzd.log", "developer.key",
                 "helper.token", "tokens", "capped.json", "policy-backup", "applicationaccess.backup.plist",
-                "applicationaccess.backup.plist.none", "hosts.backup", "status.json", "pf.enabled", "proxy.state"}
+                "applicationaccess.backup.plist.none", "hosts.backup", "status.json", "pf.enabled", "proxy.state",
+                "install_report.json", "lockqzd.log.1"}
 
 STATE = {"state": "unlocked", "quiz_id": None, "student": CONF.get("student"),
-         "locked_at": None, "locked_since": 0.0, "max_minutes": MAX_MIN,
-         "unlock_pending": False, "capped_quiz": None, "capped_at": 0.0}
+         "locked_at": None, "locked_since": 0.0, "max_minutes": MAX_MIN, "cap_at": 0.0, "end_known": False,
+         "unlock_pending": False, "capped_quiz": None, "capped_at": 0.0, "capped_reason": None}
 LOCK = threading.Lock()
 QUIZ_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 UNLOCK_REASONS = {"quiz_submitted", "quiz_left", "quiz_tab_closed"}   # what the agent may say
+SERVER_REASONS = {"quiz_submitted", "quiz_ended"}                     # C9: the server's unlock:true
+
+def parse_iso(s):
+    """ISO-8601 time from the server ('2026-10-25T21:00:00.000Z', '+00:00' offsets) -> unix seconds,
+    or None. Written out by hand: Apple's python 3.9 fromisoformat() does not take 'Z'."""
+    m = re.fullmatch(r"\s*(\d{4})-(\d\d)-(\d\d)[T ](\d\d):(\d\d)(?::(\d\d)(?:\.\d+)?)?\s*(Z|[+-]\d\d:?\d\d)?\s*", str(s or ""))
+    if not m: return None
+    import calendar
+    y, mo, d, h, mi, sec = (int(x or 0) for x in m.groups()[:6])
+    try: t = calendar.timegm((y, mo, d, h, mi, sec, 0, 0, 0))
+    except Exception: return None
+    z = m.group(7)
+    if z and z != "Z":
+        sign = -1 if z[0] == "-" else 1; z = z[1:].replace(":", "")
+        t -= sign * (int(z[:2]) * 3600 + int(z[2:]) * 60)
+    return float(t)
+
+def cap_for_end(locked_since, end_epoch, now, skew=0.0):
+    """New cap time for a lock once the server told us the quiz end (server clock), or None to keep
+    the current cap. end + 15 min, never more than 24 h after the lock started. An end that is already
+    over is ignored (the server's own quiz_ended unlock, C9, covers that case)."""
+    if end_epoch is None or not locked_since: return None
+    local_end = end_epoch - skew              # the server's clock -> this Mac's clock
+    if local_end + END_GRACE <= now: return None
+    return min(locked_since + CEIL_MIN * 60, local_end + END_GRACE)
 
 def save_lock(pending=False):
     try:
-        rec = {k: STATE[k] for k in ("quiz_id", "student", "locked_at", "locked_since", "max_minutes")}
+        rec = {k: STATE[k] for k in ("quiz_id", "student", "locked_at", "locked_since", "max_minutes", "cap_at", "end_known")}
         if pending: rec["unlock_pending"] = True
         _write_private(LOCKFILE, json.dumps(rec))
     except Exception as e:
         log("could not save lock record: %s" % e)
 
-def save_capped(qid):
-    STATE.update(capped_quiz=qid, capped_at=time.time())
-    try: _write_private(CAPFILE, json.dumps({"quiz_id": qid, "at": STATE["capped_at"]}))
+def save_capped(qid, reason="cap"):
+    STATE.update(capped_quiz=qid, capped_at=time.time(), capped_reason=reason)
+    try: _write_private(CAPFILE, json.dumps({"quiz_id": qid, "at": STATE["capped_at"], "reason": reason}))
     except Exception as e: log("could not save cap record: %s" % e)
+
+def forget_capped():
+    """Caller holds LOCK (or is single-threaded at start)."""
+    STATE.update(capped_quiz=None, capped_at=0.0, capped_reason=None)
+    try: os.unlink(CAPFILE)
+    except FileNotFoundError: pass
+    except Exception as e: log("could not remove cap record: %s" % e)
 
 def load_capped():
     try:
         with open(CAPFILE) as f: rec = json.load(f)
         at = float(rec.get("at") or 0)
-        if isinstance(rec.get("quiz_id"), str) and 0 <= time.time() - at < CAP_MIN * 60:
-            STATE.update(capped_quiz=rec["quiz_id"], capped_at=at)
+        if isinstance(rec.get("quiz_id"), str) and 0 <= time.time() - at < CAP_FORGET:
+            STATE.update(capped_quiz=rec["quiz_id"], capped_at=at, capped_reason=str(rec.get("reason") or "cap")[:32])
     except Exception:
         pass
 
@@ -195,9 +273,15 @@ def load_lock():
         with open(LOCKFILE) as f: rec = json.load(f)
         if rec.get("unlock_pending"): return None      # an unlock that did not finish: finish it, never re-lock
         since = float(rec.get("locked_since") or 0)
-        mx = max(1, min(_int(rec.get("max_minutes") or MAX_MIN, MAX_MIN), MAX_MIN))
-        if rec.get("quiz_id") and since and 0 <= time.time() - since < mx * 60:
-            rec["max_minutes"] = mx
+        try: cap_at = float(rec.get("cap_at") or 0)
+        except Exception: cap_at = 0.0
+        if cap_at <= since:   # a record without a cap time (0.4.0): its own max_minutes, at most the unknown-end cap
+            cap_at = since + max(1, min(_int(rec.get("max_minutes") or CAP_MIN, CAP_MIN), CAP_MIN)) * 60
+        cap_at = min(cap_at, since + CEIL_MIN * 60)
+        now = time.time()
+        if rec.get("quiz_id") and since and 0 <= now - since and now < cap_at:
+            rec["cap_at"], rec["max_minutes"] = cap_at, int((cap_at - since) // 60)
+            rec["end_known"] = bool(rec.get("end_known"))
             return rec
     except FileNotFoundError:
         return None
@@ -265,8 +349,8 @@ def device_key():
 KEY = device_key()
 
 def lock_id(url):
-    """Same rule as the agent and the server: '<ou>-<qi>' from the quiz URL."""
-    qi = re.search(r"qi=(\d+)", url or ""); ou = re.search(r"ou=(\d+)", url or "")
+    """Same rule as the agent and the server: '<ou>-<qi>' from the quiz URL's own ?ou= / &qi= parameters."""
+    qi = re.search(r"[?&]qi=(\d+)", url or ""); ou = re.search(r"[?&]ou=(\d+)", url or "")
     return "%s-%s" % (ou.group(1) if ou else "x", qi.group(1) if qi else "x")
 
 def _console_user():
@@ -361,15 +445,77 @@ def engine_ok():
     return STATE["state"] == "locked" if DRYRUN == "1" else engine_locked()
 
 def report(event, extra=None):
+    """Signed report. Returns (status, reply). A heartbeat/lock reply may carry the server's
+    {unlock:true, reason:"quiz_submitted"|"quiz_ended"} (C9): the helper then unlocks at once.
+    Never call this while holding LOCK (server_release takes it)."""
     body = {"device_id": DEVICE, "event": event, "quiz_id": STATE["quiz_id"],
             "student": STATE["student"], "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     if extra: body.update(extra)
-    post("/report", body)
+    code, j = call("/report", body)
+    if event not in ("unlock", "install", "update") and isinstance(j, dict) and j.get("unlock") is True:
+        server_release(body.get("quiz_id"), j.get("reason"))
+    return code, j
+
+def server_release(qid, reason):
+    """The server says this student's quiz is over (submitted per the professor's Sync, or its end has
+    passed): unlock now and tell the agent not to re-lock it. Only for the quiz that is locked."""
+    reason = reason if reason in SERVER_REASONS else "quiz_ended"
+    with LOCK:
+        if STATE["state"] != "locked" or not qid or STATE["quiz_id"] != qid: return False
+        log("server says %s is over (%s) - unlocking" % (qid, reason))
+        save_capped(qid, reason)
+        unlock_now(qid)
+    report("unlock", {"quiz_id": qid, "detail": {"reason": reason}})
+    return True
+
+LOCK_SENT = {"qid": None, "ev": threading.Event(), "ok": False}
+
+def report_lock_async(qid, extra=None):
+    """The lock report, in the background (the agent gets its answer at once), remembered so that the
+    first /password for this quiz can wait for it: the server only releases a password to a device
+    whose lock it has seen, and no separate heartbeat precedes /password any more (C1)."""
+    ev = threading.Event()
+    LOCK_SENT.update(qid=qid, ev=ev, ok=False, extra=extra)
+    def run():
+        try:
+            code, _ = report("lock", extra)
+            if LOCK_SENT["ev"] is ev: LOCK_SENT["ok"] = code == 200
+        finally:
+            ev.set()
+    threading.Thread(target=run, daemon=True).start()
+
+def ensure_lock_reported(qid):
+    """Before a /password call: wait for this quiz's lock report; resend it once if it did not get through."""
+    if LOCK_SENT["qid"] != qid: return
+    LOCK_SENT["ev"].wait(15)
+    if LOCK_SENT["qid"] == qid and not LOCK_SENT["ok"]:
+        code, _ = report("lock", LOCK_SENT.get("extra"))
+        if LOCK_SENT["qid"] == qid: LOCK_SENT["ok"] = code == 200
 
 def report_async(event, extra=None):
     # Reply to the agent first; send the server report in the background so a slow network never makes
     # a successful lock/unlock look like a failure to the agent (which would then never unlock).
     threading.Thread(target=lambda: report(event, extra), daemon=True).start()
+
+def install_due(rec, version, student, now):
+    """C6: send the 'install' report only when the version or the student changed, or 24 h passed."""
+    if not isinstance(rec, dict): return True
+    try: at = float(rec.get("at") or 0)
+    except Exception: at = 0.0
+    return rec.get("version") != version or rec.get("student") != student or not (0 <= now - at < 86400)
+
+def report_install():
+    try:
+        with open(INSTFILE) as f: rec = json.load(f)
+    except Exception:
+        rec = None
+    student = STATE["student"]
+    if not install_due(rec, VERSION, student, time.time()): return False
+    code, _ = report("install", {"platform": "mac-" + platform.mac_ver()[0], "version": VERSION})
+    if code == 200:
+        try: _write_private(INSTFILE, json.dumps({"version": VERSION, "student": student, "at": time.time()}))
+        except Exception as e: log("could not save install record: %s" % e)
+    return code == 200
 
 def refresh_blocklist():
     if not API: return
@@ -378,7 +524,9 @@ def refresh_blocklist():
         doms = json.loads(r.read()).get("domains", [])
         # Validate before trusting: must be a healthy list of well-formed hosts, and
         # must still contain the anchors. A bad/empty download never wipes the list.
-        clean = [d.strip() for d in doms if isinstance(d, str) and re.fullmatch(r"[A-Za-z0-9.-]+\.[A-Za-z]{2,}", d.strip() or "")]
+        # host names AND host/path entries (bing.com/chat): the browser policy enforces the paths
+        clean = [d.strip() for d in doms if isinstance(d, str) and
+                 re.fullmatch(r"[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}(/[A-Za-z0-9._~%/-]*)?", d.strip() or "")]
         anchors = {"chatgpt.com", "claude.ai", "gemini.google.com"}
         if len(clean) >= 20 and anchors.issubset(set(clean)):
             # The server can only ADD domains: a shorter or older server list never removes
@@ -437,10 +585,43 @@ def restart_after_update():
         log("update: agent restart: %s" % e)
     log("update: restarting helper on the new version"); os._exit(0)
 
+def rotate_log():
+    """Keep the helper's log under LOG_MAX: move it to lockqzd.log.1 and point this process's
+    stdout/stderr (launchd's StandardOutPath) at a fresh file. Only when stdout really is that file."""
+    if not LOGFILE: return False
+    try:
+        st = os.stat(LOGFILE)
+        if st.st_size <= LOG_MAX: return False
+        out = os.fstat(1)
+        if (out.st_dev, out.st_ino) != (st.st_dev, st.st_ino): return False
+        os.replace(LOGFILE, LOGFILE + ".1")
+        fd = os.open(LOGFILE, os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0), 0o644)
+        os.dup2(fd, 1); os.dup2(fd, 2); os.close(fd)
+        log("log rotated")
+        return True
+    except Exception:
+        return False
+
+def self_check():
+    """A freshly updated helper proves it starts: once its own control server answers /status with
+    this version, the .pending marker is removed and lockqz-boot.sh will not roll the update back."""
+    if not os.path.exists(PENDING): return
+    for _ in range(30):
+        time.sleep(2)
+        try:
+            req = urllib.request.Request("http://127.0.0.1:%d/status" % PORT, headers={"X-LOCKqz-Token": TOKEN})
+            s = json.loads(urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=10).read())
+            if s.get("version") == VERSION:
+                os.remove(PENDING); log("update confirmed: %s answers /status" % VERSION); return
+        except Exception:
+            pass
+
 def check_update():
     """Signed self-update; only while no quiz is locked. Returns True when an update was installed.
     A bad signature, hash, file name or download leaves the install untouched. Never raises."""
     if not UPDATE_OK or not UPDATE_URL or not os.path.isfile(PUBKEY): return False
+    # Never download during a quiz (no traffic, no CPU, nothing swapped while the student works).
+    if STATE["state"] != "unlocked" or STATE["quiz_id"]: return False
     stage = os.path.join(UPDATE_DIR, ".update")
     try:
         body = _fetch(UPDATE_URL + "/update.json", 200_000)
@@ -450,6 +631,11 @@ def check_update():
         m = json.loads(body)
         new = str(m.get("version", ""))
         if _vtuple(new) <= _vtuple(VERSION): return False
+        try:
+            with open(os.path.join(UPDATE_DIR, ".bad_version")) as f: bad = f.read().strip()
+        except Exception: bad = ""
+        if bad and bad == new:
+            return False   # this release failed to start here and was rolled back; wait for the next one
         files = (m.get("mac") or {}).get("files") or {}
         if not isinstance(files, dict) or "lockqzd.py" not in files:
             log("update: manifest lists no Mac helper - ignored"); return False
@@ -465,8 +651,20 @@ def check_update():
                 log("update: SHA-256 mismatch for %s - ignored" % name); shutil.rmtree(stage, ignore_errors=True); return False
             with open(os.path.join(stage, name), "wb") as f: f.write(data)
         with LOCK:
-            if STATE["state"] == "locked":
+            if STATE["state"] != "unlocked" or STATE["quiz_id"]:
                 log("update: quiz in progress - deferred"); shutil.rmtree(stage, ignore_errors=True); return False
+            # Rollback kit (lockqz-boot.sh uses it): the files this update replaces, the names it adds,
+            # and a .pending marker the NEW helper clears once it answers /status. A helper that keeps
+            # failing to start is put back to these files after 3 starts.
+            prev = os.path.join(UPDATE_DIR, ".prev")
+            shutil.rmtree(prev, ignore_errors=True); os.makedirs(prev, mode=0o700)
+            added = []
+            for name in files:
+                cur = os.path.join(UPDATE_DIR, name)
+                if os.path.isfile(cur): shutil.copy2(cur, os.path.join(prev, name))
+                else: added.append(name)
+            _write_private(os.path.join(prev, ".added"), "".join(n + "\n" for n in added))
+            _write_private(PENDING, "from=%s\nto=%s\nstarts=0\n" % (VERSION, new))
             for name in files:
                 dst = os.path.join(UPDATE_DIR, name)
                 os.replace(os.path.join(stage, name), dst)
@@ -488,7 +686,7 @@ def watcher():
     cycles, last_beat = 0, time.time()
     while True:
         time.sleep(5); cycles += 1
-        do_cap = do_tamper = do_beat = False; qid = None
+        do_cap = do_tamper = do_beat = cap_end_known = False; qid = None
         share_token(console_uid())   # the student who is logged in now can reach the helper
         # Decide inside the lock; do all network OUTSIDE it so a slow post never
         # stalls a /lock or /status request coming from the agent.
@@ -505,9 +703,12 @@ def watcher():
                 STATE.update(state="unlocked", quiz_id=None)
             if STATE["state"] == "locked":
                 qid = STATE["quiz_id"]
-                # hard-max safety: never leave a student locked
-                if STATE["locked_since"] and (time.time() - STATE["locked_since"] > STATE["max_minutes"] * 60):
-                    log("hard-max reached — auto-unlocking")
+                # safety cap (quiz end + 15 min, or 6 h when the end is unknown, never > 24 h): a
+                # failsafe for a broken agent - normally AI comes back the moment the quiz is submitted.
+                cap_at = STATE["cap_at"] or (STATE["locked_since"] + STATE["max_minutes"] * 60)
+                if STATE["locked_since"] and time.time() >= cap_at:
+                    log("safety cap reached — auto-unlocking")
+                    cap_end_known = STATE["end_known"]
                     save_capped(qid)
                     unlock_now(qid); do_cap = True
                 else:
@@ -520,7 +721,7 @@ def watcher():
                 # An earlier unlock failed part-way: keep trying until every layer is really gone.
                 if engine("unlock"):
                     STATE["unlock_pending"] = False; clear_lock(); log("pending unlock completed")
-        if do_cap:    report("unlock", {"quiz_id": qid, "detail": {"reason": "cap"}}); continue
+        if do_cap:    report("unlock", {"quiz_id": qid, "detail": {"reason": "cap", "end_known": cap_end_known}}); continue
         if do_tamper: report("tamper", {"quiz_id": qid, "detail": "hosts_block_removed"})
         # Liveness ping: proves the helper is still running. If the student kills it
         # mid-quiz these stop, last_lock goes stale, and the teacher's live monitor
@@ -530,6 +731,8 @@ def watcher():
             report("heartbeat", {"quiz_id": qid, "source": "helper"})
         if cycles % 8640 == 0:   # ~every 12h — keeps API calls minimal
             refresh_blocklist()
+        if cycles % 720 == 0:    # ~hourly: keep the helper log small
+            rotate_log()
         if cycles % 720 == 0 and not NET["registered"]:   # ~hourly until the server knows this key
             register()
         if cycles % UPDATE_EVERY == 0:   # ~every 6h: signed self-update (skips itself during a quiz)
@@ -569,9 +772,10 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/status":
             s = dict(STATE)   # no LOCK: an engine run can hold it for seconds; a snapshot is enough
             s["version"] = VERSION; s["engine_locked"] = engine_locked(); s["dryrun"] = DRYRUN == "1"; s["developer"] = developer_mode()
-            # A quiz released by the hard cap within the last cap window: the agent must not re-lock it.
-            if not (s.get("capped_quiz") and time.time() - float(s.get("capped_at") or 0) < CAP_MIN * 60):
-                s["capped_quiz"] = None
+            # A quiz released by the safety cap or by the server (within 30 min, until the agent says its
+            # page closed - /uncap): the agent must not re-lock it while the student is still on it.
+            if not (s.get("capped_quiz") and 0 <= time.time() - float(s.get("capped_at") or 0) < CAP_FORGET):
+                s["capped_quiz"] = None; s["capped_reason"] = None
             return self._send(200, s)
         self._send(404, {"error": "not found"})
     def do_POST(self):
@@ -585,7 +789,8 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/lock":
             qid = _qid(body.get("quiz_id"))
             if not qid: return self._send(400, {"error": "bad quiz_id"})
-            # Never longer than the configured cap (default 180 min), whatever the caller asks for.
+            # Starts with the unknown-end cap (6 h); a caller may only ask for LESS. The server's quiz end
+            # (in the /password answer) then sets it to end + 15 min.
             mx = max(1, min(_int(body.get("max_minutes", MAX_MIN), MAX_MIN), MAX_MIN))
             if developer_mode():
                 with LOCK:
@@ -594,18 +799,19 @@ class H(BaseHTTPRequestHandler):
                                  student=_student(body.get("student"), STATE["student"]))
                 # Signed "lock" flagged developer: the server admits ONLY the admin's account with it
                 # (any other device sending this is shown as tamper and refused the password).
-                report_async("lock", {"quiz_id": qid, "detail": {"developer": True}})
+                report_lock_async(qid, {"quiz_id": qid, "detail": {"developer": True}})
                 return self._send(200, {"ok": True, "state": "developer", "developer": True})
             with LOCK:
                 same = STATE["state"] == "locked" and STATE["quiz_id"] == qid
                 STATE.update(state="locked", quiz_id=qid, unlock_pending=False,
                              student=_student(body.get("student"), STATE["student"]))
                 if not same:   # a repeat /lock for the running quiz never extends the cap
+                    now = time.time()
                     STATE.update(max_minutes=mx, locked_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                                 locked_since=time.time())
-                if STATE["capped_quiz"] == qid: STATE.update(capped_quiz=None, capped_at=0.0)
+                                 locked_since=now, cap_at=now + mx * 60, end_known=False)
+                if STATE["capped_quiz"] == qid: forget_capped()
                 save_lock(); engine("lock")
-            report_async("lock")
+            report_lock_async(qid)
             return self._send(200, {"ok": True, "state": "locked"})
         if self.path == "/unlock":
             reason = body.get("reason") if body.get("reason") in UNLOCK_REASONS else "local_request"
@@ -618,7 +824,7 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True, "state": "unlocked"})
         if self.path == "/student":
             with LOCK: STATE["student"] = _student(body.get("student"), STATE["student"])
-            report_async("install", {"platform": "mac-" + platform.mac_ver()[0], "version": VERSION})
+            threading.Thread(target=report_install, daemon=True).start()   # only if new version/student or 24 h (C6)
             return self._send(200, {"ok": True, "student": STATE["student"]})
         if self.path == "/verify":
             # One-time student email setup (status | check | send | code), signed with the device key
@@ -651,11 +857,44 @@ class H(BaseHTTPRequestHandler):
                 if not engine_ok():
                     report("tamper", {"quiz_id": qid, "detail": "block_missing_at_password"})
                     return self._send(409, {"error": "AI block is not in place"})
-            report("heartbeat", {"quiz_id": qid, "source": "helper"})   # fresh signed proof of the lock
+            # The signed /password call itself refreshes this device's lock row on the server (C1): no
+            # separate heartbeat first - only the lock report itself must have arrived.
+            ensure_lock_reported(qid)
             code, j = call("/password", {"url": url, "device_id": DEVICE})
-            pw = j.get("password") if isinstance(j, dict) else None
-            pay = j.get("pay") if isinstance(j, dict) and isinstance(j.get("pay"), dict) else None
-            return self._send(200 if (pw or pay) else 502, {"password": pw, "status": code, "pay": pay})
+            j = j if isinstance(j, dict) else {}
+            pw = j.get("password") if isinstance(j.get("password"), str) else None
+            pay = j.get("pay") if isinstance(j.get("pay"), dict) else None
+            out = {"password": pw, "status": code, "pay": pay}
+            reason = j.get("reason") if isinstance(j.get("reason"), str) else None
+            if code == 200 and pw:
+                # C2: the server names the quiz end -> the safety cap becomes end + 15 min (<= 24 h).
+                with LOCK:
+                    if STATE["state"] == "locked" and STATE["quiz_id"] == qid:
+                        c = cap_for_end(STATE["locked_since"], parse_iso(j.get("end")), time.time(), NET["skew"])
+                        if c:
+                            STATE.update(cap_at=c, end_known=True, max_minutes=int((c - STATE["locked_since"]) // 60))
+                            save_lock()
+            elif code == 403 and reason == "not started":
+                st = parse_iso(j.get("start"))
+                out.update(reason=reason, start=j.get("start"),
+                           start_in=(max(0, int(st - (time.time() + NET["skew"]))) if st else None))
+            elif code == 403 and reason == "other_school":
+                # C10: this Brightspace is not a LOCKqz school; nothing to protect -> AI back now.
+                out["reason"] = reason
+                with LOCK:
+                    if STATE["state"] == "locked" and STATE["quiz_id"] == qid:
+                        save_capped(qid, "other_school"); unlock_now(qid)
+                    else: qid = None
+                if qid: report_async("unlock", {"quiz_id": qid, "detail": {"reason": "other_school"}})
+            elif code == 402 and reason:
+                out["reason"] = reason   # "verify": the student must confirm their school email first
+            return self._send(200 if (pw or pay or out.get("reason")) else 502, out)
+        if self.path == "/uncap":
+            # The agent saw the released quiz's page closed (or a new attempt start): it may lock again.
+            qid = _qid(body.get("quiz_id"))
+            with LOCK:
+                if qid and STATE["capped_quiz"] == qid: forget_capped()
+            return self._send(200, {"ok": True})
         if self.path == "/event":
             if body.get("event") != "quiz_left":
                 return self._send(400, {"error": "event not allowed"})
@@ -668,7 +907,7 @@ class H(BaseHTTPRequestHandler):
 def startup_network():
     # Runs in the background so a slow/absent network never delays the control server.
     register()
-    report("install", {"platform": "mac-" + platform.mac_ver()[0], "version": VERSION})
+    report_install()   # C6: only when the version/student changed or 24 h passed (persisted)
     refresh_blocklist()
     time.sleep(UPDATE_DELAY)
     check_update()
@@ -685,7 +924,7 @@ def main():
         # auto-unlocks on time, so nobody is ever left locked.
         STATE.update(state="locked", quiz_id=rec["quiz_id"], student=rec.get("student") or STATE["student"],
                       locked_at=rec.get("locked_at"), locked_since=float(rec["locked_since"]),
-                      max_minutes=rec["max_minutes"])
+                      max_minutes=rec["max_minutes"], cap_at=rec["cap_at"], end_known=rec["end_known"])
         engine("lock")
         # A restart from our own signed self-update is expected, not tampering. The updater drops a
         # marker; consume it and report a benign "resumed" instead of "tamper".
@@ -706,8 +945,10 @@ def main():
             if not pend: save_lock(pending=True)
             log("startup unlock did not complete - will retry")
     share_token(console_uid())
+    rotate_log()
     threading.Thread(target=startup_network, daemon=True).start()
     threading.Thread(target=watcher, daemon=True).start()
+    threading.Thread(target=self_check, daemon=True).start()   # clears an update's .pending marker
     log("listening on 127.0.0.1:%d (v%s, dryrun=%s)" % (PORT, VERSION, DRYRUN))
     ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()
 

@@ -56,7 +56,7 @@ async function world() {
       first: async () => st.get(...args) ?? null, all: async () => ({ results: st.all(...args) }),
       run: async () => ({ meta: { changes: Number(st.run(...args).changes) } }), _run() { st.run(...args); } }; return o; },
     async batch(sts) { for (const s of sts) s._run(); } };
-  const w = { sqlite, env: { DB: db, TEACHER_KEY: "admin-key", REQUIRE_SIGNED: "1" }, calls: [], confirms: [], inflight: 0, netDown: false };
+  const w = { sqlite, env: { DB: db, TEACHER_KEY: "admin-key", REQUIRE_SIGNED: "1", LIVE_CACHE_MS: "0" }, calls: [], confirms: [], inflight: 0, netDown: false };
   const track = p => { w.inflight++; return Promise.resolve(p).finally(() => { w.inflight--; }); };
   w.idle = async () => { for (let z = 0; z < 4;) { await new Promise(r => setTimeout(r, 5)); z = w.inflight ? 0 : z + 1; } };
   w.fetchApi = (url, opt) => w.netDown ? Promise.reject(new TypeError("Failed to fetch")) : track(onRequest({ request: new Request(url, opt), env: w.env }));
@@ -129,7 +129,7 @@ function syncTab(w) {
   };
   const document = { getElementById: () => boxes.find(b => b.appended && !b.removed) || null, createElement: newBox,
     body: { appendChild(b) { b.appended = true; } }, currentScript: { src: `${ORIGIN}/sync.js?k=${w.KEY}` } };
-  const ctx = { document, location: { pathname: `/d2l/home/${OU}` }, localStorage: { getItem: () => "csrf" },
+  const ctx = { document, location: { pathname: `/d2l/home/${OU}`, host: "usc.brightspace.com" }, localStorage: { getItem: () => "csrf" },
     fetch: (url, opt) => { w.calls.push(String(url)); return w.netDown ? Promise.reject(new TypeError("Failed to fetch")) : String(url).startsWith(API) ? w.fetchApi(url, opt) : w.brightspace(url, opt); },
     setInterval: fn => { timers.push(fn); return timers.length; }, clearInterval: i => { timers[i - 1] = null; },
     confirm: m => { w.confirms.push(m); return true; }, URL, Request, Response, console, setTimeout };
@@ -175,8 +175,8 @@ function dashTab(w, { token = "", hash = "", now = null } = {}) {
 // ---- pay.html (fake DOM, real API) ----
 function payTab(w, email) {
   const els = {}, el = id => (els[id] = els[id] || { textContent: "", value: "", href: "", addEventListener() {} });
-  const ctx = { document: { getElementById: el }, location: { search: "?email=" + encodeURIComponent(email) }, history: { replaceState() {} },
-    fetch: (u, o) => w.fetchApi(ORIGIN + u, o), setInterval: () => 1, clearInterval() {}, URLSearchParams, console };
+  const ctx = { document: { getElementById: el, addEventListener() {}, visibilityState: "visible" }, location: { search: "?email=" + encodeURIComponent(email) }, history: { replaceState() {} },
+    fetch: (u, o) => w.fetchApi(ORIGIN + u, o), setInterval: () => 1, clearInterval() {}, setTimeout: () => 1, clearTimeout() {}, URLSearchParams, console };
   vm.createContext(ctx); vm.runInContext(PAY_SRC, ctx);
   return { el };
 }
@@ -250,7 +250,7 @@ w.BS.failQuizPut = false; await t.tick(); await w.lock(w.AL);
 check("4 then: quiz hidden and app password === Brightspace's", w.BS.quiz.AllowOnlyUsersWithSpecialAccess === true && (await w.pw(w.AL)).data?.password === w.BS.quiz.Password);
 
 console.log("15 refused special-access writes are counted, not reported as admitted");
-w = await world(); w.BS.failSaPut = true; t = syncTab(w); await t.run(); await w.lock(w.AL); await t.startGate();
+w = await world(); t = syncTab(w); await t.run(); await t.click(t.gb()); w.BS.failSaPut = true; await w.lock(w.AL); await t.tick();   // refused AFTER the start check (round 2: a refused test grant never hides the quiz)
 check("15 grant refused -> shown", /not admitted/i.test(t.gst().textContent) && /LIVE — 0 locked in/.test(t.gst().textContent), t.gst().textContent);
 w.BS.failSaPut = false; await t.tick();
 check("15 grant works next tick", /LIVE — 1 locked in/.test(t.gst().textContent) && !!w.BS.sa["4001"], t.gst().textContent);
@@ -278,9 +278,9 @@ check("6 professors table rendered", handlers.length > 0 && thtml.includes("aler
 check("6 no onclick contains the email", handlers.every(h => !h.includes("alert(1)")), handlers.find(h => h.includes("alert(1)")));
 check("6 the button still carries the exact email", [...thtml.matchAll(/data-email="([^"]*)"/g)].map(m => decode(m[1])).includes(EVIL));
 
-console.log("7 the 60 s refresh never re-draws over open or typed things");
+console.log("7 the home refresh never re-draws over open or typed things");
 d = dashTab(w, { token: w.ADMIN, hash: "#admin" }); await w.idle();
-const auto = d.intervals.find(i => i.ms === 60000);
+const auto = d.intervals.find(i => i.ms === 300000);   // round 2: every 5 min while visible
 d.el("app").innerHTML = "MARK"; await auto.fn(); await w.idle();
 check("7 Admin page not re-drawn", d.app() === "MARK");
 d.loc.hash = ""; d.openDetails = true; d.el("app").innerHTML = "MARK"; await auto.fn(); await w.idle();

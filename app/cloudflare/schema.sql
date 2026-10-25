@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS devices (
   revoked     INTEGER DEFAULT 0,
   student_verified INTEGER DEFAULT 0   -- 1 = student typed the code emailed to `student`
 );
+CREATE INDEX IF NOT EXISTS idx_devices_student ON devices(student);   -- /bs: installed devices by email (migrate_022)
 
 -- qi = the Brightspace quiz-id parsed from the pasted link (auto-detect, no title tag).
 CREATE TABLE IF NOT EXISTS quizzes (
@@ -51,8 +52,8 @@ CREATE TABLE IF NOT EXISTS events (
   detail    TEXT,
   ts        TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_events_quiz ON events(quiz_id);
-CREATE INDEX IF NOT EXISTS idx_events_dev  ON events(device_id);
+CREATE INDEX IF NOT EXISTS idx_events_dev_quiz ON events(device_id, quiz_id, event);   -- /password (migrate_022)
+CREATE INDEX IF NOT EXISTS idx_events_quiz_ev ON events(quiz_id, event);              -- /live, /sessions (migrate_022)
 CREATE INDEX IF NOT EXISTS idx_events_event_ts ON events(event, ts);   -- rate limits (login_fail, code_sent ...) (migrate_021)
 
 -- Current live lock per device+quiz. last_lock is refreshed by lock + quiz-time
@@ -67,6 +68,7 @@ CREATE TABLE IF NOT EXISTS locks (
   ext_seen  TEXT,
   signed    INTEGER DEFAULT 0, -- 1 = lock proven by a request signed with the device key
   ip        TEXT,              -- device IP at lock (used by the gate to restrict the quiz to locked IPs)
+  locked_at TEXT,              -- when this lock began (migrate_023)
   PRIMARY KEY (device_id, quiz_id)
 );
 CREATE INDEX IF NOT EXISTS idx_locks_quiz ON locks(quiz_id);   -- live monitor (migrate_021)
@@ -85,9 +87,12 @@ CREATE TABLE IF NOT EXISTS teachers (
   sync_key  TEXT,
   verified  INTEGER DEFAULT 0,  -- proven instructor/TA via their own Brightspace login
   bs_user_id TEXT,              -- their own Brightspace user id, bound from a trusted roster at sync (migrate_016)
-  vouched   INTEGER DEFAULT 0   -- 1 = the admin vouched for the account holder (invite / first account); only these can verify (migrate_020)
+  vouched   INTEGER DEFAULT 0,  -- 1 = the admin vouched for the account holder (invite / first account); only these can verify (migrate_020)
+  sync_key_kept INTEGER DEFAULT 0  -- 1 = sync_key kept through a password reset only because a gate ran (migrate_025)
 );
 CREATE INDEX IF NOT EXISTS idx_teachers_token ON teachers(token);
+CREATE INDEX IF NOT EXISTS idx_teachers_sync_key ON teachers(sync_key);
+CREATE INDEX IF NOT EXISTS idx_teachers_role ON teachers(role);
 
 -- Invite-only teacher sign-up: the admin creates a one-time code; sign-up needs it.
 CREATE TABLE IF NOT EXISTS invites (
@@ -104,7 +109,8 @@ CREATE TABLE IF NOT EXISTS invites (
 CREATE TABLE IF NOT EXISTS teacher_courses (teacher_id TEXT, ou TEXT, name TEXT, code TEXT, role TEXT, synced_at TEXT, PRIMARY KEY (teacher_id, ou));
 CREATE TABLE IF NOT EXISTS roster (ou TEXT, user_id TEXT, name TEXT, email TEXT, username TEXT, org_id TEXT, role TEXT, synced_at TEXT, PRIMARY KEY (ou, user_id));
 CREATE INDEX IF NOT EXISTS idx_roster_email ON roster(email);
-CREATE TABLE IF NOT EXISTS bs_quizzes (ou TEXT, qi TEXT, name TEXT, active INTEGER, start_date TEXT, end_date TEXT, due_date TEXT, bs_has_password INTEGER, bs_password_is_ours INTEGER, synced_at TEXT, PRIMARY KEY (ou, qi));
+-- orig = the professor's own settings before LOCKqz changed the quiz: JSON {"pw":..., "hidden":...} (migrate_024)
+CREATE TABLE IF NOT EXISTS bs_quizzes (ou TEXT, qi TEXT, name TEXT, active INTEGER, start_date TEXT, end_date TEXT, due_date TEXT, bs_has_password INTEGER, bs_password_is_ours INTEGER, synced_at TEXT, orig TEXT, PRIMARY KEY (ou, qi));
 CREATE TABLE IF NOT EXISTS pending_clear (ou TEXT, qi TEXT, password TEXT, PRIMARY KEY (ou, qi));
 
 -- One pending email code per device (hash only; 15 min; 5 tries). See migrate_014.
@@ -124,8 +130,12 @@ CREATE TABLE IF NOT EXISTS pay_codes (teacher_id TEXT PRIMARY KEY, code TEXT UNI
 
 -- Server-confirmed Brightspace submissions (migrate_017): a trusted Sync session reports who
 -- actually submitted, so a forced client unlock cannot masquerade as a clean submit.
+-- at = Brightspace's completion time when the Sync tab sends it (C5), else when it was reported.
 CREATE TABLE IF NOT EXISTS submissions (ou TEXT, qi TEXT, user_id TEXT, at TEXT, PRIMARY KEY (ou, qi, user_id));
 CREATE TABLE IF NOT EXISTS pay_codes_students (email TEXT PRIMARY KEY, code TEXT UNIQUE);
+-- Students deleted on request (admin /forget): the Sync never imports their class-list rows again (migrate_022).
+CREATE TABLE IF NOT EXISTS forgotten (email TEXT PRIMARY KEY, at TEXT);
+-- matched: NULL = counts; 'review' = alert the script could not read (admin assigns it); 'void' = voided.
 CREATE TABLE IF NOT EXISTS payments (
   txn TEXT PRIMARY KEY, code TEXT, amount REAL, via TEXT, payer TEXT, note TEXT, term TEXT, received_at TEXT, matched TEXT
 );

@@ -22,6 +22,17 @@ SYS_CONF = "/Library/Application Support/LOCKqz/config.json"
 TOKEN_DIR = os.environ.get("LOCKQZ_TOKEN_DIR") or "/Library/Application Support/LOCKqz/tokens"
 USER_DIR = os.path.expanduser("~/Library/Application Support/LOCKqz")
 USER_CONF = os.path.join(USER_DIR, "student.json")
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+def _helper_version():
+    """The release version (the helper's VERSION line, shipped in the same folder) for the User-Agent."""
+    try:
+        with open(os.path.join(HERE, "lockqzd.py")) as f:
+            m = re.search(r'^VERSION = "([0-9.]+)"', f.read(), re.M)
+        return m.group(1) if m else "0"
+    except Exception:
+        return "0"
+VERSION = _helper_version()
 POLL, POLL_LOCKED, GRACE, BEAT = 2, 1, 30, 60   # agent reports (every 60s) only while the helper is unreachable
 DEV_KEY = os.path.join(USER_DIR, "developer.key")
 DEV_KEY_HASH = "4695a520432e105e967dd2703366c24c039fe0a850fe35db03b73b6b9506aecd"
@@ -35,9 +46,17 @@ def developer_mode():
     except Exception:
         return False
 
-# Taking a quiz (/quizzing/user/) OR previewing one (TAs/staff open quizzes via Preview).
-QUIZ_RE = re.compile(r"/d2l/lms/quizzing/(user/|.*(isprv=1|preview))", re.I)
-LEAVING_RE = re.compile(r"quizzes_list|quiz_submissions|feedback|results|submission", re.I)
+# Brightspace URL rules (tests/test_url_parsing.mjs loads these exact patterns). Each is matched
+# against ONE part of the URL only, so a word inside another parameter (?returnUrl=...results) or a
+# quiz path quoted in a query string can never lock or unlock anything.
+# Taking a quiz (/quizzing/user/) OR previewing one (TAs/staff open quizzes via Preview): URL path.
+QUIZ_PATH_RE = re.compile(r"^/d2l/lms/quizzing/(user/|.*preview)", re.I)
+QUIZ_ANY_PATH_RE = re.compile(r"^/d2l/lms/quizzing/", re.I)
+PREVIEW_QUERY_RE = re.compile(r"(^|&)isprv=1(&|$)", re.I)         # query string: a Preview attempt
+LEAVING_RE = re.compile(r"quizzes_list|quiz_submissions|feedback|results|submission", re.I)   # URL path only
+QI_RE = re.compile(r"[?&]qi=(\d+)")                                  # the quiz's own parameters
+OU_RE = re.compile(r"[?&]ou=(\d+)")
+QUIZ_RE = QUIZ_PATH_RE   # old name, kept for anything that still imports it
 WEB_OK_UDM = {"14", "2", "12", "7", "36"}
 WEB_OK_TBM = {"isch", "nws", "vid", "bks"}
 JXA_BROWSERS = ["Google Chrome", "Google Chrome Beta", "Google Chrome Dev", "Google Chrome Canary",
@@ -46,11 +65,15 @@ JXA_BROWSERS = ["Google Chrome", "Google Chrome Beta", "Google Chrome Dev", "Goo
                 "Vivaldi", "Opera", "Opera GX", "Arc", "Safari"]
 
 _LOGF = os.path.expanduser("~/Library/Logs/LOCKqz-agent.log")
+LOG_MAX = 1000000
 def log(m):
     line = "LOCKqz-agent: " + str(m)
     print(line, flush=True)
     try:
         os.makedirs(os.path.dirname(_LOGF), exist_ok=True)
+        try:
+            if os.path.getsize(_LOGF) > LOG_MAX: os.replace(_LOGF, _LOGF + ".1")   # never grows past ~2 MB
+        except OSError: pass
         with open(_LOGF, "a") as f: f.write(time.strftime("%Y-%m-%dT%H:%M:%S ") + line + "\n")
     except Exception: pass
 
@@ -60,13 +83,32 @@ def load(p):
     except Exception: return {}
 
 # ---------- pure helpers (unit-tested in tests/test_agent.py) ----------
+def url_parts(url):
+    """-> (path, query) of a URL; ("", "") for anything that is not one."""
+    try:
+        s = str(url or "")
+        if "://" not in s[:12] and not s.startswith("/"): s = "https://" + s   # address bar text without a scheme
+        u = urllib.parse.urlsplit(s)
+        return u.path or "", u.query or ""
+    except Exception:
+        return "", ""
+
 def lock_id(url):
-    qi = (re.search(r"qi=(\d+)", url) or [None, None])[1]
-    ou = (re.search(r"ou=(\d+)", url) or [None, None])[1]
+    qi = (QI_RE.search(str(url or "")) or [None, None])[1]
+    ou = (OU_RE.search(str(url or "")) or [None, None])[1]
     return "%s-%s" % (ou or "x", qi or "x")
 
+def is_quiz_page(url):
+    """A Brightspace quiz page (taking or previewing), whatever stage: start, attempt or submitted."""
+    path, query = url_parts(url)
+    return bool(QUIZ_PATH_RE.search(path) or (QUIZ_ANY_PATH_RE.search(path) and PREVIEW_QUERY_RE.search(query)))
+
+def is_leaving(url):
+    """A quiz's 'after the quiz' page (submitted, results, back to the list)."""
+    return is_quiz_page(url) and bool(LEAVING_RE.search(url_parts(url)[0]))
+
 def is_quiz(url):
-    return bool(QUIZ_RE.search(url)) and "qi=" in url and not LEAVING_RE.search(url)
+    return is_quiz_page(url) and bool(QI_RE.search(str(url or ""))) and not is_leaving(url)
 
 def classify(urls):
     """-> (present, left). present: {quiz id: url} for quizzes that are really open; left: ids whose
@@ -76,16 +118,22 @@ def classify(urls):
     never unlocks)."""
     starts, left = {}, set()
     for u in urls:
-        if not u or not QUIZ_RE.search(u) or "qi=" not in u: continue
+        if not u or not is_quiz_page(u) or not QI_RE.search(u): continue
         q = lock_id(u)
-        if LEAVING_RE.search(u): left.add(q)
+        if is_leaving(u): left.add(q)
         else: starts.setdefault(q, []).append(u)
     present = {}
     for q, us in starts.items():
-        att = [u for u in us if "/attempt/" in u]
+        att = [u for u in us if "/attempt/" in url_parts(u)[0]]
         if att: present[q] = att[0]
         elif q not in left: present[q] = us[0]
     return present, left - set(present)
+
+def next_password_check(now, opens):
+    """C2: a quiz that has not opened yet: ask every 5 min until 90 s before it opens, then every 15 s."""
+    if opens is None: return now + 300
+    t = opens - 90
+    return min(now + 300, t) if now < t else now + 15
 
 def unlock_reason(tabs_now, tabs_before):
     """Why the open quiz went away (no submission page seen): every tab gone or fewer tabs than while
@@ -138,19 +186,53 @@ def rewrite_search(url):
     """URL a locked browser tab should be sent to instead (None = leave it alone)."""
     try: u = urllib.parse.urlsplit(url)
     except Exception: return None
-    host, path = u.netloc.lower(), u.path
+    if u.scheme not in ("http", "https"): return None
+    host, path = (u.hostname or "").lower(), u.path
     q = urllib.parse.parse_qs(u.query)
     query = (q.get("q") or q.get("p") or [""])[0]
     web = "https://www.google.com/search?udm=14&q=" + urllib.parse.quote_plus(query)
-    if re.match(r"^(www\.)?google\.[a-z.]+$", host) and path in ("/search", "/webhp"):
+    if host == "lens.google.com" or re.match(r"^lens\.google\.[a-z.]+$", host): return web   # Lens answers photographed questions
+    if re.match(r"^(www\.)?google\.[a-z.]+$", host) and (path in ("/search", "/webhp", "/") or path.startswith(("/ai", "/searchbyimage"))):
+        if path.startswith(("/ai", "/searchbyimage")): return web   # AI Mode / image search pages
         udm, tbm = q.get("udm", []), q.get("tbm", [])
         if (udm and all(x in WEB_OK_UDM for x in udm)) or (tbm and all(x in WEB_OK_TBM for x in tbm)):
             return None
-        return web if query else None
+        # Any other udm/tbm (AI Mode udm=50, Lens udm=26, ...) goes to plain web results, even with no q.
+        if udm or tbm: return web
+        return web if (query and path != "/") else None
     if host.endswith("bing.com") and path.startswith(("/search", "/copilotsearch", "/chat")): return web
     if host.endswith("duckduckgo.com") or host == "duck.ai": return web
     if host in ("search.yahoo.com", "search.brave.com", "you.com", "kagi.com") or host.endswith(".search.yahoo.com"): return web
     return None
+
+def parse_blocklist(lines):
+    """blocklist.txt lines -> (hosts, [(host, path prefix)]): plain hosts and host/path entries."""
+    hosts, paths = set(), []
+    for l in lines:
+        l = l.strip().lower()
+        if not l or l.startswith("#") or " " in l: continue
+        h, _, p = l.partition("/")
+        if not re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", h): continue
+        if p: paths.append((h, "/" + p))
+        else: hosts.add(h)
+    return hosts, paths
+
+def blocked_tab(url, hosts, paths):
+    """True when an open tab is an AI site from the blocklist (it is sent to about:blank at lock, so a
+    chat page loaded before the quiz cannot keep talking over its open connection). Google search
+    pages are left to rewrite_search (plain web results), never blanked."""
+    try: u = urllib.parse.urlsplit(str(url or ""))
+    except Exception: return False
+    if u.scheme not in ("http", "https", "wss", "ws"): return False
+    h = (u.hostname or "").lower()
+    if not h: return False
+    if re.match(r"^(www\.)?google\.[a-z.]+$", h) and (u.path in ("/search", "/webhp", "/") or u.path.startswith("/search")): return False
+    hs = h[4:] if h.startswith("www.") else h
+    for d in hosts:
+        if h == d or h.endswith("." + d) or hs == d: return True
+    for d, p in paths:
+        if (h == d or hs == d or h.endswith("." + d)) and (u.path or "/").lower().startswith(p): return True
+    return False
 
 def lz4_block(src):
     dst, i, n = bytearray(), 0, len(src)
@@ -193,28 +275,49 @@ def osa(script, lang="JavaScript", timeout=10, args=None):
     if r.returncode: raise RuntimeError(r.stderr.strip())
     return r.stdout.strip()
 
-def running_apps():
+def ps_procs():
+    """This user's processes: [(pid, etime seconds, command path)] - plain `ps`, no Apple Events, so
+    nothing depends on the student allowing System Events."""
     try:
-        return set(osa('tell application "System Events" to get name of every process whose background only is false', "AppleScript").split(", "))
-    except Exception: return set()
+        out = subprocess.run(["ps", "-x", "-o", "pid=", "-o", "etime=", "-o", "comm="], capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return []
+    procs = []
+    for line in out.splitlines():
+        try:
+            pid, et, comm = line.strip().split(None, 2)
+            procs.append((int(pid), _etime(et), comm.strip()))
+        except Exception:
+            continue
+    return procs
+
+APP_MAIN_RE = re.compile(r"/([^/]+)\.app/Contents/MacOS/[^/]+$")
+def running_apps(procs=None):
+    """Names of the running apps (bundle name of each app's main binary, e.g. 'Google Chrome').
+    Helpers live in nested bundles ('Google Chrome Helper.app') and never count as the browser."""
+    names = set()
+    for _, _, comm in (ps_procs() if procs is None else procs):
+        m = APP_MAIN_RE.search(comm)
+        if m: names.add(m.group(1))
+        elif "/" not in comm: names.add(comm)   # some ps builds print the bare name
+    return names
 
 def browser_tabs():
     """-> list of (app, windowIndex, tabIndex, url) across every running browser."""
-    tabs, apps = [], running_apps()
+    tabs, procs = [], ps_procs()
+    apps = running_apps(procs)
     for app in JXA_BROWSERS:
-        if app not in apps: continue
+        if app not in apps: continue   # never name a browser that is not running (JXA would launch it)
         try:
             js = 'JSON.stringify(Application(%s).windows().map(w=>w.tabs().map(t=>t.url())))' % json.dumps(app)
             for wi, urls in enumerate(json.loads(osa(js) or "[]")):
                 for ti, u in enumerate(urls or []): tabs.append((app, wi, ti, u or ""))
+            _denied.pop(app, None)
         except Exception as e:
             if "-1743" in str(e) or "not allowed" in str(e).lower(): permission_hint(app)
     # Firefox and every Gecko fork store open tabs in a per-app profile dir; read the ones that are
     # running now so a quiz opened in Firefox/LibreWolf/Waterfox/Floorp/Zen/Mullvad is detected.
-    try:
-        ps = subprocess.run(["ps", "-x", "-o", "etime=", "-o", "comm="], capture_output=True, text=True, timeout=10).stdout.splitlines()
-    except Exception:
-        ps = []
+    ps = ["%d %s" % (et, comm) for (_, et, comm) in procs]
     files = lambda base: glob.glob(os.path.expanduser("~/Library/Application Support/%s/Profiles/*/sessionstore-backups/recovery.jsonlz4" % base))
     for base, p in gecko_session_files(gecko_running(ps, time.time()), files, os.path.getmtime):
         try:
@@ -226,12 +329,90 @@ def set_tab_url(app, wi, ti, url):
     try: osa('Application(%s).windows()[%d].tabs()[%d].url = %s' % (json.dumps(app), wi, ti, json.dumps(url)))
     except Exception: pass
 
-_hinted = set()
-def permission_hint(app):
-    if app in _hinted: return
-    _hinted.add(app)
-    dialog("LOCKqz needs permission to see your %s tabs so it can tell when a quiz starts.\n\n"
-           "System Settings > Privacy & Security > Automation > allow LOCKqz / python3 for %s." % (app, app))
+# ---------- browsers that cannot switch their AI off mid-session (G3/G4) ----------
+OPERA_APPS = ("Opera", "Opera GX", "Opera Air", "Opera Neon")   # no policy layer (Aria AI, built-in VPN)
+GECKO_BINS = tuple(GECKO_DIRS)                                   # read policies only when they start
+def no_policy_pids(procs, keep_app):
+    """Main processes of the Opera family, except the browser the quiz is in."""
+    out = []
+    for pid, _, comm in procs:
+        m = APP_MAIN_RE.search(comm)
+        if m and m.group(1) in OPERA_APPS and m.group(1) != keep_app: out.append((pid, m.group(1)))
+    return out
+
+RESTART_APPS = ("Brave Browser",)   # read new policies (Leo, Tor windows, VPN off) only when they start
+def restart_pids(procs, keep_app):
+    """Main processes of browsers closed once at lock so their quiz policies apply on reopen."""
+    out = []
+    for pid, _, comm in procs:
+        m = APP_MAIN_RE.search(comm)
+        if m and m.group(1) in RESTART_APPS and m.group(1) != keep_app: out.append((pid, m.group(1)))
+    return out
+
+def gecko_bin_of(app):
+    """Gecko launcher binary for a tab's app name ('Firefox' profile folder -> 'firefox'), else None."""
+    for b, dirs in GECKO_DIRS.items():
+        if app in dirs: return b
+    return None
+
+def gecko_pids(procs, keep_app):
+    """Main processes of Firefox and its forks (Tor Browser too: its binary is 'firefox'), except the
+    browser the quiz is in."""
+    keep = gecko_bin_of(keep_app)
+    out = []
+    for pid, _, comm in procs:
+        if ".app/Contents/MacOS/" not in comm: continue
+        b = os.path.basename(comm).lower()
+        if b in GECKO_BINS and b != keep: out.append((pid, b))
+    return out
+
+def close_pids(pids):
+    """Ask nicely (SIGTERM: the browser saves its session), then force after 3 s. In the background so
+    quiz watching never waits."""
+    import signal
+    def run():
+        for pid, _ in pids:
+            try: os.kill(pid, signal.SIGTERM)
+            except Exception: pass
+        time.sleep(3)
+        for pid, _ in pids:
+            try: os.kill(pid, signal.SIGKILL)
+            except Exception: pass
+    if pids: threading.Thread(target=run, daemon=True).start()
+    return bool(pids)
+
+_hinted, _denied = {}, {}
+HINT_EVERY = 600   # a denied browser that is in front gets the hint again at most every 10 min
+def front_app():
+    """Name of the frontmost app via lsappinfo (no Apple Events)."""
+    try:
+        asn = subprocess.run(["lsappinfo", "front"], capture_output=True, text=True, timeout=5).stdout.strip()
+        out = subprocess.run(["lsappinfo", "info", "-only", "name", asn], capture_output=True, text=True, timeout=5).stdout
+        m = re.search(r'"(?:LSDisplayName|name)"\s*=\s*"([^"]*)"', out)
+        return m.group(1) if m else None
+    except Exception:
+        return None
+
+def permission_hint(app, now=None, front=None):
+    """Tabs of a running browser cannot be read (the student clicked Don't Allow): say so at once, and
+    again whenever that browser is the one in front (the student may be opening a quiz in it)."""
+    now = time.time() if now is None else now
+    _denied[app] = now
+    last = _hinted.get(app)
+    if last is not None:
+        if now - last < HINT_EVERY: return False
+        if (front_app() if front is None else front) != app: return False
+    _hinted[app] = now
+    def run():
+        try:
+            b = osa('on run argv\n set r to display dialog (item 1 of argv) with title "LOCKqz" buttons {"Later", "Open Settings"} default button 2 giving up after 300\n return button returned of r\nend run',
+                    "AppleScript", timeout=320, args=["LOCKqz cannot see your %s tabs, so it cannot tell when a quiz starts and cannot give you the quiz password.\n\n"
+                                                      "Open Settings > Privacy & Security > Automation, and turn on %s under python3." % (app, app)])
+            if b.strip() == "Open Settings":
+                subprocess.run(["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"], timeout=10)
+        except Exception: pass
+    threading.Thread(target=run, daemon=True).start()
+    return True
 
 def dialog(text, title="LOCKqz"):
     def run():
@@ -353,9 +534,25 @@ class Agent:
         self.locked, self.quiz, self.url, self.missing_since, self.last_beat = False, None, None, None, 0.0
         self.pending = None          # (quiz, reason): an unlock the helper has not confirmed yet
         self.pending_try = 0.0
-        self.capped = {}             # quiz id -> last time its page was seen (released by the 3-hour cap)
+        self.capped = {}             # quiz id -> last time its page was seen (released by the safety cap or the server)
+        self.cap_left = {}           # quiz id -> its page left the attempt pages since the release (summary seen)
+        self.cap_forgot = {}         # quiz id -> when this agent forgot its release (the helper's older one is ignored)
         self.tabs_seen = 0           # how many tabs were open while the quiz was open
         self.last_check, self.lock_fail_shown = 0.0, {}
+        self.pw, self.pw_next, self.start_told = None, 0.0, None   # next /password check; "opens at" shown for
+        self.quiz_app, self.opera_warned = None, False             # browser holding the quiz
+        self.bl, self.bl_mtime = (set(), []), None                 # AI blocklist (hosts, host/path)
+
+    def blocklist(self):
+        p = os.path.join(HERE, "blocklist.txt")
+        try:
+            m = os.path.getmtime(p)
+            if m != self.bl_mtime:
+                with open(p) as f: self.bl = parse_blocklist(f.readlines())
+                self.bl_mtime = m
+        except Exception:
+            pass
+        return self.bl
 
     def verify_call(self, op, **kw):
         try: r = self.helper("/verify", dict(kw, op=op))
@@ -414,12 +611,69 @@ class Agent:
             # Cloudflare blocks the default "Python-urllib" user agent (403) — send our own. Bypass any
             # system proxy, which could block or MITM the call.
             req = urllib.request.Request(self.api + path, data=json.dumps(body).encode(),
-                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/0.4.0 (macOS)"})
+                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/%s (macOS)" % VERSION})
             return json.loads(NOPROXY.open(req, timeout=8).read())
         except Exception as e:
             log("api %s failed: %s" % (path, e)); return None
 
-    def start(self, url):
+    def close_for_quiz(self, app):
+        """At lock: close Firefox (and forks) and the Opera family - they cannot switch their AI off while
+        running - except the browser the quiz is in. -> note for the student ('' when nothing closed)."""
+        procs = ps_procs()
+        g, o, b = gecko_pids(procs, app), no_policy_pids(procs, app), restart_pids(procs, app)
+        close_pids(g + o + b)
+        self.opera_check = time.time() + 5   # give the closed ones time to exit before re-checking
+        if o: self.opera_warned = True       # the lock note already says so
+        names = (["Firefox"] if g else []) + (["Opera"] if o else []) + (["Brave"] if b else [])
+        if not names: return ""
+        if len(names) == 1:
+            return "\n\n%s was closed for the quiz so its AI stays off. You can reopen it; your tabs come back." % names[0]
+        return "\n\n%s were closed for the quiz so their AI stays off. You can reopen them; your tabs come back." % (", ".join(names[:-1]) + " and " + names[-1])
+
+    def pw_reply(self, r, now, first=False, note=""):
+        """Act on the helper's /password answer -> "pw" | "pay" | "wait" | "other" | None (nothing yet).
+        Sets when the next check may run (C2: a quiz that has not opened yet is asked every 5 min, then
+        every 15 s from 90 s before it opens)."""
+        r = r if isinstance(r, dict) else {}
+        pw, reason = r.get("password"), r.get("reason")
+        if pw:
+            changed, had = pw != self.pw, self.pw
+            self.pw, self.pw_next = pw, now + 15
+            if changed:
+                clipboard(pw)
+                if first and developer_mode():
+                    dialog("Developer mode: AI stays ON for you.\n\nQuiz password:  %s\n(copied to your clipboard)" % pw)
+                elif first:
+                    dialog("AI is locked for this quiz.\n\nQuiz password:  %s\n(copied to your clipboard — paste it into Brightspace)" % pw + note)
+                else:
+                    dialog(("The quiz password changed.\n\nNew password:  %s" if had else "Quiz password:  %s") % pw + "\n(copied to your clipboard)")
+            return "pw"
+        if self.payment(r):
+            self.pw_next = now + 15
+            if first and note: dialog("AI is locked for this quiz." + note)
+            return "pay"
+        if reason == "not started":
+            si = r.get("start_in")
+            opens = now + si if isinstance(si, (int, float)) else None
+            self.pw_next = next_password_check(now, opens)
+            if self.start_told != self.quiz:
+                self.start_told = self.quiz
+                at = time.strftime("%I:%M %p", time.localtime(opens)).lstrip("0") if opens else "its start time"
+                dialog("AI is locked for this quiz.\n\nThe quiz opens at %s. LOCKqz shows the password here then." % at + note)
+            return "wait"
+        if reason == "other_school":
+            # C10: the helper has already put AI back (nothing to protect here).
+            dialog("LOCKqz is not set up for this school yet.\n\nAI stays on for this quiz.")
+            self.add_cap(self.quiz, now)
+            log("other school: %s not protected" % self.quiz)
+            self.locked, self.quiz, self.url, self.missing_since = False, None, None, None
+            return "other"
+        if reason == "verify":
+            self.ensure_identity(force=True)   # the server needs the confirmed school email first
+        self.pw_next = now + 15
+        return None
+
+    def start(self, url, app=None):
         quiz = lock_id(url)
         try:
             r = self.helper("/lock", {"quiz_id": quiz, "student": self.student, "url": url})
@@ -430,26 +684,24 @@ class Agent:
                 self.lock_fail_shown[quiz] = time.time()
                 dialog("LOCKqz could not lock AI for this quiz. Is the LOCKqz app installed and running?")
             return
-        self.quiz, self.url = quiz, url
+        self.quiz, self.url, self.quiz_app, self.opera_warned = quiz, url, app, False
         self.locked, self.missing_since, self.last_beat, self.pending = True, None, time.time(), None
+        self.start_told = None
         log("LOCKED %s" % self.quiz)
-        pw, self.pay_shown = None, False
+        dev = developer_mode()
+        note = "" if dev else self.close_for_quiz(app)
+        if app in OPERA_APPS and not dev:
+            self.opera_warned = True
+            dialog("Opera cannot turn its AI off during a quiz.\n\nPlease take this quiz in Chrome, Safari, Edge or Firefox.")
+        self.pw, self.pay_shown, res = None, False, None
         for attempt in range(3):   # the helper fetches it (signed); retry a brief network blip
             try:
-                r = self.helper("/password", {"url": url}); pw = r.get("password")
-                if not pw and self.payment(r): break
+                res = self.pw_reply(self.helper("/password", {"url": url}), time.time(), first=True, note=note)
             except Exception as e: log("password via helper failed: %s" % e)
-            if pw: break
+            if res or not self.locked: break
             time.sleep(2)
-        self.pw, self.pw_checked = pw, time.time()
-        if pw and developer_mode():
-            clipboard(pw)
-            dialog("Developer mode: AI stays ON for you.\n\nQuiz password:  %s\n(copied to your clipboard)" % pw); return
-        if pw:
-            clipboard(pw)
-            dialog("AI is locked for this quiz.\n\nQuiz password:  %s\n(copied to your clipboard — paste it into Brightspace)" % pw)
-        elif not self.pay_shown:
-            dialog("AI is locked for this quiz.\n\nIf it needs a password, LOCKqz will show it here as soon as the quiz opens.")
+        if res is None and self.locked and not self.pay_shown:
+            dialog("AI is locked for this quiz.\n\nIf it needs a password, LOCKqz will show it here as soon as the quiz opens." + note)
 
     def send_unlock(self, quiz, reason):
         """True only when the helper confirms AI is back."""
@@ -471,6 +723,11 @@ class Agent:
                 self.api_post("/report", {"device_id": self.device, "event": "quiz_left", "quiz_id": quiz,
                                           "student": self.student, "source": "agent", "detail": reason})
         log("UNLOCKED (%s)%s" % (reason, " - helper did not confirm, retrying" if self.pending else ""))
+        # A Firefox started during the quiz read the quiz policies at start and keeps them until it restarts.
+        try:
+            if not developer_mode() and gecko_pids(ps_procs(), self.quiz_app):
+                dialog("AI is unlocked. Restart Firefox to get its AI features back.")
+        except Exception: pass
         self.locked, self.quiz, self.url, self.missing_since = False, None, None, None
 
     def adopt(self, st, present):
@@ -483,9 +740,40 @@ class Agent:
         self.last_beat, self.tabs_seen = time.time(), 0
         log("adopted existing lock %s" % q)
 
+    def add_cap(self, q, now=None):
+        """A quiz the helper (cap / server / other school) just released: not re-locked while its page stays open."""
+        now = time.time() if now is None else now
+        if q not in self.capped: self.cap_left[q] = False
+        self.capped[q] = now
+
     def note_cap(self, st):
         q = st.get("capped_quiz") if isinstance(st, dict) else None
-        if q: self.capped.setdefault(q, time.time())
+        if not q or q in self.capped: return
+        try: at = float(st.get("capped_at") or 0)
+        except Exception: at = 0.0
+        if q in self.cap_forgot and at <= self.cap_forgot[q]: return   # a release this agent already forgot
+        self.add_cap(q)
+
+    def forget_cap(self, q, why):
+        """Its page was closed, or a NEW attempt started: the quiz locks normally again. The helper forgets it too."""
+        self.capped.pop(q, None); self.cap_left.pop(q, None); self.cap_forgot[q] = time.time()
+        log("%s: %s may lock again" % (why, q))
+        try: self.helper("/uncap", {"quiz_id": q}, timeout=8)
+        except Exception as e: log("helper uncap failed: %s" % e)
+
+    def cap_step(self, present, now):
+        """A released quiz stays unlocked while its page stays open (the student finishes what they were
+        doing). Once the page has been gone for the grace period, or the student went back to the quiz's
+        summary page and then opened an attempt again (a new attempt), it locks normally again."""
+        for q in list(self.capped):
+            if q in present:
+                attempt = "/attempt/" in url_parts(present[q])[0]
+                if attempt and self.cap_left.get(q):
+                    self.forget_cap(q, "new attempt"); continue
+                if not attempt: self.cap_left[q] = True
+                self.capped[q] = now
+            elif now - self.capped[q] > GRACE:
+                self.forget_cap(q, "page closed")
 
     def tick(self, tabs=None, dev=None):
         # Developer mode (admin only): same quiz flow (gate password, start/end reporting) but the
@@ -495,18 +783,17 @@ class Agent:
         now = time.time()
         urls = [u for (_, _, _, u) in tabs]
         present, left = classify(urls)
-        any_leaving = any(LEAVING_RE.search(u) and QUIZ_RE.search(u) for u in urls)
-        # A quiz released by the 3-hour cap is never re-locked while it stays open; once its page has
-        # been gone for the grace period, a new attempt locks normally again.
-        for q in list(self.capped):
-            if q in present: self.capped[q] = now
-            elif now - self.capped[q] > GRACE: del self.capped[q]
+        any_leaving = any(is_leaving(u) for u in urls)
+        # A quiz released by the safety cap or by the server is never re-locked while it stays open; once
+        # its page has been gone for the grace period, a new attempt locks normally again.
+        self.cap_step(present, now)
         open_quizzes = {q: u for q, u in present.items() if q not in self.capped}
         if not self.verified and (open_quizzes or now - self.id_tried > 6 * 3600):
             self.ensure_identity()
         if not self.locked:
             if open_quizzes:
-                self.start(next(iter(open_quizzes.values())))
+                url = next(iter(open_quizzes.values()))
+                self.start(url, next((a for (a, _, _, u) in tabs if u == url), None))
                 if self.locked: self.tabs_seen = len(tabs)
                 return
             if self.pending and now - self.pending_try >= 5:
@@ -528,7 +815,8 @@ class Agent:
         if self.quiz in present and self.quiz not in self.capped:
             self.missing_since = None
             self.tabs_seen = max(self.tabs_seen, len(tabs))
-            if not self.url or "/attempt/" in present[self.quiz]: self.url = present[self.quiz]
+            if not self.url or "/attempt/" in url_parts(present[self.quiz])[0]: self.url = present[self.quiz]
+            if not self.quiz_app: self.quiz_app = next((a for (a, _, _, u) in tabs if u == present[self.quiz]), None)
         else:
             if self.quiz in left or (any_leaving and not open_quizzes):
                 self.end("quiz_submitted"); return
@@ -538,21 +826,17 @@ class Agent:
             if now - self.missing_since > GRACE:
                 self.end(unlock_reason(tabs, self.tabs_seen)); return
         # Gated quizzes change password every 5 min. Until the attempt starts (still on the quiz's
-        # start page, no "/attempt/" in the URL), re-check and hand over a new one if it changed.
+        # start page, no "/attempt/" in the URL), re-check and hand over a new one if it changed. A quiz
+        # that has not opened yet is asked on the slower C2 schedule (pw_next).
         cur = present.get(self.quiz)
-        if cur and "/attempt/" not in cur and now - getattr(self, "pw_checked", 0) > 15:
-            self.pw_checked = now
+        if cur and "/attempt/" not in url_parts(cur)[0] and now >= self.pw_next:
+            self.pw_next = now + 15
             try:
-                r2 = self.helper("/password", {"url": cur}); pw2 = r2.get("password")
-                if not pw2: self.payment(r2)
-                if pw2 and pw2 != getattr(self, "pw", None):
-                    first = not getattr(self, "pw", None)
-                    self.pw = pw2; clipboard(pw2)
-                    dialog(("Quiz password:  %s" if first else "The quiz password changed.\n\nNew password:  %s") % pw2 + "\n(copied to your clipboard)")
+                if self.pw_reply(self.helper("/password", {"url": cur}), now) == "other": return
             except Exception as e: log("password refresh failed: %s" % e)
         # Self-heal: if the helper is no longer locked while the quiz is still open (helper restarted,
-        # someone unloaded it), lock again right away - EXCEPT after the 3-hour safety cap released
-        # this quiz: then the student stays unlocked.
+        # someone unloaded it), lock again right away - EXCEPT when the safety cap or the server
+        # (submitted / ended) released this quiz: then the student stays unlocked.
         if now - self.last_check > 10:
             self.last_check = now
             try:
@@ -560,7 +844,7 @@ class Agent:
                 self.helper_ok = True
                 self.note_cap(st)
                 if self.quiz in self.capped:
-                    log("3-hour safety cap released %s — not re-locking" % self.quiz)
+                    log("%s released %s — not re-locking" % (st.get("capped_reason") or "safety cap", self.quiz))
                     self.locked, self.quiz, self.url, self.missing_since = False, None, None, None
                     return
                 if st.get("state") not in ("locked", "developer"):
@@ -568,9 +852,21 @@ class Agent:
                     self.helper("/lock", {"quiz_id": self.quiz, "student": self.student, "url": self.url or ""})
             except Exception as e:
                 self.helper_ok = False; log("helper check failed: %s" % e)
-        for (app, wi, ti, u) in ([] if dev else tabs):
-            new = rewrite_search(u)
-            if new and wi >= 0: set_tab_url(app, wi, ti, new)
+        if not dev:
+            # AI tabs opened before the quiz (an open chat keeps its connection past the hosts block) go
+            # to about:blank; AI-answer searches go to plain Google web results.
+            hosts, paths = self.blocklist()
+            for (app, wi, ti, u) in tabs:
+                if wi < 0: continue
+                new = "about:blank" if blocked_tab(u, hosts, paths) else rewrite_search(u)
+                if new: set_tab_url(app, wi, ti, new)
+            # Opera reopened during the quiz (no policy layer, built-in VPN) -> closed again.
+            if now - getattr(self, "opera_check", 0) >= 5:
+                self.opera_check = now
+                o = no_policy_pids(ps_procs(), self.quiz_app)
+                if close_pids(o) and not self.opera_warned:
+                    self.opera_warned = True
+                    dialog("Opera was closed: it cannot turn its AI off during a quiz. Use it again after the quiz.")
         # Report to the server ONLY while the helper is unreachable (proof for "helper killed"); while the
         # helper answers, its own signed pings say everything -> no routine agent traffic (free plan).
         if not getattr(self, "helper_ok", True) and now - self.last_beat > BEAT:

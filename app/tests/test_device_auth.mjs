@@ -35,9 +35,10 @@ function d1(sqlite) {
     const s = { bind(...a) { args = a.map(x => (x === undefined ? null : typeof x === "boolean" ? Number(x) : x)); return s; },
                 first: async () => st.get(...args) ?? null,
                 all: async () => ({ results: st.all(...args) }),
-                run: async () => ({ meta: { changes: Number(st.run(...args).changes) } }) };
+                run: async () => ({ meta: { changes: Number(st.run(...args).changes) } }),
+                _run: () => st.run(...args) };
     return s;
-  } };
+  }, async batch(sts) { sqlite.exec("BEGIN"); try { for (const s of sts) s._run(); sqlite.exec("COMMIT"); } catch (e) { sqlite.exec("ROLLBACK"); throw e; } return []; } };
 }
 
 const BASE = "https://lockqz.test";
@@ -131,8 +132,14 @@ async function suite(label, oldSchema) {
   check("unsigned agent heartbeat accepted as liveness only", r.status === 200 && r.data?.verified === false);
   r = await call(strict, "/report", { event: "heartbeat" });
   check("bare unsigned heartbeat is a harmless no-op (CI reachability check)", r.status === 200);
+  const lastLock = () => sqlite.prepare("SELECT last_lock FROM locks WHERE device_id=?").get(DEV)?.last_lock;
+  check("stale lock + unsigned heartbeats -> lock NOT refreshed", Date.now() - Date.parse(lastLock()) > 60000);
+  r = await pass_(strict, { key: K, device: DEV, signBody: JSON.stringify({ url: QUIZ_URL, device_id: DEV }), tsOffset: -400 });
+  check("stale lock + badly signed password request -> no password", r.status === 401 && !r.data?.password);
+  // C1: the helper's own signed password request is itself proof the lock is live (no heartbeat first).
   r = await pass_(strict, { key: K, device: DEV });
-  check("stale lock + unsigned heartbeats -> no password", r.status === 403);
+  check("C1: stale lock + SIGNED password request -> password, lock refreshed", r.status === 200 && r.data?.password === "LQ-SECRET01" && Date.now() - Date.parse(lastLock()) < 5000);
+  age(DEV, 70);
   r = await call(strict, "/report", { device_id: DEV, event: "heartbeat", quiz_id: LOCK_ID, source: "helper" }, { key: K, device: DEV });
   check("signed helper heartbeat accepted", r.status === 200);
   r = await pass_(strict, { key: K, device: DEV });

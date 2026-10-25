@@ -21,6 +21,7 @@ os.environ["LOCKQZ_POLICY_BACKUP"] = tempfile.mkdtemp()
 HOME = tempfile.mkdtemp(); os.environ["HOME"] = HOME   # agent files + fake browser profiles live here
 os.environ["LOCKQZ_FF_IDS"] = "org.mozilla.firefox,org.mozilla.librewolf,net.waterfox.waterfox,one.ablaze.floorp,app.zen_browser.zen"
 A = load("lockqz-agent.py"); P = load("browser-policy.py")
+P.PROXY_KEPT = os.path.join(tempfile.mkdtemp(), "proxy.kept")   # never a stray file on the test machine
 
 print("T1 quiz detection: attempt pages lock, list/submission pages never do")
 B = "https://brightspace.usc.edu"
@@ -161,9 +162,9 @@ run_old = A.gecko_running(["01:00:00 /Applications/Firefox.app/Contents/MacOS/fi
 ok("Firefox running and wrote the file since it started -> read") if A.gecko_session_files(run_old, lambda b: [rec] if b == "Firefox" else [], os.path.getmtime) == [("Firefox", rec)] else bad("live profile not read")
 ok("a firefox binary outside an app bundle does not count") if A.gecko_running(["01:00:00 /tmp/firefox"], now) == {} else bad("non-app firefox counted")
 ok("a bare process name (ps without paths) still counts") if "Firefox" in A.gecko_running(["01:00:00 firefox"], now) else bad("bare firefox name missed")
-class _PS: returncode = 0; stdout = "  00:30 /Applications/Firefox.app/Contents/MacOS/firefox\n"; stderr = ""
+class _PS: returncode = 0; stdout = "  4242   00:30 /Applications/Firefox.app/Contents/MacOS/firefox\n"; stderr = ""   # ps -o pid=,etime=,comm=
 _real_run, _real_apps = A.subprocess.run, A.running_apps
-A.subprocess.run = lambda *a, **k: _PS(); A.running_apps = lambda: set()
+A.subprocess.run = lambda *a, **k: _PS(); A.running_apps = lambda *a: set()
 ok("end to end: crash-left recovery file -> no quiz tab seen") if not [t for t in A.browser_tabs() if A.is_quiz(t[3])] else bad("stale recovery file produced a quiz tab")
 os.utime(rec, None)   # the running browser just wrote it
 ok("end to end: live Firefox session -> quiz tab seen") if [t for t in A.browser_tabs() if A.is_quiz(t[3])] else bad("live Firefox quiz not seen")
@@ -262,7 +263,7 @@ orig = open(os.path.join(pd, "com.google.Chrome.plist"), "rb").read()
 P.lock()
 ch = plistlib.load(open(os.path.join(pd, "com.google.Chrome.plist"), "rb"))
 ok("their keys kept during the quiz, ours added") if ch.get("HomepageLocation") == "https://usc.edu" and ch.get("GeminiSettings") == 1 and "badsite.example" in ch["URLBlocklist"] and "google.com/search" in ch["URLBlocklist"] else bad("merge wrong: %r" % ch)
-ok("force-installed extensions untouched (never uninstalled); allowlist lifted for the quiz only") if ch.get("ExtensionInstallForcelist") == ["abc;https://x"] and "ExtensionInstallAllowlist" not in ch else bad("extension keys wrong")
+ok("force-installed extensions untouched (never uninstalled); their allowlist replaced by the fixed safe list for the quiz only") if ch.get("ExtensionInstallForcelist") == ["abc;https://x"] and ch.get("ExtensionInstallAllowlist") == P.SAFE_EXTENSIONS and "aiextension" not in ch["ExtensionInstallAllowlist"] else bad("extension keys wrong")
 ok("blocklist path entries enforced in Chrome (huggingface.co/chat)") if "huggingface.co/chat" in ch["URLBlocklist"] else bad("path entry missing")
 ff = plistlib.load(open(os.path.join(pd, "org.mozilla.firefox.plist"), "rb"))
 ok("... and in Firefox") if "*://huggingface.co/chat*" in ff["WebsiteFilter"]["Block"] else bad("firefox path entry missing")
@@ -280,5 +281,199 @@ ids = P.firefox_family_ids()
 ok("bundle ids come from the fixed list only (a planted app cannot steer root's writes)") if ids == sorted(P.GECKO) else bad("ids: %r" % ids)
 ok("a path-like id is never accepted") if not P.ID_RE.fullmatch("../../etc/x") and not P.ID_RE.fullmatch("a/b.c") else bad("ID_RE too loose")
 ''')
+
+_section(r'''
+print("T15 round-2 coverage: blocklist mirrored into the browsers, Brave Tor/VPN, Firefox Smart Window + VPN, Office Copilot")
+pd, bk = tempfile.mkdtemp(), tempfile.mkdtemp()
+P.DIR, P.BACKUP = pd, bk
+os.environ["LOCKQZ_FF_IDS"] = "org.mozilla.firefox"
+hosts = P.host_entries(); paths = P.path_entries()
+ok("blocklist read: %d hosts + %d path entries" % (len(hosts), len(paths))) if len(hosts) > 250 and "gauthmath.com" in hosts and "github.com/copilot" in paths else bad("host/path split wrong: %d %r" % (len(hosts), paths))
+ok("no path entry and no comment in the host list") if not [h for h in hosts if "/" in h or h.startswith("#")] else bad("bad host entries")
+theirs_ff = {"AIControls": {"Translations": {"Value": "blocked", "Locked": True}}, "DisableTelemetry": True}
+with open(os.path.join(pd, "org.mozilla.firefox.plist"), "wb") as f: plistlib.dump(theirs_ff, f)
+theirs_off = {"OfficeAutoSignIn": True, "OfficeExperiencesAnalyzingContentPreference": True}
+with open(os.path.join(pd, "com.microsoft.office.plist"), "wb") as f: plistlib.dump(theirs_off, f)
+ff_orig = open(os.path.join(pd, "org.mozilla.firefox.plist"), "rb").read(); off_orig = open(os.path.join(pd, "com.microsoft.office.plist"), "rb").read()
+ok("lock succeeds") if P.lock() else bad("lock failed")
+ch = plistlib.load(open(os.path.join(pd, "com.google.Chrome.plist"), "rb"))
+ok("Chrome URLBlocklist: every blocklist host + path, under the 1000 limit") if all(h in ch["URLBlocklist"] for h in hosts) and all(x in ch["URLBlocklist"] for x in paths) and len(ch["URLBlocklist"]) <= 1000 else bad("URLBlocklist incomplete (%d)" % len(ch["URLBlocklist"]))
+ok("Chrome: no notes host blocked (docs.google.com, quizlet.com, m365.cloud.microsoft)") if not [x for x in ch["URLBlocklist"] if x in ("google.com", "docs.google.com", "quizlet.com", "studocu.com", "knowunity.com", "m365.cloud.microsoft", "github.com", "office.com")] else bad("notes host in URLBlocklist")
+ok("Chrome: only the fixed safe extensions stay on (password managers, Docs Offline, Zotero)") if ch["ExtensionInstallAllowlist"] == P.SAFE_EXTENSIONS and ch["ExtensionInstallBlocklist"] == ["*"] else bad("extension allowlist wrong: %r" % ch.get("ExtensionInstallAllowlist"))
+ok("Chrome: DuckDuckGo no-AI site allowed, AI Mode links blocked") if "noai.duckduckgo.com" in ch["URLAllowlist"] and "google.com/ai" in ch["URLBlocklist"] and "duckduckgo.com" in ch["URLBlocklist"] else bad("ddg/ai-mode lists wrong")
+ok("Chrome: proxy forced direct (network works without it)") if ch.get("ProxyMode") == "direct" else bad("ProxyMode missing")
+br = plistlib.load(open(os.path.join(pd, "com.brave.Browser.plist"), "rb"))
+ok("Brave: Leo, Tor windows and Brave VPN off") if br.get("BraveAIChatEnabled") is False and br.get("TorDisabled") is True and br.get("BraveVPNDisabled") is True else bad("brave policy wrong")
+ok("Chrome gets no Brave-only keys") if "TorDisabled" not in ch else bad("TorDisabled on Chrome")
+ff = plistlib.load(open(os.path.join(pd, "org.mozilla.firefox.plist"), "rb"))
+ok("Firefox: chatbot + Smart Window blocked (AIControls), never Default") if ff["AIControls"]["SidebarChatbot"] == {"Value": "blocked", "Locked": True} and ff["AIControls"]["SmartWindow"]["Value"] == "blocked" and "Default" not in ff["AIControls"] else bad("AIControls wrong: %r" % ff.get("AIControls"))
+ok("Firefox: the school's own AIControls entry kept during the quiz") if ff["AIControls"].get("Translations") == {"Value": "blocked", "Locked": True} and ff.get("DisableTelemetry") is True else bad("their AIControls lost")
+ok("Firefox: GenerativeAI off incl. SmartWindow (for 144-148), built-in VPN off") if ff["GenerativeAI"]["Chatbot"] is False and ff["GenerativeAI"]["SmartWindow"] is False and ff["GenerativeAI"]["Locked"] is True and ff["IPProtectionAvailable"] is False else bad("GenerativeAI/IPProtection wrong")
+ok("Firefox: browser.smartwindow.enabled locked off") if ff["Preferences"]["browser.smartwindow.enabled"] == {"Value": False, "Status": "locked"} else bad("smartwindow pref missing")
+blk = ff["WebsiteFilter"]["Block"]
+ok("Firefox WebsiteFilter: every blocklist host (*://*.host/*), under the 1000 limit") if all("*://*.%s/*" % h in blk for h in hosts) and len(blk) <= 1000 else bad("WebsiteFilter incomplete (%d)" % len(blk))
+of = plistlib.load(open(os.path.join(pd, "com.microsoft.office.plist"), "rb"))
+ok("Office: 'connected experiences that analyze content' off (Copilot off), their keys kept") if of["OfficeExperiencesAnalyzingContentPreference"] is False and of.get("OfficeAutoSignIn") is True else bad("office policy wrong: %r" % of)
+ok("unlock succeeds") if P.unlock() else bad("unlock failed")
+ok("Firefox + Office files restored byte-for-byte") if open(os.path.join(pd, "org.mozilla.firefox.plist"), "rb").read() == ff_orig and open(os.path.join(pd, "com.microsoft.office.plist"), "rb").read() == off_orig else bad("not restored")
+ok("nothing else left") if sorted(os.listdir(pd)) == ["com.microsoft.office.plist", "org.mozilla.firefox.plist"] else bad("left: %r" % os.listdir(pd))
+open(P.PROXY_KEPT, "w").close()   # extra-block.sh found the network only works through its proxy
+P.lock()
+ch = plistlib.load(open(os.path.join(pd, "com.google.Chrome.plist"), "rb")); ff = plistlib.load(open(os.path.join(pd, "org.mozilla.firefox.plist"), "rb"))
+ok("proxy-only network: browsers keep their proxy (no ProxyMode / Proxy policy), rest still applied") if "ProxyMode" not in ch and "Proxy" not in ff and ch.get("GenAiDefaultSettings") == 2 and ff["DNSOverHTTPS"]["Enabled"] is False else bad("proxy kept wrong")
+os.remove(P.PROXY_KEPT); P.unlock()
+os.environ.pop("LOCKQZ_FF_IDS", None)
+''')
+
+_section(r"""
+print("T15 F14: URL rules look at one part of the URL only")
+SUB = B + "/d2l/lms/quizzing/user/attempt/quiz_attempt_page.d2l?ou=123&qi=456&returnUrl=%2Fd2l%2Flms%2Fquizzing%2Fuser%2Fquiz_submissions.d2l%3Ffeedback%3D1"
+ok("attempt page whose query mentions 'submission'/'feedback' still locks") if A.is_quiz(SUB) and not A.is_leaving(SUB) else bad("query words decided the page")
+pres, left = A.classify([SUB]); ok("... and is present, not left") if "123-456" in pres and not left else bad("classify %r %r" % (pres, left))
+FAKE = B + "/d2l/le/content/123/viewContent/9/View?url=/d2l/lms/quizzing/user/quiz_summary.d2l%3Fqi=456"
+ok("a quiz path quoted in another page's query never locks") if not A.is_quiz(FAKE) else bad("content page locked")
+ok("lock id from the quiz's own ?ou=&qi= (not 'xqi=')") if A.lock_id(B + "/d2l/lms/quizzing/user/quiz_summary.d2l?xqi=1&qi=456&abou=7&ou=123") == "123-456" else bad("lock id %s" % A.lock_id(B + "/d2l/lms/quizzing/user/quiz_summary.d2l?xqi=1&qi=456&abou=7&ou=123"))
+ok("address-bar text without https:// still parsed") if A.is_quiz("brightspace.usc.edu/d2l/lms/quizzing/user/quiz_summary.d2l?qi=456&ou=123") else bad("scheme-less URL missed")
+ok("garbage never throws") if A.lock_id(None) == "x-x" and not A.is_quiz(None) and not A.is_quiz("http://[bad") else bad("garbage")
+""")
+_section(r"""
+print("T16 E5: running browsers found with ps, never through System Events")
+procs = [(1, 10, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+         (2, 10, "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper"),
+         (3, 10, "/System/Volumes/Preboot/Cryptexes/App/System/Applications/Safari.app/Contents/MacOS/Safari"),
+         (4, 10, "/Applications/Opera GX.app/Contents/MacOS/Opera")]
+apps = A.running_apps(procs)
+ok("Chrome, Safari, Opera GX found from their app bundles") if {"Google Chrome", "Safari", "Opera GX"} <= apps else bad("apps %r" % apps)
+ok("a Chrome helper alone never counts as Chrome running") if "Google Chrome" not in A.running_apps(procs[1:2]) else bad("helper counted as the browser")
+called = []
+A2 = load("lockqz-agent.py")   # a fresh copy: earlier sections replaced A.browser_tabs
+A2.osa = lambda script, *a, **k: called.append(script) or "[]"
+A2.ps_procs = lambda: procs
+A2.browser_tabs()
+ok("no System Events call at all") if not any("System Events" in c for c in called) else bad("System Events used")
+ok("tabs asked only of running browsers") if any("Google Chrome" in c for c in called) and not any("Microsoft Edge" in c for c in called) else bad("calls %r" % called)
+shown = []
+_real_osa2, _real_thr = A.osa, A.threading.Thread
+class _T:
+    def __init__(self, target=None, daemon=None): self.t = target
+    def start(self): shown.append(1)
+A.threading.Thread = _T; A._hinted.clear()
+A.permission_hint("Safari", now=1000, front="Safari")
+A.permission_hint("Safari", now=1100, front="Safari")
+A.permission_hint("Safari", now=1000 + A.HINT_EVERY + 1, front="Google Chrome")
+A.permission_hint("Safari", now=1000 + A.HINT_EVERY + 2, front="Safari")
+A.threading.Thread = _real_thr
+ok("permission hint at once, then again only when that browser is in front (>= 10 min apart)") if len(shown) == 2 else bad("hints shown %d" % len(shown))
+""")
+_section(r"""
+print("T17 G15: AI search pages go to plain Google web results, even without q")
+W = "https://www.google.com/search?udm=14&q="
+ok("AI Mode (udm=50) without q") if A.rewrite_search("https://www.google.com/search?udm=50") == W else bad(A.rewrite_search("https://www.google.com/search?udm=50"))
+ok("AI Mode home ?udm=50 on /") if A.rewrite_search("https://www.google.com/?udm=50") == W else bad("udm on /")
+ok("Google Lens") if A.rewrite_search("https://lens.google.com/search?p=abc") else bad("lens kept")
+ok("google.com/ai") if A.rewrite_search("https://www.google.com/ai?q=x") else bad("/ai kept")
+ok("plain web/images results left alone") if A.rewrite_search(W + "x") is None and A.rewrite_search("https://www.google.com/search?tbm=isch&q=x") is None else bad("web rewritten")
+ok("Google home page left alone") if A.rewrite_search("https://www.google.com/") is None else bad("home rewritten")
+""")
+_section(r"""
+print("T18 G11: open AI tabs are sent to about:blank at lock")
+hosts, paths = A.parse_blocklist(["# c", "chatgpt.com", "bing.com/chat", "huggingface.co/chat", "x.com/i/grok"])
+bt = lambda u: A.blocked_tab(u, hosts, paths)
+ok("chatgpt.com and its subdomains") if bt("https://chatgpt.com/c/1") and bt("https://www.chatgpt.com/") and bt("https://ab.chatgpt.com/x") else bad("chatgpt kept")
+ok("path entries (bing.com/chat, huggingface.co/chat, x.com/i/grok)") if bt("https://www.bing.com/chat?q=1") and bt("https://huggingface.co/chat/") and bt("https://x.com/i/grok") else bad("path entry kept")
+ok("not: Brightspace, bing search, huggingface models, x.com, Google search, notchatgpt.com") if not any(bt(u) for u in [B + "/d2l/home/1", "https://www.bing.com/search?q=1", "https://huggingface.co/models", "https://x.com/home", "https://www.google.com/search?q=1", "https://notchatgpt.com/"]) else bad("over-blank")
+g, h = agent()
+sets = []; A.set_tab_url = lambda app, wi, ti, url: sets.append((ti, url))
+g.blocklist = lambda: (hosts, paths)
+A.ps_procs = lambda: []
+T(g, [tab(ATT), ("Google Chrome", 0, 1, "https://chatgpt.com/c/1"), ("Google Chrome", 0, 2, "https://docs.google.com/x"), ("Firefox", -1, -1, "https://claude.ai/")])
+T(g, [tab(ATT), ("Google Chrome", 0, 1, "https://chatgpt.com/c/1"), ("Google Chrome", 0, 2, "https://docs.google.com/x")])
+ok("locked: the ChatGPT tab is blanked, notes and the quiz are not") if (1, "about:blank") in sets and not any(t in (0, 2) for (t, _) in sets) else bad("sets %r" % sets)
+""")
+_section(r"""
+print("T19 C2 / C10 / verify: the password answer drives what the agent does next")
+ok("not started: every 5 min until 90 s before it opens") if A.next_password_check(0, 3600) == 300 and A.next_password_check(3200, 3600) == 3500 else bad("schedule %r" % [A.next_password_check(0, 3600), A.next_password_check(3200, 3600)])
+ok("... then every 15 s; unknown start -> 5 min") if A.next_password_check(3550, 3600) == 3565 and A.next_password_check(0, None) == 300 else bad("late schedule")
+msgs = []; A.dialog = lambda m, *a, **k: msgs.append(m)
+class H2(FakeHelper):
+    def __init__(self, reply): FakeHelper.__init__(self); self.reply = reply
+    def __call__(self, path, body=None, timeout=90):
+        if path == "/password": self.calls.append((path, body)); return dict(self.reply)
+        return FakeHelper.__call__(self, path, body, timeout)
+g = A.Agent(); g.verified = True; h = H2({"password": None, "status": 403, "reason": "not started", "start_in": 1200}); g.helper = h
+T(g, [tab(SUMM)])
+n = sum(1 for (p, _) in h.calls if p == "/password")
+ok("locked, one password ask, 'opens at' shown once") if g.locked and n == 1 and sum("opens at" in m for m in msgs) == 1 else bad("n=%d msgs=%r" % (n, msgs))
+for _ in range(5): T(g, [tab(SUMM)])
+ok("no re-ask every 15 s while the quiz has not opened (C2 budget)") if sum(1 for (p, _) in h.calls if p == "/password") == 1 else bad("asked %d times" % sum(1 for (p, _) in h.calls if p == "/password"))
+g.pw_next = 0; h.reply = {"password": "PW2", "status": 200}; T(g, [tab(SUMM)])
+ok("when it opens the password is shown") if g.pw == "PW2" and any("PW2" in m for m in msgs) else bad("pw %r" % g.pw)
+g = A.Agent(); g.verified = True; h = H2({"password": None, "status": 403, "reason": "other_school"}); g.helper = h; msgs[:] = []
+T(g, [tab(SUMM)])
+ok("other school: told once, agent not locked") if not g.locked and any("not set up for this school" in m for m in msgs) else bad("locked=%r msgs=%r" % (g.locked, msgs))
+for _ in range(3): T(g, [tab(SUMM)])
+ok("... and never re-locked while the page stays open") if sum(1 for (p, _) in h.calls if p == "/lock") == 1 else bad("re-locked")
+g = A.Agent(); g.verified = True; h = H2({"password": None, "status": 402, "reason": "verify"}); g.helper = h
+asked = []; g.ensure_identity = lambda force=False: asked.append(force)
+T(g, [tab(SUMM)])
+ok("server needs the email confirmed -> setup asked") if asked and asked[0] is True else bad("no setup on verify")
+""")
+_section(r"""
+print("T20 G3/G4: Firefox and the Opera family are closed at lock unless the quiz is in them")
+procs = [(11, 5, "/Applications/Firefox.app/Contents/MacOS/firefox"), (12, 5, "/Applications/Opera.app/Contents/MacOS/Opera"),
+         (13, 5, "/Applications/Opera GX.app/Contents/MacOS/Opera"), (14, 5, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+         (15, 5, "/Applications/Tor Browser.app/Contents/MacOS/firefox")]
+ok("quiz in Chrome: Firefox (incl. Tor Browser) + every Opera closed, Chrome kept") if sorted(p for p, _ in A.gecko_pids(procs, "Google Chrome") + A.no_policy_pids(procs, "Google Chrome")) == [11, 12, 13, 15] else bad("pids")
+ok("quiz in Firefox: Firefox kept") if not [p for p, _ in A.gecko_pids(procs, "Firefox") if p == 11] else bad("closed the quiz browser")
+ok("quiz in Opera GX: Opera GX kept, Opera closed") if [p for p, _ in A.no_policy_pids(procs, "Opera GX")] == [12] else bad("opera gx")
+killed, msgs = [], []
+A.dialog = lambda m, *a, **k: msgs.append(m); A.close_pids = lambda pids: killed.extend(pids) or bool(pids)
+A.ps_procs = lambda: procs
+g, h = agent(); T(g, [tab(ATT)])
+ok("lock message says Firefox and Opera were closed") if any("Firefox and Opera were closed" in m for m in msgs) and {p for p, _ in killed} >= {11, 12, 13} else bad("msgs %r killed %r" % (msgs, killed))
+g, h = agent(); msgs[:] = []; T(g, [("Opera", 0, 0, ATT)])
+ok("quiz in Opera: student told to use another browser") if any("Please take this quiz in" in m for m in msgs) else bad("no Opera warning: %r" % msgs)
+""")
+_section(r"""
+print("T21 C9: a quiz the server released (submitted) is never re-locked; UA from the release version")
+g, h = agent(); T(g, [tab(ATT)])
+h.status = {"state": "unlocked", "capped_quiz": "123-456", "capped_reason": "quiz_submitted"}
+g.last_check = 0; T(g, [tab(ATT)])
+for _ in range(3): g.last_check = 0; T(g, [tab(ATT)])
+ok("helper released it -> agent unlocked, no re-lock") if not g.locked and sum(1 for (p, _) in h.calls if p == "/lock") == 1 else bad("calls %r" % h.calls)
+import re as _re
+ok("agent User-Agent version = the helper's VERSION") if A.VERSION == _re.search(r'^VERSION = "([^"]+)"', open(os.path.join(MAC, "lockqzd.py")).read(), _re.M).group(1) else bad("UA version %s" % A.VERSION)
+lg = os.path.join(tempfile.mkdtemp(), "a.log"); A._LOGF, A.LOG_MAX = lg, 100
+for i in range(20): A.log("line %d" % i)
+ok("agent log rotated at its size limit") if os.path.exists(lg + ".1") and os.path.getsize(lg) < 200 else bad("agent log not rotated")
+""")
+
+_section(r"""
+print("T22 round-2 #4: a released quiz locks again for a NEW attempt or once its page was closed (no 24 h re-add)")
+g, h = agent(); T(g, [tab(ATT)])
+h.status = {"state": "unlocked", "capped_quiz": "123-456", "capped_reason": "quiz_submitted", "capped_at": _t.time()}
+g.last_check = 0; T(g, [tab(ATT)])
+ok("released mid-attempt -> stays unlocked while on the attempt page") if not g.locked else bad("re-locked mid-attempt")
+T(g, [tab(SUMM)]); g.last_check = 0; T(g, [tab(SUMM)])
+ok("back on the quiz summary -> still unlocked (the release holds while its page is open)") if not g.locked else bad("re-locked on the summary page")
+n0 = sum(1 for (p, _) in h.calls if p == "/lock")
+T(g, [tab(ATT)])
+ok("a NEW attempt after the summary page -> locks again, helper told /uncap") if g.locked and sum(1 for (p, _) in h.calls if p == "/lock") == n0 + 1 and any(p == "/uncap" for (p, _) in h.calls) else bad("new attempt not locked: %r" % h.calls[-4:])
+g, h = agent(); T(g, [tab(ATT)])
+rel = _t.time() - 5
+h.status = {"state": "unlocked", "capped_quiz": "123-456", "capped_reason": "cap", "capped_at": rel}
+g.last_check = 0; T(g, [tab(ATT)])
+g.capped["123-456"] = _t.time() - A.GRACE - 1; T(g, [])        # page closed for the grace period -> forgotten
+for _ in range(3): g.last_check = 0; T(g, [])                   # helper still reports the old release
+ok("page closed: the helper's old release is not re-added") if "123-456" not in g.capped else bad("re-added from /status: %r" % g.capped)
+T(g, [tab(ATT)])
+ok("... and opening the quiz again locks") if g.locked else bad("never locks again after the release")
+g, h = agent(); T(g, [tab(ATT)])
+h.status = {"state": "unlocked", "capped_quiz": "123-456", "capped_at": _t.time()}
+g.last_check = 0; T(g, [tab(ATT)]); g.capped["123-456"] = _t.time() - A.GRACE - 1; T(g, [])
+h.status = {"state": "unlocked", "capped_quiz": "123-456", "capped_at": _t.time() + 1}   # a NEW release later
+g.last_check = 0; T(g, [])
+ok("a later release of the same quiz is honored again") if "123-456" in g.capped else bad("new release ignored")
+""")
 
 print(""); print(f"RESULT: {passed} passed, {failed} failed"); sys.exit(0 if failed == 0 else 1)

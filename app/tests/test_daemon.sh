@@ -12,7 +12,7 @@ bad(){ FAIL=$((FAIL+1)); echo "  FAIL: $1"; }
 TMP="$(mktemp -d)"; T=test-token-0123456789abcdef
 printf %s "$T" > "$TMP/helper.token"   # the helper's per-install control token
 PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
-printf '{"port":%s,"token":"%s","api_base":"","device_id":"test-dev","student":"test","max_minutes":5}' "$PORT" "$T" > "$TMP/config.json"
+printf '{"port":%s,"token":"%s","api_base":"","device_id":"test-dev","student":"test","cap_minutes":5}' "$PORT" "$T" > "$TMP/config.json"
 # exec: $DPID is the daemon itself, so the cleanup below really stops it; key file stays in $TMP
 ( cd "$MAC" && LOCKQZ_NO_DEVMODE=1 LOCKQZ_DRYRUN=1 LOCKQZ_CONFIG="$TMP/config.json" LOCKQZ_KEY_PATH="$TMP/device.key" LOCKQZ_LOCKFILE="$TMP/active_lock.json" LOCKQZ_TOKEN_FILE="$TMP/helper.token" LOCKQZ_TOKEN_DIR="$TMP/tokens" exec python3 lockqzd.py >"$TMP/daemon.log" 2>&1 ) &
 DPID=$!
@@ -63,7 +63,7 @@ start_daemon
 [ ! -f "$TMP/active_lock.json" ] && ok "expired record discarded" || bad "expired record not discarded"
 
 
-echo "T-cap a /lock can never ask for more than the configured cap (here 5 min; default 180)"
+echo "T-cap a /lock can never ask for more than the unknown-end cap (here cap_minutes 5; default 6 h)"
 curl -s -X POST -H "X-LOCKqz-Token: $T" -d '{"quiz_id":"98765-12345","max_minutes":100000}' $B/lock >/dev/null
 mm=$(curl -s -H "X-LOCKqz-Token: $T" $B/status | python3 -c 'import sys,json;print(json.load(sys.stdin)["max_minutes"])' 2>/dev/null)
 [ "$mm" = "5" ] && ok "max_minutes 100000 capped to 5" || bad "max_minutes not capped (got $mm)"

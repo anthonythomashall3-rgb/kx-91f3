@@ -48,7 +48,7 @@ if [ ! -f "$APP/lockqzd.py" ] || [ -n "${FETCH_ONLY:-}" ]; then
   WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
   printf '%s\n' "$UPDATE_PUB" > "$WORK/update.pub"
   curl -fsSL -o "$WORK/update.json" "$SITE/download/update.json"
-  curl -fsSL "$SITE/download/update.sig" | base64 -d > "$WORK/update.sig"
+  curl -fsSL "$SITE/download/update.sig" | /usr/bin/openssl base64 -d -A > "$WORK/update.sig"   # every macOS (base64 -d/-D differ)
   openssl dgst -sha256 -verify "$WORK/update.pub" -signature "$WORK/update.sig" "$WORK/update.json" >/dev/null 2>&1 \
     || { echo "LOCKqz: release signature is INVALID - not installing. Tell your professor."; exit 1; }
   mkdir -p "$WORK/files"
@@ -90,15 +90,17 @@ else
 fi
 chown -R root:wheel "$DEST"; chmod -R go-w "$DEST"
 chmod 755 "$DEST"/*.sh "$DEST"/*.py 2>/dev/null || true
+# A fresh install never inherits an old self-update's rollback state.
+rm -rf "$DEST/.prev" "$DEST/.pending" "$DEST/.bad_version"
 # python3 must really work (fresh Macs ship only a stub until Apple's tools are installed).
-bash "$DEST/ensure-python.sh"
+bash "$DEST/ensure-python.sh" || { echo "LOCKqz: not installed - Apple's Command Line Tools are needed. Run:  xcode-select --install"; echo "        then run this installer again."; exit 1; }
 
 # Write the device config (merge token/api/device into the example shape).
 /usr/bin/python3 - "$DEST/config.json" "$API" "$DEVICE" "$STUDENT" <<'PY'
 import json,sys
 path,api,dev,student=sys.argv[1:5]
-json.dump({"port":8787,"api_base":api,"device_id":dev,
-          "student":student or None,"max_minutes":180}, open(path,"w"), indent=2)
+json.dump({"port":8787,"api_base":api.replace("lockdownqz.pages.dev","lockqz.pages.dev"),"device_id":dev,
+          "student":student or None}, open(path,"w"), indent=2)
 PY
 chmod 644 "$DEST/config.json"   # the per-user agent reads it (no secrets in it)
 # Loopback control token: random per install, root-only. The helper gives the logged-in user a
@@ -158,4 +160,4 @@ echo ""
 echo "Installed. Device id: $DEVICE"
 echo "Helper status:"; curl -s -m 4 -H "X-LOCKqz-Token: $TOKEN" http://127.0.0.1:8787/status || echo "  (daemon still starting — check $DEST/lockqzd.log)"
 echo ""
-echo "Done. Open a Brightspace quiz — the agent asks your name once, then locks AI automatically."
+echo "Done. Open a Brightspace quiz — LOCKqz asks your school email once, then locks AI automatically."

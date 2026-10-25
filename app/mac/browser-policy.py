@@ -11,7 +11,13 @@ While locked, per browser:
   * encrypted-DNS bypass off (so the /etc/hosts block holds)
   * AI answers in search off: web search is pinned to Google "Web" results
     (udm=14 = no AI Overview, no AI Mode); Bing/DDG/Brave/You/Kagi/Yahoo search blocked
-  * all browser extensions disabled (AI sidebars, Grammarly-type writers)
+  * all browser extensions disabled (AI sidebars, Grammarly-type writers), except a short fixed
+    list of password managers / Docs Offline / Zotero (so a logged-out student can still sign in)
+  * every blocklist host is also blocked inside the browser (URLBlocklist / WebsiteFilter), so a
+    browser-level bypass of /etc/hosts (--host-resolver-rules, a proxy add-on, Tor/VPN windows)
+    still cannot open an AI site; Brave Tor windows + Brave VPN and Firefox's built-in VPN off
+Also Microsoft Office: "connected experiences that analyze content" off (Microsoft: Copilot is then
+unavailable in Word, Excel, PowerPoint, OneNote, Outlook) - Office reads it when an app starts.
 
 A managed-preferences file that already exists (a school MDM profile, the student's own policies)
 is backed up to a root-only folder before LOCKqz adds its keys, and put back byte-for-byte at
@@ -44,35 +50,54 @@ GECKO = ["org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition", "org.mozi
          "org.mozilla.librewolf", "io.gitlab.librewolf-community", "net.waterfox.waterfox",
          "org.waterfoxproject.waterfox", "one.ablaze.floorp", "app.zen-browser.zen", "app.zen_browser.zen",
          "net.mullvad.mullvadbrowser", "org.torproject.torbrowser"]
+OFFICE = "com.microsoft.office"   # Word/Excel/PowerPoint/OneNote/Outlook read this managed domain
 MARK = "LOCKqzManaged"
+# Written by extra-block.sh when the network only works through the student's proxy (campus /
+# workplace proxy): then the browsers keep their proxy setting so Brightspace still loads.
+PROXY_KEPT = os.environ.get("LOCKQZ_PROXY_KEPT") or os.path.join(os.path.dirname(BACKUP), "proxy.kept")
+# Extensions that stay ON during the quiz (no AI in them): Bitwarden, 1Password, LastPass, Dashlane,
+# Proton Pass, iCloud Passwords, Google Docs Offline, Zotero Connector (Chrome Web Store ids) and
+# Bitwarden, 1Password, LastPass, Dashlane (Edge Add-ons ids). Fixed list - never read from the user.
+SAFE_EXTENSIONS = ["nngceckbapebfimnlniiiahkandclblb", "aeblfdkhhhdcdjpifhhbdiojplfjncoa",
+                   "hdokiejnpimakedhajhdlcegeplioahd", "fdjamakpfbbddfjaooikfcpapjohcfmg",
+                   "ghmbeldphafepmbegfdlkpapadhbakde", "pejdijmoenmkgeppbflobdenhhabjlaj",
+                   "ghbmnnjooekpmoecnnnilnnbdlolhkhi", "ekhagklcjbdpajgpjgmbionohlpdbjgc",
+                   "jbkfoedolllekgbhcbcoahefnbanhhlh", "dppgmdbiimibapkepcbdbmkaabgiofem",
+                   "bbcinlkgjjkejfdpemiealijmmooekmp", "gehmmocbbkpblljhkekmfhjpfbkclbph"]
 
 SEARCH_BLOCK = ["google.com/search", "google.com/webhp", "bing.com/search", "bing.com/copilotsearch",
                 "bing.com/chat", "copilot.microsoft.com", "duckduckgo.com", "duck.ai",
                 "search.yahoo.com", "search.brave.com", "you.com", "kagi.com",
                 "yandex.com/search", "ecosia.org/search", "startpage.com"]
-# Google verticals that carry no AI answer: Web, Images, News, Video, Books.
-SEARCH_ALLOW = ["google.com/search@udm=14", "google.com/search@udm=2", "google.com/search@udm=12",
+# Google verticals that carry no AI answer: Web, Images, News, Video, Books; DuckDuckGo's no-AI
+# site (Search Assist, Duck.ai and AI images off).
+SEARCH_ALLOW = ["noai.duckduckgo.com", "google.com/search@udm=14", "google.com/search@udm=2", "google.com/search@udm=12",
                 "google.com/search@udm=7", "google.com/search@udm=36",
                 "google.com/search@tbm=isch", "google.com/search@tbm=nws",
                 "google.com/search@tbm=vid", "google.com/search@tbm=bks"]
 WEB_SEARCH = "https://www.google.com/search?udm=14&q={searchTerms}"
 
+def keep_proxy():
+    return os.path.exists(PROXY_KEPT)
+
 def chromium_policy(domain):
     p = {MARK: True,
          "GenAiDefaultSettings": 2, "GeminiSettings": 1, "BuiltInAIAPIsEnabled": False,
          "DnsOverHttpsMode": "off", "ProxyMode": "direct",   # a proxy would resolve AI sites past hosts
-         "URLBlocklist": SEARCH_BLOCK, "URLAllowlist": SEARCH_ALLOW,
+         "URLBlocklist": list(SEARCH_BLOCK), "URLAllowlist": list(SEARCH_ALLOW),
          "DefaultSearchProviderEnabled": True, "DefaultSearchProviderName": "Google (Web)",
          "DefaultSearchProviderSearchURL": WEB_SEARCH,
          "DefaultSearchProviderSuggestURL": "https://www.google.com/complete/search?output=chrome&q={searchTerms}",
-         "ExtensionInstallBlocklist": ["*"]}
+         "ExtensionInstallBlocklist": ["*"], "ExtensionInstallAllowlist": list(SAFE_EXTENSIONS)}
+    if keep_proxy(): p.pop("ProxyMode")
     if domain.startswith("com.microsoft.Edge"):
         p.update({"HubsSidebarEnabled": False, "CopilotCDPPageContext": False,
                   "EdgeEntraCopilotPageContext": False, "ComposeInlineEnabled": False,
                   "Microsoft365CopilotChatIconEnabled": False,
                   "GenAILocalFoundationalModelSettings": 1})
     if domain.startswith("com.brave.Browser"):
-        p.update({"BraveAIChatEnabled": False})
+        # Tor windows and Brave VPN look names up remotely, past /etc/hosts.
+        p.update({"BraveAIChatEnabled": False, "TorDisabled": True, "BraveVPNDisabled": True})
     return p
 
 def firefox_policy():
@@ -86,13 +111,28 @@ def firefox_policy():
            "https://duck.ai/*", "https://search.yahoo.com/*", "https://search.brave.com/*",
            "https://you.com/*", "https://kagi.com/*", "https://yandex.com/search*",
            "https://www.ecosia.org/search*", "https://www.startpage.com/*"]
-    return {MARK: True, "EnterprisePoliciesEnabled": True,
-            "DNSOverHTTPS": {"Enabled": False, "Locked": True},
-            "Proxy": {"Mode": "none", "Locked": True},
-            "WebsiteFilter": {"Block": blk, "Exceptions": exc},
-            "Preferences": {"browser.ml.chat.enabled": {"Value": False, "Status": "locked"},
-                            "browser.ml.enable": {"Value": False, "Status": "locked"},
-                            "browser.ml.linkPreview.enabled": {"Value": False, "Status": "locked"}}}
+    pol = {MARK: True, "EnterprisePoliciesEnabled": True,
+           "DNSOverHTTPS": {"Enabled": False, "Locked": True},
+           "Proxy": {"Mode": "none", "Locked": True},
+           "IPProtectionAvailable": False,          # Firefox's built-in VPN (149+)
+           "WebsiteFilter": {"Block": blk, "Exceptions": exc},
+           # GenerativeAI (144+); Firefox ignores it when AIControls (149+) is present, so the
+           # chatbot and Smart Window are blocked there too. Never AIControls "Default": "blocked"
+           # deletes downloaded on-device models; the on-device features are off by the prefs below.
+           "GenerativeAI": {"Enabled": False, "Chatbot": False, "LinkPreviews": False, "TabGroups": False,
+                            "SmartWindow": False, "Locked": True},
+           "AIControls": {"SidebarChatbot": {"Value": "blocked", "Locked": True},
+                          "SmartWindow": {"Value": "blocked", "Locked": True}},
+           "Preferences": {"browser.ml.chat.enabled": {"Value": False, "Status": "locked"},
+                           "browser.ml.enable": {"Value": False, "Status": "locked"},
+                           "browser.ml.linkPreview.enabled": {"Value": False, "Status": "locked"},
+                           "browser.smartwindow.enabled": {"Value": False, "Status": "locked"}}}
+    if keep_proxy(): pol.pop("Proxy")
+    return pol
+
+def office_policy():
+    # Microsoft: with this FALSE, Copilot is unavailable in Word, Excel, PowerPoint, OneNote, Outlook.
+    return {MARK: True, "OfficeExperiencesAnalyzingContentPreference": False}
 
 def firefox_family_ids():
     """Bundle ids that get the Firefox policy: the fixed GECKO list. LOCKQZ_FF_IDS (comma list,
@@ -116,6 +156,21 @@ def path_entries():
         pass
     return list(dict.fromkeys(out))
 
+def host_entries():
+    """Plain host lines of the blocklist (the /etc/hosts entries), mirrored into the browsers' own
+    URL filters: a browser that skips /etc/hosts (--host-resolver-rules, proxy add-on) is still
+    blocked. Chromium matches subdomains too."""
+    out = []
+    try:
+        with open(BLOCKLIST) as f:
+            for l in f:
+                l = l.strip().lower()
+                if l and not l.startswith("#") and re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", l):
+                    out.append(l)
+    except Exception:
+        pass
+    return list(dict.fromkeys(out))
+
 def _union(a, b):
     a = a if isinstance(a, list) else []
     return list(dict.fromkeys(list(a) + list(b)))
@@ -131,9 +186,17 @@ def merge_chromium(base, ours):
     out["URLBlocklist"] = _union((base or {}).get("URLBlocklist"), ours["URLBlocklist"])
     return out
 
+def merge_plain(base, ours):
+    out = dict(base or {}); out.update(ours); return out
+
 def merge_firefox(base, ours):
     out = dict(base or {})
-    out.update({k: v for k, v in ours.items() if k not in ("WebsiteFilter", "Preferences")})
+    out.update({k: v for k, v in ours.items() if k not in ("WebsiteFilter", "Preferences", "AIControls", "GenerativeAI")})
+    for k in ("AIControls", "GenerativeAI"):   # their other AI settings stay; ours on top
+        if k in ours:
+            have = (base or {}).get(k)
+            d = dict(have) if isinstance(have, dict) else {}
+            d.update(ours[k]); out[k] = d
     wf = (base or {}).get("WebsiteFilter") if isinstance((base or {}).get("WebsiteFilter"), dict) else {}
     out["WebsiteFilter"] = {"Block": _union(wf.get("Block"), ours["WebsiteFilter"]["Block"]),
                             "Exceptions": ours["WebsiteFilter"]["Exceptions"]}
@@ -191,18 +254,19 @@ def _candidates():
     except Exception: present = []
     try: saved = [f[:-6] for f in os.listdir(BACKUP) if f.endswith(".plist")]
     except Exception: saved = []
-    return sorted(d for d in set(CHROMIUM + GECKO + firefox_family_ids() + present + saved) if ID_RE.fullmatch(d))
+    return sorted(d for d in set(CHROMIUM + GECKO + [OFFICE] + firefox_family_ids() + present + saved) if ID_RE.fullmatch(d))
 
 def lock():
-    changed, failed, extra = False, False, path_entries()
+    changed, failed, extra, hosts = False, False, path_entries(), host_entries()
     jobs = [(d, chromium_policy(d), merge_chromium) for d in CHROMIUM] + \
-           [(d, firefox_policy(), merge_firefox) for d in firefox_family_ids()]
+           [(d, firefox_policy(), merge_firefox) for d in firefox_family_ids()] + \
+           [(OFFICE, office_policy(), merge_plain)]
     for d, pol, merge in jobs:
-        if extra:
-            if "URLBlocklist" in pol: pol["URLBlocklist"] = _union(pol["URLBlocklist"], extra)
-            if "WebsiteFilter" in pol:
-                pol["WebsiteFilter"]["Block"] = _union(pol["WebsiteFilter"]["Block"],
-                    [p for e in extra for p in ("*://%s*" % e, "*://*.%s*" % e)])
+        if "URLBlocklist" in pol:   # Chromium: <= 1000 entries (ours ~330)
+            pol["URLBlocklist"] = _union(pol["URLBlocklist"], extra + hosts)
+        if "WebsiteFilter" in pol:  # Firefox: <= 1000 entries each list
+            pol["WebsiteFilter"]["Block"] = _union(pol["WebsiteFilter"]["Block"],
+                [p for e in extra for p in ("*://%s*" % e, "*://*.%s*" % e)] + ["*://*.%s/*" % h for h in hosts])
         try: changed = write(d, pol, merge) or changed
         except Exception as e:
             failed = True; print("LOCKqz policy: %s: %s" % (d, e), file=sys.stderr)

@@ -26,13 +26,23 @@ $StudentFile = "$UserDir\student.json"
 $Poll = 2; $PollLocked = 1; $Grace = 30; $Beat = 60; $HelperOk = $true   # agent reports only while the helper is unreachable
 $BrowserClasses = @("Chrome_WidgetWin_1","MozillaWindowClass")
 
-function Log($m) { Add-Content -Path "$UserDir\agent.log" -Value ("{0} {1}" -f (Get-Date -Format s), $m) }
-function Is-QuizPath($u) { ($u -match "/d2l/lms/quizzing/user/") -or (($u -match "/d2l/lms/quizzing/") -and ($u -match "isprv=1|preview")) }
-function Is-Quiz($u)    { (Is-QuizPath $u) -and ($u -match "qi=") -and -not ($u -match "quizzes_list|quiz_submissions|feedback|results|submission") }
+function Log($m) {
+  $lf = "$UserDir\agent.log"
+  try { if ((Get-Item -LiteralPath $lf -ErrorAction Stop).Length -gt 1000000) { Move-Item -LiteralPath $lf "$lf.1" -Force } } catch { }   # never past ~2 MB
+  Add-Content -Path $lf -Value ("{0} {1}" -f (Get-Date -Format s), $m)
+}
+# Brightspace URL rules (tests/test_url_parsing.mjs runs these exact functions). Each rule looks at ONE
+# part of the URL, so a word in another parameter (?returnUrl=...results) or a quiz path quoted in a
+# query string can never lock or unlock anything. The address bar may show the URL without "https://".
+# Taking a quiz: /d2l/lms/quizzing/user/... ; previewing one (TAs/staff): .../preview... or ?isprv=1
+function Url-Path([string]$u) { if ($u -match '^(?:[A-Za-z][A-Za-z0-9+.-]*://)?[^/?#]*([^?#]*)') { return $Matches[1] }; return "" }
+function Url-Query([string]$u) { $i = $u.IndexOf("?"); if ($i -lt 0) { return "" }; $q = $u.Substring($i + 1); $h = $q.IndexOf("#"); if ($h -ge 0) { $q = $q.Substring(0, $h) }; return $q }
+function Is-QuizPath($u) { $p = Url-Path ([string]$u); ($p -match '^/d2l/lms/quizzing/(user/|.*preview)') -or (($p -match '^/d2l/lms/quizzing/') -and ((Url-Query ([string]$u)) -match '(^|&)isprv=1(&|$)')) }
+function Is-Quiz($u)    { (Is-QuizPath $u) -and [regex]::IsMatch([string]$u, '[?&]qi=\d') -and -not (Is-Leaving $u) }
 # Brightspace quiz-attempt pages carry "Quiz" (and often the LMS name) in the window title; used ONLY for
 # a window whose address bar can't be read (F11 / PWA), so going fullscreen can't drop a lock silently.
 function Is-QuizByTitle($t) { $t -match "Quiz" -and $t -match "Brightspace|D2L|Attempt" }
-function Is-Leaving($u) { (Is-QuizPath $u) -and ($u -match "quizzes_list|quiz_submissions|feedback|results|submission") }
+function Is-Leaving($u) { (Is-QuizPath $u) -and ((Url-Path ([string]$u)) -match 'quizzes_list|quiz_submissions|feedback|results|submission') }
 function Clean-Title([string]$t) {
   # Window title -> page title: drops zero-width characters (Edge writes "Microsoft<U+200B> Edge"),
   # " and N more pages" and the browser-name suffix (" - Google Chrome - Profile", " - Mozilla Firefox").
@@ -77,9 +87,8 @@ function Step-Locked($wins, $quizWin, [string]$tab, [string]$title, $missingSinc
   return $r
 }
 function Lock-Id($u) {
-  $qi = if ($u -match "qi=(\d+)") { $Matches[1] } else { "x" }
-  $ou = if ($u -match "ou=(\d+)") { $Matches[1] } else { "x" }
-  "$ou-$qi"
+  $qi = [regex]::Match([string]$u, '[?&]qi=(\d+)'); $ou = [regex]::Match([string]$u, '[?&]ou=(\d+)')
+  "$(if ($ou.Success) { $ou.Groups[1].Value } else { 'x' })-$(if ($qi.Success) { $qi.Groups[1].Value } else { 'x' })"
 }
 
 $Root = [System.Windows.Automation.AutomationElement]::RootElement
@@ -111,7 +120,7 @@ function Helper($path, $body, $timeout = 90) {
 }
 function Api($path, $body) {
   if (-not $Api) { return $null }
-  try { Invoke-RestMethod -Uri "$Api$path" -Method Post -Body ($body | ConvertTo-Json -Compress) -ContentType "application/json" -TimeoutSec 8 } catch { $null }
+  try { Invoke-RestMethod -Uri "$Api$path" -Method Post -Body ($body | ConvertTo-Json -Compress) -ContentType "application/json" -TimeoutSec 8 -UserAgent "LOCKqz-agent (Windows)" } catch { $null }
 }
 function Show-Pay($r) {
   # Student fee unpaid: open the payment page once per quiz; the password follows when the payment arrives.
@@ -275,8 +284,86 @@ Log "running (device $Device, student $Student)"
 
 # ---- main loop ----
 $Locked = $false; $Quiz = $null; $QuizTab = $null; $QuizTitle = $null; $QuizUrl = $null; $QuizProc = ""
-$LastPw = $null; $PwChecked = Get-Date; $MissingSince = $null; $LastBeat = Get-Date; $LastCheck = Get-Date "2000-01-01"
+$LastPw = $null; $PwNext = Get-Date; $StartTold = $null; $MissingSince = $null; $LastBeat = Get-Date; $LastCheck = Get-Date "2000-01-01"
 $Pending = $null; $PendingAt = Get-Date "2000-01-01"; $OperaWarned = $false
+# Quizzes the helper released (safety cap, the server's "submitted"/"ended", another school): never
+# re-locked while their page stays open; forgotten once the page has been gone for the grace period.
+$Capped = @{}
+$CapLeft = @{}     # quiz id -> its page left the attempt pages since the release (summary seen)
+$CapForgot = @{}   # quiz id -> unix time this agent forgot its release (the helper's older one is ignored)
+function Add-Cap([string]$q) { if (-not $script:Capped.ContainsKey($q)) { $script:CapLeft[$q] = $false }; $script:Capped[$q] = Get-Date }
+function Note-Cap($st) {
+  # The helper reports a release: remembered unless it is one this agent already forgot.
+  if (-not $st -or -not $st.capped_quiz) { return }
+  $q = [string]$st.capped_quiz
+  if ($script:Capped.ContainsKey($q)) { return }
+  $at = [int64]0; [void][int64]::TryParse([string]$st.capped_at, [ref]$at)
+  if ($script:CapForgot.ContainsKey($q) -and ($at -le [int64]$script:CapForgot[$q])) { return }
+  Add-Cap $q
+}
+function Forget-Cap([string]$q, [string]$why) {
+  # Page closed or a NEW attempt started: the quiz locks normally again; the helper forgets it too.
+  $script:Capped.Remove($q); $script:CapLeft.Remove($q); $script:CapForgot[$q] = [int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+  Log "${why}: $q may lock again"
+  try { Helper "/uncap" @{ quiz_id = $q } 8 | Out-Null } catch { }
+}
+function Step-Caps($openId, $openUrl) {
+  # A released quiz stays unlocked while its page stays open; gone for the grace period, or back on its
+  # summary page and then an attempt again (a new attempt) -> it locks normally again.
+  foreach ($cq in @($script:Capped.Keys)) {
+    if ($cq -eq $openId) {
+      $attempt = ((Url-Path $openUrl) -match "/attempt/")
+      if ($attempt -and $script:CapLeft[$cq]) { Forget-Cap $cq "new attempt"; continue }
+      if (-not $attempt) { $script:CapLeft[$cq] = $true }
+      $script:Capped[$cq] = Get-Date
+    } elseif (((Get-Date) - [datetime]$script:Capped[$cq]).TotalSeconds -gt $Grace) { Forget-Cap $cq "page closed" }
+  }
+}
+function Next-PwCheck([datetime]$now, $opens) {
+  # C2: a quiz that has not opened yet is asked every 5 min until 90 s before it opens, then every 15 s.
+  if ($null -eq $opens) { return $now.AddSeconds(300) }
+  $t = ([datetime]$opens).AddSeconds(-90)
+  if ($now -lt $t) { if ($t -lt $now.AddSeconds(300)) { return $t } else { return $now.AddSeconds(300) } }
+  return $now.AddSeconds(15)
+}
+function Handle-Pw($pr, [bool]$first, [string]$note) {
+  # Acts on the helper's /password answer -> "pw" | "pay" | "wait" | "other" | $null (nothing yet), and
+  # sets when the next check may run ($PwNext).
+  $now = Get-Date
+  if ($pr -and $pr.password) {
+    $pw = [string]$pr.password; $script:PwNext = $now.AddSeconds(15)
+    if ($pw -ne $script:LastPw) {
+      $had = $script:LastPw; $script:LastPw = $pw; Set-Clipboard -Value $pw
+      if ($first) { Show-Message ("AI is locked for this quiz.`n`nQuiz password:  $pw`n(copied to your clipboard - paste it into Brightspace)" + $note) }
+      elseif ($had) { Show-Message ("The quiz password changed.`n`nNew password:  " + $pw + "`n(copied to your clipboard)") }
+      else { Show-Message ("Quiz password:  " + $pw + "`n(copied to your clipboard)") }
+    }
+    return "pw"
+  }
+  if (Show-Pay $pr) { $script:PwNext = $now.AddSeconds(15); if ($first -and $note) { Show-Message ("AI is locked for this quiz." + $note) }; return "pay" }
+  $why = if ($pr) { [string]$pr.reason } else { "" }
+  if ($why -eq "not started") {
+    $opens = $null; $si = [int64]0
+    if (($null -ne $pr.start_in) -and [int64]::TryParse([string]$pr.start_in, [ref]$si)) { $opens = $now.AddSeconds($si) }
+    $script:PwNext = Next-PwCheck $now $opens
+    if ($script:StartTold -ne $script:Quiz) {
+      $script:StartTold = $script:Quiz
+      $at = if ($opens) { $opens.ToString("h:mm tt") } else { "its start time" }
+      Show-Message ("AI is locked for this quiz.`n`nThe quiz opens at $at. LOCKqz shows the password here then." + $note)
+    }
+    return "wait"
+  }
+  if ($why -eq "other_school") {
+    # C10: the helper has already put AI back (nothing to protect on this Brightspace).
+    Show-Message "LOCKqz is not set up for this school yet.`n`nAI stays on for this quiz."
+    Add-Cap ([string]$script:Quiz)
+    return "other"
+  }
+  if (($why -eq "verify") -and (((Get-Date) - $script:SetupAt).TotalSeconds -gt 60)) { Start-Setup }   # school email first
+  $script:PwNext = $now.AddSeconds(15)
+  return $null
+}
+function Clear-Quiz { $script:Locked = $false; $script:Quiz = $null; $script:QuizTab = $null; $script:QuizTitle = $null; $script:QuizUrl = $null; $script:QuizProc = ""; $script:MissingSince = $null; $script:OperaWarned = $false }
 function Send-Unlock($quiz, $reason) {
   # -> $true only when the helper confirmed it is unlocked.
   try { $r = Helper "/unlock" @{ quiz_id = $quiz; reason = $reason }; return [bool]($r -and $r.ok -and ($r.state -eq "unlocked")) } catch { return $false }
@@ -285,6 +372,8 @@ while ($true) {
   try {
     $wins = @(Get-BrowserWindows)
     $quizWin = $wins | Where-Object { Is-Quiz $_.Url } | Select-Object -First 1
+    $openId = if ($quizWin) { Lock-Id $quizWin.Url } else { $null }
+    Step-Caps $openId $(if ($quizWin) { $quizWin.Url } else { "" })
     if (-not $Verified) {
       if ((Test-Path $StudentFile) -and ((Get-Item $StudentFile).LastWriteTime -gt $StudentRead)) { Load-Student; if ($Student) { try { Helper "/student" @{ student = $Student } | Out-Null } catch {} } }
       $since = ((Get-Date) - $SetupAt).TotalSeconds
@@ -296,36 +385,41 @@ while ($true) {
       if (Send-Unlock $Pending.quiz $Pending.reason) { Log "UNLOCKED on retry ($($Pending.reason))"; $Pending = $null }
     }
     if (-not $Locked) {
-      if ($quizWin) {
+      if ($quizWin -and -not $Capped.ContainsKey($openId)) {
         $Pending = $null
-        $Quiz = Lock-Id $quizWin.Url
+        $Quiz = $openId
         $QuizTab = Get-ActiveTab $quizWin; $QuizTitle = Clean-Title $quizWin.Title; $QuizProc = [string]$quizWin.Proc
         $r = $null; try { $r = Helper "/lock" @{ quiz_id = $Quiz; student = $Student; url = $quizWin.Url } } catch {}
-        if ($r -and $r.ok) {
+        if ($r -and $r.ok -and ($r.capped_quiz -eq $Quiz)) {
+          # C9: the server says this student already finished this quiz - the helper did not lock.
+          Add-Cap ([string]$Quiz); Log "server: $Quiz is over ($($r.capped_reason)) - not locked"; Clear-Quiz
+        } elseif ($r -and $r.ok) {
           $QuizUrl = $quizWin.Url; $LastCheck = Get-Date
           $Locked = $true; $MissingSince = $null; $LastBeat = Get-Date; Log "LOCKED $Quiz"
           $closed = @()
           if (Close-Browsers $FirefoxFamily $QuizProc) { $closed += "Firefox" }
-          if (Close-Browsers $NoPolicy $QuizProc) { $closed += "Opera" }
-          $pw = $null; $script:PayShown = $false
-          for ($i = 0; ($i -lt 3) -and (-not $pw); $i++) {
-            try { $pr = Helper "/password" @{ url = $quizWin.Url }; $pw = $pr.password; if ((-not $pw) -and (Show-Pay $pr)) { break } } catch { Log "password via helper failed: $_" }
-            if (-not $pw) { Start-Sleep -Seconds 2 }
+          if (Close-Browsers $NoPolicy $QuizProc) { $closed += "Opera"; $OperaWarned = $true }
+          # Brave reads its quiz policies (Leo, Tor windows, VPN off) only when it starts: close it once.
+          if (Close-Browsers @("brave") $QuizProc) { $closed += "Brave" }
+          if ($NoPolicy -contains $QuizProc) { $OperaWarned = $true; Show-Message "Opera cannot turn its AI off during a quiz.`n`nPlease take this quiz in Chrome, Edge or Firefox." }
+          $note = if ($closed.Count -gt 1) { "`n`n" + (($closed[0..($closed.Count-2)]) -join ", ") + " and " + $closed[-1] + " were closed for the quiz so their AI stays off. You can reopen them; your tabs come back." } elseif ($closed.Count) { "`n`n" + $closed[0] + " was closed for the quiz so its AI stays off. You can reopen it; your tabs come back." } else { "" }
+          $LastPw = $null; $StartTold = $null; $script:PayShown = $false; $res = $null
+          for ($i = 0; ($i -lt 3) -and (-not $res); $i++) {
+            try { $res = Handle-Pw (Helper "/password" @{ url = $quizWin.Url }) $true $note } catch { Log "password via helper failed: $_" }
+            if (-not $res) { Start-Sleep -Seconds 2 }
           }
-          $LastPw = $pw; $PwChecked = Get-Date
-          $note = if ($closed.Count) { "`n`n" + ($closed -join " and ") + " was closed for the quiz so its AI stays off. You can reopen it; your tabs come back." } else { "" }
-          if ($pw) { Set-Clipboard -Value $pw; Show-Message ("AI is locked for this quiz.`n`nQuiz password:  $pw`n(copied to your clipboard - paste it into Brightspace)" + $note) }
-          elseif (-not $script:PayShown) { Show-Message ("AI is locked for this quiz.`n`nIf it needs a password, LOCKqz will show it here as soon as the quiz opens." + $note) }
-          elseif ($note) { Show-Message ("AI is locked for this quiz." + $note) }
+          if ($res -eq "other") { Clear-Quiz }
+          elseif (-not $res) { Show-Message ("AI is locked for this quiz.`n`nIf it needs a password, LOCKqz will show it here as soon as the quiz opens." + $note) }
         } else { Show-Message "LOCKqz could not lock AI for this quiz. Is the LOCKqz app installed and running?"; Start-Sleep -Seconds 30 }
       } elseif ((-not $Pending) -and (((Get-Date) - $LastCheck).TotalSeconds -gt 10)) {
         # Helper locked while this agent is not (it resumed a lock after a restart or reboot, or an
         # earlier unlock was lost): take the lock over. If no quiz is open, the normal 30 s grace below
-        # unlocks it - the student is never left blocked until the 3-hour cap.
+        # unlocks it - the student is never left blocked until the safety cap.
         $LastCheck = Get-Date
         try {
           $st = Helper "/status" $null 8
-          if ((($st.state -eq "locked") -or ($st.state -eq "developer")) -and $st.quiz_id -and ((-not $st.student) -or (-not $Student) -or ($st.student -eq $Student))) {
+          Note-Cap $st
+          if ((($st.state -eq "locked") -or ($st.state -eq "developer")) -and $st.quiz_id -and -not $Capped.ContainsKey([string]$st.quiz_id) -and ((-not $st.student) -or (-not $Student) -or ($st.student -eq $Student))) {
             $Locked = $true; $Quiz = $st.quiz_id; $QuizTab = $null; $QuizTitle = $null; $QuizUrl = ""; $QuizProc = ""
             $MissingSince = $null; $LastBeat = Get-Date; Log "adopted helper lock $Quiz"
           }
@@ -343,33 +437,39 @@ while ($true) {
         }
         # Opera reopened during the quiz (no policy layer, built-in VPN) -> closed again.
         if (Close-Browsers $NoPolicy $QuizProc) { if (-not $OperaWarned) { $OperaWarned = $true; Show-Message "Opera was closed: it cannot turn its AI off during a quiz. Use it again after the quiz." } }
-        # Gated quizzes change password every 5 min: until the attempt starts, re-check and hand over a new one.
-        if ($quizWin -and $QuizUrl -and ($quizWin.Url -notmatch "/attempt/") -and (((Get-Date) - $PwChecked).TotalSeconds -gt 15)) {
-          $PwChecked = Get-Date
-          try {
-            $pr2 = Helper "/password" @{ url = $QuizUrl }; $pw2 = $pr2.password; if (-not $pw2) { Show-Pay $pr2 | Out-Null }
-            if ($pw2 -and ($pw2 -ne $LastPw)) { $hdr = if ($LastPw) { "The quiz password changed.`n`nNew password:  " } else { "Quiz password:  " }; $LastPw = $pw2; Set-Clipboard -Value $pw2; Show-Message ($hdr + $pw2 + "`n(copied to your clipboard)") }
-          } catch { Log "password refresh failed: $_" }
+        # Gated quizzes change password every 5 min: until the attempt starts, re-check and hand over a new
+        # one. A quiz that has not opened yet is asked on the slower C2 schedule ($PwNext).
+        $pwRes = $null
+        if ($quizWin -and $QuizUrl -and ((Url-Path $quizWin.Url) -notmatch "/attempt/") -and ((Get-Date) -ge $PwNext)) {
+          $PwNext = (Get-Date).AddSeconds(15)
+          try { $pwRes = Handle-Pw (Helper "/password" @{ url = $QuizUrl }) $false "" } catch { Log "password refresh failed: $_" }
         }
-        # Self-heal: helper no longer locked while the quiz is open (3-hour cap, restart) -> lock again.
-        if ($QuizUrl -and (((Get-Date) - $LastCheck).TotalSeconds -gt 10)) {
+        if ($pwRes -eq "other") { Clear-Quiz; $LastCheck = Get-Date; $reason = $null }
+        # Self-heal: helper no longer locked while the quiz is open (restart, someone stopped it) -> lock
+        # again, EXCEPT when the safety cap or the server (submitted / ended) released this quiz.
+        elseif ($QuizUrl -and (((Get-Date) - $LastCheck).TotalSeconds -gt 10)) {
           $LastCheck = Get-Date
           try {
-            $hs = (Helper "/status" $null).state
+            $st = Helper "/status" $null
+            $hs = $st.state
             $HelperOk = $true
-            if (($hs -ne "locked") -and ($hs -ne "developer")) { Log "helper not locked during an open quiz ($hs) - re-locking"; Helper "/lock" @{ quiz_id = $Quiz; student = $Student; url = $QuizUrl } | Out-Null }
+            if ($st.capped_quiz -and ([string]$st.capped_quiz -eq [string]$Quiz)) {
+              Add-Cap ([string]$Quiz)
+              Log "$(if ($st.capped_reason) { $st.capped_reason } else { 'safety cap' }) released $Quiz - not re-locking"
+              Clear-Quiz; $reason = $null
+            } elseif (($hs -ne "locked") -and ($hs -ne "developer")) { Log "helper not locked during an open quiz ($hs) - re-locking"; Helper "/lock" @{ quiz_id = $Quiz; student = $Student; url = $QuizUrl } | Out-Null }
           } catch { $HelperOk = $false; Log "helper check failed: $_" }
         }
       }
-      if ($reason) {
+      if ($reason -and $Locked) {
         # The helper reports the unlock (signed) with this reason; quiz_left / quiz_tab_closed are also
         # reported as "quiz_left" by the helper. Not confirmed -> retried until it is.
         if (-not (Send-Unlock $Quiz $reason)) { $Pending = @{ quiz = $Quiz; reason = $reason }; $PendingAt = Get-Date; Log "unlock not confirmed ($reason) - will retry" }
         # A Firefox started during the quiz keeps the quiz policies until it restarts.
         if (($FirefoxFamily -notcontains $QuizProc) -and (@($wins | Where-Object { $FirefoxFamily -contains $_.Proc }).Count -gt 0)) { Show-Message "AI is unlocked. Restart Firefox to get its AI features back." }
-        Log "UNLOCKED ($reason)"; $Locked = $false; $Quiz = $null; $QuizTab = $null; $QuizTitle = $null; $QuizUrl = $null; $QuizProc = ""; $MissingSince = $null; $OperaWarned = $false
+        Log "UNLOCKED ($reason)"; Clear-Quiz
         $LastCheck = Get-Date
-      } elseif ((-not $HelperOk) -and (((Get-Date) - $LastBeat).TotalSeconds -gt $Beat)) {
+      } elseif ($Locked -and (-not $HelperOk) -and (((Get-Date) - $LastBeat).TotalSeconds -gt $Beat)) {
         # only while the helper is unreachable (proof for "helper killed"); the helper's own signed pings say the rest
         $LastBeat = Get-Date
         Api "/report" @{ device_id = $Device; event = "heartbeat"; quiz_id = $Quiz; student = $Student; source = "agent" } | Out-Null

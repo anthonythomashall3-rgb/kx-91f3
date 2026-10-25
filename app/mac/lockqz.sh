@@ -28,10 +28,13 @@ source "$HERE/lockqz-core.sh"
 if [ -f "$HERE/extra-block.sh" ]; then source "$HERE/extra-block.sh"   # VPN/VM/remote-desktop/overlay/local-model/Apple Intelligence blockers
 else extra_lock(){ :; }; extra_unlock(){ :; }; fi   # core lock still works if the file is missing
 
+# Raycast stays on the list: its AI chat is built into the same app (no separate process to close).
+# Not MacWhisper: on-device speech-to-text only, not an answer tool.
 AI_APPS=("ChatGPT" "Claude" "Copilot" "Perplexity" "Ollama" "LM Studio" \
          "GPT4All" "Msty" "Cluely" "Google Gemini" "Jan" "Pieces" "MacGPT" \
          "Dia" "Comet" "ChatGPT Atlas" "Atlas" "Raycast" "Notion AI" \
-         "Grammarly" "GrammarlyDesktop" "DeepSeek" "Poe" "Mistral" "Le Chat" "Sider" "MacWhisper")
+         "Grammarly" "GrammarlyDesktop" "DeepSeek" "Poe" "Mistral" "Le Chat" "Sider" \
+         "AnythingLLM" "Chatbox" "Cherry Studio" "Enchanted" "Ollamac" "BoltAI" "MindMac")
 
 say() { echo "LOCKqz: $*"; }
 

@@ -117,7 +117,10 @@ check("second $2 (code in subject) completes $5", r.data?.results?.[0]?.paid ===
 await lock();
 r = await pw(ON);
 check("paid: password released", r.status === 200 && r.data?.password === "LQ-SEEDPW01", JSON.stringify(r.data));
-check("pay status says paid", (await getc(ON, "/pay/status?email=al%40usc.edu")).data?.paid === true);
+check("pay status without code/token refused (H10)", (await getc(ON, "/pay/status?email=al%40usc.edu")).status === 403);
+{ const st = (await call(ON, "/pay/start", { email: "al@usc.edu" })).data;
+  check("pay status with the token from /pay/start says paid", (await getc(ON, "/pay/status?email=al%40usc.edu&token=" + st.token)).data?.paid === true);
+  check("pay status with the memo code says paid", (await getc(ON, "/pay/status?email=al%40usc.edu&code=" + st.code)).data?.paid === true); }
 
 console.log("P5 a payment with the school email in the memo also matches");
 r = await notify([{ txn: "gmail:b1", amount: 5, note: "for bo@usc.edu thanks", via: "zelle" }]);

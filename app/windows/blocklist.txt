@@ -12,6 +12,7 @@ cdn.oaistatic.com
 platform.openai.com
 sora.com
 sora.chatgpt.com
+auth.openai.com
 
 # Anthropic / Claude
 anthropic.com
@@ -27,16 +28,29 @@ makersuite.google.com
 generativelanguage.googleapis.com
 notebooklm.google.com
 notebooklm.google
+gemini.google
+labs.google
+learning.google.com
+jules.google
+jules.google.com
+# AI Mode shortcut links (google.com/ai, old google.com/aimode); ordinary Google search stays.
+google.com/ai
+google.com/aimode
 
 # Microsoft Copilot
 copilot.microsoft.com
 copilot.cloud.microsoft
-m365.cloud.microsoft
+# m365.cloud.microsoft is the Microsoft 365 home page (Word/OneNote/OneDrive notes): only its
+# Copilot Chat page is blocked (browser policy), never the whole host.
+m365.cloud.microsoft/chat
+m365copilot.com
 bing.com/chat
 sydney.bing.com
+edgeservices.bing.com
 
 # Perplexity
 perplexity.ai
+perplexity.com
 pplx.ai
 labs.perplexity.ai
 
@@ -64,11 +78,19 @@ meta.ai
 qwen.ai
 chat.qwen.ai
 tongyi.aliyun.com
+qianwen.com
+tongyi.com
+dashscope.aliyuncs.com
+dashscope-intl.aliyuncs.com
 
 # Moonshot Kimi
 kimi.com
 kimi.moonshot.cn
 moonshot.cn
+kimi.ai
+moonshot.ai
+api.moonshot.ai
+platform.moonshot.ai
 
 # Zhipu / Z.ai / GLM
 z.ai
@@ -116,6 +138,130 @@ xinghuo.xfyun.cn
 # Writing / grammar AI commonly used to cheat
 grammarly.com
 app.grammarly.com
+capi.grammarly.com
+auth.grammarly.com
+# Grammarly's parent is now Superhuman: only its AI assistant host, not the Superhuman mail app.
+go.superhuman.com
+jenni.ai
+rytr.me
+wordtune.com
+hix.ai
+smodin.io
+paperpal.com
+undetectable.ai
+stealthgpt.ai
+humanizeai.pro
+
+# Homework / answer sites that answer with AI (quizlet.com, studocu.com, knowunity.com stay
+# open: they hold the student's own notes)
+gauthmath.com
+questionai.com
+studyx.ai
+brainly.com
+solvely.ai
+julius.ai
+iask.ai
+mathgptpro.com
+mathos.ai
+caktus.ai
+studyfetch.com
+khanmigo.ai
+symbolab.com
+mathway.com
+photomath.com
+chegg.com
+coursehero.com
+
+# More chat assistants / AI answer and research engines
+genspark.ai
+felo.ai
+andisearch.com
+komo.ai
+consensus.app
+elicit.com
+scispace.com
+chatpdf.com
+manus.im
+flowith.io
+liner.com
+getliner.com
+t3.chat
+typingmind.com
+chathub.gg
+mammouth.ai
+lumo.proton.me
+janitorai.com
+talkie-ai.com
+
+# Regional AI services (China, Korea, Russia)
+yuanbao.tencent.com
+hunyuan.tencent.com
+dola.com
+cici.com
+ciciai.com
+coze.com
+coze.cn
+hailuoai.com
+minimaxi.com
+minimax.io
+agent.minimax.io
+yuewen.cn
+stepfun.com
+metaso.cn
+tiangong.cn
+ying.baichuan-ai.com
+chat.sensetime.com
+wrtn.ai
+giga.chat
+
+# AI browser-extension backends (Sider, Monica, MaxAI, Merlin, HARPA) - these work in
+# Firefox/Safari, where extensions are not switched off; Opera's Aria AI
+sider.ai
+api1.sider.ai
+api2.sider.ai
+api3.sider.ai
+monica.im
+api.monica.im
+maxai.me
+api.maxai.me
+app.maxai.me
+getmerlin.in
+arcane.getmerlin.in
+api.getmerlin.in
+uam.getmerlin.in
+harpa.ai
+api.harpa.ai
+aria.opera.com
+
+# AI coding assistants (the editors themselves keep working for code notes; only their AI is cut)
+# github.com/copilot = Copilot chat on the web (browser policy; github.com itself stays open)
+github.com/copilot
+api.githubcopilot.com
+api.individual.githubcopilot.com
+api.business.githubcopilot.com
+api.enterprise.githubcopilot.com
+githubcopilot.com
+copilot-proxy.githubusercontent.com
+cursor.com
+cursor.sh
+api2.cursor.sh
+api3.cursor.sh
+api4.cursor.sh
+repo42.cursor.sh
+us-only.gcpp.cursor.sh
+windsurf.com
+codeium.com
+server.codeium.com
+api.jetbrains.ai
+antigravity.google
+kiro.dev
+trae.ai
+v0.dev
+v0.app
+bolt.new
+lovable.dev
+# Gemini command-line tool / Code Assist when signed in with a Google account
+cloudcode-pa.googleapis.com
 
 # AI APIs (apps that call models directly)
 api.openai.com
@@ -128,6 +274,23 @@ api.deepseek.com
 api.cohere.ai
 openrouter.ai
 api.openrouter.ai
+fireworks.ai
+api.fireworks.ai
+deepinfra.com
+api.deepinfra.com
+cerebras.ai
+api.cerebras.ai
+cloud.sambanova.ai
+api.sambanova.ai
+hyperbolic.xyz
+api.hyperbolic.xyz
+novita.ai
+api.novita.ai
+replicate.com
+api.replicate.com
+router.huggingface.co
+api.ai21.com
+studio.ai21.com
 
 # Local-model runners / self-host UIs (domains they phone home to)
 ollama.com
@@ -136,6 +299,22 @@ lmstudio.ai
 gpt4all.io
 jan.ai
 msty.app
+# models that run inside a web page (WebLLM)
+chat.webllm.ai
+webllm.mlc.ai
+
+# Remote control of another computer from a browser (a home PC with AI on it)
+remotedesktop.google.com
+remotedesktop-pa.googleapis.com
+web.teamviewer.com
+my.anydesk.com
+web.parsec.app
+
+# Built-in browser/OS relays that look names up remotely, past this block: Opera VPN, and iCloud
+# Private Relay (Apple's documented way to switch Private Relay off on a network)
+api.sec-tunnel.com
+mask.icloud.com
+mask-h2.icloud.com
 
 # DoH / DoT resolver endpoints — blocked so a browser's own encrypted DNS
 # cannot bypass the /etc/hosts blackhole. (Browser falls back to OS DNS = obeys hosts.)
@@ -147,3 +326,13 @@ dns.google.com
 dns.quad9.net
 doh.opendns.com
 dns.nextdns.io
+firefox.dns.nextdns.io
+chromium.dns.nextdns.io
+doh.xfinity.com
+private.canadianshield.cira.ca
+wikimedia-dns.org
+dns.adguard-dns.com
+doh.mullvad.net
+freedns.controld.com
+dns.alidns.com
+doh.pub

@@ -24,7 +24,7 @@ $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 if ($LASTEXITCODE -ne 0) { throw "csc failed" }
 
 # 2. Payload = the same helper every other install uses.
-foreach ($f in "lockqz.ps1","lockqzd.ps1","blocklist.txt","browser-policy.ps1","lockqz-agent.ps1","install.ps1","uninstall.ps1","update.pub.xml") {
+foreach ($f in "lockqz.ps1","lockqzd.ps1","lockqz-boot.ps1","blocklist.txt","browser-policy.ps1","lockqz-agent.ps1","install.ps1","uninstall.ps1","update.pub.xml") {
   Copy-Item (Join-Path $Win $f) "$stage\payload\" -Force
 }
 Set-Content "$stage\payload\VERSION" $ver -Encoding ASCII

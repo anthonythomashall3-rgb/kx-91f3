@@ -29,7 +29,7 @@ VERSION="$(tr -d '[:space:]' < "$APP/../VERSION" 2>/dev/null || echo 0.0.0)"
 /usr/bin/python3 - "$ROOT/$DESTREL/config.json" "$API" <<'PY'
 import json,sys
 json.dump({"port":8787,"api_base":sys.argv[2],
-          "device_id":"set-at-install","student":None,"max_minutes":180},
+          "device_id":"set-at-install","student":None},
           open(sys.argv[1],"w"), indent=2)
 PY
 
@@ -41,7 +41,10 @@ PLIST="/Library/LaunchDaemons/com.lockqz.helper.plist"
 DEVICE="mac-$(/usr/bin/uuidgen | tr 'A-Z' 'a-z')"
 # Code in here runs as root: the folder and every file must be root's and not writable by others.
 chown -R root:wheel "$DEST"; chmod 755 "$DEST"; chmod -R go-w "$DEST"
-bash "$DEST/ensure-python.sh" || true   # fresh Mac: install Apple's tools so python3 really runs (before we use it)
+rm -rf "$DEST/.prev" "$DEST/.pending" "$DEST/.bad_version"   # never inherit an old update's rollback state
+# Fresh Mac: install Apple's tools so python3 really runs. If that fails the helper is still set up (its
+# boot script retries, and it gives itself a device id), but the installer reports the failure.
+PY_OK=1; bash "$DEST/ensure-python.sh" || PY_OK=0
 # Keep an existing device id on a reinstall/upgrade (its key is registered with the server).
 /usr/bin/python3 - "$DEST/config.json" "$DEVICE" "$DEST/config.prev.json" <<'PY'
 import json,sys
@@ -94,6 +97,10 @@ CUID="$(stat -f %u /dev/console 2>/dev/null || echo 0)"
 if [ "$CUID" != "0" ]; then
   launchctl bootout "gui/$CUID" "$AGENT" 2>/dev/null || true
   launchctl bootstrap "gui/$CUID" "$AGENT" 2>/dev/null || launchctl asuser "$CUID" launchctl load -w "$AGENT" 2>/dev/null || true
+fi
+if [ "$PY_OK" = 0 ]; then
+  echo "LOCKqz: Apple's Command Line Tools could not be installed. Run: xcode-select --install, then this installer again."
+  exit 1
 fi
 exit 0
 POST

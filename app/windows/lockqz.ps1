@@ -21,15 +21,23 @@ $MarkEnd   = "# LOCKqz END"
 $Here      = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BlockFile = Join-Path $Here "blocklist.txt"
 $Policy    = Join-Path $Here "browser-policy.ps1"
-$AiApps = @("chatgpt","claude","copilot","perplexity","ollama","lmstudio","gpt4all","msty","cluely","jan","dia","comet","atlas","notion ai","deepseek","poe","mistral","sider","grammarly")
+# (no "dia": that name is also the Dia diagram editor; M365Copilot = the Microsoft 365 Copilot app)
+$AiApps = @("chatgpt","claude","copilot","perplexity","ollama","lmstudio","LM Studio","gpt4all","msty","cluely","jan","comet","atlas","notion ai","deepseek","poe","mistral","sider","grammarly",
+            "AnythingLLM","Chatbox","Cherry Studio","M365Copilot")
 # Non-browser routes to AI or a human helper, all closed during the quiz:
-$VmApps     = @("Parallels","prl_vm_app","vmware","vmware-vmx","VirtualBox","VirtualBoxVM","VBoxHeadless","qemu-system-x86_64","qemu-system-aarch64","vmwp","vmms","Docker Desktop","com.docker.backend")
-$RemoteApps = @("TeamViewer","AnyDesk","RustDesk","remoting_host","ScreenConnect","ConnectWiseControl","LogMeIn","Splashtop","SRServer","vncserver","winvnc","tvnserver","Parsec","GoToMyPC")
+$VmApps     = @("Parallels","prl_vm_app","vmware","vmware-vmx","VirtualBox","VirtualBoxVM","VBoxHeadless","qemu-system-x86_64","qemu-system-aarch64","vmwp","vmms","Docker Desktop","com.docker.backend",
+                "WindowsSandbox","WindowsSandboxClient","WindowsSandboxServer","WindowsSandboxRemoteSession","wsl","wslhost","wslrelay")
+$RemoteApps = @("TeamViewer","AnyDesk","RustDesk","remoting_host","ScreenConnect","ConnectWiseControl","LogMeIn","Splashtop","SRServer","vncserver","winvnc","tvnserver","Parsec","GoToMyPC",
+                "mstsc","msrdc","QuickAssist")
 $OverlayApps= @("Cluely","InterviewCoder","Interview Coder","LockedInAI","FinalRound","Ohmni","Sensei","UltraCode","Pieces")
-$ModelProcs = @("ollama","llama-server","llamafile","koboldcpp","localai","jan","gpt4all","text-generation-webui","vllm")
+$ModelProcs = @("ollama","llama-server","llama-cli","llama-run","llamafile","koboldcpp","localai","local-ai","jan","gpt4all","text-generation-webui","vllm")
 # tor = the Tor Browser's network daemon (Tor resolves names remotely, past the hosts block).
 $VpnApps    = @("nordvpn","expressvpn","surfshark","protonvpn","mullvad","pia","piaservice","Cloudflare WARP","warp-svc","openvpn","wireguard","windscribe","tunnelbear","hssvpn","cyberghost","tor")
-$ModelPorts = @(11434,1234,4891,1337,8080,7860,5000,8000)
+$ModelPorts = @(11434,1234,4891,1337,7860)
+# 8080/8000/5000 are also ordinary web ports: blocked only to this PC and private networks (where a
+# llama.cpp / vLLM server would run), never to the internet.
+$LocalModelPorts = @(8080,5000,8000)
+$LocalNets  = @("127.0.0.0/8","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","169.254.0.0/16","::1","fc00::/7","fe80::/10")
 $VpnPorts   = @(51820,1194,500,4500)
 # Encrypted-DNS resolvers a browser may already be connected to (IPv4 + IPv6), incl. the
 # Firefox (mozilla.cloudflare-dns.com) and Chrome (chrome.cloudflare-dns.com) endpoints.
@@ -37,7 +45,12 @@ $DohIps = @("1.1.1.1","1.0.0.1","8.8.8.8","8.8.4.4","9.9.9.9","149.112.112.112",
             "162.159.61.3","162.159.61.4","172.64.41.3","172.64.41.4","146.112.41.2",
             "2606:4700:4700::1111","2606:4700:4700::1001","2001:4860:4860::8888","2001:4860:4860::8844",
             "2620:fe::fe","2620:fe::9","2803:f800:53::3","2803:f800:53::4","2a06:98c1:52::3","2a06:98c1:52::4",
-            "2620:119:fc::2")
+            "2620:119:fc::2",
+            # AdGuard, Mullvad, Control D, CIRA Shield, Wikimedia DNS, AliDNS, DNSPod (doh.pub)
+            "94.140.14.14","94.140.15.15","2a10:50c0::ad1:ff","2a10:50c0::ad2:ff","194.242.2.2","2a07:e340::2",
+            "76.76.2.11","2606:1a40::11","149.112.121.10","149.112.122.10","2620:10a:80bb::10","2620:10a:80bc::10",
+            "185.71.138.138","2001:67c:930::1","223.5.5.5","223.6.6.6","2400:3200::1","2400:3200:baba::1",
+            "1.12.12.12","120.53.53.53")
 $FwTag  = "LOCKqz-AI"
 $FwRules = @(
   @{ n = "$FwTag-DoT";     p = @{ Protocol = "TCP"; RemotePort = 853 } },
@@ -45,6 +58,7 @@ $FwRules = @(
   @{ n = "$FwTag-DoH";     p = @{ Protocol = "TCP"; RemotePort = 443; RemoteAddress = $DohIps } },
   @{ n = "$FwTag-DoH3";    p = @{ Protocol = "UDP"; RemotePort = 443; RemoteAddress = $DohIps } },
   @{ n = "$FwTag-models";  p = @{ Protocol = "TCP"; RemotePort = $ModelPorts } },
+  @{ n = "$FwTag-models-local"; p = @{ Protocol = "TCP"; RemotePort = $LocalModelPorts; RemoteAddress = $LocalNets } },
   @{ n = "$FwTag-vpn-udp"; p = @{ Protocol = "UDP"; RemotePort = $VpnPorts } },
   @{ n = "$FwTag-vpn-tcp"; p = @{ Protocol = "TCP"; RemotePort = 1194 } }
 )

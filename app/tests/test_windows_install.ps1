@@ -21,9 +21,9 @@ Get-ChildItem "$PSScriptRoot\..\windows\*.ps1" | ForEach-Object {
 $p = Start-Process -FilePath $Exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/LOG=install.log' -Wait -PassThru
 Check "installer exit code 0" ($p.ExitCode -eq 0)
 $Dest = "$env:ProgramData\LOCKqz"
-foreach ($f in 'lockqz.ps1','lockqzd.ps1','lockqz-agent.ps1','browser-policy.ps1','blocklist.txt','config.json') { Check "installed $f" (Test-Path "$Dest\$f") }
+foreach ($f in 'lockqz.ps1','lockqzd.ps1','lockqz-boot.ps1','lockqz-agent.ps1','browser-policy.ps1','blocklist.txt','config.json') { Check "installed $f" (Test-Path "$Dest\$f") }
 $cfg = Get-Content "$Dest\config.json" -Raw | ConvertFrom-Json
-Check "config token baked in" ($cfg.token -eq $Token)
+Check "config has its own per-PC control token" ([string]$cfg.token -match "^lqz-[0-9a-f]{20}$")
 Check "config device id" ($cfg.device_id -like 'win-*')
 Check "task LOCKqz (helper)" ($null -ne (Get-ScheduledTask -TaskName 'LOCKqz' -ErrorAction SilentlyContinue))
 Check "task LOCKqz Agent" ($null -ne (Get-ScheduledTask -TaskName 'LOCKqz Agent' -ErrorAction SilentlyContinue))

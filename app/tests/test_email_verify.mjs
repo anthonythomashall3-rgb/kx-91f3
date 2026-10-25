@@ -62,7 +62,8 @@ async function suite(label, oldSchema) {
 
   console.log("V2 roster check (\"Is this you?\")");
   r = await call(on, "/verify", { op: "check", email: " AL@usc.edu " }, S);
-  check("roster email returns the Brightspace name", r.data?.name === "Al Student" && r.data?.email === "al@usc.edu", JSON.stringify(r.data));
+  // H10: before the code is typed only a masked name is shown (no classmate's full name).
+  check("roster email returns the MASKED Brightspace name", r.data?.name === "A*** S***" && r.data?.found === true && r.data?.email === "al@usc.edu", JSON.stringify(r.data));
   r = await call(on, "/verify", { op: "check", email: "al@usc.eud" }, S);
   check("typo email: not on any roster (name null)", r.status === 200 && r.data?.name === null, JSON.stringify(r.data));
   r = await call(on, "/verify", { op: "check", email: "not an email" }, S);

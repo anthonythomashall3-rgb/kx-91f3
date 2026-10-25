@@ -29,7 +29,7 @@ Check "ran inside the package" $inPkg
 Start-Sleep 3
 Check "window still open (no crash)" ($null -ne (Get-Process LOCKqz -ErrorAction SilentlyContinue))
 Get-Process LOCKqz -ErrorAction SilentlyContinue | Stop-Process -Force
-foreach ($f in 'lockqz.ps1','lockqzd.ps1','lockqz-agent.ps1','browser-policy.ps1','blocklist.txt','uninstall.ps1','config.json') { Check "installed $f" (Test-Path "$Dest\$f") }
+foreach ($f in 'lockqz.ps1','lockqzd.ps1','lockqz-boot.ps1','lockqz-agent.ps1','browser-policy.ps1','blocklist.txt','uninstall.ps1','config.json') { Check "installed $f" (Test-Path "$Dest\$f") }
 $cfg = Get-Content "$Dest\config.json" -Raw | ConvertFrom-Json
 Check "store mode recorded" ($cfg.store_package -eq "LOCKqz.Test")
 Check "api is the live site" ($cfg.api_base -eq "https://lockqz.pages.dev/api")

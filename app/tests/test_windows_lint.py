@@ -101,6 +101,11 @@ ok("engine-locked check is case-sensitive") if '-match "LOCKED"' not in dmn and 
 ok("no Get-Date -UFormat %s (locale/DST safe time)") if "-UFormat %s" not in dmn else bad("still parses Get-Date -UFormat %s")
 # #21: uninstall uses CIM (Get-Process has no CommandLine in PS 5.1) and stops tasks before unlock
 uni = open(os.path.join(WIN, "uninstall.ps1"), encoding="utf-8").read()
+# round-2 #7: the one-line remover (irm .../uninstall.ps1 | iex) self-elevates and never "exit"s inside iex
+ok("uninstall self-elevates like install.ps1 (RunAs, irm | iex)") if "IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)" in uni and "-Verb RunAs" in uni and "irm $Site/uninstall.ps1 | iex" in uni else bad("uninstall.ps1 does not ask for administrator rights")
+import re as _re2
+_exits = [l for l in uni.splitlines() if _re2.search(r"\bexit\b", l) and not l.lstrip().startswith("#")]
+ok("uninstall exits only through Fail (exit when run as a file, throw when pasted)") if _exits == ["  if ($FromFile) { exit 1 }"] and 'throw "LOCKqz was not removed.' in uni else bad("bare exit in uninstall.ps1: %r" % _exits)
 ok("uninstall stops the agent via CIM") if "Get-CimInstance Win32_Process" in uni else bad("uninstall relies on Get-Process .CommandLine (PS5.1 null)")
 ok("uninstall stops tasks before unlock") if uni.index("Unregister-ScheduledTask") < uni.index("lockqz.ps1") + uni[uni.index("lockqz.ps1"):].index("unlock") and uni.index("Unregister-ScheduledTask") < uni.index(" unlock") else bad("uninstall unlocks before stopping the watcher")
 # #14: no path-style hosts entries written by the engine
@@ -117,10 +122,10 @@ eng_lines = [l for l in eng_src.splitlines() if not l.lstrip().startswith("#")]
 # no CORS on the loopback helper: web pages must never be able to call it
 ok("helper sends no CORS headers, has no OPTIONS path") if "Access-Control" not in dmn and '"OPTIONS"' not in dmn else bad("helper still answers CORS / OPTIONS")
 ok("helper refuses browser (Origin) requests") if 'Headers["Origin"]' in dmn else bad("helper accepts requests from web pages")
-ok("lock time capped at 180 min") if "Clamp-Minutes" in dmn and "$CapMin = 180" in dmn else bad("max_minutes not capped")
+ok("safety cap: quiz end + 15 min / 6 h unknown, never above 24 h") if "Clamp-Minutes" in dmn and "$CapCeilMin = 1440" in dmn and "$CapMin = 360" in dmn and "LQ-CapForEnd" in dmn else bad("safety cap missing")
 ok("heartbeat on wall clock, not cycle count") if "% 36" not in dmn and "LQ-Due $lastBeat" in dmn else bad("heartbeat still counts watcher cycles")
 ok("watcher tamper check under the engine mutex") if '"locking"' in dmn and "$State.applied" in dmn else bad("watcher can flag a lock in progress as tampering")
-ok("every unlock reported with a reason (incl. the 3-hour cap)") if "LQ-UnlockReason" in dmn and 'reason = "cap"' in dmn else bad("unlock reasons missing")
+ok("every unlock reported with a reason (incl. the safety cap)") if "LQ-UnlockReason" in dmn and 'WRelease $State.quiz_id "cap"' in dmn else bad("unlock reasons missing")
 ok("unlocks that did not finish are retried (stray block sweep)") if "WEngine \"unlock\"" in dmn and "policy-backup.json" in dmn else bad("failed unlock not retried")
 ok("no localized account names in icacls / task principals") if all(x not in inst + dmn for x in ['"SYSTEM:', '"Administrators:', '"Users:', 'BUILTIN\\Users']) and "S-1-5-32-545" in inst else bad("English account names still used (fail on non-English Windows)")
 ok("icacls result checked") if "$LASTEXITCODE" in inst else bad("icacls failures ignored")
