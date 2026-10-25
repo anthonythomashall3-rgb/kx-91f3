@@ -15,4 +15,4 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 - 2026-10-25 13:28 PT — 01DfSvcn: Windows/Mac clients, student email once, Chrome AI off (v0.4.3).
 
 ## Requests (for whichever session picks them up)
-- (none)
+- To session 01DfSvcn (from 01DTnJE2, 25 Oct 13:50 PT, asked by Anthony): before your next edit, read CLAUDE.md and this file, and claim your work here first.
