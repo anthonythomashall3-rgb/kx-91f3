@@ -106,9 +106,38 @@ ok("uninstall stops tasks before unlock") if uni.index("Unregister-ScheduledTask
 # #14: no path-style hosts entries written by the engine
 ok("engine skips path-style blocklist entries") if '-like "*/*"' in eng_src else bad("engine may write invalid hosts lines with /")
 # #5: single-object .Count guarded with @()
-ok("agent guards .Count with @()") if "@($wins | Where-Object { Is-Leaving $_.Url }).Count" in open(agt, encoding="utf-8").read() else bad("agent .Count not wrapped in @() (PS5.1 single-object bug)")
+agt_src = open(agt, encoding="utf-8").read()
+ok("agent wraps window lists in @()") if "$wins = @(Get-BrowserWindows)" in agt_src and "@($wins | Where-Object { Is-Leaving $_.Url })" in agt_src else bad("agent window list not wrapped in @() (PS5.1 single-object bug)")
 # #13: installer reuses an existing token
 ok("installer reuses existing token/device") if "keep the key the running helper already uses" in inst else bad("reinstall mints a new token the running helper won't accept")
+
+print("T8 regression guards from the 24-Oct Windows audit")
+pol_src = open(pol, encoding="utf-8").read()
+eng_lines = [l for l in eng_src.splitlines() if not l.lstrip().startswith("#")]
+# no CORS on the loopback helper: web pages must never be able to call it
+ok("helper sends no CORS headers, has no OPTIONS path") if "Access-Control" not in dmn and '"OPTIONS"' not in dmn else bad("helper still answers CORS / OPTIONS")
+ok("helper refuses browser (Origin) requests") if 'Headers["Origin"]' in dmn else bad("helper accepts requests from web pages")
+ok("lock time capped at 180 min") if "Clamp-Minutes" in dmn and "$CapMin = 180" in dmn else bad("max_minutes not capped")
+ok("heartbeat on wall clock, not cycle count") if "% 36" not in dmn and "LQ-Due $lastBeat" in dmn else bad("heartbeat still counts watcher cycles")
+ok("watcher tamper check under the engine mutex") if '"locking"' in dmn and "$State.applied" in dmn else bad("watcher can flag a lock in progress as tampering")
+ok("every unlock reported with a reason (incl. the 3-hour cap)") if "LQ-UnlockReason" in dmn and 'reason = "cap"' in dmn else bad("unlock reasons missing")
+ok("unlocks that did not finish are retried (stray block sweep)") if "WEngine \"unlock\"" in dmn and "policy-backup.json" in dmn else bad("failed unlock not retried")
+ok("no localized account names in icacls / task principals") if all(x not in inst + dmn for x in ['"SYSTEM:', '"Administrators:', '"Users:', 'BUILTIN\\Users']) and "S-1-5-32-545" in inst else bad("English account names still used (fail on non-English Windows)")
+ok("icacls result checked") if "$LASTEXITCODE" in inst else bad("icacls failures ignored")
+ok("helper task also repeats from install time") if "-Trigger @($trigger, $tNow)" in inst else bad("5-min repetition only after the next boot")
+# Firefox: extensions never blocked (installation_mode blocked uninstalls them), documented Preferences form
+ok("Firefox extensions never blocked") if "ExtensionSettings" not in pol_src and 'installation_mode' not in pol_src else bad("Firefox ExtensionSettings still used (uninstalls extensions)")
+ok("Firefox Preferences as one REG_MULTI_SZ JSON value") if '"MultiString"' in pol_src and 'Set-Val "$Firefox\\Preferences"' not in pol_src else bad("deprecated Firefox Preferences subkey form")
+ok("policy values backed up and restored, lists merged") if "New-PolicyBackup" in pol_src and "Restore-Backup" in pol_src and "Remove-Item -Path $path -Recurse" not in pol_src else bad("policy unlock can destroy existing policy")
+ok("engine no longer touches WindowsAI values itself") if not any("WindowsAI" in l for l in eng_lines) else bad("engine still writes/deletes WindowsAI values")
+ok("policies.json written without BOM") if "UTF8Encoding $false" in pol_src and "Set-Content -Path $pj" not in pol_src else bad("policies.json written with a BOM")
+ok("engine checks its hosts write") if "LOCK FAILED" in eng_src and "UNLOCK FAILED" in eng_src else bad("engine reports LOCKED without checking")
+ok("agent never sends an unsigned quiz_left report") if 'event = "quiz_left"; quiz_id = $Quiz; student' not in agt_src else bad("agent still posts unsigned quiz_left (401)")
+ok("agent retries unconfirmed unlocks") if "$Pending" in agt_src and "Send-Unlock" in agt_src else bad("agent drops a failed unlock")
+for f in sorted(os.listdir(WIN)):
+    if f.endswith(".ps1"):
+        b = open(os.path.join(WIN, f), "rb").read()
+        ok(f"{f} is plain ASCII") if all(c < 128 for c in b) else bad(f"{f} has non-ASCII bytes (PS 5.1 misreads them)")
 
 print("")
 print(f"RESULT: {passed} passed, {failed} failed")

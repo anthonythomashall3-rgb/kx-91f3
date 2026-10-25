@@ -30,6 +30,11 @@ run "17/18 Student email code (once per computer; real API + fake SMTP)" node --
 run "Per-section billing (\$1,000 per USC section, Venmo code)" node --no-warnings test_sections.mjs
 run "Student fee + automatic Venmo/Zelle matching" node --no-warnings test_pay.mjs
 run "Gmail payment script parser (forged alerts refused)" node test_pay_script.mjs
+run "API audit regressions (query/row budgets, auth, identity)" node --no-warnings test_api_audit.mjs
+run "Front-end audit regressions (dashboard + Sync panel)" node --no-warnings test_frontend_fixes.mjs
+if command -v pwsh >/dev/null 2>&1; then
+  run "Windows agent/engine logic (titles, unlock retry, policy restore)" pwsh -NoProfile -File test_windows_logic.ps1
+fi
 if command -v pwsh >/dev/null 2>&1; then
   run "18/18 Windows email setup (real Setup-Identity, scripted dialogs)" pwsh -NoProfile -File test_windows_email_setup.ps1
 else

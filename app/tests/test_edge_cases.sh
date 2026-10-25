@@ -74,6 +74,27 @@ chk "browser helper with Media flags NOT matched" '! echo "/Applications/Google 
 chk "app with a space matched" 'echo "/Applications/LM Studio.app/Contents/MacOS/LM Studio" | grep -qiE "$(app_re "LM Studio")"'
 chk "Opera does not hit CoreOperations" '! echo "/System/Library/CoreServices/CoreOperations.app/x" | grep -qiE "$(app_re Opera)"'
 
+
+echo "E10 Apple Intelligence: an existing (MDM) applicationaccess plist is restored byte-for-byte, never deleted"
+X="$TMP/x"; mkdir -p "$X"
+( DRYRUN=0; STATE="$X"; LOCKQZ_AI_MDM="$X/com.apple.applicationaccess.plist"; LOCKQZ_AI_BACKUP="$X/ai.backup.plist"
+  export LOCKQZ_AI_MDM LOCKQZ_AI_BACKUP
+  source "$HERE/../mac/extra-block.sh"
+  pkill(){ :; }; killall(){ :; }   # never signal real processes from a test
+  python3 -c "import plistlib;plistlib.dump({'allowCamera':False,'forceSchoolSetting':True},open('$X/com.apple.applicationaccess.plist','wb'))"
+  cp "$X/com.apple.applicationaccess.plist" "$X/orig.plist"
+  apple_intelligence_off; echo "off=$?" > "$X/rc"
+  python3 -c "import plistlib,sys;d=plistlib.load(open('$X/com.apple.applicationaccess.plist','rb'));sys.exit(0 if d.get('allowWritingTools') is False and d.get('forceSchoolSetting') else 1)" && echo merged >> "$X/rc"
+  apple_intelligence_off   # watcher re-apply: must not overwrite the backup with our own file
+  apple_intelligence_on; echo "on=$?" >> "$X/rc"
+  cmp -s "$X/com.apple.applicationaccess.plist" "$X/orig.plist" && echo restored >> "$X/rc"
+  rm -f "$X/com.apple.applicationaccess.plist"
+  apple_intelligence_off; apple_intelligence_on
+  [ ! -e "$X/com.apple.applicationaccess.plist" ] && echo absent >> "$X/rc"
+) >/dev/null 2>&1
+chk "lock merges our keys into theirs" 'grep -q merged "$X/rc"'
+chk "unlock restores their file byte-for-byte" 'grep -q restored "$X/rc" && grep -q "on=0" "$X/rc"'
+chk "no file before the quiz -> none after" 'grep -q absent "$X/rc"'
 echo ""
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

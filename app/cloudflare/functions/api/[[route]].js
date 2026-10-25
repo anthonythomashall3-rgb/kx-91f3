@@ -20,11 +20,31 @@ const AI_DOMAINS = [   // = app/mac/blocklist.txt (tests/test_blocklist.mjs keep
   "api.mistral.ai","api.groq.com","api.x.ai","api.deepseek.com","api.cohere.ai","openrouter.ai",
   "api.openrouter.ai","ollama.com","ollama.ai","lmstudio.ai","gpt4all.io","jan.ai",
   "msty.app","cloudflare-dns.com","chrome.cloudflare-dns.com","mozilla.cloudflare-dns.com","dns.google","dns.google.com",
-  "dns.quad9.net","doh.opendns.com","dns.nextdns.io"];
+  "dns.quad9.net","doh.opendns.com","dns.nextdns.io",
+  "cdn.oaistatic.com","platform.openai.com","sydney.bing.com","labs.perplexity.ai","x.com/i/grok","console.x.ai","platform.deepseek.com","console.mistral.ai","chat.z.ai","api.z.ai","beta.character.ai","duck.ai"];
 const now = () => new Date().toISOString();
 // "Today" in America/Los_Angeles as YYYY-MM-DD, so a professor stays active through the end of their
 // paid date in Pacific time (not 5pm Pacific, which UTC-midnight would give).
-const laToday = () => new Date(Date.now() - 7*3600000).toISOString().slice(0,10);
+// DST-correct (Intl, America/Los_Angeles); the fixed UTC-8 fallback only runs if Intl has no tz data.
+const LA_FMT = (() => { try { return new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }); } catch { return null; } })();
+const laToday = () => {
+  if (LA_FMT) { const p = {}; for (const x of LA_FMT.formatToParts(new Date())) p[x.type] = x.value; if (p.year && p.month && p.day) return `${p.year}-${p.month}-${p.day}`; }
+  return new Date(Date.now() - 8*3600000).toISOString().slice(0,10);
+};
+// A real calendar date "YYYY-MM-DD" (rejects "12/31/2026", "2026-02-31", "tomorrow").
+const isDate = s => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && (() => { const d = new Date(s + "T00:00:00Z"); return !isNaN(d) && d.toISOString().slice(0,10) === s; })();
+// Optional text field from a client body -> string or null (never an object: D1 would 500 on it).
+const str = (v, n = 200) => v == null || v === "" ? null : String(typeof v === "object" ? JSON.stringify(v) : v).slice(0, n);
+const placeholders = n => Array(n).fill("?").join(",");
+const chunk = (a, n) => { const out = []; for (let i = 0; i < a.length; i += n) out.push(a.slice(i, i + n)); return out; };
+// Multi-row INSERT statements, each under D1's 100-bound-parameter cap.
+function multiInsert(db, head, cols, rows, tail = "") {
+  const per = Math.max(1, Math.floor(99 / cols));
+  return chunk(rows, per).map(part => db.prepare(`${head} VALUES ${part.map(() => "(" + placeholders(cols) + ")").join(",")} ${tail}`).bind(...part.flat()));
+}
+// db.batch counts as ONE D1 query on the Free plan (50 per request); keep each batch modest.
+async function runBatches(db, sts) { for (const part of chunk(sts, 100)) if (part.length) await db.batch(part); }
+const STALE_MS = 660000;   // live monitor: helpers ping every ~300 s, so a lock not refreshed for 11 minutes "went dark"
 const rid = (n=6) => Array.from(crypto.getRandomValues(new Uint8Array(n))).map(b=>"ABCDEFGHJKMNPQRSTUVWXYZ23456789"[b%30]).join("");
 const hex = a => Array.from(new Uint8Array(a)).map(b=>b.toString(16).padStart(2,"0")).join("");
 const CORS = { "Access-Control-Allow-Origin":"*", "Access-Control-Allow-Headers":"Content-Type, X-LOCKqz-Teacher, X-LOCKqz-Sync", "Access-Control-Allow-Methods":"GET, POST, OPTIONS", "Access-Control-Max-Age":"86400" };
@@ -163,35 +183,39 @@ export async function onRequest(context) {
   if (hdr && adminKey && sameHex(hdr, adminKey)) me = { id:"admin", email:(env.ADMIN_EMAIL||"admin").toLowerCase(), name:"Admin", admin:true, verified:true, active:true };
   else {
     const syncKey = (request.headers.get("X-LOCKqz-Sync") || "").trim();
-    const t = hdr ? await db.prepare("SELECT id,email,name,role,active_until,verified,bs_user_id FROM teachers WHERE token=?").bind(hdr).first().catch(()=>null)
-          : syncKey ? await db.prepare("SELECT id,email,name,role,active_until,verified,bs_user_id FROM teachers WHERE sync_key=?").bind(syncKey).first().catch(()=>null) : null;
-    if (t) me = { id:t.id, email:t.email, name:t.name, admin: t.role === "admin", verified: t.role === "admin" || t.verified === 1, active: t.role === "admin" || (!!t.active_until && t.active_until >= laToday()), active_until: t.active_until||null, bs_user_id: t.bs_user_id||null };
+    const t = hdr ? await db.prepare("SELECT id,email,name,role,active_until,verified,bs_user_id,vouched FROM teachers WHERE token=?").bind(hdr).first().catch(()=>null)
+          : syncKey ? await db.prepare("SELECT id,email,name,role,active_until,verified,bs_user_id,vouched FROM teachers WHERE sync_key=?").bind(syncKey).first().catch(()=>null) : null;
+    if (t) me = { id:t.id, email:t.email, name:t.name, admin: t.role === "admin", verified: t.role === "admin" || t.verified === 1, active: t.role === "admin" || (!!t.active_until && t.active_until >= laToday()), active_until: t.active_until||null, bs_user_id: t.bs_user_id||null, vouched: t.role === "admin" || Number(t.vouched) === 1 || t.verified === 1 };
   }
+  const clientIp = request.headers.get("CF-Connecting-IP") || "?";
   // The sync key (in the bookmarklet URL, readable by any script on the Brightspace page) authorizes
   // ONLY the Brightspace-connector endpoints. Account management needs the real session token.
   const viaSyncKey = !!(request.headers.get("X-LOCKqz-Sync") || "").trim() && !(hdr && adminKey && sameHex(hdr, adminKey)) && !(hdr);
   const SYNC_OK = new Set(["/sync","/sync-result","/protect","/gate","/rotating","/rotated","/submitted","/live","/synckey","/me","/bs"]);
   const teacher = () => !!me;
   const mine = (col="teacher_id") => me.admin ? { sql:"1=1", args:[] } : { sql:`${col}=?`, args:[me.id] };
-  const inCourse = async ou => me && (me.admin || !!(await db.prepare("SELECT 1 FROM teacher_courses WHERE teacher_id=? AND ou=?").bind(me.id, String(ou)).first()));
   // Only the INSTRUCTOR of a course (named Instructor on a roster an admin or verified professor synced)
   // may act on it. TAs NEVER qualify -- a TA could otherwise reach the other classes they are in.
   // Anthony (admin) is the sole exception, handled by me.admin at each call site.
   const EMAIL = String(me && me.email || "").toLowerCase();
   const INSTR_SQL = "(r.role LIKE '%nstructor%' OR r.role LIKE '%rofessor%' OR r.role LIKE '%aculty%')";
+  // A roster row r is TRUSTED when an admin or a verified professor has synced that course.
+  // (teacher_id 'admin' = a sync made with the master key; real account ids never look like that.)
+  const TRUSTED_TC = "EXISTS (SELECT 1 FROM teacher_courses tct LEFT JOIN teachers tet ON tet.id=tct.teacher_id WHERE tct.ou=r.ou AND (tct.teacher_id='admin' OR tet.role='admin' OR tet.verified=1))";
   // Roles LOCKqz locks during quizzes: everyone except the course's instructors (Learners and TAs).
   const takesQuizzes = role => !/nstructor|rofessor|aculty/i.test(String(role||"")) && !!String(role||"").trim();
-  async function hasTrustedOwner(ou) {
-    return !!(await db.prepare("SELECT 1 FROM teacher_courses tc JOIN teachers te ON te.id=tc.teacher_id WHERE tc.ou=? AND (te.role='admin' OR te.verified=1) LIMIT 1").bind(String(ou)).first());
-  }
-  // Unpaid or expired professor: queue every quiz they protect for password removal (their next
-  // LOCKqz Sync takes it out of Brightspace, so no student is ever locked out of a quiz).
-  async function releaseAll(tid) {
-    const qs = (await db.prepare("SELECT qi,ou,password FROM quizzes WHERE teacher_id=? AND ou IS NOT NULL").bind(tid).all()).results;
-    for (const q of qs) {
-      await db.prepare("INSERT OR REPLACE INTO pending_clear (ou,qi,password) VALUES (?,?,?)").bind(String(q.ou), String(q.qi), q.password).run();
-      await db.prepare("DELETE FROM quizzes WHERE qi=? AND ou=? AND teacher_id=?").bind(q.qi, String(q.ou), tid).run();
+  // Per course: owned = an admin, or a verified professor who is INSTRUCTOR (same email + Brightspace
+  // id) on that course's roster, has synced it; trusted = any admin/verified account has synced it.
+  async function ownerInfo(ous) {
+    const out = {};
+    for (const part of chunk([...new Set(ous.map(String))].filter(o => /^\d+$/.test(o)), 99)) {
+      const rows = (await db.prepare(`SELECT tc.ou AS ou,
+          MAX(CASE WHEN tc.teacher_id='admin' OR te.role='admin' THEN 1 WHEN te.verified=1 AND EXISTS (SELECT 1 FROM roster r WHERE r.ou=tc.ou AND lower(r.email)=lower(te.email) AND r.user_id=te.bs_user_id AND ${INSTR_SQL}) THEN 1 ELSE 0 END) AS owned,
+          MAX(CASE WHEN tc.teacher_id='admin' OR te.role='admin' OR te.verified=1 THEN 1 ELSE 0 END) AS trusted
+        FROM teacher_courses tc LEFT JOIN teachers te ON te.id=tc.teacher_id WHERE tc.ou IN (${placeholders(part.length)}) GROUP BY tc.ou`).bind(...part).all()).results;
+      for (const r of rows) out[String(r.ou)] = { owned: Number(r.owned) === 1, trusted: Number(r.trusted) === 1 };
     }
+    return out;
   }
   // ---- per-section billing ($1,000 per section per semester) ----
   // A Brightspace course (ou) is paid when the professor paid for the USC section(s) it holds.
@@ -200,10 +224,19 @@ export async function onRequest(context) {
   const secNums = txt => (String(txt).match(/(?<!\d)\d{5}(?!\d)/g) || []);
   const courseKeys = txt => { const out = new Set(); const re = /(?<![A-Z])([A-Z]{2,5})[\s_\-]*(\d{3}[A-Z]?)(?![0-9])/g; let m; while ((m = re.exec(String(txt).toUpperCase()))) out.add(m[1] + m[2]); return [...out]; };
   const ckey = c => String(c||"").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const paidCache = new Map();   // per request: teacher id -> paid_sections rows; `${id}:${ou}` -> bool
   async function paidOuFor(t, ou) {
     if (!t) return false;
     if (t.admin || t.active) return true;
-    const paid = (await db.prepare("SELECT term,section,course,first,last FROM paid_sections WHERE teacher_id=? AND until>=?").bind(t.id, laToday()).all().catch(()=>({results:[]}))).results;
+    const ck = `${t.id}:${ou}`;
+    if (paidCache.has(ck)) return paidCache.get(ck);
+    const v = await paidOuUncached(t, String(ou));
+    paidCache.set(ck, v);
+    return v;
+  }
+  async function paidOuUncached(t, ou) {
+    if (!paidCache.has(t.id)) paidCache.set(t.id, (await db.prepare("SELECT term,section,course,first,last FROM paid_sections WHERE teacher_id=? AND until>=?").bind(t.id, laToday()).all().catch(()=>({results:[]}))).results);
+    const paid = paidCache.get(t.id);
     if (!paid.length) return false;
     const tc = await db.prepare("SELECT name,code FROM teacher_courses WHERE ou=? ORDER BY (teacher_id=?) DESC LIMIT 1").bind(String(ou), t.id).first();
     if (!tc) return false;
@@ -231,22 +264,25 @@ export async function onRequest(context) {
   // Release every quiz this professor protects in a course that is not paid (next Sync removes the
   // password from Brightspace, so no student is locked out).
   async function releaseUnpaid(t) {
+    if (!t || t.admin || t.active) return;          // fully active: nothing to release (no query)
     const qs = (await db.prepare("SELECT qi,ou,password FROM quizzes WHERE teacher_id=? AND ou IS NOT NULL").bind(t.id).all()).results;
-    const cache = {};
+    const st = [];
     for (const q of qs) {
       const ou = String(q.ou);
-      if (!(ou in cache)) cache[ou] = await paidOuFor(t, ou);
-      if (cache[ou]) continue;
-      await db.prepare("INSERT OR REPLACE INTO pending_clear (ou,qi,password) VALUES (?,?,?)").bind(ou, String(q.qi), q.password).run();
-      await db.prepare("DELETE FROM quizzes WHERE qi=? AND ou=? AND teacher_id=?").bind(q.qi, ou, t.id).run();
+      if (await paidOuFor(t, ou)) continue;
+      st.push(db.prepare("INSERT OR REPLACE INTO pending_clear (ou,qi,password) VALUES (?,?,?)").bind(ou, String(q.qi), q.password));
+      st.push(db.prepare("DELETE FROM quizzes WHERE qi=? AND ou=? AND teacher_id=?").bind(q.qi, ou, t.id));
     }
+    await runBatches(db, st);
   }
   const curTerms = () => { const d = laToday(), y = +d.slice(0,4), m = +d.slice(5,7), s = m <= 5 ? 1 : (m <= 7 ? 2 : 3); return [String(y*10+s), String(s < 3 ? y*10+s+1 : (y+1)*10+1)]; };
   const splitName = n => { const w = String(n||"").trim().split(/\s+/).filter(Boolean); return w.length >= 2 ? { first: w[0], last: w[w.length-1] } : null; };
   async function payCode(tid) {
     const ex = await db.prepare("SELECT code FROM pay_codes WHERE teacher_id=?").bind(tid).first();
     if (ex) return ex.code;
-    const code = "LQ" + rid(5).toUpperCase();
+    // Professor memo = "LQ" + 5 (7 chars); student = "LQS" + 5 (8 chars). Never start a professor code
+    // with S, so a memo is never ambiguous to a person reading it (settle() goes by length anyway).
+    let code; do { code = "LQ" + rid(5).toUpperCase(); } while (code[2] === "S");
     await db.prepare("INSERT OR IGNORE INTO pay_codes (teacher_id,code) VALUES (?,?)").bind(tid, code).run();
     return (await db.prepare("SELECT code FROM pay_codes WHERE teacher_id=?").bind(tid).first()).code;
   }
@@ -276,10 +312,16 @@ export async function onRequest(context) {
   // The Gmail script's key: PAY_SECRET if set, else derived from the server's own secret (the admin
   // copies it from Admin -> Payments into the script once). Nothing new to configure in Cloudflare.
   const paySecret = async () => env.PAY_SECRET ? String(env.PAY_SECRET) : ((env.ROT_SECRET || env.TEACHER_KEY) ? "lqp_" + (await hmacHex(String(env.ROT_SECRET || env.TEACHER_KEY), "lockqz-pay-notify")).slice(0, 40) : "");
-  async function studentCode(email) {
+  // limitIp: the public /pay/start passes the caller's IP, so random emails cannot write unlimited rows.
+  async function studentCode(email, limitIp = null) {
     email = String(email||"").trim().toLowerCase(); if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return null;
     const ex = await db.prepare("SELECT code FROM pay_codes_students WHERE email=?").bind(email).first();
     if (ex) return ex.code;
+    if (limitIp) {
+      const n = (await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_code_new' AND ts>? AND device_id=?").bind(new Date(Date.now() - 3600000).toISOString(), "ip:" + limitIp).first()).n;
+      if (n >= 20) return { limited: true };
+      await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + limitIp, null, null, "pay_code_new", null, now()).run();
+    }
     for (let i = 0; i < 5; i++) {
       const code = "LQS" + rid(5).toUpperCase().replace(/[^A-Z0-9]/g, "X");
       const r = await db.prepare("INSERT OR IGNORE INTO pay_codes_students (email,code) VALUES (?,?)").bind(email, code).run();
@@ -297,8 +339,9 @@ export async function onRequest(context) {
     const c = await db.prepare("SELECT code FROM pay_codes_students WHERE email=?").bind(email).first();
     return !!c && (await paidSum(c.code, curTerms()[0])) >= STUDENT_FEE;
   }
-  async function payInfo(email) {
-    const code = await studentCode(email);
+  async function payInfo(email, limitIp = null) {
+    const code = await studentCode(email, limitIp);
+    if (code && typeof code === "object") return code;   // { limited: true }
     return { amount: STUDENT_FEE, code, venmo: (env.VENMO_HANDLE || "").replace(/^@/, "") || null, zelle: env.ZELLE_TO || null,
              url: PAY_URL + (email ? "?email=" + encodeURIComponent(String(email).toLowerCase()) : "") };
   }
@@ -307,7 +350,7 @@ export async function onRequest(context) {
     const txn = String(p.txn||"").slice(0,120); const amount = Number(p.amount);
     if (!txn || !(amount > 0) || amount > 100000) return { ok:false, error:"bad payment" };
     const text = `${p.note||""} ${p.subject||""}`.toUpperCase();
-    let code = (text.match(/LQS[A-Z0-9]{5}/) || [])[0] || (text.match(/(?<![A-Z0-9])LQ[A-Z0-9]{5}(?![A-Z0-9])/) || [])[0] || null;
+    let code = (text.match(/LQS[A-Z0-9]{5}(?![A-Z0-9])/) || [])[0] || (text.match(/(?<![A-Z0-9])LQ[A-Z0-9]{5}(?![A-Z0-9])/) || [])[0] || null;
     if (!code) { const em = (String(p.note||"").match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/) || [])[0]; if (em) code = await studentCode(em); }
     const term = curTerms()[0];
     const ins = await db.prepare("INSERT OR IGNORE INTO payments (txn,code,amount,via,payer,note,term,received_at,matched) VALUES (?,?,?,?,?,?,?,?,?)")
@@ -317,7 +360,9 @@ export async function onRequest(context) {
   }
   async function settle(code, term) {
     if (!code) return { matched:null };
-    if (code.startsWith("LQS")) {
+    // By FORMAT, not prefix: student codes are "LQS"+5 (8 chars), professor codes "LQ"+5 (7 chars) --
+    // an older professor code can itself start with "LQS" (e.g. LQSABCD).
+    if (/^LQS[A-Z0-9]{5}$/.test(code)) {
       const st = await db.prepare("SELECT email FROM pay_codes_students WHERE code=?").bind(code).first();
       if (!st) return { matched:null };
       const sum = await paidSum(code, term);
@@ -329,14 +374,27 @@ export async function onRequest(context) {
     if (done) await db.prepare("UPDATE teachers SET active_until=? WHERE id=? AND (active_until IS NULL OR active_until<?)").bind(termEnd(), pc.teacher_id, termEnd()).run();
     return { matched:"professor", paid: done, total: sum };
   }
-  async function trustedInstructor(ou) {
-    if (!me || !EMAIL) return false;
-    if (me.admin) return true;
-    // Must be listed as Instructor on a TRUSTED roster for this course, by BOTH email and the caller's
-    // own Brightspace user id (captured at first sync) -- so holding someone else's email is not enough.
-    if (!me.bs_user_id) return false;
-    return !!(await db.prepare(`SELECT 1 FROM roster r JOIN teacher_courses tc ON tc.ou=r.ou JOIN teachers te ON te.id=tc.teacher_id WHERE r.ou=? AND lower(r.email)=? AND r.user_id=? AND ${INSTR_SQL} AND (te.role='admin' OR te.verified=1) LIMIT 1`).bind(String(ou), EMAIL, String(me.bs_user_id)).first());
+  // Must be listed as Instructor on a TRUSTED roster for the course, by BOTH email and the caller's own
+  // Brightspace user id (bound from a trusted roster at sync) -- so holding someone else's email is not
+  // enough. Answers are cached per request (one query for many courses; D1 Free = 50 queries/request).
+  const tiCache = new Map();
+  async function trustedOus(list) {
+    const ous = [...new Set(list.map(String))].filter(o => /^\d+$/.test(o)), out = new Set();
+    if (!me || !EMAIL) return out;
+    if (me.admin) { ous.forEach(o => out.add(o)); return out; }
+    if (!me.bs_user_id) return out;
+    for (const part of chunk(ous.filter(o => !tiCache.has(o)), 90)) {
+      const hit = new Set((await db.prepare(`SELECT DISTINCT r.ou AS ou FROM roster r WHERE r.ou IN (${placeholders(part.length)}) AND lower(r.email)=? AND r.user_id=? AND ${INSTR_SQL} AND ${TRUSTED_TC}`)
+        .bind(...part, EMAIL, String(me.bs_user_id)).all()).results.map(x => String(x.ou)));
+      part.forEach(o => tiCache.set(o, hit.has(o)));
+    }
+    ous.forEach(o => { if (tiCache.get(o)) out.add(o); });
+    return out;
   }
+  const trustedInstructor = async ou => (await trustedOus([ou])).has(String(ou));
+  // SQL: the courses the caller instructs (same rule as trustedOus), as a subquery with fixed params.
+  const myOusSql = () => me.admin ? { sql: "SELECT ou FROM teacher_courses", args: [] }
+    : { sql: `SELECT r.ou FROM roster r WHERE lower(r.email)=? AND r.user_id=? AND ${INSTR_SQL} AND ${TRUSTED_TC}`, args: [EMAIL, String(me.bs_user_id || "\u0000")] };
   // Load a quiz by (ou,qi) and confirm the caller instructs THAT course. Prevents acting on another
   // course's quiz by passing your own ou with a foreign qi.
   async function ownedQuiz(ou, qi) {
@@ -429,9 +487,10 @@ export async function onRequest(context) {
     if (p === "/install" && request.method === "POST") {
       const v = await verifyDevice(request, raw, db);
       if (!v.ok && (strict || await isRegistered(db, body.device_id))) return denied(v);
-      if (v.ok) body.device_id = v.id;
+      const did = v.ok ? v.id : (typeof body.device_id === "string" ? body.device_id.trim() : "");
+      if (!did || did.length > 120) return json({ error: "bad device id" }, 400);
       await db.prepare("INSERT INTO devices (device_id,student,platform,version,installed_at,last_seen) VALUES (?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET platform=excluded.platform,version=excluded.version,last_seen=excluded.last_seen")
-        .bind(body.device_id, body.student||null, body.platform||null, body.version||null, now(), now()).run();
+        .bind(did, str(body.student), str(body.platform, 60), str(body.version, 60), now(), now()).run();
       return json({ ok: true });
     }
 
@@ -451,30 +510,48 @@ export async function onRequest(context) {
         }
         if (!legacy) return denied(v);
       }
-      const device_id = v.ok ? v.id : (body.device_id || null);
+      const device_id = v.ok ? v.id : (body.device_id != null ? String(body.device_id).slice(0, 120) : null);
       const signed = v.ok ? 1 : 0;
       const qidOk = typeof quiz_id === "string" && /^\d+-\d+$/.test(quiz_id) ? quiz_id : null;
-      const detailStr = detail ? JSON.stringify(detail).slice(0, 2000) : null;
+      const studentStr = str(student);
+      // Unlock reports carry {reason} (quiz_submitted / quiz_left / quiz_tab_closed / cap ...): keep it
+      // in the event detail so the live monitor can tell a clean submit from a mid-quiz unlock.
+      const reason = typeof body.reason === "string" && body.reason ? body.reason.slice(0, 40) : null;
+      const detailObj = reason ? (detail != null && detail !== "" ? { reason, detail } : { reason }) : detail;
+      const detailStr = detailObj ? JSON.stringify(detailObj).slice(0, 2000) : null;
       const evName = String(ev).slice(0, 40);
       if (ev !== "heartbeat")
         await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)")
-          .bind(device_id||null, (student?String(student).slice(0,200):null), qidOk, evName, detailStr, now()).run();
+          .bind(device_id||null, studentStr, qidOk, evName, detailStr, now()).run();
       if (device_id) await db.prepare("INSERT OR IGNORE INTO devices (device_id,installed_at) VALUES (?,?)").bind(device_id, now()).run();
       // D1 free plan = 100k row writes/day: a heartbeat refreshes last_seen at most every 10 minutes
       // (an UPDATE that matches no row writes nothing). Real events always update it.
       if (ev === "heartbeat")
         await db.prepare("UPDATE devices SET last_seen=? WHERE device_id=? AND (last_seen IS NULL OR last_seen < ?)").bind(now(), device_id||null, new Date(Date.now() - 600000).toISOString()).run();
       else
-        await db.prepare("UPDATE devices SET last_seen=?, student=CASE WHEN student_verified=1 THEN student ELSE COALESCE(?,student) END WHERE device_id=?").bind(now(), student||null, device_id||null).run();
+        await db.prepare("UPDATE devices SET last_seen=?, student=CASE WHEN student_verified=1 THEN student ELSE COALESCE(?,student) END WHERE device_id=?").bind(now(), studentStr, device_id||null).run();
       const clientIp = request.headers.get("CF-Connecting-IP") || null;
-      if (ev === "lock" && qidOk)
+      // The helper went dark for longer than the live monitor's window and is now back: record the gap
+      // (writes nothing in the normal case), so a later fresh lock cannot hide that AI may have been open.
+      const vt = v => String(v||"0").split(".").map(n => parseInt(n,10)||0);
+      const newer = (a, b) => { const x = vt(a), y = vt(b); for (let i = 0; i < 3; i++) if ((x[i]||0) !== (y[i]||0)) return (x[i]||0) > (y[i]||0); return true; };
+      const gapRule = (ev === "lock" || (ev === "heartbeat" && !agentBeat)) && qidOk
+        && newer((await db.prepare("SELECT version FROM devices WHERE device_id=?").bind(device_id||null).first())?.version, "0.4.0");
+      const noteGap = async () => { if (!gapRule) return; return db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) SELECT device_id,(SELECT student FROM devices WHERE device_id=?),quiz_id,'lock_gap','{\"from\":\"'||last_lock||'\"}',? FROM locks WHERE device_id=? AND quiz_id=? AND last_lock<?")
+        .bind(device_id, now(), device_id, qidOk, new Date(Date.now() - STALE_MS).toISOString()).run(); };
+      if (ev === "lock" && qidOk) {
+        await noteGap();
         await db.prepare("INSERT INTO locks (device_id,quiz_id,last_lock,helper_seen,signed,ip) VALUES (?,?,?,?,?,?) ON CONFLICT(device_id,quiz_id) DO UPDATE SET last_lock=excluded.last_lock,helper_seen=excluded.helper_seen,signed=excluded.signed,ip=excluded.ip").bind(device_id, qidOk, now(), now(), signed, clientIp).run();
+      }
       if (ev === "unlock" && qidOk)
         await db.prepare("DELETE FROM locks WHERE device_id=? AND quiz_id=?").bind(device_id, qidOk).run();
       if (ev === "heartbeat" && qidOk) {
         // Only the helper's heartbeat keeps a lock alive; the agent's only proves the agent runs.
         if (agentBeat) await db.prepare("UPDATE locks SET ext_seen=? WHERE device_id=? AND quiz_id=?").bind(now(), device_id, qidOk).run();
-        else await db.prepare("UPDATE locks SET last_lock=?, helper_seen=?, signed=?, ip=COALESCE(?,ip) WHERE device_id=? AND quiz_id=?").bind(now(), now(), signed, clientIp, device_id, qidOk).run();
+        else {
+          await noteGap();
+          await db.prepare("UPDATE locks SET last_lock=?, helper_seen=?, signed=?, ip=COALESCE(?,ip) WHERE device_id=? AND quiz_id=?").bind(now(), now(), signed, clientIp, device_id, qidOk).run();
+        }
       }
       return json({ ok: true });
     }
@@ -496,8 +573,14 @@ export async function onRequest(context) {
       if (devLk) return json({ password: null, reason: "not locked" }, 403);   // dev mode is admin-only
       // Student fee: no password until this semester's $5 is paid (matched automatically from Venmo/Zelle).
       if (feeOn()) {
-        const stu = await db.prepare("SELECT student FROM devices WHERE device_id=?").bind(device_id).first();
-        if (!(await studentPaid(stu?.student))) return json({ password: null, reason: "unpaid", pay: await payInfo(stu?.student) }, 402);
+        const stu = await db.prepare("SELECT student, student_verified FROM devices WHERE device_id=?").bind(device_id).first();
+        // With email codes on, only a CONFIRMED email counts: an unverified device cannot claim a
+        // professor's (fee-exempt) or a paid classmate's email just by reporting it.
+        const unconfirmed = codesOn && Number(stu?.student_verified) !== 1;
+        const who = unconfirmed ? null : stu?.student;
+        if (!(await studentPaid(who))) return unconfirmed
+          ? json({ password: null, reason: "verify", needs_verify: true }, 402)   // no pay block: the agent re-runs email setup
+          : json({ password: null, reason: "unpaid", pay: await payInfo(who) }, 402);
       }
       // Admit only at the quiz's scheduled start time -- even if the professor unhid it early. But a
       // student with an accommodation (in the gate's kept special-access list) may have an earlier
@@ -518,8 +601,14 @@ export async function onRequest(context) {
       // Give the student EXACTLY what is in Brightspace: the code the Sync tab last confirmed writing
       // (gated quiz) or the quiz's fixed LOCKqz password (protected, not gated). Never a computed code,
       // so a closed or sleeping Sync tab can never cause a wrong password.
-      if (pw) await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,(SELECT student FROM devices WHERE device_id=?),?,?,?,?)")
-        .bind(device_id, device_id, lockId, "password_released", JSON.stringify({ verified: v.ok, ip: request.headers.get("CF-Connecting-IP") || null }), now()).run();
+      // Logged once per device + quiz + released code (+ IP): agents re-ask often, and every repeat
+      // would be a row written (D1 Free: 100k/day). A new code or a new IP is logged again.
+      const given = rot || pw;
+      if (given) {
+        const det = JSON.stringify({ verified: v.ok, ip: request.headers.get("CF-Connecting-IP") || null, v: (await sha256hex(enc.encode(lockId + ":" + given))).slice(0, 8) });
+        await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) SELECT ?,(SELECT student FROM devices WHERE device_id=?),?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM events WHERE device_id=? AND quiz_id=? AND event='password_released' AND detail=?)")
+          .bind(device_id, device_id, lockId, "password_released", det, now(), device_id, lockId, det).run();
+      }
       return json({ password: rot || pw, lockId });
     }
 
@@ -542,23 +631,25 @@ export async function onRequest(context) {
       const email = String(body.email||"").trim().toLowerCase(), pw = String(body.password||"");
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"enter a valid email" }, 400);
       if (pw.length < 8) return json({ error:"password must be at least 8 characters" }, 400);
-      const dup = await db.prepare("SELECT id FROM teachers WHERE email=?").bind(email).first();
-      if (dup) return json({ error:"that email already has an account — log in instead" }, 409);
       // An instructor email that an admin/verified professor has already put on a trusted roster is a
       // real professor's identity. Self-signup can't claim it without an admin invite code (which only
       // the admin issues to that person), so a student can't pre-register bristow@usc.edu.
       const codeUp = String(body.invite||"").trim().toUpperCase();
-      const invPre = codeUp ? await db.prepare("SELECT 1 FROM invites WHERE code=? AND used_at IS NULL AND (email IS NULL OR email=?)").bind(codeUp, email).first() : null;
+      const invPre = codeUp ? await db.prepare("SELECT email FROM invites WHERE code=? AND used_at IS NULL AND (email IS NULL OR email=?)").bind(codeUp, email).first() : null;
+      const dup = await db.prepare("SELECT id, role, verified, vouched FROM teachers WHERE email=?").bind(email).first();
+      // An account nobody vouched for (no invite) and that never verified may be squatting a
+      // professor's email. The real professor's invite for that exact email takes it over (below).
+      const squat = dup && invPre && invPre.email === email && dup.role !== "admin" && Number(dup.vouched) !== 1 && Number(dup.verified) !== 1;
+      if (dup && !squat) return json({ error:"that email already has an account — log in instead" }, 409);
       if (!invPre) {
-        const INSTR_ANY = "(r.role LIKE '%nstructor%' OR r.role LIKE '%rofessor%' OR r.role LIKE '%aculty%')";
-        const claimed = await db.prepare(`SELECT 1 FROM roster r JOIN teacher_courses tc ON tc.ou=r.ou JOIN teachers te ON te.id=tc.teacher_id WHERE lower(r.email)=? AND ${INSTR_ANY} AND (te.role='admin' OR te.verified=1) LIMIT 1`).bind(email).first();
+        const claimed = await db.prepare(`SELECT 1 FROM roster r WHERE lower(r.email)=? AND ${INSTR_SQL} AND ${TRUSTED_TC} LIMIT 1`).bind(email).first();
         if (claimed) return json({ error:"This email belongs to a professor already on a course roster. Ask the LOCKqz admin for an invite to claim it." }, 409);
       }
-      // The first account on the site is the admin. Anyone can sign up after that, but a new teacher
-      // is UNVERIFIED and can protect nothing until they prove -- through their OWN Brightspace login
-      // (LOCKqz Sync) -- that they are an instructor or TA. A student can make an account but can never
-      // verify (no staff role in Brightspace), so a student can never act as a teacher. No email from
-      // anyone is needed. An optional invite code still sets the paid window, but is not required.
+      // The first account on the site is the admin. Anyone can still make an account after that (the
+      // site only offers sign-up through an invite link), but it is UNVERIFIED and can protect nothing.
+      // Only an INVITED (vouched) account can verify -- by syncing a course whose trusted roster lists
+      // its email as Instructor. Without that, anyone could sign up as bristow@usc.edu before his roster
+      // is seeded and later "verify" as him. The invite also sets the paid window.
       const n = (await db.prepare("SELECT COUNT(*) AS n FROM teachers").first()).n;
       let inv = null;
       {
@@ -571,20 +662,32 @@ export async function onRequest(context) {
           } else inv = null;
         }
       }
-      const id = rid(10), salt = rid(16), token = hex(crypto.getRandomValues(new Uint8Array(24)));
-      await db.prepare("INSERT INTO teachers (id,email,name,pw_hash,salt,token,created_at,role,active_until) VALUES (?,?,?,?,?,?,?,?,?)")
-        .bind(id, email, String(body.name||"").trim()||null, await hashPw(pw,salt), salt, token, now(), n===0?"admin":"teacher", inv ? inv.active_until : null).run();
+      if (squat && !inv) return json({ error:"that email already has an account — log in instead" }, 409);
+      const id = squat ? dup.id : rid(10), salt = rid(16), token = hex(crypto.getRandomValues(new Uint8Array(24)));
+      // vouched = the admin vouched for whoever holds this account (an invite, or the first/admin
+      // account). Only a vouched account can ever become a verified professor: a self-made account
+      // proves nothing about owning its email, so it could otherwise claim a professor's identity.
+      const vouched = (inv || n === 0) ? 1 : 0;
+      if (squat) {
+        await db.prepare("DELETE FROM teacher_courses WHERE teacher_id=?").bind(id).run();
+        await db.prepare("UPDATE teachers SET name=?, pw_hash=?, salt=?, token=?, sync_key=NULL, bs_user_id=NULL, verified=0, vouched=1, active_until=?, created_at=? WHERE id=?")
+          .bind(String(body.name||"").trim()||null, await hashPw(pw,salt), salt, token, inv.active_until, now(), id).run();
+      } else
+        await db.prepare("INSERT INTO teachers (id,email,name,pw_hash,salt,token,created_at,role,active_until,vouched) VALUES (?,?,?,?,?,?,?,?,?,?)")
+          .bind(id, email, String(body.name||"").trim()||null, await hashPw(pw,salt), salt, token, now(), n===0?"admin":"teacher", inv ? inv.active_until : null, vouched).run();
       return json({ token, email, name: body.name||null });
     }
     if (p === "/login" && request.method === "POST") {
       const email = String(body.email||"").trim().toLowerCase(), pw = String(body.password||"");
-      const ip = request.headers.get("CF-Connecting-IP") || "?";
+      const ip = clientIp;
       const lkey = `login:${email}:${ip}`, since = new Date(Date.now()-900000).toISOString();
-      const fails = (await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='login_fail' AND detail=? AND ts>?").bind(lkey, since).first()).n;
-      if (fails >= 5) return json({ error:"too many attempts — wait 15 minutes" }, 429);
+      // Per email+IP (5 / 15 min) AND per IP (30 / 15 min, any emails) -- checked BEFORE anything is
+      // written, so random emails from one IP cannot write unlimited rows. Index: events(event, ts).
+      const lf = await db.prepare("SELECT COALESCE(SUM(detail=?),0) AS mine, COALESCE(SUM(device_id=?),0) AS ipn FROM events WHERE event='login_fail' AND ts>?").bind(lkey, "ip:" + ip, since).first();
+      if (Number(lf.mine) >= 5 || Number(lf.ipn) >= 30) return json({ error:"too many attempts — wait 15 minutes" }, 429);
       const t = await db.prepare("SELECT id,email,name,pw_hash,salt,token FROM teachers WHERE email=?").bind(email).first();
       if (!t || (await hashPw(pw, t.salt)) !== t.pw_hash) {
-        await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(null,null,null,"login_fail",lkey,now()).run();
+        await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + ip,null,null,"login_fail",lkey,now()).run();
         return json({ error:"wrong email or password" }, 401);
       }
       let token = t.token;
@@ -594,8 +697,10 @@ export async function onRequest(context) {
     if (p === "/forgot" && request.method === "POST") {
       const email = String(body.email||"").trim().toLowerCase();
       const t = await db.prepare("SELECT id FROM teachers WHERE email=?").bind(email).first().catch(()=>null);
-      if (t) await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)")
-        .bind(null,null,null,"reset_request",email,now()).run();
+      // At most one request per email per hour and 10 per IP per hour (else nothing is written).
+      const hr = new Date(Date.now() - 3600000).toISOString();
+      if (t) await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) SELECT ?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM events WHERE event='reset_request' AND ts>? AND detail=?) AND (SELECT COUNT(*) FROM events WHERE event='reset_request' AND ts>? AND device_id=?) < 10")
+        .bind("ip:" + clientIp,null,null,"reset_request",email,now(), hr, email, hr, "ip:" + clientIp).run();
       return json({ ok:true });   // always ok — never reveal whether the email exists
     }
     // Public: is this invite link valid? (lets the sign-up form open and prefill the email)
@@ -606,7 +711,8 @@ export async function onRequest(context) {
     }
     if (p === "/me") return me ? json({ email: me.email, name: me.name, admin: me.admin, verified: !!me.verified, active: me.active, active_until: me.active_until }) : json({ error:"unauthorized" }, 401);
     if (p === "/logout" && request.method === "POST") {
-      if (me && !me.admin) await db.prepare("UPDATE teachers SET token=NULL WHERE id=?").bind(me.id).run();
+      // Every real account (admins included) loses its session token; only the master key has no row.
+      if (me && me.id !== "admin" && !viaSyncKey) await db.prepare("UPDATE teachers SET token=NULL WHERE id=?").bind(me.id).run();
       return json({ ok:true });
     }
     if (p === "/changepw" && request.method === "POST") {
@@ -623,16 +729,17 @@ export async function onRequest(context) {
     // Admin only: list teachers / reset a teacher's password (no email service, so the
     // admin hands the new password to the teacher).
     if (p === "/teachers") {
-      if (!me?.admin) return json({ error:"admin only" }, 401);
+      if (!me?.admin) return json({ error:"admin only" }, 403);
       const r = await db.prepare("SELECT t.id,t.email,t.name,t.created_at,t.active_until,(SELECT COUNT(*) FROM paid_sections ps WHERE ps.teacher_id=t.id AND ps.until>=?) AS paid_sections,(SELECT code FROM pay_codes pc WHERE pc.teacher_id=t.id) AS memo FROM teachers t ORDER BY t.created_at DESC").bind(laToday()).all();
       return json({ teachers: r.results });
     }
     // Admin only: turn a teacher on (after payment) until a date, or off.
     if (p === "/activate" && request.method === "POST") {
-      if (!me?.admin) return json({ error:"admin only" }, 401);
+      if (!me?.admin) return json({ error:"admin only" }, 403);
       const email = String(body.email||"").trim().toLowerCase();
-      const until = body.until ? String(body.until).slice(0,10) : null;   // "YYYY-MM-DD" or null = off
-      const r = await db.prepare("UPDATE teachers SET active_until=? WHERE email=?").bind(until, email).run();
+      const until = body.until ? String(body.until).trim() : null;   // "YYYY-MM-DD" or null = off
+      if (until !== null && !isDate(until)) return json({ error:"until must be a date YYYY-MM-DD" }, 400);
+      const r = await db.prepare(`UPDATE teachers SET active_until=?${until ? ",vouched=1" : ""} WHERE email=?`).bind(until, email).run();
       if (r.meta.changes && (!until || until < laToday())) {
         const tt = await db.prepare("SELECT id FROM teachers WHERE email=?").bind(email).first();
         if (tt) await releaseUnpaid({ id: tt.id, admin: false, active: false });
@@ -640,42 +747,48 @@ export async function onRequest(context) {
       return r.meta.changes ? json({ email, active_until: until }) : json({ error:"no such professor" }, 404);
     }
     if (p === "/reset" && request.method === "POST") {
-      if (!me?.admin) return json({ error:"admin only" }, 401);
+      if (!me?.admin) return json({ error:"admin only" }, 403);
       const email = String(body.email||"").trim().toLowerCase(), salt = rid(16), pw = body.password || ("LQ-"+rid(8));
-      const r = await db.prepare("UPDATE teachers SET pw_hash=?,salt=?,token=NULL WHERE email=?").bind(await hashPw(pw,salt), salt, email).run();
-      return r.meta.changes ? json({ email, password: pw }) : json({ error:"no such professor" }, 404);
+      // The old Sync bookmark key dies with the old password (it is a login for the Sync endpoints).
+      const gating = await db.prepare("SELECT 1 FROM quizzes q JOIN teachers t ON t.id=q.teacher_id WHERE t.email=? AND q.gated=1 LIMIT 1").bind(email).first();
+      const r = await db.prepare(`UPDATE teachers SET pw_hash=?,salt=?,token=NULL${gating ? "" : ",sync_key=NULL"} WHERE email=?`).bind(await hashPw(pw,salt), salt, email).run();
+      return r.meta.changes ? json({ email, password: pw, ...(gating ? { sync_key_kept: "a gate is running; the Sync bookmark keeps working until it stops" } : {}) }) : json({ error:"no such professor" }, 404);
     }
     // Admin only: invite a teacher (one-time code; optional email lock; account active until a date).
     if (p === "/invite" && request.method === "POST") {
-      if (!me?.admin) return json({ error:"admin only" }, 401);
+      if (!me?.admin) return json({ error:"admin only" }, 403);
       const email = String(body.email||"").trim().toLowerCase() || null;
       if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"enter a valid email" }, 400);
-      if (email && await db.prepare("SELECT id FROM teachers WHERE email=?").bind(email).first()) return json({ error:"that email already has an account" }, 409);
-      const code = rid(10), until = body.until ? String(body.until).slice(0,10) : null;
+      // An existing account blocks a new invite -- unless nobody ever vouched for it (no invite) and it
+      // never verified: that may be someone squatting the professor's email, and the invite reclaims it.
+      if (email && await db.prepare("SELECT id FROM teachers WHERE email=? AND (role='admin' OR vouched=1 OR verified=1)").bind(email).first()) return json({ error:"that email already has an account" }, 409);
+      const until = body.until ? String(body.until).trim() : null;
+      if (until !== null && !isDate(until)) return json({ error:"until must be a date YYYY-MM-DD" }, 400);
+      const code = rid(10);
       await db.prepare("INSERT INTO invites (code,email,active_until,created_at) VALUES (?,?,?,?)").bind(code, email, until, now()).run();
       return json({ code, email, active_until: until });
     }
     if (p === "/invites") {
-      if (!me?.admin) return json({ error:"admin only" }, 401);
+      if (!me?.admin) return json({ error:"admin only" }, 403);
       const r = await db.prepare("SELECT code,email,active_until,created_at,used_at,used_by FROM invites ORDER BY created_at DESC LIMIT 100").all();
       return json({ invites: r.results });
     }
     if (p === "/uninvite" && request.method === "POST") {
-      if (!me?.admin) return json({ error:"admin only" }, 401);
+      if (!me?.admin) return json({ error:"admin only" }, 403);
       const r = await db.prepare("DELETE FROM invites WHERE code=? AND used_at IS NULL").bind(String(body.code||"")).run();
       return r.meta.changes ? json({ ok:true }) : json({ error:"invite not found or already used" }, 404);
     }
 
     // Admin: a professor's sections + mark sections paid / unpaid (after the Venmo payment arrives).
     if (p === "/teacher-sections") {
-      if (!me?.admin) return json({ error:"admin only" }, 401);
+      if (!me?.admin) return json({ error:"admin only" }, 403);
       const t = await db.prepare("SELECT id,email,name FROM teachers WHERE email=?").bind(String(url.searchParams.get("email")||"").toLowerCase()).first();
       if (!t) return json({ error:"no such professor" }, 404);
       const r = await sectionsFor(t.id, url.searchParams.get("name") || t.name);
       return json({ ...r, email: t.email, memo: await payCode(t.id), price: PRICE });
     }
     if (p === "/pay-sections" && request.method === "POST") {
-      if (!me?.admin) return json({ error:"admin only" }, 401);
+      if (!me?.admin) return json({ error:"admin only" }, 403);
       const t = await db.prepare("SELECT id FROM teachers WHERE email=?").bind(String(body.email||"").trim().toLowerCase()).first();
       if (!t) return json({ error:"no such professor" }, 404);
       const term = String(body.term||""), until = String(body.until||"").slice(0,10);
@@ -696,7 +809,8 @@ export async function onRequest(context) {
     if (p === "/pay/start" && request.method === "POST") {
       const email = String(body.email||"").trim().toLowerCase();
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"enter your school email" }, 400);
-      const info = await payInfo(email);
+      const info = await payInfo(email, clientIp);
+      if (info.limited) return json({ error:"too many requests — try again in an hour" }, 429);
       return json({ ...info, paid: await studentPaid(email), required: feeOn(), term: curTerms()[0] });
     }
     if (p === "/pay/status") {
@@ -707,18 +821,18 @@ export async function onRequest(context) {
     if (p === "/pay/notify" && request.method === "POST") {
       const secret = await paySecret();
       const got = String(request.headers.get("X-LOCKqz-Pay") || "");
-      if (secret.length < 16 || got !== secret) return json({ error:"unauthorized" }, 401);
+      if (secret.length < 16 || !sameHex(got, secret)) return json({ error:"unauthorized" }, 401);   // constant-time
       const list = Array.isArray(body.payments) ? body.payments.slice(0, 100) : [body];
       const out = []; for (const x of list) out.push(await applyPayment(x || {}));
       return json({ results: out });
     }
     if (p === "/payments") {
-      if (!me?.admin) return json({ error:"admin only" }, 401);
+      if (!me?.admin) return json({ error:"admin only" }, 403);
       const r = await db.prepare("SELECT p.txn,p.code,p.amount,p.via,p.payer,p.note,p.term,p.received_at,COALESCE(s.email,t.email) AS who FROM payments p LEFT JOIN pay_codes_students s ON s.code=p.code LEFT JOIN pay_codes pc ON pc.code=p.code LEFT JOIN teachers t ON t.id=pc.teacher_id ORDER BY p.received_at DESC LIMIT 300").all();
       return json({ payments: r.results, fee_on: feeOn(), fee: STUDENT_FEE, fee_from: env.STUDENT_FEE_FROM || null, script_key: await paySecret() });
     }
     if (p === "/pay-assign" && request.method === "POST") {
-      if (!me?.admin) return json({ error:"admin only" }, 401);
+      if (!me?.admin) return json({ error:"admin only" }, 403);
       const txn = String(body.txn||""); let code = String(body.code||"").trim().toUpperCase();
       if (/@/.test(code)) code = await studentCode(code.toLowerCase());
       if (!txn || !/^LQS?[A-Z0-9]{5}$/.test(code||"")) return json({ error:"bad txn or code" }, 400);
@@ -753,14 +867,19 @@ export async function onRequest(context) {
       const { qi, ou } = ids(String(body.url||""));
       if (!/^\d+$/.test(String(ou||"")) || !/^\d+$/.test(String(qi||""))) return json({ error:"could not find ou= and qi= in that link" }, 400);
       if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this course can add its quizzes." }, 403);
-      const dupe = await db.prepare("SELECT teacher_id FROM quizzes WHERE ou=? AND qi=?").bind(ou, qi).first();
-      if (dupe && dupe.teacher_id !== me.id && !me.admin) return json({ error:"that quiz is already managed by another professor" }, 409);
-      const quiz_id = body.quiz_id || rid(8);
-      const password = "LQ-" + rid(8);
       const lock_id = `${ou}-${qi}`;
+      const dupe = await db.prepare("SELECT quiz_id,title,password,teacher_id FROM quizzes WHERE ou=? AND qi=?").bind(ou, qi).first();
+      if (dupe && dupe.teacher_id !== me.id && !me.admin) return json({ error:"that quiz is already managed by another professor" }, 409);
+      // One quiz = one row = one password (UNIQUE(ou,qi), migrate_020). Adding it again returns it as is.
+      if (dupe) return json({ quiz_id: dupe.quiz_id, password: dupe.password, qi, lock_id, tag: `[LOCKqz] ${dupe.title||dupe.quiz_id}`, existing: true });
+      // The professor added it back by hand: auto-protect may manage it again.
+      await db.prepare("DELETE FROM lockqz_off WHERE ou=? AND qi=?").bind(ou, qi).run();
+      await db.prepare("DELETE FROM pending_clear WHERE ou=? AND qi=?").bind(ou, qi).run();
+      const quiz_id = rid(8);   // never the caller's: a chosen id could collide with (or probe) another row
+      const password = "LQ-" + rid(8);
       await db.prepare("INSERT INTO quizzes (quiz_id,title,url,password,created_at,qi,teacher_id,lock_id,ou) VALUES (?,?,?,?,?,?,?,?,?)")
-        .bind(quiz_id, body.title||null, body.url||null, password, now(), qi, me.id, lock_id, ou).run();
-      return json({ quiz_id, password, qi, lock_id, tag: `[LOCKqz] ${body.title||quiz_id}` });
+        .bind(quiz_id, str(body.title), str(body.url, 1000), password, now(), qi, me.id, lock_id, ou).run();
+      return json({ quiz_id, password, qi, lock_id, tag: `[LOCKqz] ${str(body.title)||quiz_id}` });
     }
     if (p === "/quizzes") {
       const m = mine();
@@ -786,15 +905,20 @@ export async function onRequest(context) {
     }
     if (p === "/delete" && request.method === "POST") {
       const m = mine();
+      let gone = 0;
       if (body.quiz_id) {
-        const q = await db.prepare(`SELECT ou,qi,password FROM quizzes WHERE quiz_id=? AND ${m.sql}`).bind(body.quiz_id, ...m.args).first();
+        const q = await db.prepare(`SELECT ou,qi,password FROM quizzes WHERE quiz_id=? AND ${m.sql}`).bind(String(body.quiz_id), ...m.args).first();
         if (q) {
-          if (q.ou && q.qi) await db.prepare("INSERT OR REPLACE INTO pending_clear (ou,qi,password) VALUES (?,?,?)").bind(q.ou, q.qi, q.password).run();
-          await db.prepare("DELETE FROM quizzes WHERE quiz_id=?").bind(body.quiz_id).run();
+          if (q.ou && q.qi) {
+            await db.prepare("INSERT OR REPLACE INTO pending_clear (ou,qi,password) VALUES (?,?,?)").bind(String(q.ou), String(q.qi), q.password).run();
+            // Removed on purpose: the next Sync's auto-protect must not quietly put it back.
+            await db.prepare("INSERT OR REPLACE INTO lockqz_off (ou,qi,teacher_id,at) VALUES (?,?,?,?)").bind(String(q.ou), String(q.qi), me.id, now()).run();
+          }
+          gone += (await db.prepare("DELETE FROM quizzes WHERE quiz_id=?").bind(String(body.quiz_id)).run()).meta.changes;
         }
       }
-      if (body.ou)      await db.prepare(`DELETE FROM courses WHERE ou=? AND ${m.sql}`).bind(body.ou, ...m.args).run();
-      return json({ ok:true });
+      if (body.ou) gone += (await db.prepare(`DELETE FROM courses WHERE ou=? AND ${m.sql}`).bind(String(body.ou), ...m.args).run()).meta.changes;
+      return gone ? json({ ok:true }) : json({ error:"nothing to remove (not found, or not yours)" }, 404);
     }
 
     // ---------- Brightspace connector: runs on the teacher's own Brightspace login (LOCKqz Sync bookmark) ----------
@@ -808,110 +932,142 @@ export async function onRequest(context) {
       return json({ key: k });
     }
     if (p === "/sync" && request.method === "POST") {
-      const courses = (Array.isArray(body.courses) ? body.courses : []).slice(0, 80), t = now(), st = [];
-      const myEmail = String(me.email||"").toLowerCase();
-      // Capture the caller's own Brightspace id once (first sync wins; it can never be changed later),
-      // so verification can require the roster's Instructor row to carry this same id.
-      const whoId = body.whoami && body.whoami.id != null ? String(body.whoami.id) : null;
-      if (whoId && !me.admin) {
-        await db.prepare("UPDATE teachers SET bs_user_id=? WHERE id=? AND (bs_user_id IS NULL OR bs_user_id='')").bind(whoId, me.id).run();
-        if (!me.bs_user_id) me.bs_user_id = whoId;   // reflect it within THIS request (auto-protect below needs it)
+      // D1 budget (Free plan: 50 queries per request, a db.batch = 1; 100k rows written per day): every
+      // per-course lookup is ONE query for all courses, writes go out in batches, and only rows that
+      // actually changed are written -- a repeat sync with nothing new writes ~0 rows.
+      const t = now(), myEmail = EMAIL;
+      const byOu = new Map();
+      for (const c of (Array.isArray(body.courses) ? body.courses : []).slice(0, 80)) {
+        const ou = String(c && c.ou || ""); if (/^\d+$/.test(ou) && !byOu.has(ou)) byOu.set(ou, c);
       }
-      const LEARNER = "(role LIKE '%earner%' OR role LIKE '%tudent%')";
-      // Trust the roster, not the browser. A course is TRUSTED once an admin or an already-verified
-      // professor has synced it. An untrusted caller (new signup, or a student) may seed a course that
-      // nobody trusted owns yet, but can NEVER overwrite a course a trusted professor already owns
-      // unless that course's roster lists them as staff -- so a student can't wipe or fake a real class.
-      const allowed = {};
-      for (const c of courses) {
-        const ou = String(c.ou||""); if (!/^\d+$/.test(ou) || ou in allowed) continue;
-        if (me.admin) { allowed[ou] = true; continue; }
-        // Write a course only if you are its trusted instructor, or nobody trusted owns it yet
-        // (seeding). Seeding grants no power until an admin/verified instructor vouches for the course.
-        allowed[ou] = (await trustedInstructor(ou)) || !(await hasTrustedOwner(ou));
+      const ous = [...byOu.keys()];
+      // The caller's own Brightspace id: bound ONCE, and only to the id a TRUSTED roster (admin- or
+      // verified-professor-synced) already lists for this account's email -- a browser-sent id alone
+      // proves nothing. After that it never changes.
+      const whoId = body.whoami && body.whoami.id != null && /^[A-Za-z0-9_-]{1,64}$/.test(String(body.whoami.id)) ? String(body.whoami.id) : null;
+      if (whoId && !me.admin && !me.bs_user_id) {
+        const b = await db.prepare(`UPDATE teachers SET bs_user_id=? WHERE id=? AND (bs_user_id IS NULL OR bs_user_id='') AND EXISTS (SELECT 1 FROM roster r WHERE lower(r.email)=? AND r.user_id=? AND ${TRUSTED_TC})`)
+          .bind(whoId, me.id, myEmail, whoId).run();
+        if (b.meta.changes) me.bs_user_id = whoId;
       }
-      for (const c of courses) {
-        const ou = String(c.ou || ""); if (!/^\d+$/.test(ou) || !allowed[ou]) continue;
-        // A trusted owner syncing this course evicts any seed rows a non-trusted account left on it.
-        if (me.admin || await trustedInstructor(ou)) await db.prepare("DELETE FROM teacher_courses WHERE ou=? AND teacher_id<>? AND teacher_id NOT IN (SELECT id FROM teachers WHERE role='admin' OR verified=1)").bind(ou, me.id).run();
-        st.push(db.prepare("INSERT INTO teacher_courses (teacher_id,ou,name,code,role,synced_at) VALUES (?,?,?,?,?,?) ON CONFLICT(teacher_id,ou) DO UPDATE SET name=excluded.name,code=excluded.code,role=excluded.role,synced_at=excluded.synced_at")
-          .bind(me.id, ou, c.name||null, c.code||null, c.role||null, t));
-        if (Array.isArray(c.classlist)) {
-          // Free-plan write budget: compare with what is stored and write only changed/new/removed rows.
-          const old = new Map((await db.prepare("SELECT user_id,name,email,username,org_id,role FROM roster WHERE ou=?").bind(ou).all()).results.map(r => [String(r.user_id), r]));
-          const seen = new Set();
-          for (const s of c.classlist.slice(0, 3000)) {
-            const row = [String(s.id ?? ""), s.name||null, String(s.email||"").toLowerCase()||null, s.username||null, s.org_id ? String(s.org_id) : null, s.role||null];
-            seen.add(row[0]);
-            const o = old.get(row[0]);
-            if (o && o.name === row[1] && o.email === row[2] && o.username === row[3] && (o.org_id ?? null) === row[4] && o.role === row[5]) continue;
-            st.push(db.prepare("INSERT OR REPLACE INTO roster (ou,user_id,name,email,username,org_id,role,synced_at) VALUES (?,?,?,?,?,?,?,?)").bind(ou, ...row, t));
-          }
-          for (const id of old.keys()) if (!seen.has(id)) st.push(db.prepare("DELETE FROM roster WHERE ou=? AND user_id=?").bind(ou, id));
+      // Trust the roster, not the browser. You may write a course if you are its trusted instructor, or
+      // nobody trusted OWNS it (an admin, or a verified professor who is Instructor on it). An unverified
+      // account may only seed a course no admin/verified account has synced at all -- so a student can
+      // never wipe or fake a real class. Seeding grants no power until a trusted instructor syncs it.
+      const trusted0 = await trustedOus(ous);
+      const info = me.admin ? {} : await ownerInfo(ous.filter(o => !trusted0.has(o)));
+      const A = ous.filter(o => me.admin || trusted0.has(o) || (!info[o]?.owned && (me.verified || !info[o]?.trusted)));
+      const withRoster = A.filter(o => Array.isArray(byOu.get(o).classlist)), withQuiz = A.filter(o => Array.isArray(byOu.get(o).quizzes));
+      const sel = async (sql, list, extra = []) => {
+        const out = [];
+        for (const part of chunk(list, 99 - extra.length)) out.push(...(await db.prepare(sql.replace("%IN%", placeholders(part.length))).bind(...extra, ...part).all()).results);
+        return out;
+      };
+      const oldTc = new Map((A.length ? await sel("SELECT ou,name,code,role,synced_at FROM teacher_courses WHERE teacher_id=? AND ou IN (%IN%)", A, [me.id]) : []).map(r => [String(r.ou), r]));
+      const oldRoster = withRoster.length ? await sel("SELECT ou,user_id,name,email,username,org_id,role FROM roster WHERE ou IN (%IN%)", withRoster) : [];
+      const oldBq = withQuiz.length ? await sel("SELECT ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours FROM bs_quizzes WHERE ou IN (%IN%)", withQuiz) : [];
+      const same = (a, b) => (a == null ? null : String(a)) === (b == null ? null : String(b));
+      const st = [], tcRows = [], touch = [], rUp = [], bUp = [];
+      const touchBefore = new Date(Date.now() - 600000).toISOString();   // "last synced" kept fresh to 10 min
+      for (const ou of A) {
+        const c = byOu.get(ou), o = oldTc.get(ou);
+        const v = [str(c.name), str(c.code), str(c.role, 80)];
+        if (!o || !same(o.name, v[0]) || !same(o.code, v[1]) || !same(o.role, v[2])) tcRows.push([me.id, ou, ...v, t]);
+        else if (!o.synced_at || o.synced_at < touchBefore) touch.push(ou);
+      }
+      st.push(...multiInsert(db, "INSERT INTO teacher_courses (teacher_id,ou,name,code,role,synced_at)", 6, tcRows,
+        "ON CONFLICT(teacher_id,ou) DO UPDATE SET name=excluded.name,code=excluded.code,role=excluded.role,synced_at=excluded.synced_at"));
+      for (const part of chunk(touch, 98)) st.push(db.prepare(`UPDATE teacher_courses SET synced_at=? WHERE teacher_id=? AND ou IN (${placeholders(part.length)})`).bind(t, me.id, ...part));
+      // Class lists: upsert changed/new students, delete the ones Brightspace no longer lists.
+      const oldR = new Map(oldRoster.map(r => [String(r.ou) + "\u0000" + String(r.user_id), r]));
+      for (const ou of withRoster) {
+        const keep = new Set();
+        for (const s of byOu.get(ou).classlist.slice(0, 3000)) {
+          if (!s || typeof s !== "object") continue;
+          const uid = String(s.id ?? ""), k = ou + "\u0000" + uid;
+          if (keep.has(uid)) continue; keep.add(uid);
+          const v = [str(s.name), (str(s.email) || "").toLowerCase() || null, str(s.username), str(s.org_id), str(s.role, 80)];
+          const o = oldR.get(k);
+          if (!o || !same(o.name, v[0]) || !same(o.email, v[1]) || !same(o.username, v[2]) || !same(o.org_id, v[3]) || !same(o.role, v[4])) rUp.push([ou, uid, ...v, t]);
         }
-        if (Array.isArray(c.quizzes)) {
-          const oldQ = new Map((await db.prepare("SELECT qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours FROM bs_quizzes WHERE ou=?").bind(ou).all()).results.map(r => [String(r.qi), r]));
-          const seenQ = new Set();
-          for (const q of c.quizzes.slice(0, 1000)) {
-            const qi = String(q.qi), o = oldQ.get(qi); seenQ.add(qi);
-            const row = [q.name||null, q.active?1:0, q.start||null, q.end||null, q.due||null, q.has_password?1:0, (o && Number(o.bs_password_is_ours) === 1) && q.has_password ? 1 : 0];
-            if (o && o.name === row[0] && Number(o.active) === row[1] && o.start_date === row[2] && o.end_date === row[3] && o.due_date === row[4] && Number(o.bs_has_password) === row[5] && Number(o.bs_password_is_ours) === row[6]) continue;
-            st.push(db.prepare("INSERT OR REPLACE INTO bs_quizzes (ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours,synced_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(ou, qi, ...row, t));
-          }
-          for (const qi of oldQ.keys()) if (!seenQ.has(qi)) st.push(db.prepare("DELETE FROM bs_quizzes WHERE ou=? AND qi=?").bind(ou, qi));
-        }
+        const drop = oldRoster.filter(r => String(r.ou) === ou && !keep.has(String(r.user_id))).map(r => String(r.user_id));
+        for (const part of chunk(drop, 98)) st.push(db.prepare(`DELETE FROM roster WHERE ou=? AND user_id IN (${placeholders(part.length)})`).bind(ou, ...part));
       }
-      for (let i = 0; i < st.length; i += 90) await db.batch(st.slice(i, i + 90));
-      // Protect-by-default: new active quizzes get a LOCKqz password automatically (allowed courses only).
-      const today = now().slice(0, 10);
-      for (const c of courses) {
-        const ou = String(c.ou || ""); if (!/^\d+$/.test(ou) || !allowed[ou] || !Array.isArray(c.quizzes)) continue;
-        if (!(await paidOu(ou))) continue;                           // unpaid section: never auto-protect
-        if (!me.admin && !(await trustedInstructor(ou))) continue;   // auto-protect only courses you instruct
-        for (const q of c.quizzes) {
-          const qi = String(q.qi || ""); if (!/^\d+$/.test(qi)) continue;
-          if (q.active === false) continue;
-          if (q.end && String(q.end).slice(0, 10) < today) continue;   // skip ended quizzes
-          const seen = await db.prepare("SELECT 1 FROM quizzes WHERE qi=? AND ou=? UNION ALL SELECT 1 FROM pending_clear WHERE ou=? AND qi=? UNION ALL SELECT 1 FROM lockqz_off WHERE ou=? AND qi=?").bind(qi, ou, ou, qi, ou, qi).first();
-          if (seen) continue;
-          await db.prepare("INSERT INTO quizzes (quiz_id,title,url,password,created_at,qi,teacher_id,lock_id,ou,gated) VALUES (?,?,?,?,?,?,?,?,?,0)")
-            .bind(rid(8), q.name||null, null, "LQ-" + rid(8), now(), qi, me.id, `${ou}-${qi}`, ou).run();
+      st.push(...multiInsert(db, "INSERT INTO roster (ou,user_id,name,email,username,org_id,role,synced_at)", 8, rUp,
+        "ON CONFLICT(ou,user_id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,org_id=excluded.org_id,role=excluded.role,synced_at=excluded.synced_at"));
+      // Brightspace quizzes: same diff. bs_password_is_ours survives only while the quiz still has a password.
+      const oldQ = new Map(oldBq.map(r => [String(r.ou) + "\u0000" + String(r.qi), r]));
+      for (const ou of withQuiz) {
+        const keep = new Set();
+        for (const q of byOu.get(ou).quizzes.slice(0, 1000)) {
+          if (!q || typeof q !== "object" || q.qi == null) continue;
+          const qi = String(q.qi); if (keep.has(qi)) continue; keep.add(qi);
+          const o = oldQ.get(ou + "\u0000" + qi);
+          const v = [str(q.name), q.active ? 1 : 0, str(q.start, 40), str(q.end, 40), str(q.due, 40), q.has_password ? 1 : 0, (o && Number(o.bs_password_is_ours) === 1 && q.has_password) ? 1 : 0];
+          if (!o || !same(o.name, v[0]) || Number(o.active) !== v[1] || !same(o.start_date, v[2]) || !same(o.end_date, v[3]) || !same(o.due_date, v[4]) || Number(o.bs_has_password) !== v[5] || Number(o.bs_password_is_ours) !== v[6]) bUp.push([ou, qi, ...v, t]);
         }
+        const drop = oldBq.filter(r => String(r.ou) === ou && !keep.has(String(r.qi))).map(r => String(r.qi));
+        for (const part of chunk(drop, 98)) st.push(db.prepare(`DELETE FROM bs_quizzes WHERE ou=? AND qi IN (${placeholders(part.length)})`).bind(ou, ...part));
       }
-      // VERIFY ONLY FROM A TRUSTED ROSTER -- a student can never become a professor:
-      //  - if this email is a Learner/Student on ANY roster, it is never verified (and loses it);
-      //  - else verified only if a TRUSTED course's roster (one an admin or verified professor synced)
-      //    lists this email with a staff role. So the admin (or an already-verified professor) syncing
-      //    a course is what lets its real instructors/TAs in; a stranger needs that seed first.
+      st.push(...multiInsert(db, "INSERT INTO bs_quizzes (ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours,synced_at)", 10, bUp,
+        "ON CONFLICT(ou,qi) DO UPDATE SET name=excluded.name,active=excluded.active,start_date=excluded.start_date,end_date=excluded.end_date,due_date=excluded.due_date,bs_has_password=excluded.bs_has_password,bs_password_is_ours=excluded.bs_password_is_ours,synced_at=excluded.synced_at"));
+      await runBatches(db, st);
+      // VERIFY ONLY FROM A TRUSTED ROSTER -- a student can never become a professor. Verified iff the
+      // account is VOUCHED (admin invite) AND a trusted roster lists this email as Instructor with the
+      // Brightspace id bound above. A grad student who instructs one course and takes another is still
+      // verified; a pure student is never an Instructor anywhere. Written only when it changes.
       if (!me.admin) {
-        // Verified iff this email is an Instructor on a TRUSTED course's roster. A grad-student who
-        // instructs one course and takes another is still verified (instructor takes precedence over
-        // being a learner elsewhere). A pure student is never an Instructor anywhere, so never verified.
-        // Verified iff a TRUSTED roster lists this email as Instructor AND that row's Brightspace user
-        // id equals the id this account first synced with. So pre-registering someone else's email and
-        // waiting for the admin to seed the roster no longer grants verification (the ids won't match).
-        const myBs = (await db.prepare("SELECT bs_user_id FROM teachers WHERE id=?").bind(me.id).first())?.bs_user_id || null;
-        const prof = myBs ? await db.prepare(`SELECT 1 FROM roster r JOIN teacher_courses tc ON tc.ou=r.ou JOIN teachers te ON te.id=tc.teacher_id WHERE lower(r.email)=? AND ${INSTR_SQL} AND r.user_id=? AND (te.role='admin' OR te.verified=1) LIMIT 1`).bind(myEmail, String(myBs)).first() : null;
-        await db.prepare("UPDATE teachers SET verified=? WHERE id=?").bind(prof ? 1 : 0, me.id).run();
+        const prof = me.vouched && me.bs_user_id ? await db.prepare(`SELECT 1 FROM roster r WHERE lower(r.email)=? AND r.user_id=? AND ${INSTR_SQL} AND ${TRUSTED_TC} LIMIT 1`).bind(myEmail, String(me.bs_user_id)).first() : null;
+        if (!!prof !== !!me.verified) { await db.prepare("UPDATE teachers SET verified=? WHERE id=?").bind(prof ? 1 : 0, me.id).run(); me.verified = !!prof; }
       }
+      // Re-check AFTER the writes: a professor syncing a course for the first time becomes its trusted
+      // instructor only now (their course row + roster are in), so seed eviction must come after.
+      tiCache.clear();
+      const trusted = await trustedOus(A);
+      const mineA = A.filter(o => trusted.has(o)), st2 = [];
+      // A trusted owner syncing a course evicts any seed rows a non-trusted account left on it.
+      for (const part of chunk(mineA, 98)) st2.push(db.prepare(`DELETE FROM teacher_courses WHERE ou IN (${placeholders(part.length)}) AND teacher_id<>? AND teacher_id<>'admin' AND teacher_id NOT IN (SELECT id FROM teachers WHERE role='admin' OR verified=1)`).bind(...part, me.id));
+      // Protect-by-default: new active quizzes get a LOCKqz password automatically (courses you instruct, paid).
+      const autoOus = [];
+      for (const ou of mineA) if (Array.isArray(byOu.get(ou).quizzes) && await paidOu(ou)) autoOus.push(ou);
+      if (autoOus.length) {
+        const seen = new Set();
+        for (const part of chunk(autoOus, 33)) {
+          const ph = placeholders(part.length);
+          (await db.prepare(`SELECT ou,qi FROM quizzes WHERE ou IN (${ph}) AND qi IS NOT NULL UNION SELECT ou,qi FROM pending_clear WHERE ou IN (${ph}) UNION SELECT ou,qi FROM lockqz_off WHERE ou IN (${ph})`).bind(...part, ...part, ...part).all())
+            .results.forEach(r => seen.add(String(r.ou) + "-" + String(r.qi)));
+        }
+        const add = [];
+        for (const ou of autoOus) for (const q of byOu.get(ou).quizzes.slice(0, 1000)) {
+          const qi = String(q && q.qi || ""); if (!/^\d+$/.test(qi) || seen.has(`${ou}-${qi}`)) continue;
+          if (q.active === false) continue;
+          const end = q.end ? Date.parse(q.end) : NaN; if (!isNaN(end) && end < Date.now()) continue;   // skip ended quizzes
+          seen.add(`${ou}-${qi}`);
+          add.push([rid(8), str(q.name), null, "LQ-" + rid(8), t, qi, me.id, `${ou}-${qi}`, ou, 0]);
+        }
+        st2.push(...multiInsert(db, "INSERT OR IGNORE INTO quizzes (quiz_id,title,url,password,created_at,qi,teacher_id,lock_id,ou,gated)", 10, add));
+      }
+      await runBatches(db, st2);
       await releaseUnpaid(me);
       // Only hand back passwords for courses this caller instructs (never leak another course's).
-      const ownOus = [];
-      for (const c of courses) { const ou = String(c.ou||""); if (/^\d+$/.test(ou) && (me.admin || await trustedInstructor(ou))) ownOus.push(ou); }
-      return json(await bsState(ownOus));
+      return json(await bsState(mineA));
     }
     if (p === "/sync-result" && request.method === "POST") {
-      for (const r of (Array.isArray(body.results) ? body.results : []).slice(0, 1000)) {
+      const list = (Array.isArray(body.results) ? body.results : []).slice(0, 1000).filter(r => r && typeof r === "object");
+      const okOus = await trustedOus(list.map(r => String(r.ou || "")));   // only the course's trusted instructor
+      const st = [];
+      for (const r of list) {
         const ou = String(r.ou||""), qi = String(r.qi||"");
-        if (!(await inCourse(ou))) continue;
+        if (!okOus.has(ou) || !/^\d+$/.test(qi)) continue;
         if (r.status === "set" || r.status === "already")
-          await db.prepare("UPDATE bs_quizzes SET bs_password_is_ours=1, bs_has_password=1 WHERE ou=? AND qi=?").bind(ou, qi).run();
+          st.push(db.prepare("UPDATE bs_quizzes SET bs_password_is_ours=1, bs_has_password=1 WHERE ou=? AND qi=? AND NOT (COALESCE(bs_password_is_ours,0)=1 AND COALESCE(bs_has_password,0)=1)").bind(ou, qi));
         else if (r.status === "cleared") {
-          await db.prepare("DELETE FROM pending_clear WHERE ou=? AND qi=?").bind(ou, qi).run();
-          await db.prepare("UPDATE bs_quizzes SET bs_password_is_ours=0 WHERE ou=? AND qi=?").bind(ou, qi).run();
+          st.push(db.prepare("DELETE FROM pending_clear WHERE ou=? AND qi=?").bind(ou, qi));
+          st.push(db.prepare("UPDATE bs_quizzes SET bs_password_is_ours=0 WHERE ou=? AND qi=? AND COALESCE(bs_password_is_ours,0)<>0").bind(ou, qi));
         } else if (r.status === "error")
-          await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(null, null, `${ou}-${qi}`, "brightspace_sync_error", String(r.msg||"").slice(0,300), now()).run();
+          st.push(db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(null, null, `${ou}-${qi}`, "brightspace_sync_error", String(r.msg||"").slice(0,300), now()));
       }
+      await runBatches(db, st);
       return json({ ok:true });
     }
     if (p === "/protect" && request.method === "POST") {
@@ -957,8 +1113,8 @@ export async function onRequest(context) {
       const ou = String(body.ou||""), qi = String(body.qi||""), code = String(body.code||"");
       if (!/^\d+$/.test(ou) || !/^\d+$/.test(qi) || !/^LQ-[A-Za-z0-9-]{1,40}$/.test(code)) return json({ error:"bad request" }, 400);
       if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this course." }, 403);
-      await db.prepare("UPDATE quizzes SET bs_code=? WHERE qi=? AND ou=? AND gated=1").bind(code, qi, ou).run();
-      return json({ ok: true });
+      const r = await db.prepare("UPDATE quizzes SET bs_code=? WHERE qi=? AND ou=? AND gated=1").bind(code, qi, ou).run();
+      return r.meta.changes ? json({ ok: true }) : json({ error: "that quiz is not protected and gated" }, 409);
     }
     // The Sync tab (the professor's own trusted Brightspace session) reports which students Brightspace
     // shows as having SUBMITTED the quiz. This is the only unforgeable proof a quiz actually ended, so
@@ -969,8 +1125,8 @@ export async function onRequest(context) {
       if (!/^\d+$/.test(ou) || !/^\d+$/.test(qi)) return json({ error:"bad quiz" }, 400);
       if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this course." }, 403);
       const uids = (Array.isArray(body.user_ids) ? body.user_ids : []).map(String).filter(x => /^\d+$/.test(x)).slice(0, 3000);
-      for (let i = 0; i < uids.length; i += 1)
-        await db.prepare("INSERT OR IGNORE INTO submissions (ou,qi,user_id,at) VALUES (?,?,?,?)").bind(ou, qi, uids[i], now()).run();
+      const t = now();
+      await runBatches(db, multiInsert(db, "INSERT OR IGNORE INTO submissions (ou,qi,user_id,at)", 4, [...new Set(uids)].map(u => [ou, qi, u, t])));
       return json({ ok: true, count: uids.length });
     }
     // Current rotating code(s) for quizzes the teacher protects -- the Sync tab writes these into
@@ -993,9 +1149,14 @@ export async function onRequest(context) {
     if (p === "/bs") {
       const cs = (await db.prepare("SELECT ou,name,code,role,synced_at FROM teacher_courses WHERE teacher_id=? ORDER BY name LIMIT 200").bind(me.id).all()).results;
       if (!cs.length) return json({ courses: [] });
+      // Passwords, protection state and who-installed are shown ONLY for courses the caller INSTRUCTS
+      // (trusted roster). A seed row (e.g. a student who synced the course first) lists the course and
+      // its class list, never its quiz passwords.
+      const own = await trustedOus(cs.map(c => String(c.ou)));
       const sub = "SELECT ou FROM teacher_courses WHERE teacher_id=?";
       const roster = (await db.prepare(`SELECT ou,user_id,name,email,username,role FROM roster WHERE ou IN (${sub}) ORDER BY name`).bind(me.id).all()).results;
-      const qz = (await db.prepare(`SELECT b.ou,b.qi,b.name,b.active,b.start_date,b.end_date,b.due_date,b.bs_has_password,b.bs_password_is_ours,q.password,q.lock_id,q.gated FROM bs_quizzes b LEFT JOIN quizzes q ON q.qi=b.qi AND q.ou=b.ou WHERE b.ou IN (${sub}) ORDER BY b.name`).bind(me.id).all()).results;
+      const qz = (await db.prepare(`SELECT b.ou,b.qi,b.name,b.active,b.start_date,b.end_date,b.due_date,b.bs_has_password,b.bs_password_is_ours,q.password,q.lock_id,q.gated FROM bs_quizzes b LEFT JOIN quizzes q ON q.qi=b.qi AND q.ou=b.ou WHERE b.ou IN (${sub}) ORDER BY b.name`).bind(me.id).all()).results
+        .map(q => own.has(String(q.ou)) ? q : { ...q, password: null, lock_id: null, gated: null });
       const devs = (await db.prepare(`SELECT device_id,lower(student) AS who,platform,version,last_seen FROM devices WHERE (student_verified=1 OR ?=0) AND (lower(student) IN (SELECT lower(email) FROM roster WHERE ou IN (${sub})) OR lower(student) IN (SELECT lower(name) FROM roster WHERE ou IN (${sub})))`).bind(codesOn ? 1 : 0, me.id, me.id).all()).results;
       const by = {}; devs.forEach(d => { (by[d.who] = by[d.who] || []).push(d); });
       const adminEmails = new Set(((await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin'").all()).results).map(x => x.e));
@@ -1003,7 +1164,7 @@ export async function onRequest(context) {
         // Everyone LOCKqz locks: Learners AND TAs (any non-instructor role). The admin is the one
         // exempt person (developer mode), so he is never listed as someone who must install.
         students: roster.filter(r => r.ou === c.ou && takesQuizzes(r.role) && !adminEmails.has((r.email||"").toLowerCase())).map(r => {
-          const d = by[(r.email||"").toLowerCase()] || by[(r.name||"").toLowerCase()] || [];
+          const d = !own.has(String(c.ou)) ? [] : by[(r.email||"").toLowerCase()] || by[(r.name||"").toLowerCase()] || [];
           return { name:r.name, email:r.email, ta: !/learner|student/i.test(r.role||""), installed: d.length > 0, platform: d[0]?.platform||null, last_seen: d[0]?.last_seen||null }; }),
         quizzes: qz.filter(q => q.ou === c.ou) })) });
     }
@@ -1015,8 +1176,11 @@ export async function onRequest(context) {
     function scope(col) {
       if (me.admin) return { sql:"1=1", args:[] };
       const ouExpr = `substr(${col},1,instr(${col}||'-','-')-1)`;
-      return { sql:`(${col} IN (SELECT lock_id FROM quizzes WHERE teacher_id=?) OR ${ouExpr} IN (SELECT ou FROM teacher_courses WHERE teacher_id=?) OR ${ouExpr} IN (SELECT ou FROM courses WHERE teacher_id=?))`,
-               args:[me.id, me.id, me.id] };
+      // Courses: only those the caller INSTRUCTS on a trusted roster -- not any teacher_courses row (a
+      // seed row from syncing someone else's course grants nothing).
+      const mo = myOusSql();
+      return { sql:`(${col} IN (SELECT lock_id FROM quizzes WHERE teacher_id=?) OR ${ouExpr} IN (${mo.sql}) OR ${ouExpr} IN (SELECT ou FROM courses WHERE teacher_id=?))`,
+               args:[me.id, ...mo.args, me.id] };
     }
 
     if (p === "/roster") {
@@ -1036,26 +1200,36 @@ export async function onRequest(context) {
     if (p === "/live") {
       const quiz = url.searchParams.get("quiz");
       if (!quiz) return json({ error: "quiz id required" }, 400);
-      const like = `${quiz}-%`;
       const _ou0 = String(quiz).split("-")[0];
-      if (!me.admin && !(await inCourse(_ou0)) && !(await trustedInstructor(_ou0))) return json({ error: "not your course" }, 403);
-      const s = scope("l.quiz_id"), s2 = scope("e.quiz_id");
-      const STALE = 660000, nowMs = Date.now(), age = t => t ? (nowMs - Date.parse(t)) : null;   // helper pings every ~300s
-      // Free-plan read budget (5M rows/day): the Sync tab calls /live every 10s per gated quiz, so every
-      // query here must use an index. "quiz_id = q OR starts with q-" is written as a RANGE (an index
-      // can serve it; LIKE cannot), and the three events scans are one indexed query.
-      const QR = col => `(${col}=? OR (${col}>=? AND ${col}<?))`, qa = [quiz, quiz + "-", quiz + "."];
-      const locks = (await db.prepare(`SELECT l.device_id,l.quiz_id,l.last_lock,l.helper_seen,l.ext_seen,l.signed,l.ip,d.student,d.platform,d.student_verified FROM locks l LEFT JOIN devices d ON d.device_id=l.device_id WHERE ${QR("l.quiz_id")} AND ${s.sql}`).bind(...qa, ...s.args).all()).results;
-      const evs = (await db.prepare(`SELECT e.device_id, e.event, MAX(e.event='lock' AND e.detail LIKE '%"developer":true%') AS dev FROM events e WHERE ${QR("e.quiz_id")} AND e.event IN ('tamper','lock','unlock','auto_unlock') AND ${s2.sql} GROUP BY e.device_id, e.event`).bind(...qa, ...s2.args).all()).results;
-      const tamp = new Set(evs.filter(x => x.event === "tamper").map(x => x.device_id));
+      // Only the course's trusted instructor (or the admin) -- never a seed row in teacher_courses.
+      if (!me.admin && !(await trustedInstructor(_ou0))) return json({ error: "not your course" }, 403);
+      const STALE = STALE_MS, nowMs = Date.now(), age = t => t ? (nowMs - Date.parse(t)) : null;
+      // "<ou>-<qi>" = one quiz (exact match, uses the index); "<ou>" = every quiz of the course (range).
+      const exact = /^\d+-\d+$/.test(quiz), courseWide = /^\d+$/.test(quiz);
+      if (!exact && !courseWide) return json({ quiz, now: now(), stale_ms: STALE, rows: [] });
+      const qc = col => exact ? { sql: `${col}=?`, args: [quiz] } : { sql: `${col}>=? AND ${col}<?`, args: [quiz + "-", quiz + "."] };
+      const lc = qc("l.quiz_id"), ec = qc("e.quiz_id");
+      const locks = (await db.prepare(`SELECT l.device_id,l.quiz_id,l.last_lock,l.helper_seen,l.ext_seen,l.signed,l.ip,d.student,d.platform,d.student_verified FROM locks l LEFT JOIN devices d ON d.device_id=l.device_id WHERE ${lc.sql}`).bind(...lc.args).all()).results;
+      // ONE pass over this quiz's events: tamper, developer-mode lock claims, and every unlock / gap.
+      const evs = (await db.prepare(`SELECT e.device_id,e.quiz_id,e.event,e.detail,e.ts,d.student,d.platform,d.student_verified FROM events e LEFT JOIN devices d ON d.device_id=e.device_id WHERE ${ec.sql} AND e.event IN ('tamper','lock','unlock','auto_unlock','lock_gap') AND (e.event<>'lock' OR e.detail LIKE '%"developer":true%') ORDER BY e.ts`).bind(...ec.args).all()).results;
+      const tamp = new Set(), devClaim = new Set(), incidents = new Map();
+      for (const e of evs) {
+        if (e.event === "tamper") tamp.add(e.device_id);
+        else if (e.event === "lock") devClaim.add(e.device_id);
+        else { const k = e.device_id + "|" + e.quiz_id; if (!incidents.has(k)) incidents.set(k, []); incidents.get(k).push(e); }
+      }
       // Developer mode: only the admin's own Mac may hold a lock without blocking AI. A dev claim
       // from any other device is a modified client -> tamper (never admitted).
-      const devClaim = new Set(evs.filter(x => x.event === "lock" && Number(x.dev) === 1).map(x => x.device_id));
       const adminEm = new Set(((await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin'").all()).results).map(x => x.e));
-      const doneIds = [...new Set(evs.filter(x => x.event === "unlock" || x.event === "auto_unlock").map(x => x.device_id))].filter(id => !locks.some(l => l.device_id === id));
-      const done = doneIds.length ? (await db.prepare("SELECT device_id,student,platform,student_verified FROM devices WHERE device_id IN (SELECT value FROM json_each(?))").bind(JSON.stringify(doneIds)).all()).results : [];
-      const active = new Set(locks.map(l=>l.device_id));
-      const rows = locks.map(l => {
+      // Quiz windows (Brightspace start/end) for this course.
+      const win = new Map(((await db.prepare(`SELECT qi,start_date,end_date FROM bs_quizzes WHERE ou=?${exact ? " AND qi=?" : ""}`).bind(_ou0, ...(exact ? [quiz.split("-")[1]] : [])).all()).results).map(w => [String(w.qi), w]));
+      const startOf = qi => { const w = win.get(qi); const s = w && w.start_date ? Date.parse(w.start_date) : NaN; return isNaN(s) ? null : s; };
+      const endOf = qi => { const w = win.get(qi); const s = w && w.end_date ? Date.parse(w.end_date) : NaN; return isNaN(s) ? null : s; };
+      const started = qi => { const s = startOf(qi); return s === null || nowMs >= s; };   // not before scheduled start
+      const inWindow = (ts, qi) => { const t = Date.parse(ts), s = startOf(qi), e = endOf(qi); return !isNaN(t) && (s === null || t >= s) && (e === null || t <= e); };
+      const rows = [], lockedKeys = new Set();
+      for (const l of locks) {
+        lockedKeys.add(l.device_id + "|" + l.quiz_id);
         const a = age(l.last_lock), h = age(l.helper_seen), e = age(l.ext_seen);
         let status = "locked";
         const dev = devClaim.has(l.device_id);
@@ -1068,15 +1242,18 @@ export async function onRequest(context) {
           status = helperDown && agentAfterHelper ? "helper_killed" : (extDown && !helperDown ? "browser_closed" : "dark");
         }
         else if (dev) status = "developer";
-        return { device_id:l.device_id, student:l.student||null, platform:l.platform||null, status, last_lock:l.last_lock, age_ms:a, verified: Number(l.signed) === 1, ip: l.ip||null, sv: Number(l.student_verified) === 1 };
-      });
-      done.forEach(d => { if (!active.has(d.device_id)) rows.push({ device_id:d.device_id, student:d.student||null, platform:d.platform||null, status:"done", sv: Number(d.student_verified) === 1 }); });
+        rows.push({ device_id:l.device_id, student:l.student||null, platform:l.platform||null, status, last_lock:l.last_lock, age_ms:a, verified: Number(l.signed) === 1, ip: l.ip||null, sv: Number(l.student_verified) === 1, _q: l.quiz_id });
+      }
+      // Devices that unlocked and hold no lock now.
+      for (const [k, list] of incidents) {
+        if (lockedKeys.has(k)) continue;
+        const u = list.filter(e => e.event === "unlock" || e.event === "auto_unlock").pop();
+        if (!u) continue;
+        rows.push({ device_id:u.device_id, student:u.student||null, platform:u.platform||null, status:"done", sv: Number(u.student_verified) === 1, _q: u.quiz_id });
+      }
       // A student is admitted ONLY when LOCKqz is holding a fresh, device-signed lock (status "locked",
       // verified). The gate loop reads r.eligible + r.user_id to grant/revoke Brightspace special access.
-      const _qi = String(quiz).split("-").pop(), _ou = String(quiz).split("-")[0];
-      const _sq = /^\d+$/.test(_qi) ? await db.prepare("SELECT start_date FROM bs_quizzes WHERE ou=? AND qi=?").bind(_ou, _qi).first() : null;
-      const started = !(_sq && _sq.start_date) || Date.now() >= Date.parse(_sq.start_date);   // not before scheduled start
-      rows.forEach(r => { r.eligible = (started && (r.status === "locked" || r.status === "developer") && r.verified === true); });
+      rows.forEach(r => { r.eligible = (started(r._q.split("-")[1]) && (r.status === "locked" || r.status === "developer") && r.verified === true); });
       // Resolve each locked device to a Brightspace user_id, by email OR name OR username, from THIS
       // course's roster only (one query, no per-student bound params -> no D1 100-param limit).
       // Only the roster rows we need: by email through the email index (emails are stored lowercase).
@@ -1096,18 +1273,32 @@ export async function onRequest(context) {
         if (hit) { r.user_id = hit.user_id || null; if (hit.display) r.student = hit.display; }
         r.email = who.includes("@") ? who : (hit && hit.e) || null;
       });
-      // Server-confirmed submissions (reported by the professor's trusted Sync session). A device that
-      // reported "unlock" is a clean "done" ONLY if Brightspace shows its student submitted; otherwise,
-      // while the quiz is still open, it is "left_early" (AI unblocked without a real submit) -- a red
-      // flag, never a quiet green done. A forced local unlock therefore cannot pose as a submission.
-      const subs = rows.some(r => r.status === "done") ? new Set(((await db.prepare("SELECT user_id FROM submissions WHERE ou=? AND qi=?").bind(_ou, _qi).all()).results).map(x => String(x.user_id))) : new Set();
+      // Server-confirmed submissions (reported by the professor's trusted Sync session). Any unlock --
+      // or a period the helper went dark -- inside the quiz window, while the student has NOT submitted,
+      // is "left_early" (red: AI may have been open), even if a later lock re-created the lock row: the
+      // events stay, so a re-lock can never hide it. Clean: a submissions row, or the agent's own
+      // "quiz_submitted" unlock (only while the Sync tab is not reporting submissions for this quiz, or
+      // for 2 minutes until its report arrives). The helper's 3-hour cap ("cap") is NOT clean.
+      const subs = new Set(((await db.prepare(`SELECT qi,user_id FROM submissions WHERE ou=?${exact ? " AND qi=?" : ""}`).bind(_ou0, ...(exact ? [quiz.split("-")[1]] : [])).all()).results).map(x => String(x.qi) + ":" + String(x.user_id)));
+      const subsFor = new Set([...subs].map(x => x.split(":")[0]));
+      const reasonOf = e => { let d = null; try { d = JSON.parse(e.detail); } catch { d = e.detail; }
+        const r = d && typeof d === "object" ? d.reason : (typeof d === "string" ? d : null);
+        return typeof r === "string" && r ? r.slice(0, 40) : null; };
       rows.forEach(r => {
-        if (r.status === "done") {
-          const submitted = r.user_id && subs.has(String(r.user_id));
-          if (submitted) r.submitted = true;
-          else if (started) { r.status = "left_early"; r.submitted = false; }
+        const qi = r._q.split("-")[1];
+        const submitted = !!(r.user_id && subs.has(qi + ":" + String(r.user_id)));
+        if (submitted) { if (r.status === "done") r.submitted = true; return; }
+        const inc = (incidents.get(r.device_id + "|" + r._q) || []).filter(e => inWindow(e.ts, qi) &&
+          !(e.event === "unlock" && reasonOf(e) === "quiz_submitted" && (!subsFor.has(qi) || nowMs - Date.parse(e.ts) < 120000)));
+        if (r.status === "done" && !inc.length) return;
+        if (inc.length && (r.status === "locked" || r.status === "done" || r.status === "browser_closed")) {
+          const last = inc[inc.length - 1];
+          r.status = "left_early"; r.submitted = false;
+          r.reason = last.event === "lock_gap" ? "went_dark" : (reasonOf(last) || (last.event === "auto_unlock" ? "cap" : "unlock"));
+          r.flagged_at = last.ts;
         }
       });
+      rows.forEach(r => { delete r._q; });
       return json({ quiz, now: now(), stale_ms: STALE, rows });
     }
 

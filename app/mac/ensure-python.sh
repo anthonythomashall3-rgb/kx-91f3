@@ -10,6 +10,7 @@ python_ok && exit 0
 [ "$(id -u)" = 0 ] || { echo "LOCKqz: python3 is not usable and this is not root - run with sudo"; exit 1; }
 echo "LOCKqz: installing Apple's Command Line Tools (one time, several minutes)..."
 FLAG=/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
+[ -L "$FLAG" ] && rm -f "$FLAG"   # never follow a planted symlink as root
 touch "$FLAG"
 # softwareupdate lists it as "* Label: Command Line Tools for Xcode-16.0" (older macOS: without "Label:").
 LABEL="$(softwareupdate -l 2>/dev/null | grep -E '\* (Label: )?Command Line Tools' \

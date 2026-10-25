@@ -46,6 +46,11 @@ _kill_list() {   # _kill_list "label" name...
   done
 }
 
+# The Mac's own applicationaccess plist (e.g. from a real MDM profile) is backed up before we add our
+# keys and put back byte-for-byte at unlock - never deleted. Backup lives in the root-only state dir.
+AI_BACKUP="${LOCKQZ_AI_BACKUP:-${STATE:-/Library/Application Support/LOCKqz}/applicationaccess.backup.plist}"
+AI_NONE="$AI_BACKUP.none"   # marker: there was no file before the quiz
+
 apple_intelligence_off() {
   if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would write $AI_MDM (Apple Intelligence off)"; return 0; fi
   # Already applied? Just sweep any generative helpers (cheap) and return — do NOT rewrite the plist
@@ -54,9 +59,12 @@ apple_intelligence_off() {
     pkill -i -f "GenerativeExperiences|IntelligencePlatform|WritingTools|ImagePlayground|com.apple.generativeexperiencesd" 2>/dev/null || true
     return 0
   fi
-  mkdir -p "$(dirname "$AI_MDM")" 2>/dev/null || true
-  /usr/bin/python3 - "$AI_MDM" "$XB_MARK" <<'PY' 2>/dev/null || true
-import plistlib, sys
+  mkdir -p "$(dirname "$AI_MDM")" "$(dirname "$AI_BACKUP")" 2>/dev/null || true
+  # Back up whatever is there now (it is not ours - checked above), so unlock restores it exactly.
+  if [ -f "$AI_MDM" ]; then cp -p "$AI_MDM" "$AI_BACKUP" || return 1; rm -f "$AI_NONE"
+  elif [ ! -e "$AI_BACKUP" ]; then : > "$AI_NONE" || return 1; fi
+  /usr/bin/python3 - "$AI_MDM" "$XB_MARK" <<'PY' 2>/dev/null || return 1
+import plistlib, os, sys
 path, mark = sys.argv[1], sys.argv[2]
 keys = {"allowAppleIntelligenceReport": False, "allowGenmoji": False, "allowImagePlayground": False,
         "allowImageWand": False, "allowWritingTools": False, "allowExternalIntelligenceIntegrations": False,
@@ -67,29 +75,27 @@ try:
 except Exception:
     cur = {}
 cur.update(keys)
-with open(path, "wb") as f: plistlib.dump(cur, f)
+tmp = path + ".lockqz.tmp"
+with open(tmp, "wb") as f: plistlib.dump(cur, f)
+os.chmod(tmp, 0o644); os.replace(tmp, path)
 PY
   # Nudge the OS to re-read managed prefs and stop any running generative helpers.
   killall cfprefsd 2>/dev/null || true
   pkill -i -f "GenerativeExperiences|IntelligencePlatform|WritingTools|ImagePlayground|com.apple.generativeexperiencesd" 2>/dev/null || true
+  return 0
 }
 
 apple_intelligence_on() {
-  if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would remove LOCKqz keys from $AI_MDM"; return 0; fi
-  [ -f "$AI_MDM" ] || return 0
-  # Only touch the file if WE wrote it (carries our mark); never clobber a real MDM profile.
-  /usr/bin/python3 - "$AI_MDM" "$XB_MARK" <<'PY' 2>/dev/null || true
-import plistlib, os, sys
-path, mark = sys.argv[1], sys.argv[2]
-try:
-    with open(path, "rb") as f: cur = plistlib.load(f)
-except Exception:
-    sys.exit(0)
-if not isinstance(cur, dict) or mark not in cur:
-    sys.exit(0)   # not ours -- leave it alone
-os.remove(path)
-PY
-  killall cfprefsd 2>/dev/null || true
+  if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would restore $AI_MDM as it was before the quiz"; return 0; fi
+  if [ -f "$AI_MDM" ] && /usr/bin/grep -q "$XB_MARK" "$AI_MDM" 2>/dev/null; then
+    # Ours: put back exactly what was there before, or remove it if nothing was.
+    if [ -f "$AI_BACKUP" ]; then cp -p "$AI_BACKUP" "$AI_MDM.lockqz.tmp" && mv -f "$AI_MDM.lockqz.tmp" "$AI_MDM" || return 1
+    else rm -f "$AI_MDM" || return 1; fi
+    killall cfprefsd 2>/dev/null || true
+  fi
+  # Not ours (absent, or replaced by a real MDM mid-quiz): leave it alone. Either way the quiz is over.
+  rm -f "$AI_BACKUP" "$AI_NONE"
+  ! { [ -f "$AI_MDM" ] && /usr/bin/grep -q "$XB_MARK" "$AI_MDM" 2>/dev/null; }
 }
 
 # System proxies (Safari and every app that uses them) would resolve AI sites on the proxy, past
@@ -97,7 +103,8 @@ PY
 PROXY_STATE="${STATE:-/Library/Application Support/LOCKqz}/proxy.state"
 PROXY_KINDS="webproxy securewebproxy socksfirewallproxy autoproxy"
 proxies_off() {
-  scutil --proxy 2>/dev/null | grep -qE "(HTTPEnable|HTTPSEnable|SOCKSEnable|ProxyAutoConfigEnable) : 1" || return 0
+  local px; px="$(scutil --proxy 2>/dev/null || true)"   # captured: no SIGPIPE false-negative under pipefail
+  printf '%s\n' "$px" | grep -qE "(HTTPEnable|HTTPSEnable|SOCKSEnable|ProxyAutoConfigEnable) : 1" || return 0
   if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would turn system proxies off"; return 0; fi
   local svc k
   networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | sed 's/^\*//' | while IFS= read -r svc; do
@@ -113,9 +120,11 @@ proxies_off() {
 proxies_restore() {
   [ -f "$PROXY_STATE" ] || return 0
   if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would restore system proxies"; return 0; fi
-  local line
+  local line k
   while IFS= read -r line; do
-    [ -n "$line" ] && networksetup "-set${line##*|}state" "${line%|*}" on 2>/dev/null || true
+    [ -n "$line" ] || continue
+    k="${line##*|}"
+    case " $PROXY_KINDS " in *" $k "*) networksetup "-set${k}state" "${line%|*}" on 2>/dev/null || true ;; esac
   done < "$PROXY_STATE"
   rm -f "$PROXY_STATE"
 }
@@ -135,13 +144,17 @@ extra_lock() {
   _kill_list "remote-desktop" "${REMOTE_APPS[@]}"
   _kill_list "overlay" "${OVERLAY_APPS[@]}"
   _kill_list "local-model" "${LOCAL_MODEL_PROCS[@]}"
-  apple_intelligence_off
-  proxies_off
+  local rc=0
+  apple_intelligence_off || rc=1
+  proxies_off || true
+  return $rc
 }
 
 extra_unlock() {
   # VPN/VM/remote/overlay/model apps are left for the student to reopen; only the
-  # OS-level Apple Intelligence policy must be actively restored.
-  apple_intelligence_on
-  proxies_restore
+  # OS-level Apple Intelligence policy and the proxies must be actively restored.
+  local rc=0
+  apple_intelligence_on || rc=1
+  proxies_restore || true
+  return $rc
 }

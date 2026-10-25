@@ -73,6 +73,13 @@
         $("lead").textContent = "Or install with one command:";
       }
     }
+    // Pages answers a missing file with this page (HTML, status 200). Only offer what is really published.
+    var served = function (path, cb) {
+      fetch(path, { method: "HEAD", cache: "no-store" }).then(function (r) { cb(r.ok && !/text\/html/i.test(r.headers.get("Content-Type") || "")); }, function () { cb(true); });
+    };
+    var one = mac ? "install.sh" : "install.ps1", rel = "/download/" + (mac ? "mac/" : "windows/") + one;
+    served("/" + one, function (ok) { if (!ok) served(rel, function (ok2) { if (ok2) $("cmd").textContent = $("cmd").textContent.replace(site + "/" + one, site + rel); }); });
+    served($("dl").getAttribute("href"), function (ok) { if (!ok) $("dl").parentNode.hidden = true; });
   } else {
     $("nope").hidden = false;
   }

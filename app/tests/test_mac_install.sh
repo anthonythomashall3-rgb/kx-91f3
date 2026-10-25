@@ -7,9 +7,7 @@ cd "$(dirname "$0")/../mac" || exit 1
 FAIL=0
 check() { if eval "$2" >/dev/null 2>&1; then echo "PASS  $1"; else echo "FAIL  $1"; FAIL=$((FAIL+1)); fi; }
 DEST="/Library/Application Support/LOCKqz"
-TOK="lqz-ci-$RANDOM$RANDOM"
-
-bash make-pkg.sh --token "$TOK" --api https://lockqz.pages.dev/api --out /tmp/lockqz-mac.pkg >/dev/null
+bash make-pkg.sh --api https://lockqz.pages.dev/api --out /tmp/lockqz-mac.pkg >/dev/null
 check "pkg built" "[ -s /tmp/lockqz-mac.pkg ]"
 sudo installer -pkg /tmp/lockqz-mac.pkg -target / >/tmp/install.log 2>&1
 check "installer succeeded" "grep -q 'successful' /tmp/install.log"
@@ -17,11 +15,19 @@ for f in lockqz.sh lockqz-core.sh extra-block.sh lockqzd.py lockqz-agent.py brow
   check "installed $f" "[ -f \"$DEST/$f\" ]"
 done
 check "device id set" "grep -q '\"mac-' \"$DEST/config.json\""
+check "no control token in the world-readable config" "! grep -q '\"token\"' \"$DEST/config.json\""
+check "control token is root-only (600)" "[ \"\$(stat -f %Lp \"$DEST/helper.token\")\" = 600 ] && [ \"\$(stat -f %Su \"$DEST/helper.token\")\" = root ]"
+check "install folder is root's, not group/world writable" "[ \"\$(stat -f %Su \"$DEST\")\" = root ] && [ \"\$(stat -f %Lp \"$DEST\")\" = 755 ]"
+TOK="$(sudo cat "$DEST/helper.token")"
 check "daemon registered (launchd)" "sudo launchctl print system/com.lockqz.helper"
 
 H="X-LOCKqz-Token: $TOK"; B=http://127.0.0.1:8787
 for i in $(seq 1 30); do curl -sf -m 2 -H "$H" $B/status >/dev/null && break; sleep 2; done
 check "daemon answering" "curl -sf -m 3 -H '$H' $B/status"
+CU="$(stat -f %u /dev/console)"
+[ "$CU" != 0 ] && check "console user got a read-only token copy" "[ \"\$(stat -f %Su:%Lp \"$DEST/tokens/$CU\")\" = \"\$(id -un $CU):400\" ]"
+check "browser-origin request refused (no CORS)" "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -H '$H' -H 'Origin: https://evil.example' $B/status)\" = 401 ]"
+check "no CORS preflight answer" "! curl -s -i -X OPTIONS $B/lock | grep -qi 'access-control-allow'"
 check "rejects wrong token" "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -H 'X-LOCKqz-Token: nope' $B/status)\" = 401 ]"
 check "no developer mode on a student machine" "curl -s -H '$H' $B/status | grep -q '\"developer\": false'"
 

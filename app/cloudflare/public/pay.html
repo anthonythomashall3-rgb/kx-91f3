@@ -23,7 +23,7 @@
 <body>
 <main class="card">
   <h1>LOCKqz</h1>
-  <p class="price">$5 <span>per semester</span></p>
+  <p class="price" id="price" hidden><span id="amt"></span> <span>per semester</span></p>
 
   <form id="f" style="display:flex;flex-direction:column;gap:10px">
     <label for="em">School email</label>
@@ -32,13 +32,14 @@
   </form>
 
   <section id="pay" hidden style="display:flex;flex-direction:column;gap:12px">
-    <a class="btn prime" id="venmo" href="#" target="_blank" rel="noopener" hidden>Venmo $5</a>
-    <div class="box" id="zelle" hidden><span class="muted">Zelle $5</span><b id="zto"></b></div>
+    <a class="btn prime" id="venmo" href="#" target="_blank" rel="noopener" hidden>Venmo</a>
+    <div class="box" id="zelle" hidden><span class="muted" id="zamt">Zelle</span><b id="zto"></b></div>
     <p class="memo">Memo: <b id="code"></b></p>
     <p class="muted" id="wait">Waiting for payment…</p>
   </section>
 
   <p class="ok" id="done" hidden>Paid ✓</p>
+  <p class="ok" id="free" hidden>No payment needed yet</p>
   <p class="muted" id="err" hidden></p>
 </main>
 <script>
@@ -49,10 +50,13 @@ async function start(email){
   let d; try { d = await (await fetch(API + "/pay/start", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ email }) })).json(); } catch { d = { error:"No connection. Try again." }; }
   if (d.error) { $("err").textContent = d.error; $("err").hidden = false; return; }
   history.replaceState(null, "", "?email=" + encodeURIComponent(email));
+  if (!d.required) { clearInterval(timer); $("f").hidden = true; $("pay").hidden = true; $("free").hidden = false; return; }   // fee not on yet
+  const amt = "$" + Number(d.amount).toLocaleString("en-US");
+  $("amt").textContent = amt; $("price").hidden = false;
   if (d.paid) return paid();
   $("code").textContent = d.code;
-  if (d.venmo) { $("venmo").href = `https://venmo.com/?txn=pay&recipients=${encodeURIComponent(d.venmo)}&amount=${d.amount}&note=${encodeURIComponent(d.code)}`; $("venmo").textContent = `Venmo $${d.amount} to @${d.venmo}`; $("venmo").hidden = false; }
-  if (d.zelle) { $("zto").textContent = d.zelle; $("zelle").hidden = false; }
+  if (d.venmo) { $("venmo").href = `https://venmo.com/?txn=pay&recipients=${encodeURIComponent(d.venmo)}&amount=${encodeURIComponent(d.amount)}&note=${encodeURIComponent(d.code)}`; $("venmo").textContent = `Venmo ${amt} to @${d.venmo}`; $("venmo").hidden = false; }
+  if (d.zelle) { $("zamt").textContent = "Zelle " + amt; $("zto").textContent = d.zelle; $("zelle").hidden = false; }
   $("f").hidden = true; $("pay").hidden = false;
   clearInterval(timer); timer = setInterval(async () => {
     try { const s = await (await fetch(API + "/pay/status?email=" + encodeURIComponent(email))).json(); if (s.paid) paid(); } catch {}

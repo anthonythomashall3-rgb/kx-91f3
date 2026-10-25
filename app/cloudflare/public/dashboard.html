@@ -140,17 +140,26 @@
 <script>
 const API = "/api", INSTALL = "https://lockqz.pages.dev";
 let token = localStorage.getItem("lockqz_token") || "";
-let signup = false, ME = null, BS = { courses: [] }, LEGACY = [], SYNCKEY = "", liveTimer = null, INVITE = "";
+let signup = false, ME = null, BS = { courses: [] }, LEGACY = [], SYNCKEY = "", liveTimer = null, INVITE = "", LOADERR = "", AUTO = null;
 const $ = id => document.getElementById(id);
 const H = () => ({ "X-LOCKqz-Teacher": token, "Content-Type":"application/json" });
-const get  = async p => (await fetch(API+p,{headers:H()})).json();
-const post = async (p,b) => (await fetch(API+p,{method:"POST",headers:H(),body:JSON.stringify(b||{})})).json();
+// Every API call returns an object; a failure always carries {error}. A dead session (401) goes back to sign-in.
+async function call(p, opt){
+  let r; try { r = await fetch(API+p, opt); } catch(e){ return { error:"No connection to LOCKqz. Try again." }; }
+  let d = null; try { d = await r.json(); } catch(e){}
+  if(!d || typeof d!=="object") d = {};
+  if(!r.ok && !d.error) d.error = "LOCKqz answered "+r.status;
+  if(r.status===401 && token){ token=""; localStorage.removeItem("lockqz_token"); location.reload(); }
+  d._status = r.status; return d;
+}
+const get  = p => call(p,{headers:H()});
+const post = (p,b) => call(p,{method:"POST",headers:H(),body:JSON.stringify(b||{})});
 const esc = s => String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const when = t => t ? new Date(t).toLocaleString([], {weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}) : "";
 const ago = t => { if(!t) return "never"; const m=Math.round((Date.now()-Date.parse(t))/60000); return m<1?"just now":m<60?m+" min ago":m<1440?Math.round(m/60)+" h ago":Math.round(m/1440)+" d ago"; };
 const cname = c => String(c.name||c.ou).replace(/^\d+_\w+\s*/,"");
 const SHIELD = (c,s) => `<svg aria-hidden="true" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/></svg>`;
-const BACK = (to,label) => `<a class="back" href="#" onclick="nav('${to}');return false"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>${label}</a>`;
+const BACK = (to,label) => `<a class="back" href="#${esc(to)}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>${label}</a>`;
 
 // ---- login (unchanged behaviour) ----
 function toggle(){ signup=!signup; $("name").classList.toggle("hide",!signup); $("ltitle").textContent=signup?"Create your professor account":"No AI during your exams.";
@@ -159,17 +168,21 @@ function toggle(){ signup=!signup; $("name").classList.toggle("hide",!signup); $
 async function go(){
   $("lerr").textContent="";
   const d = await post(signup?"/signup":"/login",{email:$("email").value,password:$("pw").value,name:$("name").value,invite:INVITE});
-  if(d.error){ $("lerr").textContent = signup ? d.error : "Incorrect email or password."; return; }
+  if(d.error){ $("lerr").textContent = !signup && d._status===401 ? "Incorrect email or password." : d.error; return; }
   token=d.token; localStorage.setItem("lockqz_token",token);
   if(INVITE){ INVITE=""; history.replaceState(null,"",location.pathname); }
   boot();
 }
 function showForgot(){ $("forgot").classList.remove("hide"); $("femail").value=$("email").value||""; $("fmsg").textContent=""; }
 async function requestReset(){ const email=$("femail").value.trim(); if(!email){ $("fmsg").textContent="Enter your email."; return; }
-  await post("/forgot",{email}); $("fmsg").textContent="If that account exists, your LOCKqz admin has been notified and will give you a new password."; }
-async function changePw(){ const pw = prompt("Enter a new password (at least 8 characters):"); if(pw===null) return;
+  const d = await post("/forgot",{email}); $("fmsg").textContent = d.error || "If that account exists, your LOCKqz admin has been notified and will give you a new password."; }
+async function changePw(){ const old = prompt("Current password:"); if(old===null) return;
+  const pw = prompt("Enter a new password (at least 8 characters):"); if(pw===null) return;
   if(pw.length<8){ alert("Password must be at least 8 characters."); return; }
-  const d = await post("/changepw",{password:pw}); alert(d.error ? d.error : "Password changed."); }
+  const d = await post("/changepw",{old_password:old,password:pw}); if(d.error){ alert(d.error); return; }
+  token=d.token; localStorage.setItem("lockqz_token",token); SYNCKEY="";   // the server ended the old session and Sync bookmark
+  await refresh(); location.hash="connect"; route();
+  alert("Password changed. Your old LOCKqz Sync bookmark stopped working: drag the new one to your bookmarks bar."); }
 ["email","pw","name"].forEach(i=>$(i).addEventListener("keydown",e=>{ if(e.key==="Enter") go(); }));
 async function logout(){ await post("/logout"); token=""; localStorage.removeItem("lockqz_token"); location.hash=""; location.reload(); }
 
@@ -177,20 +190,30 @@ async function logout(){ await post("/logout"); token=""; localStorage.removeIte
 async function boot(){
   if(!token) return;
   const m = await get("/me");
-  if(m.error){ token=""; localStorage.removeItem("lockqz_token"); return; }
+  if(m.error){ $("lerr").textContent = m._status===401 ? "" : m.error; if(m._status===401){ token=""; localStorage.removeItem("lockqz_token"); } return; }
   ME = m;
   $("login").classList.add("hide"); $("app").classList.remove("hide"); $("menu").classList.remove("hide");
   $("who").insertAdjacentHTML("afterbegin", esc(m.name||m.email));
   if(m.admin) $("m-admin").classList.remove("hide");
   await refresh(); route();
-  setInterval(async()=>{ if(!location.hash.startsWith("#live")) { await refresh(); route(); } }, 60000);
+  if(!AUTO) AUTO = setInterval(autoRefresh, 60000);
 }
 async function refresh(){
-  const [b,q,k] = await Promise.all([get("/bs"), get("/quizzes"), SYNCKEY?{key:SYNCKEY}:get("/synckey")]);
-  BS = b.courses ? b : { courses: [] };
-  LEGACY = (q.quizzes||[]).filter(x=>!x.ou);              // quizzes added by link in the old UI, not from Brightspace
+  const [m,b,q,k] = await Promise.all([get("/me"), get("/bs"), get("/quizzes"), SYNCKEY?{key:SYNCKEY}:get("/synckey")]);
+  if(!m.error) ME = m;
+  LOADERR = b.error || q.error || "";
+  if(!b.error) BS = b.courses ? b : { courses: [] };
+  if(!q.error) LEGACY = (q.quizzes||[]).filter(x=>!x.ou);   // quizzes added by link in the old UI, not from Brightspace
   if(k.key) SYNCKEY = k.key;
 }
+// Every 60 s: new data, but never re-draw over something the user is typing, picking or has open.
+// Live has its own 10 s loop; Admin and Activity refresh on their own buttons.
+const viewName = () => location.hash.replace(/^#/,"").split("/")[0];
+function busy(){ const a=$("app"), f=document.activeElement;
+  if(f && a.contains(f) && /^(INPUT|TEXTAREA|SELECT)$/.test(f.tagName||"")) return true;
+  if(a.querySelector("details[open]")) return true;
+  return [...a.querySelectorAll("input")].some(i => i.value !== i.defaultValue); }
+async function autoRefresh(){ if(!["","class","connect"].includes(viewName())) return; await refresh(); if(!busy()) route(); }
 function nav(h){ location.hash = h; }
 window.addEventListener("hashchange", route);
 document.addEventListener("click", e=>{ const m=$("menu"); if(m && !m.contains(e.target)) m.removeAttribute("open"); });
@@ -200,7 +223,9 @@ const now = () => Date.now();
 const live = q => q.password && q.start_date && Date.parse(q.start_date) <= now() && (!q.end_date || Date.parse(q.end_date) > now()) && (!q.start_date || now() - Date.parse(q.start_date) < 6*3600e3);
 const ended = q => (q.end_date && Date.parse(q.end_date) < now()) || (q.due_date && !q.end_date && Date.parse(q.due_date) < now() - 86400e3);
 const current = c => c.quizzes.filter(q => q.active !== 0 && !ended(q));
-const pendingSync = () => BS.courses.some(c => c.quizzes.some(q => q.password && !q.bs_password_is_ours));
+// Brightspace does not match LOCKqz yet: on but our password not there, or off but our password still there.
+const pend = q => q.password ? !q.bs_password_is_ours : !!q.bs_password_is_ours;
+const pendingSync = () => BS.courses.some(c => c.quizzes.some(pend));
 function classStats(c){
   const cur = current(c), prot = cur.filter(q=>q.password), ready = c.students.filter(s=>s.installed).length;
   const next = cur.filter(q=>q.start_date && Date.parse(q.start_date) > now()).sort((a,b)=>Date.parse(a.start_date)-Date.parse(b.start_date))[0];
@@ -226,7 +251,9 @@ function route(){
 function viewHome(){
   let h = "";
   h += `<div id="pay"></div>`;
+  if(LOADERR) h += `<div class="note red"><span>Could not load from LOCKqz: ${esc(LOADERR)}</span></div>`;
   if(!BS.courses.length) return h + viewConnect(true);
+  if(!ME.admin && !ME.verified) h += `<div class="note warn"><span>LOCKqz can't protect your exams until Brightspace shows you as the instructor. Click your <b>LOCKqz Sync</b> bookmark in Brightspace.</span><button class="btn warn" onclick="nav('connect')">How</button></div>`;
   const all = BS.courses.map(classStats);
   const exams = all.reduce((n,s)=>n+s.cur.length,0), prot = all.reduce((n,s)=>n+s.prot.length,0), students = BS.courses.reduce((n,c)=>n+c.students.length,0);
   const allOn = exams>0 && prot===exams, allOff = prot===0;
@@ -248,49 +275,59 @@ function viewHome(){
     h += `<article class="card cls ${s.on?'':'off'}">
       <div class="top">
         <a href="#class/${esc(c.ou)}"><span class="nm">${esc(cname(c))}</span><span class="sm">${esc(c.code||"")}${c.code?" · ":""}${c.students.length} students</span></a>
-        ${s.cur.length ? `<button class="sw" aria-pressed="${s.on}" aria-label="LOCKqz on for this class" onclick="setClass('${esc(c.ou)}',${!s.on})"><b>${s.on?"On":"Off"}</b><i></i></button>` : ""}
+        ${s.cur.length ? `<button class="sw" aria-pressed="${s.on}" aria-label="LOCKqz on for this class" data-ou="${esc(c.ou)}" onclick="setClass(this.dataset.ou,${!s.on})"><b>${s.on?"On":"Off"}</b><i></i></button>` : ""}
       </div>
       <div class="tiles">
         <div class="tile"><span class="k">Students ready</span><span class="v">${s.ready}<small> / ${c.students.length}</small></span><span class="bar"><span style="width:${pct}%"></span></span></div>
         <div class="tile"><span class="k">Exams protected</span><span class="v">${s.prot.length}<small> / ${s.cur.length}</small></span><span class="n">${s.cur.length===0?"no upcoming exams":s.on&&s.prot.length===s.cur.length?"all of them, automatically":s.on?"some turned off":"LOCKqz is off for this class"}</span></div>
         <div class="tile"><span class="k">Next exam</span><span class="v md">${s.next?esc(s.next.name):"—"}</span><span class="n">${s.next?when(s.next.start_date):"none scheduled"}</span></div>
       </div>
-      ${s.on && s.missing.length && s.cur.length ? `<div class="note warn"><span>${s.missing.length} student${s.missing.length===1?"":"s"} still need${s.missing.length===1?"s":""} to install LOCKqz${s.next?" before "+esc(s.next.name):""}.</span><a class="btn warn" href="${mailMissing(c,s)}">Send them the install link</a></div>` : ""}
+      ${s.on && s.missing.length && s.cur.length ? `<div class="note warn"><span>${s.missing.length} student${s.missing.length===1?"":"s"} still need${s.missing.length===1?"s":""} to install LOCKqz${s.next?" before "+esc(s.next.name):""}.</span>${mailBtns(c,s)}</div>` : ""}
     </article>`;
   });
   h += `</section>`;
-  if(LEGACY.length) h += `<details class="past card" style="padding:12px 28px"><summary>${LEGACY.length} quiz${LEGACY.length===1?"":"zes"} added by link (old method)</summary><table><thead><tr><th>Quiz</th><th>Brightspace password</th><th></th></tr></thead><tbody>${LEGACY.map(x=>`<tr><td>${esc(x.title||x.quiz_id)}</td><td><code>${esc(x.password)}</code></td><td><a href="#live/${esc(x.lock_id||x.quiz_id)}">Watch</a> · <button style="color:var(--usc)" onclick="delLegacy('${esc(x.quiz_id)}')">Remove</button></td></tr>`).join("")}</tbody></table></details>`;
+  if(LEGACY.length) h += `<details class="past card" style="padding:12px 28px"><summary>${LEGACY.length} quiz${LEGACY.length===1?"":"zes"} added by link (old method)</summary><table><thead><tr><th>Quiz</th><th>Brightspace password</th><th></th></tr></thead><tbody>${LEGACY.map(x=>`<tr><td>${esc(x.title||x.quiz_id)}</td><td><code>${esc(x.password)}</code></td><td><a href="#live/${esc(x.lock_id||x.quiz_id)}">Watch</a> · <button style="color:var(--usc)" data-id="${esc(x.quiz_id)}" onclick="delLegacy(this.dataset.id)">Remove</button></td></tr>`).join("")}</tbody></table></details>`;
   h += `<p class="foot">New classes, students and exams appear here on their own. Students without LOCKqz cannot open a protected exam.</p>`;
   return h;
 }
-function mailMissing(c,s){
-  const bcc = s.missing.map(x=>x.email).filter(Boolean).join(",");
+function mailMissing(c,s,withBcc=true){
+  const bcc = withBcc ? s.missing.map(x=>x.email).filter(Boolean).join(",") : "";
   const subj = `Install LOCKqz before ${s.next?s.next.name:"our next exam"} (${cname(c)})`;
   const body = `Hi,\n\nOur Brightspace exams in ${cname(c)} use LOCKqz. You need it installed once, or the exam will not open for you.\n\n1. Go to ${INSTALL}\n2. Click Download and run the installer.\n\nThat is all. It only blocks AI tools while an exam is open and turns itself off after.\n\n${ME.name||""}`;
-  return `mailto:?bcc=${encodeURIComponent(bcc)}&subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`;
+  return `mailto:?${bcc?"bcc="+encodeURIComponent(bcc)+"&":""}subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`;
 }
-async function setAll(on){ const jobs=[]; BS.courses.forEach(c=>current(c).forEach(q=>{ if(!!q.password!==on) jobs.push(post("/protect",{ou:c.ou,qi:q.qi,on})); })); await Promise.all(jobs); await refresh(); route(); }
-async function setClass(ou,on){ const c=BS.courses.find(x=>x.ou===ou); const jobs=current(c).filter(q=>!!q.password!==on).map(q=>post("/protect",{ou,qi:q.qi,on})); await Promise.all(jobs); await refresh(); route(); }
-async function setQuiz(ou,qi,on){ const d=await post("/protect",{ou,qi,on}); if(d.error){ alert(d.error); return; } await refresh(); route(); }
-async function delLegacy(id){ if(confirm("Remove this quiz from LOCKqz?")){ await post("/delete",{quiz_id:id}); await refresh(); route(); } }
+// Mail apps drop mailto links over ~2000 characters: a big class gets the email without Bcc + a Copy emails button.
+function mailBtns(c,s){ const full = mailMissing(c,s), long = full.length > 1900;
+  return long ? `<span style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn warn" data-ou="${esc(c.ou)}" onclick="copyMissing(this)">Copy emails</button><a class="btn warn" href="${mailMissing(c,s,false)}">Send them the install link</a></span>`
+              : `<a class="btn warn" href="${full}">Send them the install link</a>`; }
+async function copyMissing(b){ const c=BS.courses.find(x=>x.ou===b.dataset.ou); if(!c) return;
+  try { await navigator.clipboard.writeText(classStats(c).missing.map(x=>x.email).filter(Boolean).join(", ")); b.textContent="Copied"; }
+  catch(e){ alert("Could not copy the emails."); } }
+// Change, then re-draw from the server (so the page shows what is really saved), then say what failed.
+async function after(results){ await refresh(); route(); const bad = results.filter(d=>d && d.error);
+  if(bad.length) alert(bad.length===1 ? bad[0].error : `${bad.length} exams were not changed: ${bad[0].error}`); }
+async function setAll(on){ const jobs=[]; BS.courses.forEach(c=>current(c).forEach(q=>{ if(!!q.password!==on) jobs.push(post("/protect",{ou:c.ou,qi:q.qi,on})); })); await after(await Promise.all(jobs)); }
+async function setClass(ou,on){ const c=BS.courses.find(x=>x.ou===ou); if(!c) return; const jobs=current(c).filter(q=>!!q.password!==on).map(q=>post("/protect",{ou,qi:q.qi,on})); await after(await Promise.all(jobs)); }
+async function setQuiz(ou,qi,on){ await after([await post("/protect",{ou,qi,on})]); }
+async function delLegacy(id){ if(confirm("Remove this quiz from LOCKqz?")) await after([await post("/delete",{quiz_id:id})]); }
 
 // ---- CLASS ----
 function viewClass(ou){
   const c = BS.courses.find(x=>x.ou===ou); if(!c) return viewHome();
   const s = classStats(c), past = c.quizzes.filter(q=>ended(q) || q.active===0);
-  const row = q => { const on=!!q.password, pend = on && !q.bs_password_is_ours;
-    return `<li><div class="grow"><span class="t" style="color:${on?'var(--ink)':'#6b6861'}">${esc(q.name)}</span><span class="d">${q.start_date?when(q.start_date):"no start date"}${q.end_date?" – "+when(q.end_date):""}${live(q)?` · <a href="#live/${esc(ou)}-${esc(q.qi)}">in progress — watch</a>`:""}</span></div>
-      <button class="sw" aria-pressed="${on}" aria-label="Protect this exam" onclick="this.disabled=true;setQuiz('${esc(ou)}','${esc(q.qi)}',${!on})"><b class="st ${on?(pend?'warn':'ok'):''}" style="min-width:110px;text-align:right">${on?(pend?"Protected · 1 click left":"Protected"):"Not protected"}</b><i></i></button></li>`; };
+  const row = q => { const on=!!q.password, p = pend(q), lv = `#live/${esc(ou)}-${esc(q.qi)}`;
+    return `<li><div class="grow"><span class="t" style="color:${on?'var(--ink)':'#6b6861'}">${esc(q.name)}</span><span class="d">${q.start_date?when(q.start_date):"no start date"}${q.end_date?" – "+when(q.end_date):""}${live(q)?` · <a href="${lv}">in progress — watch</a>`:on?` · <a href="${lv}">watch live</a>`:""}</span></div>
+      <button class="sw" aria-pressed="${on}" aria-label="Protect this exam" data-ou="${esc(ou)}" data-qi="${esc(q.qi)}" onclick="this.disabled=true;setQuiz(this.dataset.ou,this.dataset.qi,${!on})"><b class="st ${p?'warn':on?'ok':''}" style="min-width:110px;text-align:right">${on?(p?"Protected · 1 click left":"Protected"):(p?"Off · 1 click left":"Not protected")}</b><i></i></button></li>`; };
   return `${BACK('', 'All classes')}
   <div class="band"><div><h1 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-.015em">${esc(cname(c))}</h1><p class="sub">${esc(c.code||"")}${c.code?" · ":""}${c.students.length} students · from Brightspace, updated ${ago(c.synced_at)}</p></div>
-    ${s.cur.length ? `<button class="sw" aria-pressed="${s.on}" aria-label="LOCKqz on for this class" onclick="setClass('${esc(ou)}',${!s.on})"><b>LOCKqz ${s.on?"on":"off"}</b><i></i></button>` : ""}</div>
+    ${s.cur.length ? `<button class="sw" aria-pressed="${s.on}" aria-label="LOCKqz on for this class" data-ou="${esc(ou)}" onclick="setClass(this.dataset.ou,${!s.on})"><b>LOCKqz ${s.on?"on":"off"}</b><i></i></button>` : ""}</div>
   <div class="two">
     <section class="card"><div class="hrow"><h2>Exams</h2><span>every exam starts protected</span></div>
       <ul class="list">${s.cur.map(row).join("") || `<li class="d">No upcoming exams in Brightspace.</li>`}</ul>
       ${past.length ? `<details class="past"><summary>${past.length} past or inactive</summary><ul class="list">${past.map(q=>`<li><div class="grow"><span class="t" style="color:#6b6861">${esc(q.name)}</span><span class="d">${q.end_date?"ended "+when(q.end_date):q.active===0?"inactive":""}</span></div><span class="st">${q.password?"was protected":""}</span></li>`).join("")}</ul></details>` : ""}
     </section>
     <section class="card"><div class="hrow"><h2>Students</h2><span><b style="color:var(--ok)">${s.ready} ready</b>${s.missing.length?` · <b style="color:var(--warn)">${s.missing.length} not yet</b>`:""}</span></div>
-      ${s.missing.length ? `<div class="note warn"><span>${s.missing.length} student${s.missing.length===1?" has":"s have"} not installed LOCKqz. They cannot open a protected exam until they do.</span><a class="btn warn" href="${mailMissing(c,s)}">Send them the install link</a></div>` : `<div class="note ok"><span>Every student has LOCKqz installed.</span></div>`}
+      ${s.missing.length ? `<div class="note warn"><span>${s.missing.length} student${s.missing.length===1?" has":"s have"} not installed LOCKqz. They cannot open a protected exam until they do.</span>${mailBtns(c,s)}</div>` : `<div class="note ok"><span>Every student has LOCKqz installed.</span></div>`}
       <ul class="list">${[...s.missing, ...c.students.filter(x=>x.installed)].map(x=>`<li><span class="dot ${x.installed?'ok':'warn'}"></span><span class="grow"><span style="font-size:15px">${esc(x.name)}</span>${x.ta?' <span class="sm" style="color:var(--muted,#777)">· TA</span>':""}</span><span class="st ${x.installed?'ok':'warn'}">${x.installed?"Ready"+(x.platform?" · "+esc(x.platform):""):"Needs LOCKqz"}</span></li>`).join("") || `<li class="d">No students on the Brightspace roster.</li>`}</ul>
     </section>
   </div>`;
@@ -301,15 +338,16 @@ const LBL = {locked:["ok","Locked · working"],tamper:["red","Tampering detected
 function viewLive(id){
   const [ou,qi] = id.split("-"); const c = BS.courses.find(x=>x.ou===ou); const q = c && c.quizzes.find(x=>String(x.qi)===qi);
   const title = q ? q.name : (LEGACY.find(x=>(x.lock_id||x.quiz_id)===id)||{}).title || id;
-  return `${BACK(c?'class/'+esc(ou):'', c?esc(cname(c)):'Home')}
+  return `${BACK(c?'class/'+ou:'', c?esc(cname(c)):'Home')}
   <div class="band"><div><div style="display:flex;align-items:center;gap:10px"><span class="pulse"></span><span style="font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ok)">Live</span></div>
-    <h1 style="margin:4px 0 0;font-size:28px;font-weight:700;letter-spacing:-.015em">${esc(title)}</h1><p class="sub" id="lsub">${q&&q.start_date?"Started "+when(q.start_date)+" · ":""}updates every 10 seconds</p></div></div>
+    <h1 style="margin:4px 0 0;font-size:28px;font-weight:700;letter-spacing:-.015em">${esc(title)}</h1><p class="sub">${q&&q.start_date?"Started "+when(q.start_date)+" · ":""}<span id="livesub">updates every 10 seconds</span></p></div></div>
   <div class="counts" id="lcounts"></div>
   <section class="card" style="padding:8px 24px 12px"><ul class="list" id="lrows"><li class="d">Loading…</li></ul></section>
   <p class="foot">Students without a fresh LOCKqz lock cannot open this exam while the gate is on. Everything here is kept in the activity log.</p>`;
 }
 async function loadLive(id){
   const d = await get("/live?quiz="+encodeURIComponent(id)); if(!$("lrows")) return;
+  if(d.error){ $("lcounts").innerHTML = ""; $("lrows").innerHTML = `<li class="d err">Could not load: ${esc(d.error)}</li>`; $("livesub").textContent = "not updated "+new Date().toLocaleTimeString(); return; }
   const rows = d.rows||[], [ou] = id.split("-"), c = BS.courses.find(x=>x.ou===ou);
   const seen = new Set(rows.map(r=>(r.email||r.student||"").toLowerCase()));
   const nameOf = r => { const k=(r.email||r.student||"").toLowerCase(); const s=c&&c.students.find(x=>(x.email||"").toLowerCase()===k||(x.name||"").toLowerCase()===k); return s?s.name:(r.student||r.device_id); };
@@ -323,7 +361,7 @@ async function loadLive(id){
     return `<li class="${k==='red'?'flag':''}"><span class="dot ${k}"></span><span class="grow"><span style="font-size:15px;font-weight:${k==='red'?700:500}">${esc(nameOf(r))}</span></span><span class="st ${k}">${l}</span><span class="st" style="min-width:48px;text-align:right">${t}</span></li>`; })
     .concat(notStarted.map(s=>`<li><span class="dot"></span><span class="grow"><span style="font-size:15px">${esc(s.name)}</span></span><span class="st">Has not opened the exam</span><span class="st" style="min-width:48px"></span></li>`));
   $("lrows").innerHTML = list.join("") || `<li class="d">No students have opened this exam yet.</li>`;
-  $("lsub").textContent = ($("lsub").textContent.split("·")[0].includes("Started")?$("lsub").textContent.split("·")[0]+"· ":"") + "updated " + new Date().toLocaleTimeString();
+  $("livesub").textContent = "updated " + new Date().toLocaleTimeString();
 }
 
 // ---- CONNECT (the one manual step; shown on first visit and from the menu) ----
@@ -348,11 +386,14 @@ function viewActivity(){ return `${BACK('', 'Home')}<section class="card"><div c
   <div style="overflow-x:auto;margin-top:12px"><table id="events"><thead><tr><th>Time</th><th>Student</th><th>Exam</th><th>Event</th><th>Detail</th></tr></thead><tbody></tbody></table></div></section>`; }
 const qname = lid => { for(const c of BS.courses){ const q=c.quizzes.find(x=>`${c.ou}-${x.qi}`===lid); if(q) return q.name; } return lid||""; };
 async function loadSessions(){ const d = await get("/sessions"); const tb=document.querySelector("#events tbody"); if(!tb) return; tb.innerHTML="";
+  if(d.error){ tb.innerHTML=`<tr><td colspan="5" class="err">${esc(d.error)}</td></tr>`; return; }
   (d.events||[]).forEach(e=>tb.insertAdjacentHTML("beforeend",`<tr style="${e.event==='tamper'?'color:var(--usc);font-weight:700':''}"><td>${when(e.ts)}</td><td>${esc(e.student||"—")}</td><td>${esc(qname(e.quiz_id))}</td><td>${esc(e.event)}</td><td>${esc(e.detail||"")}</td></tr>`));
   if(!(d.events||[]).length) tb.innerHTML=`<tr><td colspan="5" class="muted">Nothing yet.</td></tr>`; }
 
 // ---- ADMIN (unchanged behaviour, moved under the name menu) ----
-function semEnd(){ const d=new Date(), y=d.getFullYear(), m=d.getMonth()+1; return m<=5?`${y}-05-31`:(m<=8?`${y}-08-31`:`${y}-12-31`); }
+// Today in Los Angeles (YYYY-MM-DD) and the semester's last day, the same dates the server uses.
+const laDay = () => { const p = {}; new Intl.DateTimeFormat("en-US",{timeZone:"America/Los_Angeles",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date()).forEach(x=>p[x.type]=x.value); return `${p.year}-${p.month}-${p.day}`; };
+function semEnd(){ const d=laDay(), y=d.slice(0,4), m=+d.slice(5,7); return m<=5?`${y}-05-31`:(m<=7?`${y}-08-15`:`${y}-12-31`); }
 function viewAdmin(){ return `${BACK('', 'Home')}
   <section class="card"><h2 style="margin:0 0 12px">Invite a professor</h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><input id="iemail" type="email" placeholder="Professor's email" style="padding:10px;border:1px solid #cfccc4;border-radius:8px;flex:1 1 220px"><span class="muted">active until</span><input id="iuntil" type="date" value="${semEnd()}" style="padding:10px;border:1px solid #cfccc4;border-radius:8px"><button class="btn prime" onclick="makeInvite()">Create invite</button></div>
@@ -367,26 +408,27 @@ function viewAdmin(){ return `${BACK('', 'Home')}
     <p class="muted" style="margin:0 0 10px">Gmail script key: <code id="skey" style="user-select:all"></code></p>
     <div style="overflow-x:auto"><table id="payments"><thead><tr><th>Received</th><th>Amount</th><th>Via</th><th>From</th><th>Memo</th><th>Who</th><th></th></tr></thead><tbody></tbody></table></div>
 </section>`; }
-async function loadTeachers(){ const d = await get("/teachers"); const tb=document.querySelector("#teachers tbody"); if(!tb) return; tb.innerHTML=""; const today=new Date().toISOString().slice(0,10);
+async function loadTeachers(){ const d = await get("/teachers"); const tb=document.querySelector("#teachers tbody"); if(!tb) return; tb.innerHTML=""; const today=laDay();
+  if(d.error){ tb.innerHTML=`<tr><td colspan="7" class="err">${esc(d.error)}</td></tr>`; return; }
   (d.teachers||[]).forEach(t=>{ const on = t.active_until && t.active_until>=today;
-    tb.insertAdjacentHTML("beforeend",`<tr style="${on?'':'color:#888'}"><td>${esc(t.email)}</td><td>${esc(t.name||"")}</td><td>${when(t.created_at)}</td><td>${on?esc(t.active_until):"<b style='color:#990000'>off</b>"}</td><td>${t.paid_sections||0}</td><td>${esc(t.memo||"")}</td><td style="white-space:nowrap"><button class="btn" style="min-height:32px;padding:4px 10px" onclick="secAdmin('${esc(t.email)}')">Sections</button> <input type="date" id="d_${esc(t.id)}" value="${esc(t.active_until||semEnd())}" style="padding:4px"> <button class="btn" style="min-height:32px;padding:4px 10px" onclick="activate('${esc(t.email)}','${esc(t.id)}')">Activate</button> <button class="btn" style="min-height:32px;padding:4px 10px" onclick="deactivate('${esc(t.email)}')">Off</button> <button class="btn" style="min-height:32px;padding:4px 10px" onclick="resetPw('${esc(t.email)}')">Reset pw</button></td></tr>`); }); }
+    tb.insertAdjacentHTML("beforeend",`<tr style="${on?'':'color:#888'}"><td>${esc(t.email)}</td><td>${esc(t.name||"")}</td><td>${when(t.created_at)}</td><td>${on?esc(t.active_until):"<b style='color:#990000'>off</b>"}</td><td>${t.paid_sections||0}</td><td>${esc(t.memo||"")}</td><td style="white-space:nowrap"><button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" onclick="secAdmin(this.dataset.email)">Sections</button> <input type="date" id="d_${esc(t.id)}" value="${esc(t.active_until||semEnd())}" style="padding:4px"> <button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" data-id="${esc(t.id)}" onclick="activate(this.dataset.email,this.dataset.id)">Activate</button> <button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" onclick="deactivate(this.dataset.email)">Off</button> <button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" onclick="resetPw(this.dataset.email)">Reset pw</button></td></tr>`); }); }
 // ---- per-section payment ($1,000 per section per semester, Venmo) ----
 let PAY=null, PAYSEL=null;
 const termName = t => { t=String(t||""); return (({1:"Spring",2:"Summer",3:"Fall"})[t.slice(4)]||"")+" "+t.slice(0,4); };
 const money = n => "$"+Number(n).toLocaleString("en-US");
 async function loadPay(name){ const el=$("pay"); if(!el) return;
-  const d = await get("/my-sections"+(name?("?name="+encodeURIComponent(name)):"")); if(!d || d.error){ el.innerHTML=""; return; }
+  const d = await get("/my-sections"+(name?("?name="+encodeURIComponent(name)):"")); if(d.error){ if(name) alert(d.error); return; }
   PAY=d; PAYSEL=new Set(d.sections.filter(s=>!s.paid).map(s=>s.section)); renderPay(); }
 function paySel(s,on){ on?PAYSEL.add(s):PAYSEL.delete(s); renderPay(); }
 function renderPay(){ const d=PAY, el=$("pay"); if(!el||!d) return;
-  if(d.all_active){ el.innerHTML=""; return; }
+  if(d.all_active || (d.sections.length && d.sections.every(s=>s.paid))){ el.innerHTML=""; return; }   // nothing left to pay
   const nameBox = `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><label for="pname" class="muted">Name in the USC Schedule of Classes</label><input id="pname" value="${esc(d.name||"")}" placeholder="First Last" style="padding:10px;border:1px solid #cfccc4;border-radius:8px;flex:1 1 200px"><button class="btn" onclick="loadPay($('pname').value)">Find my sections</button></div>`;
   const total=d.price, note=d.memo;
   const link = d.venmo ? `https://venmo.com/?txn=pay&recipients=${encodeURIComponent(d.venmo)}&amount=${total}&note=${encodeURIComponent(note)}` : "";
   el.innerHTML = `<section class="card" style="display:flex;flex-direction:column;gap:16px">
-    <div class="hrow"><h2>Activate LOCKqz</h2><span>${termName(d.term)}</span></div>
+    <div class="hrow"><h2>Activate LOCKqz</h2><span>${d.term?termName(d.term):""}</span></div>
     <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b style="font-size:44px">${money(total)}</b><span class="muted">per semester · all your sections</span></div>
-    ${d.sections.length ? `<ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px">${d.sections.map(s=>`<li style="display:flex;gap:12px;align-items:center;min-height:40px;padding:0 12px;border:1px solid #e3e0d8;border-radius:10px"><b>${esc(s.course)}</b><span class="muted">Section ${esc(s.section)} · ${esc(s.registered??"")} students</span></li>`).join("")}</ul>` : nameBox}
+    ${d.sections.length ? `<ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px">${d.sections.map(s=>`<li style="display:flex;gap:12px;align-items:center;min-height:40px;padding:0 12px;border:1px solid #e3e0d8;border-radius:10px"><b>${esc(s.course)}</b><span class="muted">Section ${esc(s.section)} · ${esc(s.registered??"")} students</span></li>`).join("")}</ul>` : `${!d.term?`<p class="muted" style="margin:0">Enter your first and last name.</p>`:d.name?`<p class="muted" style="margin:0">No sections found for ${esc(d.name)}.</p>`:""}${nameBox}`}
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
       ${d.zelle ? `<div style="padding:14px;border:1px solid #e3e0d8;border-radius:10px"><span class="muted">Zelle</span><br><b>${esc(d.zelle)}</b></div>` : ""}
       ${link ? `<a class="btn prime" style="text-align:center;display:flex;align-items:center;justify-content:center" href="${link}" target="_blank" rel="noopener">Venmo ${money(total)}</a>` : ""}
@@ -399,16 +441,19 @@ async function secAdmin(email){ const el=$("secpanel"); el.innerHTML="Loading…
   const d = await get("/teacher-sections?email="+encodeURIComponent(email)); if(d.error){ el.innerHTML=esc(d.error); return; }
   el.innerHTML = `<div class="card" style="margin-top:12px;display:flex;flex-direction:column;gap:10px"><b>${esc(d.email)} · ${esc(d.name||"no name")} · ${termName(d.term)} · Venmo code ${esc(d.memo)}</b>
     ${d.sections.length ? d.sections.map(s=>`<label style="display:flex;gap:10px;align-items:center"><input type="checkbox" class="secck" value="${esc(s.section)}" ${s.paid?"checked":""}> ${esc(s.course)} · ${esc(s.section)} · ${esc(s.registered??"")} students ${s.paid?"<b style='color:var(--ok)'>paid to "+esc(s.paid_until)+"</b>":""}</label>`).join("") : "<span class='muted'>No sections found for this name.</span>"}
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="muted">paid until</span><input type="date" id="secuntil" value="${semEnd()}" style="padding:6px"><button class="btn prime" onclick="markSecs('${esc(d.email)}','${esc(d.term)}',false)">Mark ticked paid</button><button class="btn" onclick="markSecs('${esc(d.email)}','${esc(d.term)}',true)">Mark ticked unpaid</button></div></div>`; }
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="muted">paid until</span><input type="date" id="secuntil" value="${semEnd()}" style="padding:6px"><button class="btn prime" data-email="${esc(d.email)}" data-term="${esc(d.term)}" onclick="markSecs(this.dataset.email,this.dataset.term,false)">Mark ticked paid</button><button class="btn" data-email="${esc(d.email)}" data-term="${esc(d.term)}" onclick="markSecs(this.dataset.email,this.dataset.term,true)">Mark ticked unpaid</button></div></div>`; }
 async function markSecs(email,term,off){ const sections=[...document.querySelectorAll(".secck:checked")].map(x=>x.value); if(!sections.length) return;
+  if(!off && !$("secuntil").value){ alert("Pick the paid-until date first."); return; }
   const d=await post("/pay-sections",{email,term,sections,until:$("secuntil").value,off}); if(d.error) alert(d.error); secAdmin(email); loadTeachers(); }
-async function loadPayments(){ const d = await get("/payments"); const tb=document.querySelector("#payments tbody"); if(!tb||d.error) return;
+async function loadPayments(){ const d = await get("/payments"); const tb=document.querySelector("#payments tbody"); if(!tb) return;
+  if(d.error){ tb.innerHTML=`<tr><td colspan="7" class="err">${esc(d.error)}</td></tr>`; return; }
   $("skey").textContent = d.script_key||""; $("feeinfo").textContent = d.fee_on ? `Student fee $${d.fee} on` : (d.fee_from ? `Student fee starts ${d.fee_from}` : "Student fee off");
-  tb.innerHTML = (d.payments||[]).map(p=>`<tr><td>${when(p.received_at)}</td><td>${money(p.amount)}</td><td>${esc(p.via||"")}</td><td>${esc(p.payer||"")}</td><td>${esc(p.note||"")}</td><td>${p.who?esc(p.who):"<b style='color:#990000'>unmatched</b>"}</td><td>${p.who?"":`<input id="as_${esc(p.txn)}" placeholder="student email or code" style="padding:4px;width:180px"> <button class="btn" style="min-height:32px;padding:4px 10px" onclick="assignPay('${esc(p.txn)}')">Assign</button>`}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">No payments yet.</td></tr>`; }
+  tb.innerHTML = (d.payments||[]).map(p=>`<tr><td>${when(p.received_at)}</td><td>${money(p.amount)}</td><td>${esc(p.via||"")}</td><td>${esc(p.payer||"")}</td><td>${esc(p.note||"")}</td><td>${p.who?esc(p.who):"<b style='color:#990000'>unmatched</b>"}</td><td>${p.who?"":`<input id="as_${esc(p.txn)}" placeholder="student email or code" style="padding:4px;width:180px"> <button class="btn" style="min-height:32px;padding:4px 10px" data-txn="${esc(p.txn)}" onclick="assignPay(this.dataset.txn)">Assign</button>`}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">No payments yet.</td></tr>`; }
 async function assignPay(txn){ const v=document.getElementById("as_"+txn).value.trim(); if(!v) return; const d=await post("/pay-assign",{txn,code:v}); if(d.error) alert(d.error); loadPayments(); }
-async function activate(email,id){ const d=await post("/activate",{email,until:$("d_"+id).value}); if(d.error) alert(d.error); loadTeachers(); }
-async function deactivate(email){ if(confirm("Turn off "+email+"?")){ await post("/activate",{email,until:null}); loadTeachers(); } }
-async function resetPw(email){ const d=await post("/reset",{email}); alert(d.error||("New password for "+email+": "+d.password)); }
+async function activate(email,id){ const until=$("d_"+id).value; if(!until){ alert("Pick the active-until date first."); return; }   // an empty date would turn them OFF
+  const d=await post("/activate",{email,until}); if(d.error) alert(d.error); loadTeachers(); }
+async function deactivate(email){ if(confirm("Turn off "+email+"?")){ const d=await post("/activate",{email,until:null}); if(d.error) alert(d.error); loadTeachers(); } }
+async function resetPw(email){ const d=await post("/reset",{email}); alert(d.error||("New password for "+email+": "+d.password+(d.sync_key_kept?"\n\n"+d.sync_key_kept:""))); }
 const inviteLink = code => location.origin + "/?invite=" + code;
 function inviteMail(email, link){
   const s = "Your LOCKqz professor account";
@@ -423,7 +468,8 @@ async function makeInvite(){ const d = await post("/invite",{email:$("iemail").v
   $("newinvite").innerHTML = `<div class="note ok" style="margin-top:10px"><span>Invite link (works once): <code>${esc(window._ilink)}</code></span><span style="display:flex;gap:8px"><button class="btn" onclick="navigator.clipboard.writeText(window._ilink);this.textContent='Copied'">Copy link</button><button class="btn prime" onclick="location.href=window._imail">Email it</button></span></div>`;
   $("iemail").value=""; loadInvites(); }
 async function loadInvites(){ const d = await get("/invites"); const tb=document.querySelector("#invites tbody"); if(!tb) return; tb.innerHTML="";
-  (d.invites||[]).forEach(i=>tb.insertAdjacentHTML("beforeend",`<tr style="${i.used_at?'color:#888':''}"><td>${esc(i.email||"(anyone with link)")}</td><td>${esc(i.active_until||"—")}</td><td>${when(i.created_at)}</td><td>${i.used_at?"joined":"pending"}</td><td>${i.used_at?"":`<button class="btn" style="min-height:32px;padding:4px 10px" onclick="cancelInvite('${esc(i.code)}')">Cancel</button>`}</td></tr>`));
+  if(d.error){ tb.innerHTML=`<tr><td colspan="5" class="err">${esc(d.error)}</td></tr>`; return; }
+  (d.invites||[]).forEach(i=>tb.insertAdjacentHTML("beforeend",`<tr style="${i.used_at?'color:#888':''}"><td>${esc(i.email||"(anyone with link)")}</td><td>${esc(i.active_until||"—")}</td><td>${when(i.created_at)}</td><td>${i.used_at?"joined":"pending"}</td><td>${i.used_at?"":`<button class="btn" style="min-height:32px;padding:4px 10px" data-code="${esc(i.code)}" onclick="cancelInvite(this.dataset.code)">Cancel</button>`}</td></tr>`));
   if(!(d.invites||[]).length) tb.innerHTML=`<tr><td colspan="5" class="muted">No invites yet.</td></tr>`; }
 async function cancelInvite(code){ if(!confirm("Cancel this invite?")) return; const d=await post("/uninvite",{code}); if(d.error){ alert(d.error); return; } if((window._ilink||"").endsWith("="+code)){ $("newinvite").innerHTML=""; window._ilink=window._imail=null; } loadInvites(); }
 

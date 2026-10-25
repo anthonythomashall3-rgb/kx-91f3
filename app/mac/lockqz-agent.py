@@ -14,10 +14,12 @@ Chromium, Vivaldi, Arc, Safari via Apple Events; Firefox via its session file) a
 First run asks the student's school email ONCE (confirmed by an emailed code) so the
 professor's roster and the quiz gate know who is locked.
 """
-import hashlib, json, os, re, subprocess, threading, time, urllib.request, urllib.parse, glob
+import hashlib, json, os, re, subprocess, threading, time, urllib.error, urllib.request, urllib.parse, glob
 NOPROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))   # never go through a system proxy
 
 SYS_CONF = "/Library/Application Support/LOCKqz/config.json"
+# Per-user copy of the helper's random control token, written by the helper (root) for the console user.
+TOKEN_DIR = os.environ.get("LOCKQZ_TOKEN_DIR") or "/Library/Application Support/LOCKqz/tokens"
 USER_DIR = os.path.expanduser("~/Library/Application Support/LOCKqz")
 USER_CONF = os.path.join(USER_DIR, "student.json")
 POLL, POLL_LOCKED, GRACE, BEAT = 2, 1, 30, 60   # agent reports (every 60s) only while the helper is unreachable
@@ -65,6 +67,72 @@ def lock_id(url):
 
 def is_quiz(url):
     return bool(QUIZ_RE.search(url)) and "qi=" in url and not LEAVING_RE.search(url)
+
+def classify(urls):
+    """-> (present, left). present: {quiz id: url} for quizzes that are really open; left: ids whose
+    submitted/results page is showing. "Leaving" is evaluated BEFORE "present": a quiz's own start or
+    summary page left in another tab never keeps the lock once its submission page shows. Only an
+    open ATTEMPT page outranks a leaving page (so opening an old submission in a new tab mid-attempt
+    never unlocks)."""
+    starts, left = {}, set()
+    for u in urls:
+        if not u or not QUIZ_RE.search(u) or "qi=" not in u: continue
+        q = lock_id(u)
+        if LEAVING_RE.search(u): left.add(q)
+        else: starts.setdefault(q, []).append(u)
+    present = {}
+    for q, us in starts.items():
+        att = [u for u in us if "/attempt/" in u]
+        if att: present[q] = att[0]
+        elif q not in left: present[q] = us[0]
+    return present, left - set(present)
+
+def unlock_reason(tabs_now, tabs_before):
+    """Why the open quiz went away (no submission page seen): every tab gone or fewer tabs than while
+    the quiz was open -> the quiz tab was closed; otherwise the student navigated away."""
+    if not tabs_now or (tabs_before and len(tabs_now) < tabs_before): return "quiz_tab_closed"
+    return "quiz_left"
+
+# Gecko browsers: profile folder (under ~/Library/Application Support) per launcher binary name.
+GECKO_DIRS = {"firefox": ["Firefox", "Firefox Developer Edition", "Firefox Nightly"], "librewolf": ["LibreWolf"],
+              "waterfox": ["Waterfox"], "floorp": ["Floorp"], "zen": ["zen", "Zen"], "mullvadbrowser": ["MullvadBrowser"]}
+
+def _etime(s):
+    """ps etime ([[dd-]hh:]mm:ss) -> seconds."""
+    d, _, rest = s.strip().rpartition("-")
+    parts = [int(x) for x in rest.split(":")]
+    while len(parts) < 3: parts.insert(0, 0)
+    return (int(d) if d else 0) * 86400 + parts[0] * 3600 + parts[1] * 60 + parts[2]
+
+def gecko_running(ps_lines, now):
+    """`ps -x -o etime= -o comm=` lines -> {profile folder: start time of that browser}."""
+    out = {}
+    for line in ps_lines:
+        try:
+            et, comm = line.strip().split(None, 1)
+            # A full path must be an app launcher; a bare name (some ps builds print only that) is
+            # accepted - the profile still has to be newer than the process to be read.
+            if "/" in comm and ".app/Contents/MacOS/" not in comm: continue
+            b = os.path.basename(comm).lower()
+            if b not in GECKO_DIRS: continue
+            start = now - _etime(et)
+            for base in GECKO_DIRS[b]: out[base] = min(out.get(base, start), start)
+        except Exception:
+            continue
+    return out
+
+def gecko_session_files(running, files_for, mtime):
+    """Session files worth reading: only for a Gecko browser that is RUNNING, and only a profile it
+    wrote since it started. A recovery file left by a crash (browser not running, or a stale profile
+    of a browser that started later) never makes LOCKqz lock."""
+    out = []
+    for base, started in running.items():
+        for p in files_for(base):
+            try:
+                if mtime(p) >= started - 5: out.append((base, p))
+            except Exception:
+                pass
+    return out
 
 def rewrite_search(url):
     """URL a locked browser tab should be sent to instead (None = leave it alone)."""
@@ -141,15 +209,17 @@ def browser_tabs():
                 for ti, u in enumerate(urls or []): tabs.append((app, wi, ti, u or ""))
         except Exception as e:
             if "-1743" in str(e) or "not allowed" in str(e).lower(): permission_hint(app)
-    # Firefox and every Gecko fork store open tabs in a per-app profile dir; read them all so a quiz
-    # opened in Firefox/LibreWolf/Waterfox/Floorp/Zen/Mullvad is detected and locked.
-    FF_SUPPORT = ["Firefox", "LibreWolf", "Waterfox", "Floorp", "zen", "Zen", "MullvadBrowser",
-                  "Firefox Developer Edition", "Firefox Nightly"]
-    for base in FF_SUPPORT:
-        for p in glob.glob(os.path.expanduser("~/Library/Application Support/%s/Profiles/*/sessionstore-backups/recovery.jsonlz4" % base)):
-            try:
-                for u in firefox_urls(mozlz4_json(p)): tabs.append((base, -1, -1, u))
-            except Exception: pass
+    # Firefox and every Gecko fork store open tabs in a per-app profile dir; read the ones that are
+    # running now so a quiz opened in Firefox/LibreWolf/Waterfox/Floorp/Zen/Mullvad is detected.
+    try:
+        ps = subprocess.run(["ps", "-x", "-o", "etime=", "-o", "comm="], capture_output=True, text=True, timeout=10).stdout.splitlines()
+    except Exception:
+        ps = []
+    files = lambda base: glob.glob(os.path.expanduser("~/Library/Application Support/%s/Profiles/*/sessionstore-backups/recovery.jsonlz4" % base))
+    for base, p in gecko_session_files(gecko_running(ps, time.time()), files, os.path.getmtime):
+        try:
+            for u in firefox_urls(mozlz4_json(p)): tabs.append((base, -1, -1, u))
+        except Exception: pass
     return tabs
 
 def set_tab_url(app, wi, ti, url):
@@ -258,17 +328,34 @@ def clipboard(text):
     except Exception: pass
 
 # ---------- helper + backend ----------
+def load_token(conf):
+    """This user's copy of the helper token (written by the helper); the config value only for an
+    older install that still has one."""
+    try:
+        with open(os.path.join(TOKEN_DIR, str(os.getuid()))) as f:
+            t = f.read().strip()
+        if t: return t
+    except Exception:
+        pass
+    return conf.get("token", "")
+
 class Agent:
     def __init__(self):
-        c = load(SYS_CONF)
-        self.port, self.token = int(c.get("port", 8787)), c.get("token", "lockqz-dev")
+        c = load(SYS_CONF); self.conf = c
+        self.port, self.token = int(c.get("port", 8787)), load_token(c)
         self.api, self.device = c.get("api_base", "").rstrip("/"), c.get("device_id", "unknown")
         if self.api and not self.api.endswith("/api"): self.api += "/api"   # accept a bare site URL too
-        os.makedirs(USER_DIR, exist_ok=True)
+        try: os.makedirs(USER_DIR, exist_ok=True)
+        except Exception: pass
         u = load(USER_CONF)
         self.student, self.verified = u.get("student"), bool(u.get("verified"))
         self.id_busy, self.id_tried = False, 0.0
         self.locked, self.quiz, self.url, self.missing_since, self.last_beat = False, None, None, None, 0.0
+        self.pending = None          # (quiz, reason): an unlock the helper has not confirmed yet
+        self.pending_try = 0.0
+        self.capped = {}             # quiz id -> last time its page was seen (released by the 3-hour cap)
+        self.tabs_seen = 0           # how many tabs were open while the quiz was open
+        self.last_check, self.lock_fail_shown = 0.0, {}
 
     def verify_call(self, op, **kw):
         try: r = self.helper("/verify", dict(kw, op=op))
@@ -308,11 +395,18 @@ class Agent:
         return True
 
     def helper(self, path, body=None, timeout=90):
-        req = urllib.request.Request("http://127.0.0.1:%d%s" % (self.port, path),
-                                     data=json.dumps(body).encode() if body is not None else None,
-                                     headers={"Content-Type": "application/json", "X-LOCKqz-Token": self.token},
-                                     method="POST" if body is not None else "GET")
-        return json.loads(NOPROXY.open(req, timeout=timeout).read())   # loopback must bypass any system proxy
+        for attempt in (0, 1):
+            req = urllib.request.Request("http://127.0.0.1:%d%s" % (self.port, path),
+                                         data=json.dumps(body).encode() if body is not None else None,
+                                         headers={"Content-Type": "application/json", "X-LOCKqz-Token": self.token},
+                                         method="POST" if body is not None else "GET")
+            try:
+                return json.loads(NOPROXY.open(req, timeout=timeout).read())   # loopback must bypass any system proxy
+            except urllib.error.HTTPError as e:
+                # The helper may have (re)issued this user's token copy since we read it: reload once.
+                if e.code == 401 and attempt == 0:
+                    self.token = load_token(self.conf); continue
+                raise
 
     def api_post(self, path, body):
         if not self.api: return None
@@ -320,18 +414,24 @@ class Agent:
             # Cloudflare blocks the default "Python-urllib" user agent (403) — send our own. Bypass any
             # system proxy, which could block or MITM the call.
             req = urllib.request.Request(self.api + path, data=json.dumps(body).encode(),
-                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/0.3.9 (macOS)"})
+                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/0.4.0 (macOS)"})
             return json.loads(NOPROXY.open(req, timeout=8).read())
         except Exception as e:
             log("api %s failed: %s" % (path, e)); return None
 
     def start(self, url):
-        self.quiz, self.url = lock_id(url), url
-        try: self.helper("/lock", {"quiz_id": self.quiz, "student": self.student, "url": url})
+        quiz = lock_id(url)
+        try:
+            r = self.helper("/lock", {"quiz_id": quiz, "student": self.student, "url": url})
+            if not (isinstance(r, dict) and r.get("ok")): raise RuntimeError("helper answered %r" % (r,))
         except Exception as e:
             log("helper lock failed: %s" % e)
-            dialog("LOCKqz could not lock AI for this quiz. Is the LOCKqz app installed and running?"); return
-        self.locked, self.missing_since, self.last_beat = True, None, time.time()
+            if time.time() - self.lock_fail_shown.get(quiz, 0) > 120:   # retried every tick; tell the student once
+                self.lock_fail_shown[quiz] = time.time()
+                dialog("LOCKqz could not lock AI for this quiz. Is the LOCKqz app installed and running?")
+            return
+        self.quiz, self.url = quiz, url
+        self.locked, self.missing_since, self.last_beat, self.pending = True, None, time.time(), None
         log("LOCKED %s" % self.quiz)
         pw, self.pay_shown = None, False
         for attempt in range(3):   # the helper fetches it (signed); retry a brief network blip
@@ -351,59 +451,121 @@ class Agent:
         elif not self.pay_shown:
             dialog("AI is locked for this quiz.\n\nIf it needs a password, LOCKqz will show it here as soon as the quiz opens.")
 
+    def send_unlock(self, quiz, reason):
+        """True only when the helper confirms AI is back."""
+        try:
+            r = self.helper("/unlock", {"quiz_id": quiz, "reason": reason}, timeout=150)
+            return isinstance(r, dict) and bool(r.get("ok"))
+        except Exception as e:
+            log("helper unlock failed: %s" % e); return False
+
     def end(self, reason):
-        try: self.helper("/unlock", {"quiz_id": self.quiz})
-        except Exception as e: log("helper unlock failed: %s" % e)
-        if reason != "submitted":
-            try: self.helper("/event", {"event": "quiz_left", "quiz_id": self.quiz, "detail": reason})
+        """reason: quiz_submitted | quiz_left | quiz_tab_closed. A failed unlock is kept as pending and
+        retried until the helper confirms - the student is never left blocked after the quiz."""
+        quiz = self.quiz
+        if not self.send_unlock(quiz, reason):
+            self.pending, self.pending_try = (quiz, reason), time.time()
+        if reason != "quiz_submitted":
+            try: self.helper("/event", {"event": "quiz_left", "quiz_id": quiz, "detail": reason})
             except Exception:   # helper unreachable: send it directly (unsigned, best-effort)
-                self.api_post("/report", {"device_id": self.device, "event": "quiz_left", "quiz_id": self.quiz,
+                self.api_post("/report", {"device_id": self.device, "event": "quiz_left", "quiz_id": quiz,
                                           "student": self.student, "source": "agent", "detail": reason})
-        log("UNLOCKED (%s)" % reason)
+        log("UNLOCKED (%s)%s" % (reason, " - helper did not confirm, retrying" if self.pending else ""))
         self.locked, self.quiz, self.url, self.missing_since = False, None, None, None
 
-    def tick(self):
+    def adopt(self, st, present):
+        """The helper is locked but this agent is not (agent restarted, or the helper resumed a lock
+        after a reboot): take the lock over so it ends with the quiz. If the quiz is not open it ends
+        after the normal grace period."""
+        q = st.get("quiz_id")
+        self.locked, self.quiz, self.url = True, q, present.get(q, "")
+        self.missing_since = None if q in present else time.time()
+        self.last_beat, self.tabs_seen = time.time(), 0
+        log("adopted existing lock %s" % q)
+
+    def note_cap(self, st):
+        q = st.get("capped_quiz") if isinstance(st, dict) else None
+        if q: self.capped.setdefault(q, time.time())
+
+    def tick(self, tabs=None, dev=None):
         # Developer mode (admin only): same quiz flow (gate password, start/end reporting) but the
         # daemon never blocks AI and search tabs are never rewritten.
-        dev = developer_mode()
-        tabs = browser_tabs()
-        quiz_urls = [u for (_, _, _, u) in tabs if is_quiz(u)]
-        leaving = any(LEAVING_RE.search(u) and QUIZ_RE.search(u) for (_, _, _, u) in tabs)
-        if not self.verified and (quiz_urls or time.time() - self.id_tried > 6 * 3600):
+        dev = developer_mode() if dev is None else dev
+        tabs = browser_tabs() if tabs is None else tabs
+        now = time.time()
+        urls = [u for (_, _, _, u) in tabs]
+        present, left = classify(urls)
+        any_leaving = any(LEAVING_RE.search(u) and QUIZ_RE.search(u) for u in urls)
+        # A quiz released by the 3-hour cap is never re-locked while it stays open; once its page has
+        # been gone for the grace period, a new attempt locks normally again.
+        for q in list(self.capped):
+            if q in present: self.capped[q] = now
+            elif now - self.capped[q] > GRACE: del self.capped[q]
+        open_quizzes = {q: u for q, u in present.items() if q not in self.capped}
+        if not self.verified and (open_quizzes or now - self.id_tried > 6 * 3600):
             self.ensure_identity()
         if not self.locked:
-            if quiz_urls: self.start(quiz_urls[0])
+            if open_quizzes:
+                self.start(next(iter(open_quizzes.values())))
+                if self.locked: self.tabs_seen = len(tabs)
+                return
+            if self.pending and now - self.pending_try >= 5:
+                self.pending_try = now
+                if self.send_unlock(*self.pending):
+                    log("pending unlock confirmed (%s)" % self.pending[1]); self.pending = None
+                return
+            # Unlocked here: make sure the helper is not still locked (a lost unlock, a resumed lock).
+            if now - self.last_check > 10:
+                self.last_check = now
+                try:
+                    st = self.helper("/status", timeout=8)
+                    self.note_cap(st)
+                    if st.get("state") == "locked" and st.get("quiz_id") and st["quiz_id"] not in self.capped:
+                        self.adopt(st, present)
+                except Exception as e: log("helper check failed: %s" % e)
             return
         # locked
-        if quiz_urls:
+        if self.quiz in present and self.quiz not in self.capped:
             self.missing_since = None
+            self.tabs_seen = max(self.tabs_seen, len(tabs))
+            if not self.url or "/attempt/" in present[self.quiz]: self.url = present[self.quiz]
         else:
-            if leaving: self.end("submitted"); return
-            self.missing_since = self.missing_since or time.time()
-            if time.time() - self.missing_since > GRACE:
-                self.end("browser_closed" if not tabs else "quiz_tab_closed"); return
+            if self.quiz in left or (any_leaving and not open_quizzes):
+                self.end("quiz_submitted"); return
+            if open_quizzes:          # our quiz is gone and another one is open: hand over at once
+                self.end("quiz_left"); return
+            self.missing_since = self.missing_since or now
+            if now - self.missing_since > GRACE:
+                self.end(unlock_reason(tabs, self.tabs_seen)); return
         # Gated quizzes change password every 5 min. Until the attempt starts (still on the quiz's
         # start page, no "/attempt/" in the URL), re-check and hand over a new one if it changed.
-        if quiz_urls and "/attempt/" not in quiz_urls[0] and time.time() - getattr(self, "pw_checked", 0) > 15:
-            self.pw_checked = time.time()
+        cur = present.get(self.quiz)
+        if cur and "/attempt/" not in cur and now - getattr(self, "pw_checked", 0) > 15:
+            self.pw_checked = now
             try:
-                r2 = self.helper("/password", {"url": self.url}); pw2 = r2.get("password")
+                r2 = self.helper("/password", {"url": cur}); pw2 = r2.get("password")
                 if not pw2: self.payment(r2)
                 if pw2 and pw2 != getattr(self, "pw", None):
                     first = not getattr(self, "pw", None)
                     self.pw = pw2; clipboard(pw2)
                     dialog(("Quiz password:  %s" if first else "The quiz password changed.\n\nNew password:  %s") % pw2 + "\n(copied to your clipboard)")
             except Exception as e: log("password refresh failed: %s" % e)
-        # Self-heal: if the helper is no longer locked while the quiz is still open (3-hour safety cap
-        # on a long exam, helper restarted, someone unloaded it), lock again right away.
-        if time.time() - getattr(self, "last_check", 0) > 10:
-            self.last_check = time.time()
+        # Self-heal: if the helper is no longer locked while the quiz is still open (helper restarted,
+        # someone unloaded it), lock again right away - EXCEPT after the 3-hour safety cap released
+        # this quiz: then the student stays unlocked.
+        if now - self.last_check > 10:
+            self.last_check = now
             try:
-                st = self.helper("/status").get("state")
+                st = self.helper("/status")
                 self.helper_ok = True
-                if st not in ("locked", "developer"):
-                    log("helper not locked during an open quiz (%s) — re-locking" % st)
-                    self.helper("/lock", {"quiz_id": self.quiz, "student": self.student, "url": self.url})
+                self.note_cap(st)
+                if self.quiz in self.capped:
+                    log("3-hour safety cap released %s — not re-locking" % self.quiz)
+                    self.locked, self.quiz, self.url, self.missing_since = False, None, None, None
+                    return
+                if st.get("state") not in ("locked", "developer"):
+                    log("helper not locked during an open quiz (%s) — re-locking" % st.get("state"))
+                    self.helper("/lock", {"quiz_id": self.quiz, "student": self.student, "url": self.url or ""})
             except Exception as e:
                 self.helper_ok = False; log("helper check failed: %s" % e)
         for (app, wi, ti, u) in ([] if dev else tabs):
@@ -411,8 +573,8 @@ class Agent:
             if new and wi >= 0: set_tab_url(app, wi, ti, new)
         # Report to the server ONLY while the helper is unreachable (proof for "helper killed"); while the
         # helper answers, its own signed pings say everything -> no routine agent traffic (free plan).
-        if not getattr(self, "helper_ok", True) and time.time() - self.last_beat > BEAT:
-            self.last_beat = time.time()
+        if not getattr(self, "helper_ok", True) and now - self.last_beat > BEAT:
+            self.last_beat = now
             self.api_post("/report", {"device_id": self.device, "event": "heartbeat", "quiz_id": self.quiz,
                                       "student": self.student, "source": "agent"})
 
@@ -423,10 +585,9 @@ class Agent:
         # correctly when the quiz ends instead of leaving the student blocked until the hard max.
         try:
             st = self.helper("/status", timeout=8)
+            self.note_cap(st)
             if st.get("state") in ("locked", "developer") and st.get("quiz_id"):
-                self.locked, self.quiz, self.url = True, st["quiz_id"], ""
-                self.missing_since, self.last_beat = time.time(), time.time()
-                log("adopted existing lock %s at startup" % self.quiz)
+                self.adopt(st, {})
         except Exception as e: log("startup status check failed: %s" % e)
         log("running (device %s, student %s)" % (self.device, self.student))
         self.ensure_identity(force=True)   # checks the server once per login; asks only if not yet confirmed

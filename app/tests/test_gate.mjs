@@ -1,7 +1,7 @@
 // Live access gate + teacher self-verification (23 Oct 2026). Runs the REAL API against an in-memory
 // SQLite DB (node:sqlite), no network. Proves:
-//   * a teacher signs up with NO invite and is UNVERIFIED -> cannot protect or gate a quiz;
-//   * syncing a course where they are staff auto-verifies them (no email, no admin) -> can protect + gate;
+//   * a teacher signs up (admin invite = vouched) and is UNVERIFIED -> cannot protect or gate a quiz;
+//   * syncing a course whose trusted roster lists them as Instructor verifies them -> can protect + gate;
 //   * a student-type account that never syncs staff stays unverified and can never act as a teacher;
 //   * /gate needs the quiz protected first; and the quiz's `gated` flag flips;
 //   * /live admits ONLY a device holding a fresh, device-SIGNED lock (eligible=true + user_id), and
@@ -90,9 +90,10 @@ async function suite(label, oldSchema) {
   // First account becomes admin; make it so the teacher under test is a normal teacher.
   const ADMIN_TOK = (await call(env, "/signup", { email: "admin@usc.edu", password: "adminpass1" })).data.token;
 
-  console.log("T1 open signup, no invite needed, new teacher is UNVERIFIED");
-  let r = await call(env, "/signup", { email: "prof@usc.edu", password: "profpass1", name: "Prof" });
-  check("signup with no invite code succeeds", r.status === 200 && r.data?.token, JSON.stringify(r.data));
+  console.log("T1 invited signup; the new teacher is UNVERIFIED");
+  const INV = (await call(env, "/invite", { email: "prof@usc.edu" }, { teacher: ADMIN_TOK })).data.code;
+  let r = await call(env, "/signup", { email: "prof@usc.edu", password: "profpass1", name: "Prof", invite: INV });
+  check("signup with the invite succeeds", r.status === 200 && r.data?.token, JSON.stringify(r.data));
   const TOK = r.data.token;
   r = await getc(env, "/me", { teacher: TOK });
   check("teacher starts unverified", r.status === 200 && r.data?.verified === false, JSON.stringify(r.data));
@@ -134,7 +135,7 @@ async function suite(label, oldSchema) {
   r = await call(env, "/rotating", { ou: OU, qis: [QI] }, { teacher: TOK });
   check("unpaid /rotating refused (402)", r.status === 402, `got ${r.status}`);
   r = await call(env, "/activate", { email: "student-nobody@usc.edu", until: "2099-12-31" }, { teacher: TOK });
-  check("a professor cannot activate anyone (admin only)", r.status === 401, `got ${r.status}`);
+  check("a professor cannot activate anyone (admin only)", r.status === 403, `got ${r.status}`);
   r = await call(env, "/activate", { email: "prof@usc.edu", until: "2099-12-31" }, { teacher: ADMIN_TOK });
   check("admin activates after payment", r.status === 200, JSON.stringify(r.data));
   r = await call(env, "/sync", { whoami: { id: "4000" }, courses: [ { ou: OU, name: "ECON 203", code: "ECON-203", role: "Instructor",

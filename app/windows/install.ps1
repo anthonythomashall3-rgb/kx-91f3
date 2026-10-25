@@ -54,11 +54,20 @@ if (-not $Api   -and (Test-Path $cfgOld)) { $Api   = (Get-Content $cfgOld -Raw |
 if (-not $Token) { $Token = Read-Host "Shared token" }
 if (-not $Api)   { $Api   = Read-Host "API base (e.g. https://<project>.pages.dev/api)" }
 
+# Well-known SIDs, never names: "Users"/"Administrators"/"SYSTEM" are translated on non-English
+# Windows (Benutzer, Administrateurs, ...) and the English names fail there.
+$SidSystem = "S-1-5-18"; $SidAdmins = "S-1-5-32-544"; $SidUsers = "S-1-5-32-545"
+function Sid-Name($sid) {
+  # Local name of a well-known SID, in the language of this Windows.
+  try { return (New-Object System.Security.Principal.SecurityIdentifier($sid)).Translate([System.Security.Principal.NTAccount]).Value } catch { return $sid }
+}
+
 Write-Host "== installing LOCKqz helper =="
 New-Item -ItemType Directory -Force -Path $Dest | Out-Null
 # Only SYSTEM + Administrators may write here; Users get read+execute. Stops a standard user from
 # swapping a staged self-update file between its hash check and the move (local privilege escalation).
-& icacls "$Dest" /inheritance:r /grant:r "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F" "Users:(OI)(CI)RX" | Out-Null
+& icacls "$Dest" /inheritance:r /grant:r "*$($SidSystem):(OI)(CI)F" "*$($SidAdmins):(OI)(CI)F" "*$($SidUsers):(OI)(CI)RX" | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Host "LOCKqz: could not set permissions on $Dest (icacls exit $LASTEXITCODE) - not installing."; exit 1 }
 # The .exe installer already unpacks into $Dest and runs this script from there; copying a
 # file onto itself throws, so only copy when installing from a separate folder.
 if ((Resolve-Path $Here).Path.TrimEnd('\') -ne (Resolve-Path $Dest).Path.TrimEnd('\')) {
@@ -86,20 +95,23 @@ $cfg | ConvertTo-Json | Set-Content -Path "$Dest\config.json" -Encoding UTF8
 $action  = New-ScheduledTaskAction -Execute "powershell.exe" `
   -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Dest\lockqzd.ps1`""
 $trigger = New-ScheduledTaskTrigger -AtStartup
-# Repeat the trigger so the task restarts even after a clean process exit (RestartCount only covers
-# launch failures). MultipleInstances=IgnoreNew keeps a single running copy.
-$trigger.Repetition = (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)).Repetition
-$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+# Repeat so the task restarts even after a clean process exit (RestartCount only covers launch
+# failures). A boot trigger's repetition only starts at the NEXT boot, so a second trigger starting
+# now repeats every 5 minutes indefinitely from install on. MultipleInstances=IgnoreNew keeps one copy.
+$rep = (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)).Repetition
+$trigger.Repetition = $rep
+$tNow = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5)
+$principal = New-ScheduledTaskPrincipal -UserId (Sid-Name $SidSystem) -LogonType ServiceAccount -RunLevel Highest
 # Comes back on its own if it ever stops (crash, kill, self-update restart); no time limit, runs on battery.
 $dSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0 -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
-Register-ScheduledTask -TaskName "LOCKqz" -Action $action -Trigger $trigger `
+Register-ScheduledTask -TaskName "LOCKqz" -Action $action -Trigger @($trigger, $tNow) `
   -Principal $principal -Settings $dSettings -Force | Out-Null
 
 # Per-user agent at every logon (quiz detection + password + live monitor).
 $aAction  = New-ScheduledTaskAction -Execute "powershell.exe" `
   -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Dest\lockqz-agent.ps1`""
 $aTrigger = New-ScheduledTaskTrigger -AtLogOn
-$aPrincipal = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Users" -RunLevel Limited
+$aPrincipal = New-ScheduledTaskPrincipal -GroupId (Sid-Name $SidUsers) -RunLevel Limited
 $aSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0 -RestartCount 99 -RestartInterval (New-TimeSpan -Minutes 1)
 Register-ScheduledTask -TaskName "LOCKqz Agent" -Action $aAction -Trigger $aTrigger `
   -Principal $aPrincipal -Settings $aSettings -Force | Out-Null

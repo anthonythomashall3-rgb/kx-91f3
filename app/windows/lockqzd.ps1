@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.3.9"
+$Version = "0.4.0"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = "$env:ProgramData\LOCKqz\config.json"
@@ -22,8 +22,13 @@ if ($Api -and -not $Api.EndsWith("/api")) { $Api += "/api" }   # accept a bare s
 $Site = if ($Api.EndsWith("/api")) { $Api.Substring(0, $Api.Length - 4) } else { $Api }
 $UpdateUrl = if ($Conf.store_package) { "store:" + $Conf.store_package } elseif ($env:LOCKQZ_UPDATE_URL) { $env:LOCKQZ_UPDATE_URL.TrimEnd("/") } elseif ($Site) { "$Site/download" } else { "" }
 $Device = if ($Conf.device_id) { $Conf.device_id } else { "unknown" }
-$MaxMin = if ($Conf.max_minutes) { [int]$Conf.max_minutes } else { 180 }
-$State  = [hashtable]::Synchronized(@{ state="unlocked"; quiz_id=$null; student=$Conf.student; locked_since=0; max_minutes=$MaxMin; skew=0; registered=$false })
+# Hard cap on any lock: 180 minutes (3 h). Neither config.json nor a /lock request can raise it.
+$CapMin = 180
+function Clamp-Minutes($m) { $n = 0; if (-not [int]::TryParse([string]$m, [ref]$n) -or $n -le 0) { return $CapMin }; return [Math]::Min($n, $CapMin) }
+$MaxMin = Clamp-Minutes $Conf.max_minutes
+# state: "unlocked" | "locking" (engine running, watcher keeps out) | "locked".  applied = the block was
+# verified in place at least once during this lock (only then can its absence be tampering).
+$State  = [hashtable]::Synchronized(@{ state="unlocked"; quiz_id=$null; student=$Conf.student; locked_since=0; max_minutes=$MaxMin; applied=$false; skew=0; registered=$false })
 $KeyPath = "$env:ProgramData\LOCKqz\device.key"
 
 # Signing + API calls. Kept as text so the watcher runspace can load the same code.
@@ -74,6 +79,17 @@ function LQ-Register($api, $device, $key, $state) {
   $r = LQ-Call $api "/register" @{ device_id = $device; key = $key; platform = "windows"; version = $Version; student = $state.student } $device $key $state $false
   if ($r.code -eq 200) { $state.registered = $true }
   return $state.registered
+}
+function LQ-Due($last, $now, [int]$every) {
+  # Wall-clock timer: $true when at least $every seconds passed since $last (unix seconds; 0 = never).
+  return ([int64]$last -le 0) -or (([int64]$now - [int64]$last) -ge $every) -or ([int64]$now -lt [int64]$last)
+}
+function LQ-UnlockReason($claimed, $requester) {
+  # Reason sent with every unlock report. Only the LOCKqz agent may name a quiz-ending reason;
+  # any other local caller of /unlock is "local_request". (The 3-hour cap reports "cap" itself.)
+  $agentReasons = @("quiz_submitted", "quiz_left", "quiz_tab_closed")
+  if (($agentReasons -contains [string]$claimed) -and ($requester.kind -ne "other")) { return [string]$claimed }
+  return "local_request"
 }
 function LQ-VerifySig([byte[]]$body, [string]$sigB64, [string]$pubXml) {
   # RSA-SHA256 (PKCS#1 v1.5) over the exact manifest bytes, public key in .NET XML form.
@@ -171,17 +187,36 @@ $Key = Get-DeviceKey
 # must never land after the unlock and leave the student blocked.
 $EngineMutex = New-Object System.Threading.Mutex($false, "Global\LOCKqzEngine")
 function Engine([string]$c) {
-  try { $null = $EngineMutex.WaitOne(120000) } catch [System.Threading.AbandonedMutexException] { }
-  try { & powershell -ExecutionPolicy Bypass -File $Engine $c | Out-Null } finally { try { $EngineMutex.ReleaseMutex() } catch { } }
+  # -> the engine's output (one string). "LOCKqz: LOCKED" / "LOCKqz: UNLOCKED" only when verified.
+  $got = $false
+  try { $got = $EngineMutex.WaitOne(120000) } catch [System.Threading.AbandonedMutexException] { $got = $true }
+  try { return ((& powershell -NoProfile -ExecutionPolicy Bypass -File $Engine $c) -join "`n") }
+  finally { if ($got) { try { $EngineMutex.ReleaseMutex() } catch { } } }
 }
-function EngineLocked { (& powershell -ExecutionPolicy Bypass -File $Engine status) -cmatch "LOCKqz: LOCKED" }
+function EngineLocked { (& powershell -NoProfile -ExecutionPolicy Bypass -File $Engine status) -cmatch "LOCKqz: LOCKED" }
+# Cheap in-process check of the hosts block (same marker as the engine), for /status.
+$HostsFile = "$env:WINDIR\System32\drivers\etc\hosts"
+function HostsLocked { try { [IO.File]::ReadAllText($HostsFile) -match [regex]::Escape("# LOCKqz START") } catch { $false } }
+function Get-Requester($req) {
+  # Which local process called us: its TCP source port -> owning process -> command line.
+  # kind: "agent" (the installed LOCKqz agent), "other", or "unknown" (lookup failed).
+  $who = @{ kind = "unknown" }
+  try {
+    $c = Get-NetTCPConnection -LocalPort $req.RemoteEndPoint.Port -RemotePort $Port -ErrorAction Stop | Select-Object -First 1
+    $p = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$c.OwningProcess) -ErrorAction Stop
+    $cl = [string]$p.CommandLine
+    $who = @{ kind = "other"; pid = [int]$c.OwningProcess; name = [string]$p.Name; cmd = $cl.Substring(0, [Math]::Min(300, $cl.Length)) }
+    if ($cl -match ('-File\s+"?' + [regex]::Escape((Join-Path $Here "lockqz-agent.ps1")) + '"?(\s|$)')) { $who.kind = "agent" }
+  } catch { }
+  return $who
+}
 # Active-lock record (SYSTEM/admins only). Brightspace checks access only when a quiz is LAUNCHED, so the
 # lock must survive this service being killed: on restart we resume an unexpired lock instead of unlocking.
 $LockFile = if ($env:LOCKQZ_LOCKFILE) { $env:LOCKQZ_LOCKFILE } else { "$env:ProgramData\LOCKqz\active_lock.json" }
 function Save-Lock {
   New-Item -ItemType Directory -Force -Path (Split-Path $LockFile) | Out-Null
   @{ quiz_id=$State.quiz_id; student=$State.student; locked_since=$State.locked_since; max_minutes=$State.max_minutes } | ConvertTo-Json -Compress | Set-Content -Path $LockFile -Encoding UTF8
-  try { icacls $LockFile /inheritance:r /grant:r "SYSTEM:F" "Administrators:F" | Out-Null } catch {}
+  try { & icacls $LockFile /inheritance:r /grant:r "*S-1-5-18:F" "*S-1-5-32-544:F" | Out-Null } catch {}
 }
 function Clear-Lock { Remove-Item -Path $LockFile -Force -ErrorAction SilentlyContinue }
 function Load-Lock {
@@ -219,35 +254,66 @@ $watcher.AddScript({
     # Restart both tasks from a detached process: stopping "LOCKqz" ends this very process.
     Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoProfile -Command `"Stop-ScheduledTask -TaskName 'LOCKqz Agent'; Stop-ScheduledTask -TaskName 'LOCKqz'; Start-Sleep 3; Start-ScheduledTask -TaskName 'LOCKqz'; Start-ScheduledTask -TaskName 'LOCKqz Agent'`""
   }
-  function ELocked { (& powershell -ExecutionPolicy Bypass -File $Engine status) -cmatch "LOCKqz: LOCKED" }
-  function WReport($event,$detail,$source) {
-    $b = @{ device_id=$Device; event=$event; quiz_id=$State.quiz_id; student=$State.student;
+  function ELocked { (& powershell -NoProfile -ExecutionPolicy Bypass -File $Engine status) -cmatch "LOCKqz: LOCKED" }
+  function WEngine([string]$c) { ((& powershell -NoProfile -ExecutionPolicy Bypass -File $Engine $c) -join "`n") }
+  function WReport($event,$detail,$source,$quiz) {
+    $b = @{ device_id=$Device; event=$event; quiz_id=$(if ($quiz) { $quiz } else { $State.quiz_id }); student=$State.student;
             ts=(Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") }
     if ($detail) { $b.detail = $detail }
     if ($source) { $b.source = $source }
     LQ-Call $Api "/report" $b $Device $Key $State $true | Out-Null
   }
+  function WLock { $got = $false; try { $got = $mx.WaitOne(120000) } catch [System.Threading.AbandonedMutexException] { $got = $true }; return $got }
+  function WUnlockMx($got) { if ($got) { try { $mx.ReleaseMutex() } catch { } } }
+  $hostsPath = "$env:WINDIR\System32\drivers\etc\hosts"
+  $policyBackup = "$env:ProgramData\LOCKqz\policy-backup.json"
   $mx = New-Object System.Threading.Mutex($false, "Global\LOCKqzEngine")
-  $cycles = 0
+  $cycles = 0; $lastBeat = 0; $lastSweep = 0
   while ($true) {
     Start-Sleep -Seconds 5; $cycles++
+    $now = [int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
     if ($State.state -eq "locked") {
-      $now = [int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
       if ($State.locked_since -gt 0 -and ($now - $State.locked_since) -gt ($State.max_minutes * 60)) {
-        # hard-max safety: never leave a student locked
-        WReport "auto_unlock" "max_minutes" $null
-        $State.state = "unlocked"; $State.quiz_id = $null; $State.locked_since = 0
-        try { $null = $mx.WaitOne(120000) } catch [System.Threading.AbandonedMutexException] { }
-        try { & powershell -ExecutionPolicy Bypass -File $Engine unlock | Out-Null } finally { try { $mx.ReleaseMutex() } catch { } }
-        $lf = if ($env:LOCKQZ_LOCKFILE) { $env:LOCKQZ_LOCKFILE } else { "$env:ProgramData\LOCKqz\active_lock.json" }
-        Remove-Item -Path $lf -Force -ErrorAction SilentlyContinue
+        # hard-max safety: never leave a student locked (3 h)
+        $q = $State.quiz_id; $ok = $false
+        $got = WLock
+        try {
+          if ($State.state -eq "locked") {
+            $State.state = "unlocked"; $State.quiz_id = $null; $State.locked_since = 0; $State.applied = $false
+            $ok = (WEngine "unlock") -cmatch "LOCKqz: UNLOCKED"
+            $lf = if ($env:LOCKQZ_LOCKFILE) { $env:LOCKQZ_LOCKFILE } else { "$env:ProgramData\LOCKqz\active_lock.json" }
+            Remove-Item -Path $lf -Force -ErrorAction SilentlyContinue
+          } else { $q = $null }
+        } finally { WUnlockMx $got }
+        if ($q) { WReport "unlock" @{ reason = "cap"; requester = "helper"; engine_ok = $ok } $null $q }
       } else {
-        if (-not (ELocked)) { WReport "tamper" "hosts_block_removed" $null }
-        try { $null = $mx.WaitOne(120000) } catch [System.Threading.AbandonedMutexException] { }
-        try { if ($State.state -eq "locked") { & powershell -ExecutionPolicy Bypass -File $Engine lock | Out-Null } }
-        finally { try { $mx.ReleaseMutex() } catch { } }
-        # liveness ping every ~300s so a killed helper shows up on the live monitor (free-plan budget)
-        if ($cycles % 60 -eq 0) { WReport "heartbeat" $null "helper" }
+        # Tamper check and re-apply under the engine mutex, re-checking the state inside it, so a
+        # lock or unlock in progress can never look like a removed block.
+        $tamper = $false
+        $got = WLock
+        try {
+          if ($State.state -eq "locked") {
+            $was = ELocked
+            if ((-not $was) -and $State.applied -and ($State.state -eq "locked")) { $tamper = $true }
+            $o = WEngine "lock"
+            if (($State.state -eq "locked") -and ($o -cmatch "LOCKqz: LOCKED")) { $State.applied = $true }
+          }
+        } finally { WUnlockMx $got }
+        if ($tamper) { WReport "tamper" "hosts_block_removed" $null }
+        # liveness ping every 300 s of wall time, whatever a cycle costs (server: stale after 660 s)
+        if (($State.state -eq "locked") -and (LQ-Due $lastBeat $now 300)) { $lastBeat = $now; WReport "heartbeat" $null "helper" }
+      }
+    } elseif ($State.state -eq "unlocked") {
+      $lastBeat = 0
+      # Never leave AI blocked after an unlock: a block (or saved policy backup) still present while
+      # unlocked means an unlock did not finish (hosts file busy, policy write failed) -> finish it.
+      $stray = $false
+      try { $stray = ([IO.File]::ReadAllText($hostsPath) -match [regex]::Escape("# LOCKqz START")) } catch { }
+      if (-not $stray) { $stray = Test-Path $policyBackup }
+      if ($stray -and (LQ-Due $lastSweep $now 15)) {
+        $lastSweep = $now
+        $got = WLock
+        try { if ($State.state -eq "unlocked") { WEngine "unlock" | Out-Null } } finally { WUnlockMx $got }
       }
     }
     # ~hourly until the server knows this device's key
@@ -257,17 +323,24 @@ $watcher.AddScript({
     if ($cycles -eq [math]::Min(18, $every) -or ($cycles % $every -eq 0)) { WUpdate }
   }
 }).AddArgument($State).AddArgument($Engine).AddArgument($Api).AddArgument($Device).AddArgument($Key).AddArgument($SignLib).AddArgument($Here).AddArgument($UpdateUrl).AddArgument($Version) | Out-Null
-$watcher.BeginInvoke() | Out-Null
-
-# Fail safe on start: never leave a machine locked across a restart.
+# Fail safe on start: never leave a machine locked across a restart. The state is set BEFORE the
+# watcher starts, so it never mistakes a resumed lock for a leftover block.
 $saved = Load-Lock
 if ($saved) {
-  # Service was killed or the PC rebooted mid-quiz: stay locked and report it. Hard max still unlocks on time.
-  $State.state="locked"; $State.quiz_id=$saved.quiz_id; if ($saved.student) { $State.student=$saved.student }
-  $State.locked_since=[int]$saved.locked_since; $State.max_minutes=[int]$saved.max_minutes
-  Engine "lock"; Report "tamper" @{ detail="helper_restarted_mid_quiz" } $null $saved.quiz_id
-} else { Engine "unlock" }
+  $State.state="locking"; $State.quiz_id=$saved.quiz_id; if ($saved.student) { $State.student=$saved.student }
+  $State.locked_since=[int]$saved.locked_since; $State.max_minutes=Clamp-Minutes $saved.max_minutes
+}
+$watcher.BeginInvoke() | Out-Null
+if ($saved) {
+  # Service was killed or the PC rebooted mid-quiz: stay locked and report it. Hard max still unlocks
+  # on time, and the agent unlocks within its 30 s grace if the quiz is no longer open.
+  $State.applied = (Engine "lock") -cmatch "LOCKqz: LOCKED"
+  $State.state="locked"
+  Report "tamper" @{ detail="helper_restarted_mid_quiz" } $null $saved.quiz_id
+} else { Engine "unlock" | Out-Null }   # restores only what a LOCKqz lock changed; no-op otherwise
 LQ-Register $Api $Device $Key $State | Out-Null
+# Tell the server which version runs now (a self-update restarts the helper), as the Mac helper does.
+try { Report "install" @{ platform="windows"; version=$Version } } catch {}
 
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://127.0.0.1:$Port/")
@@ -277,17 +350,41 @@ Write-Host "LOCKqzd: listening on 127.0.0.1:$Port"
 while ($listener.IsListening) {
   $ctx = $listener.GetContext()
   $req = $ctx.Request; $res = $ctx.Response
-  $res.Headers.Add("Access-Control-Allow-Origin","*")
-  $res.Headers.Add("Access-Control-Allow-Headers","Content-Type, X-LOCKqz-Token")
-  if ($req.HttpMethod -eq "OPTIONS") { $res.StatusCode = 204; $res.Close(); continue }
+  # No CORS: only local programs (the agent) talk to this server, never a web page.
+  if ($req.Headers["Origin"]) { $res.StatusCode = 403; $res.Close(); continue }
   if ($req.Headers["X-LOCKqz-Token"] -ne $Token) { $res.StatusCode = 401; $res.Close(); continue }
   $path = $req.Url.AbsolutePath
   $body = @{}
   if ($req.HasEntityBody) { $body = (New-Object IO.StreamReader($req.InputStream)).ReadToEnd() | ConvertFrom-Json }
   $out = @{ ok = $true }
   switch ($path) {
-    "/lock"      { $State.state="locked"; $State.quiz_id=$body.quiz_id; if($body.student){$State.student=$body.student}; if($body.max_minutes){$State.max_minutes=[int]$body.max_minutes}; $State.locked_since=[int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); Engine "lock"; Save-Lock; Report "lock" $null; $out.state="locked" }
-    "/unlock"    { $q = if ($State.quiz_id) { $State.quiz_id } else { $body.quiz_id }; $State.state="unlocked"; $State.quiz_id=$null; Engine "unlock"; Clear-Lock; Report "unlock" $null $null $q; $out.state="unlocked" }
+    "/lock"      {
+      # "locking" while the engine runs: the watcher neither checks for tampering nor sweeps a
+      # "stray" block until the block is really in place.
+      $same = ($State.state -eq "locked") -and ($State.quiz_id -eq $body.quiz_id)
+      $State.state="locking"; $State.quiz_id=$body.quiz_id; if($body.student){$State.student=$body.student}
+      $State.max_minutes = Clamp-Minutes $(if ($body.max_minutes) { $body.max_minutes } else { $MaxMin })
+      if (-not $same) { $State.locked_since=[int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); $State.applied=$false }
+      $ok = (Engine "lock") -cmatch "LOCKqz: LOCKED"
+      if ($ok) { $State.applied = $true }
+      $State.state="locked"; Save-Lock; Report "lock" $null
+      $out.state="locked"; $out.engine_locked=$ok
+    }
+    "/unlock"    {
+      $q = if ($State.quiz_id) { $State.quiz_id } else { $body.quiz_id }
+      $who = Get-Requester $req
+      $why = LQ-UnlockReason $body.reason $who
+      $State.state="unlocked"; $State.quiz_id=$null; $State.locked_since=0; $State.applied=$false
+      $ok = (Engine "unlock") -cmatch "LOCKqz: UNLOCKED"   # if not, the watcher finishes it within 5 s
+      Clear-Lock
+      $det = @{ reason = $why; requester = $who.kind; engine_ok = $ok }
+      if ($who.name) { $det.process = $who.name }
+      if (($why -eq "local_request") -and $body.reason) { $det.claimed = ([string]$body.reason).Substring(0, [Math]::Min(40, ([string]$body.reason).Length)) }
+      if (($why -eq "local_request") -and $who.cmd) { $det.cmd = $who.cmd }
+      Report "unlock" $det $null $q
+      if (($why -eq "quiz_left") -or ($why -eq "quiz_tab_closed")) { Report "quiz_left" $why "agent" $q }
+      $out.state="unlocked"; $out.engine_unlocked=$ok
+    }
     "/student"   { if($body.student){$State.student=$body.student}; Report "install" @{ platform="windows"; version=$Version }; $out.student=$State.student }
     "/verify"    {
       # One-time student email setup (status | check | send | code), signed with the SYSTEM-only key
@@ -323,7 +420,7 @@ while ($listener.IsListening) {
       }
     }
     "/event"     { if ($body.event -eq "quiz_left") { Report "quiz_left" $body.detail "agent" $body.quiz_id } else { $res.StatusCode = 400; $out = @{ error = "event not allowed" } } }
-    "/status"    { $out = @{ state=$State.state; quiz_id=$State.quiz_id; engine_locked=(EngineLocked); version=$Version } }
+    "/status"    { $out = @{ state=$State.state; quiz_id=$State.quiz_id; student=$State.student; engine_locked=(HostsLocked); version=$Version } }
     default      { $res.StatusCode = 404; $out = @{ error="not found" } }
   }
   $json = ($out | ConvertTo-Json -Compress)

@@ -1,11 +1,13 @@
 #!/bin/bash
 # Start the LOCKqz daemon in DRY-RUN (no system changes) and smoke-test the control
 # plane the extension uses. No sudo needed. Ctrl-C to stop.
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
 pkill -f lockqzd.py 2>/dev/null; sleep 1
-LOCKQZ_DRYRUN=1 python3 lockqzd.py & PID=$!
+W="$(mktemp -d)"   # dry-run state + token live in a temp folder, never in /Library
+T="dryrun-$(python3 -c 'import secrets;print(secrets.token_hex(16))')"; printf %s "$T" > "$W/helper.token"
+LOCKQZ_DRYRUN=1 LOCKQZ_TOKEN_FILE="$W/helper.token" LOCKQZ_TOKEN_DIR="$W/tokens" LOCKQZ_LOCKFILE="$W/active_lock.json" \
+  LOCKQZ_KEY_PATH="$W/device.key" python3 lockqzd.py & PID=$!
 sleep 2
-T=$(python3 -c "import json;print(json.load(open('config.json'))['token'])")
 B=http://127.0.0.1:8787
 echo "status:   $(curl -s -H "X-LOCKqz-Token: $T" $B/status)"
 echo "lock:     $(curl -s -X POST -H "X-LOCKqz-Token: $T" -d '{"quiz_id":"QZTEST"}' $B/lock)"

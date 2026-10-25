@@ -8,7 +8,7 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 APP="$(cd "$HERE/.." && pwd)"
 TMP="$(mktemp -d)"
-TOKEN="utest-token"
+TOKEN="utest-token-0123456789abcdef"
 pass=0; fail=0
 ok(){ pass=$((pass+1)); echo "  ok: $1"; }
 bad(){ fail=$((fail+1)); echo "  FAIL: $1"; }
@@ -68,13 +68,13 @@ PY
 # --- an "installed" helper: a copy of the real files in its own folder ---
 fresh_install(){   # $1 dir
   rm -rf "$1"; mkdir -p "$1"; cp "$APP/mac/"*.py "$APP/mac/"*.sh "$APP/mac/blocklist.txt" "$1/"
-  cp "$TMP/good.pub" "$1/update.pub"
+  cp "$TMP/good.pub" "$1/update.pub"; printf %s "$TOKEN" > "$1/helper.token"
   cat > "$1/config.json" <<CFG
 { "port": $2, "token": "$TOKEN", "api_base": "http://127.0.0.1:$MOCK_PORT", "device_id": "utest-dev", "student": "T", "max_minutes": 180 }
 CFG
 }
 start_daemon(){   # $1 install dir  $2 ctrl port  [$3 extra env]  -> DPID_
-  env LOCKQZ_NO_DEVMODE=1 LOCKQZ_DRYRUN=1 LOCKQZ_CONFIG="$1/config.json" LOCKQZ_KEY_PATH="$1/device.key" \
+  env LOCKQZ_TOKEN_FILE="$1/helper.token" LOCKQZ_TOKEN_DIR="$1/tokens" LOCKQZ_NO_DEVMODE=1 LOCKQZ_DRYRUN=1 LOCKQZ_CONFIG="$1/config.json" LOCKQZ_KEY_PATH="$1/device.key" \
       LOCKQZ_LOCKFILE="$1/active_lock.json" LOCKQZ_BLOCKLIST="$1/blocklist.txt" LOCKQZ_UPDATE_DELAY=1 \
       LOCKQZ_UPDATE_DIR="$1" LOCKQZ_UPDATE_PUB="$1/update.pub" ${3:-} \
       python3 "$1/lockqzd.py" >"$1/daemon.log" 2>&1 & DPID_=$!
@@ -142,7 +142,8 @@ cat > "$TMP/i7/config.json" <<CFG
 { "port": $P, "token": "$TOKEN", "api_base": "http://127.0.0.1:$MOCK_PORT", "device_id": "utest-dev7", "max_minutes": 180 }
 CFG
 cp "$APP/mac/blocklist.txt" "$TMP/i7/blocklist.txt"; cp "$APP/mac/lockqzd.py" "$TMP/i7/orig.py"
-env LOCKQZ_NO_DEVMODE=1 LOCKQZ_DRYRUN=1 LOCKQZ_CONFIG="$TMP/i7/config.json" LOCKQZ_KEY_PATH="$TMP/i7/device.key" \
+printf %s "$TOKEN" > "$TMP/i7/helper.token"
+env LOCKQZ_TOKEN_FILE="$TMP/i7/helper.token" LOCKQZ_TOKEN_DIR="$TMP/i7/tokens" LOCKQZ_NO_DEVMODE=1 LOCKQZ_DRYRUN=1 LOCKQZ_CONFIG="$TMP/i7/config.json" LOCKQZ_KEY_PATH="$TMP/i7/device.key" \
     LOCKQZ_LOCKFILE="$TMP/i7/active_lock.json" LOCKQZ_BLOCKLIST="$TMP/i7/blocklist.txt" LOCKQZ_UPDATE_DELAY=1 \
     LOCKQZ_UPDATE_PUB="$TMP/good.pub" python3 "$APP/mac/lockqzd.py" >"$TMP/i7/daemon.log" 2>&1 & DPID_=$!; PIDS="$PIDS $DPID_"
 sleep 4

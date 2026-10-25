@@ -9,7 +9,7 @@ The blocking service that runs on the student's Mac.
 - `lockqzd.py` — daemon: loopback control server on 127.0.0.1:8787 + tamper watcher + reports.
 - `com.lockqz.pf.conf` — firewall rules (block DoT/DoH so encrypted DNS can't bypass hosts).
 - `browser-ai-block.mobileconfig` — turns off Chrome Gemini / Edge Copilot / browser DoH.
-- `config.example.json` — copy to config.json; set the token (shared with the extension) and api_base.
+- `config.example.json` — copy to config.json; set api_base. The helper's loopback control token is generated on each Mac (`helper.token`, root-only; a read-only copy for the logged-in user in `tokens/<uid>`) — never shipped in a package.
 
 ## Test the engine by hand
 ```

@@ -16,7 +16,8 @@ free_port(){ python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0
 # free ports picked at run time, so a second test run (or anything else) on this machine can't collide
 MOCK_PORT=$(free_port)
 CTRL_PORT=$(free_port)
-TOKEN="itest-token"
+TOKEN="itest-token-0123456789abcdef"
+BL_SUM="$(cksum < "$APP/mac/blocklist.txt")"   # the test must never write the repo's blocklist
 pass=0; fail=0
 ok(){ pass=$((pass+1)); echo "  ok: $1"; }
 bad(){ fail=$((fail+1)); echo "  FAIL: $1"; }
@@ -90,8 +91,8 @@ start_daemon(){   # $1 mock port  $2 ctrl port  $3 log  $4 skew  $5 dir  -> sets
 { "port": $2, "token": "$TOKEN", "api_base": "http://127.0.0.1:$1",
   "device_id": "itest-dev", "student": "Test Student", "max_minutes": 180, "beat_cycles": 1 }
 CFG
-  cp "$APP/mac/blocklist.txt" "$5/blocklist.txt"
-  LOCKQZ_NO_DEVMODE=1 LOCKQZ_DRYRUN=1 LOCKQZ_CONFIG="$5/config.json" LOCKQZ_KEY_PATH="$5/device.key" LOCKQZ_BLOCKLIST="$5/blocklist.txt" \
+  cp "$APP/mac/blocklist.txt" "$5/blocklist.txt"; printf %s "$TOKEN" > "$5/helper.token"
+  LOCKQZ_TOKEN_FILE="$5/helper.token" LOCKQZ_TOKEN_DIR="$5/tokens" LOCKQZ_LOCKFILE="$5/active_lock.json" LOCKQZ_NO_DEVMODE=1 LOCKQZ_DRYRUN=1 LOCKQZ_CONFIG="$5/config.json" LOCKQZ_KEY_PATH="$5/device.key" LOCKQZ_BLOCKLIST="$5/blocklist.txt" \
     python3 "$APP/mac/lockqzd.py" >"$5/daemon.log" 2>&1 & DPID_=$!
   for i in $(seq 1 20); do
     curl -s -m 2 -H "X-LOCKqz-Token: $TOKEN" "http://127.0.0.1:$2/status" >/dev/null 2>&1 && break
@@ -178,7 +179,7 @@ orig=$(grep -cvE '^\s*(#|$)' "$APP/mac/blocklist.txt"); now=$(grep -cvE '^\s*(#|
 [ "$now" -eq $((orig + 21)) ] && ok "list grew $orig -> $now (20 test domains + new-ai.example), nothing removed" || bad "list went $orig -> $now"
 grep -qx 'new-ai.example' "$TMP/a/blocklist.txt" && ok "new AI from the server added" || bad "server addition missing"
 grep -qx 'chat.deepseek.com' "$TMP/a/blocklist.txt" && ok "shipped domains kept (chat.deepseek.com)" || bad "shipped domain dropped"
-git -C "$APP" diff --quiet -- mac/blocklist.txt 2>/dev/null && ok "repo blocklist untouched by the test" || bad "test modified app/mac/blocklist.txt"
+[ "$(cksum < "$APP/mac/blocklist.txt")" = "$BL_SUM" ] && ok "repo blocklist untouched by the test" || bad "test modified app/mac/blocklist.txt"
 
 echo "T7 a student clock 15 minutes off is corrected from the server time"
 LOG2="$TMP/reports2.log"; mkdir -p "$TMP/b"; CTRL1=$CTRL_PORT; CTRL_PORT=$(free_port)
@@ -202,8 +203,8 @@ cat > "$TMP/c/config.json" <<CFG
 { "port": $CTRL_PORT, "token": "$TOKEN", "api_base": "http://127.0.0.1:$M3",
   "device_id": "itest-admin", "student": "Admin", "max_minutes": 180, "beat_cycles": 1 }
 CFG
-cp "$APP/mac/blocklist.txt" "$TMP/c/blocklist.txt"
-LOCKQZ_DEV_KEY="$TMP/c/developer.key" LOCKQZ_DRYRUN=1 LOCKQZ_CONFIG="$TMP/c/config.json" LOCKQZ_KEY_PATH="$TMP/c/device.key" LOCKQZ_BLOCKLIST="$TMP/c/blocklist.txt" \
+cp "$APP/mac/blocklist.txt" "$TMP/c/blocklist.txt"; printf %s "$TOKEN" > "$TMP/c/helper.token"
+LOCKQZ_TOKEN_FILE="$TMP/c/helper.token" LOCKQZ_TOKEN_DIR="$TMP/c/tokens" LOCKQZ_LOCKFILE="$TMP/c/active_lock.json" LOCKQZ_DEV_KEY="$TMP/c/developer.key" LOCKQZ_DRYRUN=1 LOCKQZ_CONFIG="$TMP/c/config.json" LOCKQZ_KEY_PATH="$TMP/c/device.key" LOCKQZ_BLOCKLIST="$TMP/c/blocklist.txt" \
   python3 "$TMP/c/lockqzd.py" >"$TMP/c/daemon.log" 2>&1 & DPID3=$!
 for i in $(seq 1 20); do curl -s -m 2 -H "X-LOCKqz-Token: $TOKEN" "http://127.0.0.1:$CTRL_PORT/status" >/dev/null 2>&1 && break; sleep 0.5; done
 st=$(curl -s -H "X-LOCKqz-Token: $TOKEN" "http://127.0.0.1:$CTRL_PORT/status")
@@ -222,6 +223,32 @@ grep -q '"event": "unlock"' "$LOG3" && ok "unlock reported at quiz end" || bad "
 kill $DPID3 $MPID3 2>/dev/null
 CTRL_PORT=$CTRL1
 
+
+echo "T9 every unlock report says why: agent reasons pass through, anything else is local_request, the cap says cap"
+hpost /lock '{"quiz_id":"98765-12345","student":"Test Student"}' >/dev/null
+hpost /unlock '{"quiz_id":"98765-12345","reason":"quiz_submitted"}' >/dev/null; sleep 1
+grep '"event": "unlock"' "$LOG" | grep -q '"reason": "quiz_submitted"' && ok "agent reason quiz_submitted reported" || bad "no quiz_submitted reason"
+hpost /lock '{"quiz_id":"98765-12345","student":"Test Student"}' >/dev/null
+hpost /unlock '{"quiz_id":"98765-12345","reason":"because I said so"}' >/dev/null; sleep 1
+grep '"event": "unlock"' "$LOG" | grep -q '"reason": "local_request"' && ok "unknown caller reason -> local_request" || bad "no local_request reason"
+LOG4="$TMP/reports4.log"; mkdir -p "$TMP/d"; CTRL1=$CTRL_PORT; CTRL_PORT=$(free_port); M4=$(free_port)
+python3 "$TMP/mock.py" "$M4" "$LOG4" 0 & MPID4=$!
+for i in $(seq 1 20); do curl -s -o /dev/null -m 1 "http://127.0.0.1:$M4/" && break; sleep 0.25; done
+cat > "$TMP/d/config.json" <<CFG
+{ "port": $CTRL_PORT, "api_base": "http://127.0.0.1:$M4", "device_id": "itest-cap", "student": "T", "max_minutes": 1, "beat_cycles": 1 }
+CFG
+cp "$APP/mac/blocklist.txt" "$TMP/d/blocklist.txt"; printf %s "$TOKEN" > "$TMP/d/helper.token"
+python3 -c "import json,time;json.dump({'quiz_id':'98765-12345','student':'T','locked_at':'x','locked_since':time.time()-55,'max_minutes':1},open('$TMP/d/active_lock.json','w'))"
+LOCKQZ_TOKEN_FILE="$TMP/d/helper.token" LOCKQZ_TOKEN_DIR="$TMP/d/tokens" LOCKQZ_LOCKFILE="$TMP/d/active_lock.json" LOCKQZ_NO_DEVMODE=1 LOCKQZ_DRYRUN=1 \
+  LOCKQZ_CONFIG="$TMP/d/config.json" LOCKQZ_KEY_PATH="$TMP/d/device.key" LOCKQZ_BLOCKLIST="$TMP/d/blocklist.txt" \
+  python3 "$APP/mac/lockqzd.py" >"$TMP/d/daemon.log" 2>&1 & DPID4=$!
+for i in $(seq 1 40); do grep -q '"reason": "cap"' "$LOG4" 2>/dev/null && break; sleep 0.5; done
+grep '"event": "unlock"' "$LOG4" | grep '"reason": "cap"' | grep -q '"quiz_id": "98765-12345"' && ok "hard cap auto-unlock reported as unlock, reason cap" || bad "no cap unlock report: $(tail -3 "$LOG4")"
+st=$(curl -s -H "X-LOCKqz-Token: $TOKEN" "http://127.0.0.1:$CTRL_PORT/status")
+echo "$st" | grep -q '"state": "unlocked"' && echo "$st" | grep -q '"capped_quiz": "98765-12345"' && ok "status tells the agent which quiz the cap released" || bad "status after cap: $st"
+[ ! -f "$TMP/d/active_lock.json" ] && ok "cap clears the lock record" || bad "lock record left after cap"
+kill $DPID4 $MPID4 2>/dev/null
+CTRL_PORT=$CTRL1
 echo ""
 echo "RESULT: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -77,14 +77,15 @@ async function getc(env, path, { teacher=null, sync=null } = {}) {
   const sqlite = makeDb(false);
   const env = { DB: d1real(sqlite), TEACHER_KEY: ADMIN, REQUIRE_SIGNED: "1", VENMO_HANDLE: "@lockqz-test" };
   const ADMIN_TOK = (await call(env, "/signup", { email: "admin@usc.edu", password: "adminpass1" })).data.token;
-  const [CUR] = (() => { const d = new Date(Date.now() - 7*3600000).toISOString().slice(0,10), y=+d.slice(0,4), m=+d.slice(5,7), s = m<=5?1:(m<=7?2:3); return [String(y*10+s)]; })();
+  const [CUR] = (() => { const d = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date()), y=+d.slice(0,4), m=+d.slice(5,7), s = m<=5?1:(m<=7?2:3); return [String(y*10+s)]; })();
   const ins = sqlite.prepare("INSERT INTO usc_sections (term,section,course,title,first,last,seats,registered) VALUES (?,?,?,?,?,?,?,?)");
   ins.run(CUR, "15351", "FBE 437", "Ent Fin", "Duke", "Bristow", 60, 58);
   ins.run(CUR, "15353", "FBE 437", "Ent Fin", "Duke", "Bristow", 60, 58);
   ins.run(CUR, "15395", "FBE 527", "Ent Fin", "Duke", "Bristow", 77, 63);
   ins.run(CUR, "15999", "FBE 437", "Ent Fin", "Other", "Person", 60, 50);
 
-  let r = await call(env, "/signup", { email: "prof@usc.edu", password: "profpass1", name: "Duke Bristow" });
+  const INV = (await call(env, "/invite", { email: "prof@usc.edu" }, { teacher: ADMIN_TOK })).data.code;   // professors join by invite
+  let r = await call(env, "/signup", { email: "prof@usc.edu", password: "profpass1", name: "Duke Bristow", invite: INV });
   const TOK = r.data.token;
   const SYNC = (await getc(env, "/synckey", { teacher: TOK })).data.key;
   const roster = [ { id: "4000", name: "Duke Bristow", email: "prof@usc.edu", role: "Instructor" }, { id: "4001", name: "Al", email: "al@usc.edu", role: "Student" } ];
@@ -116,7 +117,7 @@ async function getc(env, path, { teacher=null, sync=null } = {}) {
 
   console.log("S3 only the admin marks sections paid");
   r = await call(env, "/pay-sections", { email: "prof@usc.edu", term: CUR, sections: ["15351"], until: "2099-12-31" }, { teacher: TOK });
-  check("professor cannot mark own section paid", r.status === 401, `got ${r.status}`);
+  check("professor cannot mark own section paid", r.status === 403, `got ${r.status}`);
   r = await call(env, "/pay-sections", { email: "prof@usc.edu", term: CUR, sections: ["15351"], until: "2099-12-31" }, { teacher: ADMIN_TOK });
   check("admin marks 15351 paid", r.status === 200, JSON.stringify(r.data));
   r = await getc(env, "/teacher-sections?email=prof%40usc.edu", { teacher: ADMIN_TOK });

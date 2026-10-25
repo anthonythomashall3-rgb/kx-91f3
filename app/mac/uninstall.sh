@@ -14,11 +14,14 @@ pkill -f "$DEST/lockqzd.py" 2>/dev/null || true
 pkill -f "$DEST/lockqz-agent.py" 2>/dev/null || true
 sleep 1
 # Now nothing is running to fight us: restore everything.
-bash "$DEST/lockqz.sh" unlock 2>/dev/null || true
+# (unlock restores the browser policies and Apple Intelligence settings from their backups, so it
+#  must run BEFORE the folder holding those backups is deleted; try twice.)
+bash "$DEST/lockqz.sh" unlock 2>/dev/null || bash "$DEST/lockqz.sh" unlock || echo "LOCKqz: warning - some settings could not be restored"
 /usr/bin/python3 "$DEST/browser-policy.py" unlock 2>/dev/null || true
 # Remove our pf.conf anchor line (added at install).
 if grep -q 'anchor "com.lockqz"' /etc/pf.conf 2>/dev/null; then
-  grep -v 'anchor "com.lockqz"' /etc/pf.conf > /tmp/pf.conf.lockqz && cat /tmp/pf.conf.lockqz > /etc/pf.conf && rm -f /tmp/pf.conf.lockqz
+  T="$(mktemp)"   # private temp file (a fixed /tmp name could be a planted symlink)
+  grep -v 'anchor "com.lockqz"' /etc/pf.conf > "$T" && cat "$T" > /etc/pf.conf; rm -f "$T"
   pfctl -f /etc/pf.conf 2>/dev/null || true
 fi
 rm -f "$PLIST" "$AGENT"

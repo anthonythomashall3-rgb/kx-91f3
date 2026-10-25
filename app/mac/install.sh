@@ -2,7 +2,8 @@
 # LOCKqz macOS installer. Installs the root helper (blocks AI) and the per-user agent
 # (detects the Brightspace quiz). ONE install, no browser extension, no Web Store.
 # Run from the mac/ folder:   sudo bash install.sh
-# Reads token/api from mac/config.json if present, else from --token/--api or prompts.
+# Reads api from mac/config.json if present, else from --api or prompts. The helper's loopback
+# control token is generated fresh on THIS Mac (never shipped); --token is accepted and ignored.
 # Uninstall any time:          sudo bash uninstall.sh
 #
 # ONE-LINE INSTALL (no download, no Gatekeeper warning - the $0 path):
@@ -65,38 +66,46 @@ if [ ! -f "$APP/lockqzd.py" ] || [ -n "${FETCH_ONLY:-}" ]; then
   if [ -n "${FETCH_ONLY:-}" ]; then mkdir -p "$FETCH_ONLY"; cp "$WORK/files"/* "$FETCH_ONLY/"; echo "fetched $(wc -l < "$WORK/list") files (signature + hashes OK)"; exit 0; fi
   APP="$WORK/files"; REMOTE=1
   [ -n "$API" ] || API="$SITE/api"
-  [ -n "$TOKEN" ] || TOKEN="lqz-$(/usr/bin/uuidgen | tr 'A-Z' 'a-z' | tr -d '-' | cut -c1-20)"
 fi
 
 # Pull defaults from an existing config.json next to this script.
 CFG="$APP/config.json"
-if [ -z "$TOKEN" ] && [ -f "$CFG" ]; then TOKEN="$(/usr/bin/python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("token",""))' "$CFG" 2>/dev/null || true)"; fi
 if [ -z "$API" ]   && [ -f "$CFG" ]; then API="$(/usr/bin/python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("api_base",""))' "$CFG" 2>/dev/null || true)"; fi
-[ -n "$TOKEN" ] || { read -r -p "Shared token: " TOKEN; }
 [ -n "$API" ]   || { read -r -p "API base (e.g. https://<project>.pages.dev/api): " API; }
 
 DEVICE="mac-$(/usr/bin/uuidgen | tr 'A-Z' 'a-z')"
+# A reinstall keeps this Mac's device id (its signing key is already registered with the server).
+OLD_DEV="$(/usr/bin/python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("device_id",""))' "$DEST/config.json" 2>/dev/null || true)"
+case "$OLD_DEV" in mac-*) DEVICE="$OLD_DEV";; esac
 echo "== installing LOCKqz helper =="
 
-mkdir -p "$DEST"
+# The install folder holds code that runs as root: it must be root's, whatever was there before.
+[ -L "$DEST" ] && rm -f "$DEST"
+mkdir -p "$DEST"; chown root:wheel "$DEST"; chmod 755 "$DEST"
 if [ -n "${REMOTE:-}" ]; then
   cp "$APP"/* "$DEST/"
 else
   cp "$APP/lockqz.sh" "$APP/lockqz-core.sh" "$APP/extra-block.sh" "$APP/lockqzd.py" "$APP/lockqz-agent.py" "$APP/browser-policy.py" \
      "$APP/blocklist.txt" "$APP/com.lockqz.pf.conf" "$APP/ensure-python.sh" "$APP/lockqz-boot.sh" "$APP/update.pub" "$APP/install.sh" "$APP/uninstall.sh" "$DEST/"
 fi
+chown -R root:wheel "$DEST"; chmod -R go-w "$DEST"
 chmod 755 "$DEST"/*.sh "$DEST"/*.py 2>/dev/null || true
 # python3 must really work (fresh Macs ship only a stub until Apple's tools are installed).
 bash "$DEST/ensure-python.sh"
 
 # Write the device config (merge token/api/device into the example shape).
-/usr/bin/python3 - "$DEST/config.json" "$TOKEN" "$API" "$DEVICE" "$STUDENT" <<'PY'
+/usr/bin/python3 - "$DEST/config.json" "$API" "$DEVICE" "$STUDENT" <<'PY'
 import json,sys
-path,token,api,dev,student=sys.argv[1:6]
-json.dump({"port":8787,"token":token,"api_base":api,"device_id":dev,
+path,api,dev,student=sys.argv[1:5]
+json.dump({"port":8787,"api_base":api,"device_id":dev,
           "student":student or None,"max_minutes":180}, open(path,"w"), indent=2)
 PY
-chmod 644 "$DEST/config.json"   # the per-user agent reads it (loopback token only)
+chmod 644 "$DEST/config.json"   # the per-user agent reads it (no secrets in it)
+# Loopback control token: random per install, root-only. The helper gives the logged-in user a
+# read-only copy in "$DEST/tokens/<uid>" (root-owned folder).
+[ -s "$DEST/helper.token" ] || ( umask 077; /usr/bin/openssl rand -hex 32 > "$DEST/helper.token" )
+chown root:wheel "$DEST/helper.token"; chmod 600 "$DEST/helper.token"
+TOKEN="$(cat "$DEST/helper.token")"
 
 # Firewall anchor so the pf (encrypted-DNS) layer is evaluated.
 if ! grep -q 'anchor "com.lockqz"' /etc/pf.conf; then

@@ -8,6 +8,8 @@ chatgpt.com
 chat.openai.com
 oaistatic.com
 oaiusercontent.com
+cdn.oaistatic.com
+platform.openai.com
 sora.com
 sora.chatgpt.com
 
@@ -31,23 +33,29 @@ copilot.microsoft.com
 copilot.cloud.microsoft
 m365.cloud.microsoft
 bing.com/chat
+sydney.bing.com
 
 # Perplexity
 perplexity.ai
 pplx.ai
+labs.perplexity.ai
 
 # xAI / Grok
 grok.com
 x.ai
 grok.x.com
+x.com/i/grok
+console.x.ai
 
 # DeepSeek
 deepseek.com
 chat.deepseek.com
+platform.deepseek.com
 
 # Mistral
 mistral.ai
 chat.mistral.ai
+console.mistral.ai
 
 # Meta AI
 meta.ai
@@ -64,14 +72,18 @@ moonshot.cn
 
 # Zhipu / Z.ai / GLM
 z.ai
+chat.z.ai
+api.z.ai
 chatglm.cn
 bigmodel.cn
 
 # Other chat assistants / answer engines
 poe.com
 character.ai
+beta.character.ai
 you.com
 phind.com
+duck.ai
 huggingface.co/chat
 hf.co/chat
 chat.lmsys.org

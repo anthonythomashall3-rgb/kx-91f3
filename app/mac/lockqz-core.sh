@@ -7,7 +7,9 @@
 : "${MARK_END:=# LOCKqz END}"
 
 # domains_from <blocklist-file>  -> clean domain list (no comments/blanks/spaces)
-domains_from() { grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$1" | sed 's/[[:space:]]//g' | grep -v '/'; }
+# (host/path entries such as huggingface.co/chat are enforced by the browser policy instead; only
+#  plain host names - subdomains included, e.g. chat.z.ai - can go in hosts.)
+domains_from() { grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$1" | sed 's/[[:space:]]//g' | grep -E '^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$' || true; }
 
 # build_block_from <blocklist-file>  -> the exact text block we add to hosts
 build_block_from() {

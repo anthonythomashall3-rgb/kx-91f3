@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_quiz ON events(quiz_id);
 CREATE INDEX IF NOT EXISTS idx_events_dev  ON events(device_id);
+CREATE INDEX IF NOT EXISTS idx_events_event_ts ON events(event, ts);   -- rate limits (login_fail, code_sent ...) (migrate_021)
 
 -- Current live lock per device+quiz. last_lock is refreshed by lock + quiz-time
 -- heartbeats; the password is released only while it is fresh, and the live monitor
@@ -68,6 +69,7 @@ CREATE TABLE IF NOT EXISTS locks (
   ip        TEXT,              -- device IP at lock (used by the gate to restrict the quiz to locked IPs)
   PRIMARY KEY (device_id, quiz_id)
 );
+CREATE INDEX IF NOT EXISTS idx_locks_quiz ON locks(quiz_id);   -- live monitor (migrate_021)
 
 -- Teacher accounts (email + password; token = session). TEACHER_KEY stays the admin master key.
 CREATE TABLE IF NOT EXISTS teachers (
@@ -82,7 +84,8 @@ CREATE TABLE IF NOT EXISTS teachers (
   active_until TEXT,
   sync_key  TEXT,
   verified  INTEGER DEFAULT 0,  -- proven instructor/TA via their own Brightspace login
-  bs_user_id TEXT               -- their own Brightspace user id (whoami), captured on first sync (migrate_016)
+  bs_user_id TEXT,              -- their own Brightspace user id, bound from a trusted roster at sync (migrate_016)
+  vouched   INTEGER DEFAULT 0   -- 1 = the admin vouched for the account holder (invite / first account); only these can verify (migrate_020)
 );
 CREATE INDEX IF NOT EXISTS idx_teachers_token ON teachers(token);
 
@@ -127,3 +130,7 @@ CREATE TABLE IF NOT EXISTS payments (
   txn TEXT PRIMARY KEY, code TEXT, amount REAL, via TEXT, payer TEXT, note TEXT, term TEXT, received_at TEXT, matched TEXT
 );
 CREATE INDEX IF NOT EXISTS payments_code ON payments (code, term);
+
+-- One row (one password) per Brightspace quiz. Kept LAST: on an existing database with duplicate rows
+-- this statement fails until migrate_021 removes the duplicates (deploy.sh runs it right after).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_quizzes_ou_qi ON quizzes(ou, qi);

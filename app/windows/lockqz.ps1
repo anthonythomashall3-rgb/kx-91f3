@@ -2,7 +2,14 @@
 #   powershell -ExecutionPolicy Bypass -File .\lockqz.ps1 lock|unlock|status
 # Blackholes AI + DoH domains in the hosts file (all browsers + apps using system
 # DNS), adds firewall backup rules, kills AI apps, and (via browser-policy.ps1) turns off
-# browser AI, AI search answers and extensions for the quiz only. Fully reversible.
+# browser AI, AI search answers, extensions and Windows Copilot/Recall for the quiz only.
+# Fully reversible: browser-policy.ps1 backs up every policy value it changes and puts the
+# student's (or their organisation's) own values back at unlock.
+# Output contract (read by lockqzd.ps1): the LAST line starts with
+#   "LOCKqz: LOCKED"      - the hosts block is really in place
+#   "LOCKqz: LOCK FAILED" - it is not (e.g. hosts file not writable)
+#   "LOCKqz: UNLOCKED"    - the hosts block is really gone
+#   "LOCKqz: UNLOCK FAILED"
 param([Parameter(Mandatory=$true)][ValidateSet("lock","unlock","status")]$cmd)
 $ErrorActionPreference = "SilentlyContinue"
 
@@ -20,72 +27,118 @@ $VmApps     = @("Parallels","prl_vm_app","vmware","vmware-vmx","VirtualBox","Vir
 $RemoteApps = @("TeamViewer","AnyDesk","RustDesk","remoting_host","ScreenConnect","ConnectWiseControl","LogMeIn","Splashtop","SRServer","vncserver","winvnc","tvnserver","Parsec","GoToMyPC")
 $OverlayApps= @("Cluely","InterviewCoder","Interview Coder","LockedInAI","FinalRound","Ohmni","Sensei","UltraCode","Pieces")
 $ModelProcs = @("ollama","llama-server","llamafile","koboldcpp","localai","jan","gpt4all","text-generation-webui","vllm")
-$VpnApps    = @("nordvpn","expressvpn","surfshark","protonvpn","mullvad","pia","piaservice","Cloudflare WARP","warp-svc","openvpn","wireguard","windscribe","tunnelbear","hssvpn","cyberghost")
+# tor = the Tor Browser's network daemon (Tor resolves names remotely, past the hosts block).
+$VpnApps    = @("nordvpn","expressvpn","surfshark","protonvpn","mullvad","pia","piaservice","Cloudflare WARP","warp-svc","openvpn","wireguard","windscribe","tunnelbear","hssvpn","cyberghost","tor")
 $ModelPorts = @(11434,1234,4891,1337,8080,7860,5000,8000)
 $VpnPorts   = @(51820,1194,500,4500)
+# Encrypted-DNS resolvers a browser may already be connected to (IPv4 + IPv6), incl. the
+# Firefox (mozilla.cloudflare-dns.com) and Chrome (chrome.cloudflare-dns.com) endpoints.
+$DohIps = @("1.1.1.1","1.0.0.1","8.8.8.8","8.8.4.4","9.9.9.9","149.112.112.112",
+            "162.159.61.3","162.159.61.4","172.64.41.3","172.64.41.4","146.112.41.2",
+            "2606:4700:4700::1111","2606:4700:4700::1001","2001:4860:4860::8888","2001:4860:4860::8844",
+            "2620:fe::fe","2620:fe::9","2803:f800:53::3","2803:f800:53::4","2a06:98c1:52::3","2a06:98c1:52::4",
+            "2620:119:fc::2")
 $FwTag  = "LOCKqz-AI"
+$FwRules = @(
+  @{ n = "$FwTag-DoT";     p = @{ Protocol = "TCP"; RemotePort = 853 } },
+  @{ n = "$FwTag-DoQ";     p = @{ Protocol = "UDP"; RemotePort = 853 } },
+  @{ n = "$FwTag-DoH";     p = @{ Protocol = "TCP"; RemotePort = 443; RemoteAddress = $DohIps } },
+  @{ n = "$FwTag-DoH3";    p = @{ Protocol = "UDP"; RemotePort = 443; RemoteAddress = $DohIps } },
+  @{ n = "$FwTag-models";  p = @{ Protocol = "TCP"; RemotePort = $ModelPorts } },
+  @{ n = "$FwTag-vpn-udp"; p = @{ Protocol = "UDP"; RemotePort = $VpnPorts } },
+  @{ n = "$FwTag-vpn-tcp"; p = @{ Protocol = "TCP"; RemotePort = 1194 } }
+)
+# Latin-1 maps every byte to one char and back, so a hosts file in any encoding round-trips untouched.
+$Latin1 = [Text.Encoding]::GetEncoding(28591)
 
 function Get-Domains {
-  Get-Content $BlockFile | Where-Object { $_ -and -not $_.StartsWith("#") } | ForEach-Object { $_.Trim() }
+  Get-Content $BlockFile | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith("#") }
 }
-function Is-Locked { (Get-Content $Hosts -Raw) -match [regex]::Escape($MarkStart) }
+function Get-HostsLines($domains) {
+  # A path entry (site.com/chat) can't be a hosts entry; browser-policy.ps1 blocks those URLs.
+  $lines = @($MarkStart)
+  foreach ($d in $domains) {
+    if ($d -like "*/*") { continue }
+    $lines += "0.0.0.0 $d"; $lines += ":: $d"
+    if ($d -like "*.*" -and $d -notlike "www.*") { $lines += "0.0.0.0 www.$d"; $lines += ":: www.$d" }
+  }
+  $lines += $MarkEnd
+  return $lines
+}
+function Remove-Block([string]$raw) {
+  $raw = [regex]::Replace($raw, "(?s)\r?\n?" + [regex]::Escape($MarkStart) + ".*?" + [regex]::Escape($MarkEnd) + "\r?\n?", "")
+  return ($raw.TrimEnd() + "`r`n")
+}
+function Read-Hosts { [IO.File]::ReadAllText($Hosts, $Latin1) }
+function Is-Locked { try { (Read-Hosts) -match [regex]::Escape($MarkStart) } catch { $false } }
+function Write-Hosts([string]$text, [bool]$append) {
+  # Clears a read-only flag for the write and puts it back; $false if the write failed.
+  $ro = $false
+  try {
+    $fi = Get-Item -LiteralPath $Hosts -Force -ErrorAction Stop
+    $ro = $fi.IsReadOnly
+    if ($ro) { $fi.IsReadOnly = $false }
+    if ($append) { [IO.File]::AppendAllText($Hosts, $text, $Latin1) } else { [IO.File]::WriteAllText($Hosts, $text, $Latin1) }
+    return $true
+  } catch { return $false }
+  finally { if ($ro) { try { (Get-Item -LiteralPath $Hosts -Force).IsReadOnly = $true } catch { } } }
+}
 
 function Kill-AiAndTools {
   foreach ($a in ($AiApps + $VmApps + $RemoteApps + $OverlayApps + $ModelProcs + $VpnApps)) {
     Stop-Process -Name $a -Force -ErrorAction SilentlyContinue
   }
 }
+function Ensure-FirewallRules {
+  # One rule per name: creates missing ones, collapses duplicates left by an older version.
+  $have = @(Get-NetFirewallRule -DisplayName "$FwTag-*" -ErrorAction SilentlyContinue)
+  foreach ($r in $FwRules) {
+    $same = @($have | Where-Object { $_.DisplayName -eq $r.n })
+    if ($same.Count -eq 1) { continue }
+    if ($same.Count -gt 1) { $same | Remove-NetFirewallRule -ErrorAction SilentlyContinue }
+    $p = $r.p
+    New-NetFirewallRule -DisplayName $r.n -Direction Outbound -Action Block @p | Out-Null
+  }
+}
+function Policy($verb) {
+  if (-not (Test-Path $Policy)) { return "" }
+  return ((& powershell -NoProfile -ExecutionPolicy Bypass -File $Policy $verb) -join "`n")
+}
 function Do-Lock {
-  $already = Is-Locked
-  if ($already) { Kill-AiAndTools; "LOCKqz: re-locked (apps re-closed)"; return }
+  if (Is-Locked) {
+    Kill-AiAndTools
+    # Policies removed by hand mid-quiz -> put them back (browser-policy keeps the first backup).
+    if ((Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Google\Chrome").LOCKqzManaged -ne 1) { Policy "lock" | Out-Null }
+    "LOCKqz: LOCKED (re-applied, apps re-closed)"; return
+  }
   New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
   if (-not (Test-Path $Backup)) { Copy-Item $Hosts $Backup -Force }
-  $lines = @($MarkStart)
-  foreach ($d in Get-Domains) {
-    if ($d -like "*/*") { continue }   # a path (e.g. site.com/chat) can't be a hosts entry; browser policy covers it
-    $lines += "0.0.0.0 $d"; $lines += ":: $d"
-    if ($d -like "*.*" -and $d -notlike "www.*") { $lines += "0.0.0.0 www.$d"; $lines += ":: www.$d" }
-  }
-  $lines += $MarkEnd
-  Add-Content -Path $Hosts -Value ("`r`n" + ($lines -join "`r`n"))
+  $wrote = Write-Hosts ("`r`n" + ((Get-HostsLines (Get-Domains)) -join "`r`n") + "`r`n") $true
   ipconfig /flushdns | Out-Null
 
-  # Firewall backup: block DoT (853) + known DoH resolver IPs on 443.
-  New-NetFirewallRule -DisplayName "$FwTag-DoT" -Direction Outbound -Action Block -Protocol TCP -RemotePort 853 | Out-Null
-  New-NetFirewallRule -DisplayName "$FwTag-DoH" -Direction Outbound -Action Block -Protocol TCP -RemotePort 443 -RemoteAddress 1.1.1.1,1.0.0.1,8.8.8.8,8.8.4.4,9.9.9.9,149.112.112.112 | Out-Null
+  # Firewall backup: DoT/DoQ + known DoH resolvers, local AI model servers, VPN protocols.
+  Ensure-FirewallRules
 
-  # Browser AI + AI search answers + extensions off, Windows Copilot off (quiz only).
-  if (Test-Path $Policy) { & powershell -ExecutionPolicy Bypass -File $Policy lock | Out-Null }
+  # Browser AI + AI search answers + extensions off, Windows Copilot/Recall/Click to Do off (quiz only).
+  $pol = Policy "lock"
 
   Kill-AiAndTools
-
-  # Firewall: block local AI model servers and VPN protocols (backup to closing their apps).
-  New-NetFirewallRule -DisplayName "$FwTag-models" -Direction Outbound -Action Block -Protocol TCP -RemotePort $ModelPorts | Out-Null
-  New-NetFirewallRule -DisplayName "$FwTag-vpn-udp" -Direction Outbound -Action Block -Protocol UDP -RemotePort $VpnPorts  | Out-Null
-  New-NetFirewallRule -DisplayName "$FwTag-vpn-tcp" -Direction Outbound -Action Block -Protocol TCP -RemotePort 1194      | Out-Null
-
-  # Windows built-in AI off for the quiz (Copilot, Recall snapshots, Click to Do) via HKLM policy.
-  $wai = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI"
-  New-Item -Path $wai -Force | Out-Null
-  Set-ItemProperty -Path $wai -Name "TurnOffWindowsCopilot" -Value 1 -Type DWord
-  Set-ItemProperty -Path $wai -Name "DisableAIDataAnalysis" -Value 1 -Type DWord
-  Set-ItemProperty -Path $wai -Name "DisableClickToDo" -Value 1 -Type DWord
-  "LOCKqz: LOCKED (AI apps, VPNs, VMs, remote-desktop, overlays and local models closed; Windows Copilot/Recall off)"
+  if ($pol -match "FAILED") { "LOCKqz: browser policy not applied ($pol)" }
+  if ($wrote -and (Is-Locked)) { "LOCKqz: LOCKED (AI apps, VPNs, VMs, remote-desktop, overlays and local models closed; Windows Copilot/Recall off)" }
+  else { "LOCKqz: LOCK FAILED (the hosts file could not be written)" }
 }
 
 function Do-Unlock {
+  $wrote = $true
   if (Is-Locked) {
-    $raw = Get-Content $Hosts -Raw
-    $raw = [regex]::Replace($raw, "(?s)\r?\n?" + [regex]::Escape($MarkStart) + ".*?" + [regex]::Escape($MarkEnd), "")
-    Set-Content -Path $Hosts -Value $raw.TrimEnd() -NoNewline
-    Add-Content -Path $Hosts -Value "`r`n"
+    $wrote = Write-Hosts (Remove-Block (Read-Hosts)) $false
     ipconfig /flushdns | Out-Null
   }
-  Get-NetFirewallRule -DisplayName "$FwTag-*" | Remove-NetFirewallRule
-  $wai = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI"
-  Remove-ItemProperty -Path $wai -Name "TurnOffWindowsCopilot","DisableAIDataAnalysis","DisableClickToDo" -ErrorAction SilentlyContinue
-  if (Test-Path $Policy) { & powershell -ExecutionPolicy Bypass -File $Policy unlock | Out-Null }
-  "LOCKqz: UNLOCKED"
+  Get-NetFirewallRule -DisplayName "$FwTag-*" -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+  # Restores exactly the policy values that were there before the quiz (nothing if none were changed).
+  $pol = Policy "unlock"
+  if ($pol -match "incomplete") { "LOCKqz: policy restore pending ($pol)" }
+  if ($wrote -and -not (Is-Locked)) { "LOCKqz: UNLOCKED" } else { "LOCKqz: UNLOCK FAILED (the hosts file could not be written)" }
 }
 
 switch ($cmd) {

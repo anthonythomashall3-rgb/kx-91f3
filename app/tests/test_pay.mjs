@@ -131,7 +131,7 @@ check("admin sees unmatched payment", (r.data?.payments||[]).some(x => x.txn ===
 r = await call(ON, "/pay-assign", { txn: "gmail:c1", code: "cy@usc.edu" }, { teacher: ADMIN_TOK });
 check("admin assigns it to cy@usc.edu", r.data?.paid === true && r.data.email === "cy@usc.edu", JSON.stringify(r.data));
 r = await getc(ON, "/payments");
-check("payments list is admin-only", r.status === 401);
+check("payments list is admin-only", r.status === 403);
 
 console.log("P7 professor pays $5,000 (two Zelle payments) -> account turns on by itself");
 r = await call(ON, "/signup", { email: "prof@usc.edu", password: "profpass1", name: "Duke Bristow" });
