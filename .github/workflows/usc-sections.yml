@@ -3,7 +3,7 @@
 # Runs once a day (enrollment and instructor changes), on demand, and when the builder changes. $0.
 name: USC sections
 on:
-  schedule: [ { cron: "17 10 * * *" } ]
+  schedule: [ { cron: "17 10 * * *" } ]   # daily; only changed rows are written
   workflow_dispatch:
   push:
     branches: [master]
@@ -20,13 +20,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - name: Build the section index from classes.usc.edu
-        run: python3 app/usc/build_sections.py "$RUNNER_TEMP/sections.sql"
-      - name: Load it into the LOCKqz database
+      - name: Refresh the section index (writes only what changed)
         working-directory: app/cloudflare
         run: |
           [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::warning::missing CLOUDFLARE_API_TOKEN"; exit 0; }
           npm ci --no-audit --no-fund
-          npx wrangler d1 execute lockqz --remote --file=migrate_017_sections.sql
-          npx wrangler d1 execute lockqz --remote --file="$RUNNER_TEMP/sections.sql"
-          npx wrangler d1 execute lockqz --remote --command "SELECT term, COUNT(*) AS rows FROM usc_sections GROUP BY term"
+          # What D1 already holds (reads are cheap; writes are the free-plan limit).
+          npx wrangler d1 execute lockqz --remote --json --command "SELECT term,section,course,title,first,last,seats,registered FROM usc_sections" > "$RUNNER_TEMP/current.json"
+          python3 ../usc/build_sections.py "$RUNNER_TEMP/changes.sql" "$RUNNER_TEMP/current.json"
+          # Apply in small batches with --command (never --file: a failed --file restores the whole DB).
+          python3 - "$RUNNER_TEMP/changes.sql" <<'PY'
+          import subprocess, sys
+          lines = [l.strip() for l in open(sys.argv[1]) if l.strip()]
+          print(len(lines), "changes")
+          for i in range(0, len(lines), 50):
+              subprocess.run(["npx", "wrangler", "d1", "execute", "lockqz", "--remote", "--command", " ".join(lines[i:i+50])], check=True)
+          PY

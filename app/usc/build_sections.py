@@ -2,7 +2,8 @@
 """Build sections.sql from USC's public Schedule of Classes (classes.usc.edu).
 
 For the current and next terms: every section and its instructor(s). No AI, no login.
-Usage: python3 build_sections.py OUT.sql
+Usage: python3 build_sections.py OUT.sql [CURRENT.json]
+With CURRENT.json (the rows already in D1) only the changes are written: one SQL statement per line.
 """
 import json, sys, datetime, urllib.request, concurrent.futures as cf
 
@@ -28,7 +29,7 @@ def terms_now():
 def q(v):
     return "NULL" if v is None else "'" + str(v).replace("'", "''") + "'"
 
-def main(out):
+def main(out, current=None):
     rows = []
     for term in terms_now():
         progs = get(f"/Programs/TermCode?termCode={term}") or []
@@ -52,12 +53,49 @@ def main(out):
     rows = sorted(set(rows))
     if len(rows) < 1000: sys.exit(f"only {len(rows)} sections found; refusing to replace the index")
     terms = sorted({r[0] for r in rows})
+    stmts = diff(rows, terms, load_current(current))
     with open(out, "w") as fh:
-        fh.write("DELETE FROM usc_sections WHERE term IN (%s);\n" % ",".join(q(t) for t in terms))
-        for i in range(0, len(rows), 200):
-            fh.write("INSERT OR REPLACE INTO usc_sections (term,section,course,title,first,last,seats,registered) VALUES\n")
-            fh.write(",\n".join("(%s)" % ",".join(q(v) for v in r) for r in rows[i:i+200]) + ";\n")
-    print(f"{len(rows)} instructor-section rows, terms {terms}", file=sys.stderr)
+        for st in stmts: fh.write(st + "\n")
+    print(f"{len(rows)} instructor-section rows, terms {terms}; {len(stmts)} changes", file=sys.stderr)
+
+KEY = lambda r: (r[0], r[1], r[5], r[4])                   # term, section, last, first (the table's key)
+
+def load_current(path):
+    """Rows already in D1 (wrangler d1 execute --json output), or None for a full load."""
+    if not path: return None
+    d = json.load(open(path))
+    res = d[0]["results"] if isinstance(d, list) else d.get("results", [])
+    return {(str(x["term"]), str(x["section"]), x["last"] or "", x["first"] or ""):
+            (str(x["term"]), str(x["section"]), x["course"], x["title"], x["first"] or "", x["last"] or "", x["seats"], x["registered"]) for x in res}
+
+def diff(rows, terms, cur):
+    """Only the writes needed: new or changed sections, removed ones. Enrollment counts move every day
+    during registration, so a count change alone is written only when it moved by 5 or more."""
+    if cur is None:
+        out = ["DELETE FROM usc_sections WHERE term IN (%s);" % ",".join(q(t) for t in terms)]
+        return out + [ins(r) for r in rows]
+    want = {KEY(r): r for r in rows}
+    out = []
+    for k, r in want.items():
+        old = cur.get(k)
+        if old is None or not same(old, r) or big_move(old, r):
+            out.append(ins(r))
+    for k in cur:
+        if k[0] in terms and k not in want:
+            out.append("DELETE FROM usc_sections WHERE term=%s AND section=%s AND last=%s AND first=%s;" % (q(k[0]), q(k[1]), q(k[2]), q(k[3])))
+    return out
+
+def same(old, r):
+    norm = lambda v: None if v is None else str(v)
+    return [norm(x) for x in old[:7]] == [norm(x) for x in r[:7]]
+
+def big_move(old, r):
+    if old is None: return False
+    try: return abs(int(old[7] or 0) - int(r[7] or 0)) >= 5
+    except Exception: return str(old[7]) != str(r[7])
+
+def ins(r):
+    return "INSERT OR REPLACE INTO usc_sections (term,section,course,title,first,last,seats,registered) VALUES (%s);" % ",".join(q(v) for v in r)
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "sections.sql")
+    main(sys.argv[1] if len(sys.argv) > 1 else "sections.sql", sys.argv[2] if len(sys.argv) > 2 else None)
