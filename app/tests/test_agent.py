@@ -123,6 +123,31 @@ r = A.setup_identity(S, U)
 ok("Send new code button resends") if r == ("al@usc.edu", True) and [c[0] for c in S.calls].count("send") == 2 else bad("resend %r" % (S.calls,))
 S = FakeServer(); U = FakeUI([("OK", "not-an-email"), ("OK", "al@usc.edu"), ("Yes", ""), ("OK", "246810")])
 ok("non-email re-asked") if A.setup_identity(S, U) == ("al@usc.edu", True) and "not an email" in U.shown[1] else bad("non-email")
+# 25 Oct 2026: the email is asked ONCE; server trouble never pops up a dialog.
+saved = []; st = {}
+S = FakeServer(); U = FakeUI([("OK", "al@usc.edu"), ("Yes", "")])
+S_send = S.__call__
+def S500(op, **kw):
+    if op == "send": return {"status": 500, "error": "Error: D1_ERROR: daily row write limit"}
+    return S_send(op, **kw)
+r = A.setup_identity(S500, U, "", saved.append, st)
+ok("server error after the email: saved at once, NO error popup, quiet retry") if r is None and saved == ["al@usc.edu"] and st.get("r") == "server" and not any("wrong" in m.lower() or "later" in m.lower() for m in U.shown) else bad("500: %r %r %r" % (r, saved, U.shown))
+U = FakeUI([("OK", "246810")])
+r = A.setup_identity(S, U, "al@usc.edu", saved.append, st)
+ok("retry with the saved email: straight to the code, email NOT asked again") if r == ("al@usc.edu", True) and len(U.shown) == 2 and "6-digit" in U.shown[0] else bad("retry %r %r" % (r, U.shown))
+S = FakeServer(); S.calls = []; U = FakeUI([]); st = {}
+S_status = S.__call__
+def Spend(op, **kw):
+    if op == "status": return {"status": 200, "student": "al@usc.edu", "verified": False, "codes": True}
+    return S_status(op, **kw)
+r = A.setup_identity(Spend, U, "", None, st)
+ok("server already holds the (unconfirmed) email: no email dialog, code only") if r is None and st.get("r") == "closed" and len(U.shown) == 1 and "6-digit" in U.shown[0] else bad("server email %r" % (U.shown,))
+n_send = [c[0] for c in S.calls].count("send"); U = FakeUI([("OK", "246810")])
+r = A.setup_identity(Spend, U, "", None, st)
+ok("code still fresh: not resent on the next try") if r == ("al@usc.edu", True) and [c[0] for c in S.calls].count("send") == n_send else bad("resent %r" % (S.calls,))
+U = FakeUI([("OK", "al@usc.edu")]); st = {}
+r = A.setup_identity(lambda op, **k: {"status": 200, "codes": True} if op == "status" else {}, U, "", saved.append, st)
+ok("check unreachable after typing: email kept, no popup") if r is None and saved[-1] == "al@usc.edu" and len(U.shown) == 1 else bad("check down %r %r" % (saved, U.shown))
 S = FakeServer(codes=False); U = FakeUI([("OK", "al@usc.edu"), ("Yes", "")])
 ok("server codes off: roster check only, saved unconfirmed") if A.setup_identity(S, U) == ("al@usc.edu", False) else bad("codes off")
 import shutil, subprocess as _sp

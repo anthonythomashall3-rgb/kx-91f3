@@ -33,6 +33,10 @@ jobs:
           import subprocess, sys
           lines = [l.strip() for l in open(sys.argv[1]) if l.strip()]
           print(len(lines), "changes")
+          # Guard (25 Oct 2026): a full reload once cost ~119k D1 writes and blew the free daily limit
+          # (100k), which broke student email setup for a whole day. Never write more than 3,000 rows a run.
+          if len(lines) > 3000:
+              print("::error::%d changes is too many for one run (free D1 limit) - nothing written" % len(lines)); sys.exit(1)
           for i in range(0, len(lines), 50):
               subprocess.run(["npx", "wrangler", "d1", "execute", "lockqz", "--remote", "--command", " ".join(lines[i:i+50])], check=True)
           PY

@@ -15,10 +15,11 @@ foreach ($f in Get-ChildItem $Win -Filter *.ps1) {
 
 Write-Host "W2 Setup-Identity (real code) with scripted dialogs"
 $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $Win "lockqz-agent.ps1"), [ref]$null, [ref]$null)
-$fns = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and @("Verify","Err-Text","Setup-Identity","Say") -contains $n.Name }, $true)
+$fns = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and @("Verify","Setup-Identity","Say","Ask-Email","Save-Student","Now-Sec") -contains $n.Name }, $true)
 foreach ($fn in $fns) { . ([scriptblock]::Create($fn.Extent.Text)) }
 $EmailRe = ($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$EmailRe' }, $true) | Select-Object -First 1).Right.Extent.Text.Trim("'")
 $Ask = "Enter your school email"
+$StudentFile = Join-Path ([System.IO.Path]::GetTempPath()) ("lqstudent-" + [guid]::NewGuid() + ".json"); $CodeFresh = 720
 function Log($m) {}
 $script:Answers = @(); $script:Shown = @(); $script:Calls = @()
 function Ask-Box($msg, $buttons, $default, [bool]$answer) {
@@ -61,6 +62,22 @@ $r = Run (@(@("OK","al@usc.edu"), @("Yes",""))) @{ off = $true }
 Check "server codes off: roster check only, unconfirmed" (($r.student -eq "al@usc.edu") -and -not $r.verified)
 $r = Run (,@("OK","al@usc.edu")) @{}
 Check "dialog closed mid-way: nothing saved" ($null -eq $r)
+# 25 Oct 2026: the email is asked ONCE; server trouble never pops up a dialog.
+$script:SendFail = $true
+$real = ${function:Helper}
+function Helper($path, $body) { if ($script:SendFail -and $body.op -eq "send") { return [pscustomobject]@{ status = 500; error = "D1_ERROR" } }; & $real $path $body }
+$st = @{ sent_email = ""; sent_at = 0; r = "" }
+$script:Answers = @(@("OK","al@usc.edu"), @("Yes","")); $script:Shown = @(); $script:Calls = @(); $script:Srv = @{}
+$r = Setup-Identity "" $st
+$saved = (Get-Content $StudentFile -Raw | ConvertFrom-Json).student
+Check "server error after the email: email saved at once, no error popup" (($null -eq $r) -and ($saved -eq "al@usc.edu") -and ($st.r -eq "server") -and $script:Shown.Count -eq 2)
+$script:SendFail = $false; $script:Answers = @(,@("OK","246810")); $script:Shown = @()
+$r = Setup-Identity $saved $st
+Check "retry with the saved email: code only, email NOT asked again" ($r.verified -and $script:Shown.Count -eq 2 -and ($script:Shown[0] -match "6-digit"))
+$script:Answers = @(); $script:Shown = @(); $st = @{ sent_email = ""; sent_at = 0; r = "" }
+function Helper($path, $body) { if ($body.op -eq "status") { return [pscustomobject]@{ status = 200; student = "al@usc.edu"; verified = $false; codes = $true } }; & $real $path $body }
+$r = Setup-Identity "" $st
+Check "server holds the unconfirmed email: no email dialog, code only" (($null -eq $r) -and ($st.r -eq "closed") -and $script:Shown.Count -eq 1 -and ($script:Shown[0] -match "6-digit"))
 function Helper($path, $body) { throw "offline" }
 $r = Run @() @{}
 Check "offline: nothing saved, no dialog" (($null -eq $r) -and $script:Shown.Count -eq 0)

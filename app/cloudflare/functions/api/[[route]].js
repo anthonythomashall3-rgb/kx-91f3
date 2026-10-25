@@ -1849,6 +1849,8 @@ export async function onRequest(context) {
 
     return json({ error: "not found", path: p }, 404);
   } catch (e) {
+    // Free-plan D1 daily write cap: a clean, retryable answer (apps retry quietly; nobody sees a popup).
+    if (/exceeded D1|row write limit|daily .*limit/i.test(String(e))) return json({ error: "server_busy", retry_minutes: 30 }, 503);
     return json({ error: String(e) }, 500);
   }
 }

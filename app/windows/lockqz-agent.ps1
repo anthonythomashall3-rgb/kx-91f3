@@ -10,7 +10,7 @@
 # First run asks the student's school email ONCE (confirmed by an emailed code) so the
 # professor's roster and the quiz gate know who is locked. -Setup runs that dialog in its own
 # process so quiz watching never waits on it.
-param([switch]$Setup)
+param([switch]$Setup, [switch]$QuizOpen)
 $ErrorActionPreference = "SilentlyContinue"
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms, System.Drawing, Microsoft.VisualBasic
 
@@ -201,53 +201,81 @@ function Verify($op, $extra) {
   if ($r -and $r.status) { return $r }
   return $null
 }
-function Err-Text($r) {
-  if (-not $r) { return "LOCKqz can't reach the internet right now. It will ask again later." }
-  if ($r.error -eq "too_many_codes") { return "Too many codes were sent. LOCKqz will ask again in an hour." }
-  if (($r.error -eq "send_failed") -or ($r.error -eq "mail_busy")) { return "LOCKqz couldn't send the email right now. It will ask again later." }
-  return "Something went wrong. LOCKqz will ask again later."
+# The email is asked ONCE: saved on this computer the moment it is typed; every later try goes straight
+# to the emailed code. Server/network trouble is NEVER shown as a popup: setup stops quietly and the
+# agent retries in the background (2, 4, 8 ... 60 min). State between tries lives in setup.json.
+$SetupFile = "$UserDir\setup.json"
+$CodeFresh = 720   # a code sent < 12 min ago is still good (server: 15 min): ask for it, don't resend
+function Save-Student($email, $verified) {
+  try { @{ student = $(if ($email) { $email } else { $null }); verified = [bool]$verified } | ConvertTo-Json | Set-Content $StudentFile -Encoding UTF8 }
+  catch { Log "could not save student: $_" }
 }
-function Setup-Identity($saved) {
-  # -> @{ student; verified } to save, or $null (not finished: ask again later)
+function Read-SetupState {
+  $s = @{ next = 0; fails = 0; tried = 0; sent_email = ""; sent_at = 0; r = "" }
+  try { if (Test-Path $SetupFile) { $j = Get-Content $SetupFile -Raw | ConvertFrom-Json; foreach ($k in @($s.Keys)) { if ($null -ne $j.$k) { $s[$k] = $j.$k } } } } catch {}
+  return $s
+}
+function Write-SetupState($s) { try { $s | ConvertTo-Json | Set-Content $SetupFile -Encoding UTF8 } catch {} }
+function Now-Sec { return [double][DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }
+function Ask-Email($state) {
+  $email = ""; $msg = "LOCKqz setup (one time only)`n`n" + $Ask
+  while ($true) {
+    $a = Ask-Box $msg @("OK") $email $true
+    if (-not $a) { $state.r = "closed"; return $null }
+    $email = ([string]$a.t).Trim().ToLower()
+    if ($email -notmatch $EmailRe) { $msg = "That is not an email address.`n`n" + $Ask; continue }
+    $chk = Verify "check" @{ email = $email }
+    if (-not $chk) { return $email }   # server unreachable: keep what they typed (the code proves it later)
+    if ($chk.name) { $a = Ask-Box ("Is this you?`n`n" + $chk.name + "`n" + $email) @("No, retype", "Yes") "" $false }
+    else { $a = Ask-Box ($email + " is not on a LOCKqz class list yet.`n`nCheck the spelling.") @("Retype", "Use it") "" $false }
+    if (-not $a) { $state.r = "closed"; return $null }
+    if (($a.b -eq "No, retype") -or ($a.b -eq "Retype")) { $msg = $Ask; continue }
+    return $email
+  }
+}
+function Setup-Identity($saved, $state) {
+  # -> @{ student; verified } to save, or $null ($state.r = "server": retry quietly; "closed": dialog closed)
+  $state.r = "server"
   $st = Verify "status" $null
   if (-not $st) { return $null }
   if ($st.verified -and $st.student) { return @{ student = $st.student; verified = $true } }
   if ((-not $st.codes) -and $st.student) { return @{ student = $st.student; verified = $false } }
-  $email = [string]$saved; $msg = "LOCKqz setup (one time only)`n`n" + $Ask
+  $email = ([string]$(if ($saved) { $saved } else { $st.student })).Trim().ToLower()
+  if ($email -notmatch $EmailRe) { $email = "" }
   while ($true) {
-    $a = Ask-Box $msg @("OK") $email $true
-    if (-not $a) { return $null }
-    $email = ([string]$a.t).Trim().ToLower()
-    if ($email -notmatch $EmailRe) { $msg = "That is not an email address.`n`n" + $Ask; continue }
-    $chk = Verify "check" @{ email = $email }
-    if (-not $chk) { Say (Err-Text $null); return $null }
-    if ($chk.name) { $a = Ask-Box ("Is this you?`n`n" + $chk.name + "`n" + $email) @("No, retype", "Yes") "" $false }
-    else { $a = Ask-Box ($email + " is not on a LOCKqz class list yet.`n`nCheck the spelling.") @("Retype", "Use it") "" $false }
-    if (-not $a) { return $null }
-    if (($a.b -eq "No, retype") -or ($a.b -eq "Retype")) { $msg = $Ask; continue }
-    $r = Verify "send" @{ email = $email }
-    if ($r -and $r.bound) { return @{ student = $email; verified = $false } }
-    if (-not ($r -and $r.sent)) { Say (Err-Text $r); return $null }
+    if (-not $email) {
+      $email = Ask-Email $state
+      if (-not $email) { return $null }
+      Save-Student $email $false          # never asked again, whatever happens next
+    }
+    if (-not (($state.sent_email -eq $email) -and ((Now-Sec) - [double]$state.sent_at -lt $CodeFresh))) {
+      $r = Verify "send" @{ email = $email }
+      if ($r -and $r.bound) { return @{ student = $email; verified = $false } }
+      if (-not ($r -and $r.sent)) { Log "code not sent ($(if ($r) { $r.error } else { 'no answer' })): will retry quietly"; return $null }
+      $state.sent_email = $email; $state.sent_at = Now-Sec
+    }
     $note = ""
     while ($true) {
       $a = Ask-Box ($note + "We emailed a 6-digit code to`n" + $email + "`n`nType it here (check Junk/Spam if you don't see it):") @("Change email", "Send new code", "OK") "" $true
-      if (-not $a) { return $null }
-      if ($a.b -eq "Change email") { $msg = $Ask; break }
+      if (-not $a) { $state.r = "closed"; return $null }
+      if ($a.b -eq "Change email") { $email = ""; $state.sent_email = ""; Save-Student $null $false; break }
       if ($a.b -eq "Send new code") {
         $r = Verify "send" @{ email = $email }
-        if (-not ($r -and $r.sent)) { Say (Err-Text $r); return $null }
+        if (-not ($r -and $r.sent)) { $note = "LOCKqz couldn't send a new code right now. Use the last one, or try again in a few minutes.`n`n"; continue }
+        $state.sent_email = $email; $state.sent_at = Now-Sec
         $note = "New code sent.`n`n"; continue
       }
       $r = Verify "code" @{ email = $email; code = $a.t }
-      if ($r -and $r.verified) { Say "Done. LOCKqz is set up and won't ask again."; return @{ student = $email; verified = $true } }
+      if ($r -and $r.verified) { $state.sent_email = ""; Say "Done. LOCKqz is set up and won't ask again."; return @{ student = $email; verified = $true } }
       if ($r -and $r.resent) {
+        $state.sent_email = $email; $state.sent_at = Now-Sec
         if ($r.error -eq "expired") { $note = "That code expired. We sent a new one.`n`n" }
         elseif ($r.error -eq "too_many_tries") { $note = "Too many wrong tries. We sent a new code.`n`n" }
         else { $note = "We sent a new code.`n`n" }
         continue
       }
       if ($r -and ($r.error -eq "wrong_code")) { $note = "That code is wrong (" + $r.tries_left + " tries left).`n`n"; continue }
-      Say (Err-Text $r); return $null
+      Log "code check failed ($(if ($r) { $r.error } else { 'no answer' })): will retry quietly"; return $null
     }
   }
 }
@@ -256,13 +284,22 @@ if ($Setup) {
   # One setup window at a time per user session.
   $mtx = New-Object System.Threading.Mutex($false, "Local\LOCKqzSetup")
   if (-not $mtx.WaitOne(0)) { exit }
-  $saved = $null; if (Test-Path $StudentFile) { $saved = (Get-Content $StudentFile -Raw | ConvertFrom-Json).student }
-  $got = Setup-Identity $saved
+  $state = Read-SetupState; $state.tried = Now-Sec
+  $saved = $null; try { if (Test-Path $StudentFile) { $saved = (Get-Content $StudentFile -Raw | ConvertFrom-Json).student } } catch {}
+  $got = $null
+  try { $got = Setup-Identity $saved $state } catch { Log "identity setup error: $_"; $state.r = "server" }
   if ($got) {
-    @{ student = $got.student; verified = $got.verified } | ConvertTo-Json | Set-Content $StudentFile -Encoding UTF8
+    Save-Student $got.student $got.verified
+    $state.fails = 0; $state.next = 0
     try { Helper "/student" @{ student = $got.student } | Out-Null } catch {}
     Log "student $($got.student) verified=$($got.verified)"
+  } elseif ($state.r -eq "closed") {
+    $state.next = (Now-Sec) + $(if ($QuizOpen) { 600 } else { 21600 })
+  } else {
+    $state.fails = [int]$state.fails + 1
+    $state.next = (Now-Sec) + [Math]::Min(3600, 120 * [Math]::Pow(2, [Math]::Min([int]$state.fails - 1, 5)))
   }
+  Write-SetupState $state
   $mtx.ReleaseMutex(); exit
 }
 
@@ -273,12 +310,19 @@ function Load-Student {
     $script:Student = $j.student; $script:Verified = [bool]$j.verified; $script:StudentRead = (Get-Item $StudentFile).LastWriteTime
   }
 }
-function Start-Setup {
+function Start-Setup([switch]$Force, [switch]$Quiz) {
+  # Quiet, spaced-out retries (setup.json): only when due, or when a quiz needs it and the last try
+  # was 10+ min ago. Force = check now (login).
+  $st = Read-SetupState; $now = Now-Sec
+  if (-not $Force) {
+    if (($now -lt [double]$st.next) -and -not ($Quiz -and ($now - [double]$st.tried -ge 600))) { return }
+  }
   $script:SetupAt = Get-Date
-  Start-Process powershell.exe -WindowStyle Hidden -ArgumentList "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Setup"
+  $qa = if ($Quiz) { " -QuizOpen" } else { "" }
+  Start-Process powershell.exe -WindowStyle Hidden -ArgumentList "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Setup$qa"
 }
 Load-Student
-Start-Setup   # checks the server once per login; asks only if not yet confirmed
+Start-Setup -Force   # checks the server once per login; asks only if not yet confirmed
 try { Helper "/student" @{ student = $Student } 8 | Out-Null } catch { Log "helper not reachable yet" }
 Log "running (device $Device, student $Student)"
 
@@ -359,7 +403,7 @@ function Handle-Pw($pr, [bool]$first, [string]$note) {
     Add-Cap ([string]$script:Quiz)
     return "other"
   }
-  if (($why -eq "verify") -and (((Get-Date) - $script:SetupAt).TotalSeconds -gt 60)) { Start-Setup }   # school email first
+  if (($why -eq "verify") -and (((Get-Date) - $script:SetupAt).TotalSeconds -gt 60)) { Start-Setup -Quiz }   # school email first
   $script:PwNext = $now.AddSeconds(15)
   return $null
 }
@@ -377,7 +421,7 @@ while ($true) {
     if (-not $Verified) {
       if ((Test-Path $StudentFile) -and ((Get-Item $StudentFile).LastWriteTime -gt $StudentRead)) { Load-Student; if ($Student) { try { Helper "/student" @{ student = $Student } | Out-Null } catch {} } }
       $since = ((Get-Date) - $SetupAt).TotalSeconds
-      if ((-not $Verified) -and ((($null -ne $quizWin) -and ($since -gt 60)) -or ($since -gt 21600))) { Start-Setup }
+      if ((-not $Verified) -and ($since -gt 60)) { Start-Setup -Quiz:($null -ne $quizWin) }
     }
     # An unlock the helper did not confirm is retried every 5 s until it is (AI must come back).
     if ($Pending -and (-not $quizWin) -and (((Get-Date) - $PendingAt).TotalSeconds -ge 5)) {

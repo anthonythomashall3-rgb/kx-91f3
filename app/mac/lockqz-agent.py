@@ -449,60 +449,80 @@ class MacUI:
     def say(self, msg): self.ask(msg, ["OK"], answer=False)
 
 ASK = "Enter your school email (the one Brightspace uses, e.g. you@usc.edu):"
-def _err(r):
-    e = (r or {}).get("error")
-    if not r: return "LOCKqz can't reach the internet right now. It will ask again later."
-    if e == "too_many_codes": return "Too many codes were sent. LOCKqz will ask again in an hour."
-    if e in ("send_failed", "mail_busy"): return "LOCKqz couldn't send the email right now. It will ask again later."
-    return "Something went wrong. LOCKqz will ask again later."
+CODE_FRESH = 12 * 60   # a code sent less than 12 min ago is still good (server: 15 min): ask for it, don't resend
 
-def setup_identity(call, ui, saved=""):
-    """call(op, **kw) -> server reply dict ({} = no answer). Returns (email, verified) or None
-    (not finished: ask again later)."""
-    st = call("status")
-    if not st: return None
-    if st.get("verified") and st.get("student"): return (st["student"], True)
-    if not st.get("codes") and st.get("student"): return (st["student"], False)   # codes off on server
-    email, msg = saved or "", "LOCKqz setup (one time only)\n\n" + ASK
+# The email is asked ONCE. The moment the student types it, it is saved on this computer (save());
+# every later try goes straight to the emailed code. Server/network trouble is NEVER shown as a popup:
+# setup just stops quietly (state["r"] = "server") and the agent retries in the background.
+def _ask_email(call, ui, state):
+    email, msg = "", "LOCKqz setup (one time only)\n\n" + ASK
     while True:
         b, typed = ui.ask(msg, ["OK"], email)
-        if b is None: return None
+        if b is None: state["r"] = "closed"; return None
         email = (typed or "").strip().lower()
         if not EMAIL_RE.match(email):
             msg = "That is not an email address.\n\n" + ASK; continue
         chk = call("check", email=email)
-        if not chk: ui.say(_err(chk)); return None
+        if not chk: return email          # server unreachable: keep what they typed (the code proves it later)
         if chk.get("name"):
             b, _ = ui.ask("Is this you?\n\n%s\n%s" % (chk["name"], email), ["No, retype", "Yes"], answer=False)
         else:
             b, _ = ui.ask("%s is not on a LOCKqz class list yet.\n\nCheck the spelling." % email, ["Retype", "Use it"], answer=False)
-        if b is None: return None
+        if b is None: state["r"] = "closed"; return None
         if b in ("No, retype", "Retype"):
             msg = ASK; continue
-        r = call("send", email=email)
-        if r.get("bound"): return (email, False)          # server has codes off: roster check only
-        if not r.get("sent"): ui.say(_err(r)); return None
+        return email
+
+def setup_identity(call, ui, saved="", save=None, state=None):
+    """call(op, **kw) -> server reply dict ({} = no answer). Returns (email, verified) or None
+    (not finished: state["r"] = "server" (retry quietly) or "closed" (the student closed the dialog))."""
+    state = {} if state is None else state
+    state["r"] = "server"
+    st = call("status")
+    if not st: return None
+    if st.get("verified") and st.get("student"): return (st["student"], True)
+    if not st.get("codes") and st.get("student"): return (st["student"], False)   # codes off on server
+    email = (saved or st.get("student") or "").strip().lower()
+    if not EMAIL_RE.match(email): email = ""
+    while True:
+        if not email:
+            email = _ask_email(call, ui, state)
+            if not email: return None
+            if save: save(email)                      # never asked again, whatever happens next
+        sent = state.get("sent")
+        if not (sent and sent[0] == email and time.time() - sent[1] < CODE_FRESH):
+            r = call("send", email=email)
+            if r.get("bound"): return (email, False)  # server has codes off: roster check only
+            if not r.get("sent"):
+                log("code not sent (%s): will retry quietly" % (r.get("error") or "no answer")); return None
+            state["sent"] = (email, time.time())
         note = ""
         while True:
             b, code = ui.ask(note + "We emailed a 6-digit code to\n%s\n\nType it here (check Junk/Spam if you don't see it):" % email,
                              ["Change email", "Send new code", "OK"])
-            if b is None: return None
+            if b is None: state["r"] = "closed"; return None
             if b == "Change email":
-                msg = ASK; break
+                email = ""; state.pop("sent", None)
+                if save: save("")
+                break
             if b == "Send new code":
                 r = call("send", email=email)
-                if not r.get("sent"): ui.say(_err(r)); return None
+                if not r.get("sent"):
+                    note = "LOCKqz couldn't send a new code right now. Use the last one, or try again in a few minutes.\n\n"; continue
+                state["sent"] = (email, time.time())
                 note = "New code sent.\n\n"; continue
             r = call("code", email=email, code=code or "")
             if r.get("verified"):
+                state.pop("sent", None)
                 ui.say("Done. LOCKqz is set up and won't ask again."); return (email, True)
             e = r.get("error")
             if r.get("resent"):
+                state["sent"] = (email, time.time())
                 note = {"expired": "That code expired. We sent a new one.\n\n",
                         "too_many_tries": "Too many wrong tries. We sent a new code.\n\n"}.get(e, "We sent a new code.\n\n"); continue
             if e == "wrong_code":
                 note = "That code is wrong (%s tries left).\n\n" % r.get("tries_left"); continue
-            ui.say(_err(r)); return None
+            log("code check failed (%s): will retry quietly" % (e or "no answer")); return None
 
 def clipboard(text):
     try: subprocess.run(["pbcopy"], input=text.encode(), timeout=5)
@@ -530,7 +550,7 @@ class Agent:
         except Exception: pass
         u = load(USER_CONF)
         self.student, self.verified = u.get("student"), bool(u.get("verified"))
-        self.id_busy, self.id_tried = False, 0.0
+        self.id_busy, self.id_tried, self.id_next, self.id_fails, self.id_state = False, 0.0, 0.0, 0, {}
         self.locked, self.quiz, self.url, self.missing_since, self.last_beat = False, None, None, None, 0.0
         self.pending = None          # (quiz, reason): an unlock the helper has not confirmed yet
         self.pending_try = 0.0
@@ -559,20 +579,36 @@ class Agent:
         except Exception as e: log("verify %s: helper unreachable: %s" % (op, e)); return {}
         return r if isinstance(r, dict) and r.get("status") else {}
 
-    def ensure_identity(self, force=False):
-        """Run the one-time email setup in the background (never blocks quiz watching)."""
-        if self.id_busy or (self.verified and not force) or time.time() - self.id_tried < 60: return
-        self.id_busy, self.id_tried = True, time.time()
+    def save_student(self, email, verified=False):
+        self.student, self.verified = (email or None), bool(verified)
+        try:
+            with open(USER_CONF, "w") as f: json.dump({"student": self.student, "verified": self.verified}, f)
+        except Exception as e: log("could not save student: %s" % e)
+
+    def ensure_identity(self, force=False, quiz=False):
+        """One-time email setup, in the background (never blocks quiz watching). Retries are quiet and
+        spaced out: server trouble 2, 4, 8 ... 60 min; a closed dialog 10 min while a quiz is open,
+        otherwise 6 h. force = check now (login, or the quiz gate needs the confirmed email)."""
+        now = time.time()
+        if self.id_busy or (self.verified and not force): return
+        if now < self.id_next and not ((force or quiz) and now - self.id_tried >= 600): return
+        self.id_busy, self.id_tried = True, now
         def run():
             try:
-                got = setup_identity(self.verify_call, MacUI(), self.student or "")
+                got = setup_identity(self.verify_call, MacUI(), self.student or "",
+                                     lambda e: self.save_student(e, False), self.id_state)
                 if got:
-                    self.student, self.verified = got
-                    with open(USER_CONF, "w") as f: json.dump({"student": self.student, "verified": self.verified}, f)
+                    self.save_student(*got); self.id_fails, self.id_next = 0, 0.0
                     try: self.helper("/student", {"student": self.student})
                     except Exception: pass
                     log("student %s (%s)" % (self.student, "verified" if self.verified else "unconfirmed"))
-            except Exception as e: log("identity setup error: %s" % e)
+                elif self.id_state.get("r") == "closed":
+                    self.id_next = time.time() + (600 if (quiz or self.quiz) else 6 * 3600)
+                else:
+                    self.id_fails += 1
+                    self.id_next = time.time() + min(3600, 120 * 2 ** min(self.id_fails - 1, 5))
+            except Exception as e:
+                log("identity setup error: %s" % e); self.id_next = time.time() + 600
             finally: self.id_busy = False
         threading.Thread(target=run, daemon=True).start()
 
@@ -788,8 +824,8 @@ class Agent:
         # its page has been gone for the grace period, a new attempt locks normally again.
         self.cap_step(present, now)
         open_quizzes = {q: u for q, u in present.items() if q not in self.capped}
-        if not self.verified and (open_quizzes or now - self.id_tried > 6 * 3600):
-            self.ensure_identity()
+        if not self.verified:
+            self.ensure_identity(quiz=bool(open_quizzes))
         if not self.locked:
             if open_quizzes:
                 url = next(iter(open_quizzes.values()))
