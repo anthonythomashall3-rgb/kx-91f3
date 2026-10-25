@@ -35,6 +35,7 @@ run "Round-2 API regressions (verify, FERPA, capacity, submissions, payments, de
 run "Round-2 front-end regressions (Sync gate safety, saved settings, polling)" node --no-warnings test_round2_frontend.mjs
 run "Deploy secrets check (Production + Preview, both projects)" bash test_deploy_secrets.sh
 run "Front-end audit regressions (dashboard + Sync panel)" node --no-warnings test_frontend_fixes.mjs
+if command -v xvfb-run >/dev/null 2>&1 && [ "$(id -u)" = 0 ]; then run "Real Chromium loads the quiz policy (AI refused, Web search + notes allowed, extensions off)" xvfb-run -a node --no-warnings test_chrome_policy_real.mjs; fi
 if command -v pwsh >/dev/null 2>&1; then
   run "Windows agent/engine logic (titles, unlock retry, policy restore)" pwsh -NoProfile -File test_windows_logic.ps1
 fi

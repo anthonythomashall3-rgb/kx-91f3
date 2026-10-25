@@ -73,7 +73,7 @@ ok("every managed browser channel written (>=15) + foreign file untouched") if l
 ok("all channels of Chrome/Edge/Brave covered") if all(x in ours for x in ["com.google.Chrome.plist","com.google.Chrome.beta.plist","com.microsoft.Edge.plist","com.microsoft.Edge.Dev.plist","com.brave.Browser.plist","com.brave.Browser.nightly.plist","com.operasoftware.OperaGX.plist"]) else bad("missing a channel: " + str(sorted(ours)))
 with open(os.path.join(tmp, "com.google.Chrome.plist"), "rb") as f: ch = plistlib.load(f)
 ok("Chrome: AI off + Web search pinned") if ch["GeminiSettings"] == 1 and ch["GenAiDefaultSettings"] == 2 and "udm=14" in ch["DefaultSearchProviderSearchURL"] else bad("chrome policy wrong")
-ok("Chrome: Web allowed beats search blocked") if "google.com/search" in ch["URLBlocklist"] and "google.com/search@udm=14" in ch["URLAllowlist"] else bad("url lists wrong")
+ok("Chrome: Web allowed beats search blocked") if "google.com/search" in ch["URLBlocklist"] and "google.com/search?udm=14" in ch["URLAllowlist"] else bad("url lists wrong")
 with open(os.path.join(tmp, "org.mozilla.firefox.plist"), "rb") as f: ff = plistlib.load(f)
 ok("Firefox: filter + AI chat off") if ff["WebsiteFilter"]["Block"] and ff["Preferences"]["browser.ml.chat.enabled"]["Value"] is False else bad("firefox policy wrong")
 for fork in ["org.mozilla.librewolf","net.waterfox.waterfox","one.ablaze.floorp","app.zen_browser.zen"]:

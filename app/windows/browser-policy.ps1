@@ -38,9 +38,9 @@ $SearchBlock = @("google.com/search","google.com/webhp","bing.com/search","bing.
                  "you.com","kagi.com","yandex.com/search","ecosia.org/search","startpage.com")
 # Google verticals with no AI answer: Web (udm=14), Images, News, Video, Books.
 # + DuckDuckGo's no-AI site (Search Assist, Duck.ai and AI images off).
-$SearchAllow = @("noai.duckduckgo.com","google.com/search@udm=14","google.com/search@udm=2","google.com/search@udm=12",
-                 "google.com/search@udm=7","google.com/search@udm=36","google.com/search@tbm=isch",
-                 "google.com/search@tbm=nws","google.com/search@tbm=vid","google.com/search@tbm=bks")
+$SearchAllow = @("noai.duckduckgo.com","google.com/search?udm=14","google.com/search?udm=2","google.com/search?udm=12",
+                 "google.com/search?udm=7","google.com/search?udm=36","google.com/search?tbm=isch",
+                 "google.com/search?tbm=nws","google.com/search?tbm=vid","google.com/search?tbm=bks")
 $FfBlock = @("https://www.google.com/search*","https://www.google.com/webhp*","https://www.bing.com/*search*",
              "https://www.bing.com/chat*","https://copilot.microsoft.com/*","https://duckduckgo.com/*","https://duck.ai/*",
              "https://search.yahoo.com/*","https://search.brave.com/*","https://you.com/*","https://kagi.com/*",
@@ -130,6 +130,18 @@ function Get-PolicyPlan([bool]$KeepProxy = $false) {
     V $root "GenAiDefaultSettings" 2
     V $root "GeminiSettings" 1
     V $root "BuiltInAIAPIsEnabled" 0
+    # Every Chrome AI feature off one by one too (chromium policy_definitions/GenerativeAI), plus no
+    # developer-mode (unpacked) or externally installed extensions.
+    foreach ($kv in @(@("AIModeSettings",1),@("GeminiActOnWebSettings",1),@("GeminiSparkSettings",1),
+        @("GeminiChromeFileUploadSettings",1),@("HelpMeWriteSettings",2),@("HistorySearchSettings",2),
+        @("TabCompareSettings",2),@("TabOrganizerSettings",2),@("CreateThemesSettings",2),
+        @("DevToolsGenAiSettings",2),@("AutofillGenAiSettings",2),@("AutofillPredictionSettings",2),
+        @("SearchContentSharingSettings",1),@("SmartTabSharingSettings",1),@("ThirdPartyAiChatSettings",1),
+        @("TryOnYouSettings",2),@("ChromeSuggestionsSettings",1),@("GenAILocalFoundationalModelSettings",1),
+        @("LensOverlaySettings",1),@("LensRegionSearchEnabled",0),@("LensDesktopNTPSearchEnabled",0),
+        @("GoogleSearchSidePanelEnabled",0),@("ExtensionDeveloperModeSettings",1),@("BlockExternalExtensions",1))) {
+      V $root $kv[0] $kv[1]
+    }
     V $root "DnsOverHttpsMode" "off" "String"
     if (-not $KeepProxy) { V $root "ProxyMode" "direct" "String" }   # a proxy would resolve AI sites remotely, past the hosts block
     V $root "DefaultSearchProviderEnabled" 1
@@ -146,7 +158,7 @@ function Get-PolicyPlan([bool]$KeepProxy = $false) {
     if ($Chromium[$root] -eq "edge") {
       V $root "HubsSidebarEnabled" 0; V $root "CopilotCDPPageContext" 0
       V $root "EdgeEntraCopilotPageContext" 0; V $root "ComposeInlineEnabled" 0
-      V $root "Microsoft365CopilotChatIconEnabled" 0; V $root "GenAILocalFoundationalModelSettings" 1
+      V $root "Microsoft365CopilotChatIconEnabled" 0
     }
     # Brave: Leo AI off; Tor windows and Brave VPN off (both look names up remotely, past hosts).
     if ($Chromium[$root] -eq "brave") { V $root "BraveAIChatEnabled" 0; V $root "TorDisabled" 1; V $root "BraveVPNDisabled" 1 }

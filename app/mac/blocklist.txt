@@ -336,3 +336,5 @@ doh.mullvad.net
 freedns.controld.com
 dns.alidns.com
 doh.pub
+appsgenaiserver-pa.clients6.google.com
+appsgenaiserver-pa.googleapis.com

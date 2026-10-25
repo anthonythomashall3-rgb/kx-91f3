@@ -54,7 +54,7 @@ The browser extension is retired (kept in `legacy/`). Everything it did now live
   browser-policy.ps1` → HKLM policies), applied by the engine at LOCK and removed at UNLOCK:
   Gemini/Copilot/Leo/Firefox-AI off, on-device AI APIs off, encrypted DNS off, ALL extensions
   disabled (AI sidebars, Grammarly), and search pinned to Google **Web** (udm=14 — no AI Overview,
-  no AI Mode): `google.com/search` blocked, `@udm=14` + Images/News/Video/Books allowed, Bing/DDG/
+  no AI Mode): `google.com/search` blocked, `?udm=14` + Images/News/Video/Books allowed, Bing/DDG/
   Brave/You/Kagi/Yahoo search blocked. Needs no MDM, no domain join, no enrollment.
 - Safari has no policy layer → the agent rewrites any AI-answer search tab to Google Web (≤1 s).
 - Download page is ONE button. No extension, no Chrome Web Store, no $5, no profile approval.

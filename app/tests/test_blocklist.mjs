@@ -54,7 +54,7 @@ JSON.stringify(mac) === JSON.stringify(win)
 console.log("T7 browser policy (no extension) pins search to Google Web + blocks AI-answer search engines, Mac and Windows alike");
 const pyPol = readFileSync(join(DIR, "../mac/browser-policy.py"), "utf8");
 const psPol = readFileSync(join(DIR, "../windows/browser-policy.ps1"), "utf8");
-const polMust = ["google.com/search@udm=14", "GeminiSettings", "GenAiDefaultSettings", "DnsOverHttpsMode",
+const polMust = ["google.com/search?udm=14", "GeminiSettings", "GenAiDefaultSettings", "DnsOverHttpsMode",
               "ExtensionInstallBlocklist", "bing.com/search", "duckduckgo.com", "copilot.microsoft.com",
               "udm=14&q={searchTerms}", "WebsiteFilter", "browser.ml.chat.enabled",
               // round 2: Brave Tor/VPN, Firefox Smart Window + built-in VPN, safe-extension allowlist,

@@ -38,7 +38,7 @@ const AI_DOMAINS = [
   "chat.webllm.ai","webllm.mlc.ai","remotedesktop.google.com","remotedesktop-pa.googleapis.com","web.teamviewer.com","my.anydesk.com","web.parsec.app","api.sec-tunnel.com",
   "mask.icloud.com","mask-h2.icloud.com","cloudflare-dns.com","chrome.cloudflare-dns.com","mozilla.cloudflare-dns.com","dns.google","dns.google.com","dns.quad9.net",
   "doh.opendns.com","dns.nextdns.io","firefox.dns.nextdns.io","chromium.dns.nextdns.io","doh.xfinity.com","private.canadianshield.cira.ca","wikimedia-dns.org","dns.adguard-dns.com",
-  "doh.mullvad.net","freedns.controld.com","dns.alidns.com","doh.pub"
+  "doh.mullvad.net","freedns.controld.com","dns.alidns.com","doh.pub","appsgenaiserver-pa.clients6.google.com","appsgenaiserver-pa.googleapis.com"
 ];
 const now = () => new Date().toISOString();
 // "Today" in America/Los_Angeles as YYYY-MM-DD, so a professor stays active through the end of their

@@ -71,14 +71,30 @@ SEARCH_BLOCK = ["google.com/search", "google.com/webhp", "bing.com/search", "bin
                 "yandex.com/search", "ecosia.org/search", "startpage.com"]
 # Google verticals that carry no AI answer: Web, Images, News, Video, Books; DuckDuckGo's no-AI
 # site (Search Assist, Duck.ai and AI images off).
-SEARCH_ALLOW = ["noai.duckduckgo.com", "google.com/search@udm=14", "google.com/search@udm=2", "google.com/search@udm=12",
-                "google.com/search@udm=7", "google.com/search@udm=36",
-                "google.com/search@tbm=isch", "google.com/search@tbm=nws",
-                "google.com/search@tbm=vid", "google.com/search@tbm=bks"]
+SEARCH_ALLOW = ["noai.duckduckgo.com", "google.com/search?udm=14", "google.com/search?udm=2", "google.com/search?udm=12",
+                "google.com/search?udm=7", "google.com/search?udm=36",
+                "google.com/search?tbm=isch", "google.com/search?tbm=nws",
+                "google.com/search?tbm=vid", "google.com/search?tbm=bks"]
 WEB_SEARCH = "https://www.google.com/search?udm=14&q={searchTerms}"
 
 def keep_proxy():
     return os.path.exists(PROXY_KEPT)
+
+# Every Chrome AI feature switched off one by one as well (GenAiDefaultSettings=2 covers most, but a
+# feature newer than that default, or a browser that reads only the per-feature policy, still obeys
+# these). Values from chromium policy_definitions/GenerativeAI (2 / 1 / false = do not allow).
+CHROMIUM_AI_OFF = {
+    "AIModeSettings": 1, "GeminiActOnWebSettings": 1, "GeminiSparkSettings": 1,
+    "GeminiChromeFileUploadSettings": 1, "HelpMeWriteSettings": 2, "HistorySearchSettings": 2,
+    "TabCompareSettings": 2, "TabOrganizerSettings": 2, "CreateThemesSettings": 2,
+    "DevToolsGenAiSettings": 2, "AutofillGenAiSettings": 2, "AutofillPredictionSettings": 2,
+    "SearchContentSharingSettings": 1, "SmartTabSharingSettings": 1, "ThirdPartyAiChatSettings": 1,
+    "TryOnYouSettings": 2, "ChromeSuggestionsSettings": 1, "GenAILocalFoundationalModelSettings": 1,
+    "LensOverlaySettings": 1, "LensRegionSearchEnabled": False, "LensDesktopNTPSearchEnabled": False,
+    "GoogleSearchSidePanelEnabled": False,
+    # Extensions: no developer-mode (unpacked) extensions and no externally installed ones either.
+    "ExtensionDeveloperModeSettings": 1, "BlockExternalExtensions": True,
+}
 
 def chromium_policy(domain):
     p = {MARK: True,
@@ -89,6 +105,7 @@ def chromium_policy(domain):
          "DefaultSearchProviderSearchURL": WEB_SEARCH,
          "DefaultSearchProviderSuggestURL": "https://www.google.com/complete/search?output=chrome&q={searchTerms}",
          "ExtensionInstallBlocklist": ["*"], "ExtensionInstallAllowlist": list(SAFE_EXTENSIONS)}
+    p.update(CHROMIUM_AI_OFF)
     if keep_proxy(): p.pop("ProxyMode")
     if domain.startswith("com.microsoft.Edge"):
         p.update({"HubsSidebarEnabled": False, "CopilotCDPPageContext": False,

@@ -115,7 +115,7 @@ if ($ossl -and $py) {
   # a "release": the real Windows files with the version bumped, published by the real builder
   function Fresh($d) { Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Path $d | Out-Null; Copy-Item "$Win/*" $d -Recurse -Force }
   $src = Join-Path $t "winsrc"; Fresh $src
-  (Get-Content "$src/lockqzd.ps1" -Raw) -replace '\$Version = "[^"]+"', '$$Version = "9.9.9"' | Set-Content "$src/lockqzd.ps1" -Encoding UTF8
+  (Get-Content "$src/lockqzd.ps1" -Raw) -replace '\$Version = "[^"]+"', '$$Version = "9.9.9"' | Set-Content "$src/lockqzd.ps1" -Encoding ASCII   # release files must be ASCII (make-manifest refuses a BOM)
   Copy-Item "$t/k.xml" "$src/update.pub.xml" -Force
   $site = Join-Path $t "site"; New-Item -ItemType Directory -Path "$site/download" -Force | Out-Null
   & $py.Source (Join-Path $Here "../release/make-manifest.py") --key "$t/k.pem" --pub "$t/k.pub" --out "$site/download" --windows $src --version 9.9.9 | Out-Null
