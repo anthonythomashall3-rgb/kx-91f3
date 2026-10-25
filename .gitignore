@@ -24,3 +24,7 @@ app/cloudflare/public/install.sh
 app/cloudflare/public/uninstall.sh
 app/cloudflare/public/install.ps1
 _to_delete_workflows/
+
+# local scratch (stale patch, source tarball)
+paid_only.patch
+app/.src2.tgz

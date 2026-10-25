@@ -18,7 +18,7 @@ Created 22 Oct 2026. Everything USC asks for to add LOCKqz to Brightspace (LTI),
 ## Open items before sending
 - Fake-lock hole (a student could fake a lock and get the quiz password): fixed and live 23 Oct 2026, strict mode on (see 07_device_auth). HECVAT START HERE C27 updated to match.
 - Privacy page fixed locally (contact email; name collected at setup). Not yet deployed.
-- HECVAT PDAT-04 left blank: confirm the Cloudflare D1 database region.
+- HECVAT PDAT-04 filled 23 Oct 2026: "No" (data stays in the US; Cloudflare D1 region WNAM / United States). DPAI-01..08 response cells set (No / N/A — LOCKqz does no AI processing; the N/A notes were already there). Edited with openpyxl, which drops Excel dropdown validation + conditional formatting (answers and all 17,748 formulas intact); pristine pre-edit copy kept as "LOCKqz - HECVAT 4.1.6.BEFORE_PDAT04.xlsx". Open once in Excel to confirm formatting before sending. HIPAA/PCI/AI-tab/datacenter modules remain N/A (do not apply to LOCKqz) — not fabricated.
 - No SOC 2 (USC asks for one); hosting provider Cloudflare holds SOC 2 Type II.
 
 ## Sources
@@ -26,3 +26,6 @@ Created 22 Oct 2026. Everything USC asks for to add LOCKqz to Brightspace (LTI),
 - USC DA new-LTI process: https://www.brightspacehelp.usc.edu/domain-admin-guides/da-net-new-lti-request-process/
 - ITI VPAT: https://www.itic.org/policy/accessibility/vpat
 - EDUCAUSE HECVAT: https://www.educause.edu/hecvat
+
+
+2026-10-23: Final check — all 4 forms complete. HECVAT + VPAT URLs updated lockdownqz -> lockqz.pages.dev / prof.lockqz.pages.dev. Backups of VPAT pre-edit in /tmp/vp. Handoff: claude Project doc LOCKqz-HANDOFF.md.
