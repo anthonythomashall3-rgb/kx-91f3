@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
   push:
     branches: [master]
-    paths: [ "app/usc/build_sections.py", "app/cloudflare/migrate_016_sections.sql", ".github/workflows/usc-sections.yml" ]
+    paths: [ "app/usc/build_sections.py", "app/cloudflare/migrate_017_sections.sql", ".github/workflows/usc-sections.yml" ]
 concurrency: { group: usc-sections, cancel-in-progress: false }
 jobs:
   refresh:
@@ -27,6 +27,6 @@ jobs:
         run: |
           [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::warning::missing CLOUDFLARE_API_TOKEN"; exit 0; }
           npm ci --no-audit --no-fund
-          npx wrangler d1 execute lockqz --remote --file=migrate_016_sections.sql
+          npx wrangler d1 execute lockqz --remote --file=migrate_017_sections.sql
           npx wrangler d1 execute lockqz --remote --file="$RUNNER_TEMP/sections.sql"
           npx wrangler d1 execute lockqz --remote --command "SELECT term, COUNT(*) AS rows FROM usc_sections GROUP BY term"

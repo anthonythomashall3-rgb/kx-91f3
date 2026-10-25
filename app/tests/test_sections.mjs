@@ -53,7 +53,7 @@ function makeDb(oldSchema) {
   }
   sqlite.exec(schema);
   if (oldSchema) { sqlite.exec(readFileSync(join(CF, "migrate_010_gate_verify.sql"), "utf8")); sqlite.exec(readFileSync(join(CF, "migrate_011_lock_ip.sql"), "utf8")); }
-  for (const m of ["migrate_012_bs_code.sql", "migrate_013_sa_keep.sql", "migrate_014_lockqz_off.sql"]) sqlite.exec(readFileSync(join(CF, m), "utf8"));
+  for (const m of ["migrate_012_bs_code.sql", "migrate_013_sa_keep.sql", "migrate_014_lockqz_off.sql", "migrate_017_sections.sql"]) { try { sqlite.exec(readFileSync(join(CF, m), "utf8")); } catch (e) { if (!/duplicate column/.test(e.message)) throw e; } }
   return sqlite;
 }
 
@@ -94,7 +94,7 @@ async function getc(env, path, { teacher=null, sync=null } = {}) {
               { ou: "500003", name: "FBE 437 Entrepreneurial Finance", code: "FBE-437-COMBINED" } ];
   const courses = (qi0) => C.map((c, i) => ({ ...c, role: "Instructor", classlist: roster, quizzes: [ { qi: String(qi0 + i), name: "Quiz", active: true } ] }));
   await call(env, "/sync", { courses: courses(700) }, { teacher: ADMIN_TOK });   // trusted seed
-  r = await call(env, "/sync", { courses: courses(700) }, { sync: SYNC });
+  r = await call(env, "/sync", { whoami: { id: "4000" }, courses: courses(700) }, { sync: SYNC });
   check("professor verified", (await getc(env, "/me", { teacher: TOK })).data?.verified === true);
 
   console.log("S1 the professor's sections come straight from the public schedule (no AI, instant)");
@@ -136,7 +136,7 @@ async function getc(env, path, { teacher=null, sync=null } = {}) {
 
   console.log("S5 paying the second section unlocks it and the combined shell; sync auto-protects them");
   await call(env, "/pay-sections", { email: "prof@usc.edu", term: CUR, sections: ["15353"], until: "2099-12-31" }, { teacher: ADMIN_TOK });
-  r = await call(env, "/sync", { courses: courses(800) }, { sync: SYNC });
+  r = await call(env, "/sync", { whoami: { id: "4000" }, courses: courses(800) }, { sync: SYNC });
   const prot = sqlite.prepare("SELECT ou FROM quizzes WHERE qi IN ('800','801','802') ORDER BY ou").all().map(x => x.ou).join();
   check("all three FBE 437 shells auto-protected once both sections paid", prot === "500001,500002,500003", prot);
   r = await getc(env, "/my-sections", { teacher: TOK });
