@@ -235,6 +235,7 @@ function Ask-Email($state) {
 }
 function Setup-Identity($saved, $state) {
   # -> @{ student; verified } to save, or $null ($state.r = "server": retry quietly; "closed": dialog closed)
+  if ($null -eq $state) { $state = @{ sent_email = ""; sent_at = 0; r = "" } }
   $state.r = "server"
   $st = Verify "status" $null
   if (-not $st) { return $null }
