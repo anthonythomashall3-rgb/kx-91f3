@@ -37,6 +37,22 @@ function Log($m) {
 # Taking a quiz: /d2l/lms/quizzing/user/... ; previewing one (TAs/staff): .../preview... or ?isprv=1
 function Url-Path([string]$u) { if ($u -match '^(?:[A-Za-z][A-Za-z0-9+.-]*://)?[^/?#]*([^?#]*)') { return $Matches[1] }; return "" }
 function Url-Query([string]$u) { $i = $u.IndexOf("?"); if ($i -lt 0) { return "" }; $q = $u.Substring($i + 1); $h = $q.IndexOf("#"); if ($h -ge 0) { $q = $q.Substring(0, $h) }; return $q }
+# A quiz opened from Content/Lessons runs in a frame of /d2l/le/content/<ou>/fullscreen/<topic>/ViewLocation
+# ?...&location=<quiz URL, encoded>: return that quiz URL (same host) so every rule sees the real quiz.
+function Inner-Url([string]$u) {
+  try {
+    if ((Url-Path $u) -match '^/d2l/le/(content|lessons)/\d+/') {
+      foreach ($kv in ((Url-Query $u) -split '&')) {
+        if ($kv -like 'location=*') {
+          $raw = $kv.Substring(9).Replace('+', ' ')
+          $loc = [Uri]::UnescapeDataString($raw)
+          if ($loc.StartsWith('/d2l/')) { $hn = ''; if ($u -match '^(?:[A-Za-z][A-Za-z0-9+.-]*://)?([^/?#]+)') { $hn = $Matches[1] }; return "https://$hn$loc" }
+        }
+      }
+    }
+  } catch { }
+  return $u
+}
 function Is-QuizPath($u) { $p = Url-Path ([string]$u); ($p -match '^/d2l/lms/quizzing/(user/|.*preview)') -or (($p -match '^/d2l/lms/quizzing/') -and ((Url-Query ([string]$u)) -match '(^|&)isprv=1(&|$)')) }
 function Is-Quiz($u)    { (Is-QuizPath $u) -and [regex]::IsMatch([string]$u, '[?&]qi=\d') -and -not (Is-Leaving $u) }
 # Brightspace quiz-attempt pages carry "Quiz" (and often the LMS name) in the window title; used ONLY for
@@ -106,6 +122,7 @@ function Get-BrowserWindows {
     $url = ""
     $edit = $w.FindFirst($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Edit)))
     if ($edit) { $vp = $null; if ($edit.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { $url = $vp.Current.Value } }
+    $url = Inner-Url $url   # a quiz opened from Content/Lessons
     $tabs = @()
     foreach ($t in $w.FindAll($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::TabItem)))) { $tabs += $t.Current.Name }
     $out += [pscustomobject]@{ Title = $w.Current.Name; Url = $url; Tabs = $tabs; Proc = $names[$wpid] }

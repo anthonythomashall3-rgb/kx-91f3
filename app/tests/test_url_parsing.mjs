@@ -19,6 +19,11 @@ const bad = m => { fail++; console.log("  FAIL:", m); };
 const B = "https://usc.brightspace.com";
 // [description, url, lock id, is a quiz page that locks, is a leaving (after-the-quiz) page]
 const cases = [
+  ["opened from Content (fullscreen ViewLocation, live USC shape 25 Oct 2026)", `${B}/d2l/le/content/302972/fullscreen/10348552/ViewLocation?title=BTAM+Spr+23&location=%2fd2l%2flms%2fquizzing%2fuser%2fquiz_summary.d2l%3fqi%3d423694%26ou%3d302972%26cfql%3d1%26dnb%3d1`, "302972-423694", true, false],
+  ["Content view, attempt inside", `${B}/d2l/le/content/111/fullscreen/5/ViewLocation?location=%2Fd2l%2Flms%2Fquizzing%2Fuser%2Fattempt%2Fquiz_start_frame_auto.d2l%3Fou%3D111%26qi%3D777`, "111-777", true, false],
+  ["Content view, submitted inside", `${B}/d2l/le/content/111/fullscreen/5/ViewLocation?location=%2fd2l%2flms%2fquizzing%2fuser%2fquiz_submissions_attempt.d2l%3fqi%3d777%26ou%3d111`, "111-777", false, true],
+  ["Content topic page (no quiz frame yet)", `${B}/d2l/le/content/302972/viewContent/10348552/View`, "x-x", false, false],
+  ["Content view of a file (not a quiz)", `${B}/d2l/le/content/111/fullscreen/5/ViewLocation?location=%2fcontent%2fenforced%2fnotes.pdf`, "x-x", false, false],
   ["classic quiz summary", `${B}/d2l/lms/quizzing/user/quiz_summary.d2l?qi=12345&ou=98765`, "98765-12345", true, false],
   ["params reversed order", `${B}/d2l/lms/quizzing/user/quiz_summary.d2l?ou=98765&qi=12345`, "98765-12345", true, false],
   ["extra params present", `${B}/d2l/lms/quizzing/user/attempt/start.d2l?ou=98765&qi=12345&cfql=1&d2l_body_type=3`, "98765-12345", true, false],
@@ -52,7 +57,7 @@ def load(n, f):
     s = importlib.util.spec_from_file_location(n, os.path.join(sys.argv[1], f)); m = importlib.util.module_from_spec(s); s.loader.exec_module(m); return m
 A = load("agent", "lockqz-agent.py"); D = load("helperd", "lockqzd.py")
 urls = json.load(open(sys.argv[2]))
-print(json.dumps([[A.lock_id(u), A.is_quiz(u), A.is_leaving(u), D.lock_id(u)] for u in urls]))
+print(json.dumps([[A.lock_id(v), A.is_quiz(v), A.is_leaving(v), D.lock_id(v)] for v in [A.inner_url(u) for u in urls]]))
 `;
 writeFileSync(join(tmp, "urls.json"), JSON.stringify(cases.map(c => c[1])));
 writeFileSync(join(tmp, "t.py"), py);
@@ -75,7 +80,7 @@ for (const c of ["pwsh", "/tmp/auditD/pwsh/pwsh"]) { try { execFileSync(c, ["-No
 if (pwsh) {
   const ps = `
 $ErrorActionPreference = "Stop"
-$want = @("Url-Path","Url-Query","Is-QuizPath","Is-Quiz","Is-Leaving","Lock-Id")
+$want = @("Url-Path","Url-Query","Inner-Url","Is-QuizPath","Is-Quiz","Is-Leaving","Lock-Id")
 $a = [System.Management.Automation.Language.Parser]::ParseFile('${join(WIN, "lockqz-agent.ps1").replace(/'/g, "''")}', [ref]$null, [ref]$null)
 foreach ($f in @($a.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $want -contains $_.Name })) { . ([scriptblock]::Create($f.Extent.Text)) }
 $d = [System.Management.Automation.Language.Parser]::ParseFile('${join(WIN, "lockqzd.ps1").replace(/'/g, "''")}', [ref]$null, [ref]$null)
@@ -83,7 +88,7 @@ $dl = @($d.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automa
 $dsb = [scriptblock]::Create($dl.Extent.Text.Replace("function Lock-Id", "function Helper-LockId"))
 . $dsb
 $urls = Get-Content '${join(tmp, "urls.json").replace(/'/g, "''")}' -Raw | ConvertFrom-Json
-$out = foreach ($u in @($urls)) { ,@((Lock-Id $u), [bool](Is-Quiz $u), [bool](Is-Leaving $u), (Helper-LockId $u)) }
+$out = foreach ($u0 in @($urls)) { $u = Inner-Url $u0; ,@((Lock-Id $u), [bool](Is-Quiz $u), [bool](Is-Leaving $u), (Helper-LockId $u)) }
 ConvertTo-Json -InputObject @($out) -Compress -Depth 3
 `;
   writeFileSync(join(tmp, "t.ps1"), ps);
@@ -101,7 +106,8 @@ ConvertTo-Json -InputObject @($out) -Compress -Depth 3
 }
 
 console.log("T3 lock ids stay collision-free for different quizzes");
-const ids = macRes.slice(0, 3).map(r => r[0]);
+const at = name => macRes[cases.findIndex(c => c[0] === name)][0];
+const ids = [at("classic quiz summary"), at("params reversed order")];
 (new Set(["100-1", "100-2", "200-1"]).size === 3) && ids[0] === ids[1] ? ok("same quiz in different shapes -> same id") : bad("ids differ for the same quiz");
 
 console.log("");

@@ -93,6 +93,21 @@ def url_parts(url):
     except Exception:
         return "", ""
 
+CONTENT_VIEW_RE = re.compile(r"^/d2l/le/(content|lessons)/\d+/", re.I)
+def inner_url(url):
+    """A quiz opened from Content/Lessons runs in a frame of
+    /d2l/le/content/<ou>/fullscreen/<topic>/ViewLocation?...&location=<quiz URL, encoded>. Return that quiz
+    URL (same scheme and host), so every rule below sees the real quiz; any other URL is returned as is."""
+    s = str(url or "")
+    try:
+        t = s if "://" in s[:12] else "https://" + s
+        u = urllib.parse.urlsplit(t)
+        if CONTENT_VIEW_RE.search(u.path or ""):
+            loc = (urllib.parse.parse_qs(u.query).get("location") or [""])[0]
+            if loc.startswith("/d2l/"): return "%s://%s%s" % (u.scheme, u.netloc, loc)
+    except Exception: pass
+    return s
+
 def lock_id(url):
     qi = (QI_RE.search(str(url or "")) or [None, None])[1]
     ou = (OU_RE.search(str(url or "")) or [None, None])[1]
@@ -829,6 +844,7 @@ class Agent:
         # daemon never blocks AI and search tabs are never rewritten.
         dev = developer_mode() if dev is None else dev
         tabs = browser_tabs() if tabs is None else tabs
+        tabs = [(a, w, t, inner_url(u)) for (a, w, t, u) in tabs]   # quizzes opened from Content/Lessons
         now = time.time()
         urls = [u for (_, _, _, u) in tabs]
         present, left = classify(urls)

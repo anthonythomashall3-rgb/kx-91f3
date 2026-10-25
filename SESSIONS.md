@@ -7,9 +7,10 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-10-25 15:35 PT — 01CsgBZK: Content/Lessons quiz detection (agents + server ids), Brightspace AI chat widget (learnwise) blocked, v0.4.4. Files: app/mac/lockqz-agent.py, app/windows/lockqz-agent.ps1, [[route]].js ids()/AI_DOMAINS, blocklists, test_url_parsing.mjs, VERSION + helper versions.
+- (none)
 
 ## Recently finished
+- 2026-10-25 15:45 PT — 01CsgBZK: quizzes opened from Content/Lessons now lock (fullscreen ViewLocation ?location= decoded by Mac/Windows agents + server ids()); Brightspace's own AI chat widget chat.learnwise.ai blocked; v0.4.4. ONE deploy at 5 pm: 01CsgBZK has scheduled sessions at 17:10/17:12 PT that run release-local.sh + deploy.sh and SKIP if /api/version already shows HEAD's version (e.g. a Release workflow_dispatch ran first).
 - 2026-10-25 13:55 PT — 01DfSvcn: student email typed ONCE ever (saved at once, no error popups, quiet retries; proof of confirmed email survives reinstall); D1 write-cap -> 503 server_busy; USC sections run capped at 3,000 rows. 5pm PT (D1 reset): mark real users' devices verified, run full Release (workflow_dispatch), restart Anthony's agent.
 - 2026-10-25 14:00 PT — 01DTnJE2: USC sections refresh weekly outside registration/add-drop; events left as is (already minimal: heartbeats not logged, installs throttled, each of its 3 indexes is used by /password, /live or rate limits).
 - 2026-10-25 12:59 PT — 01DTnJE2: student fee on, USC term dates, renewal emails (9d22c7a, 3d1081e).

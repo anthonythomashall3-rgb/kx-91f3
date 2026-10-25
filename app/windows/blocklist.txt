@@ -338,3 +338,5 @@ dns.alidns.com
 doh.pub
 appsgenaiserver-pa.clients6.google.com
 appsgenaiserver-pa.googleapis.com
+chat.learnwise.ai
+learnwise.ai
