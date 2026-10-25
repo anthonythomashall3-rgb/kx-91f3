@@ -638,7 +638,7 @@ export async function onRequest(context) {
       const nm = url.searchParams.get("name");
       if (nm && splitName(nm)) await db.prepare("UPDATE teachers SET name=? WHERE id=?").bind(String(nm).trim().slice(0,80), me.id).run();
       const r = await sectionsFor(me.id, nm || me.name);
-      return json({ ...r, price: PRICE, venmo: (env.VENMO_HANDLE || "").replace(/^@/, "") || null, memo: await payCode(me.id), all_active: !!me.active });
+      return json({ ...r, price: PRICE, venmo: (env.VENMO_HANDLE || "").replace(/^@/, "") || null, zelle: env.ZELLE_TO || null, invoice: env.INVOICE_EMAIL || env.ADMIN_EMAIL || null, memo: await payCode(me.id), all_active: !!me.active });
     }
     if (p === "/quiz" && request.method === "POST") {
       const { qi, ou } = ids(String(body.url||""));
