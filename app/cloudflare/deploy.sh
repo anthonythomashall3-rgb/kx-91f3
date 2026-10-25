@@ -17,12 +17,27 @@ if ! npx wrangler d1 list 2>/dev/null | grep -q "\b$DB\b"; then
   exit 1
 fi
 
-echo "== schema (idempotent; CREATE TABLE IF NOT EXISTS) =="
-npx wrangler d1 execute "$DB" --remote --file=schema.sql
-
-echo "== migrations (safe to re-run; 'duplicate column' = already applied) =="
+# 25 Oct 2026: never use `d1 execute --file` here. --file goes through D1's IMPORT path: every run
+# snapshots the database and a failing file ("duplicate column" = already applied) RESTORES it, which
+# counts every row as written. 17 files x every deploy exhausted the free 100k rows/day limit and froze
+# all LOCKqz writes (locks, codes). Use the query path (--command) and run each migration only once.
+q(){ npx wrangler d1 execute "$DB" --remote --json --command "$1" 2>/dev/null; }
+echo "== schema (idempotent; CREATE TABLE IF NOT EXISTS; query path) =="
+q "$(grep -v '^[[:space:]]*--' schema.sql)" >/dev/null && echo "  schema ok" || echo "  schema: check manually"
+q "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, at TEXT)" >/dev/null
+done_list=$(q "SELECT name FROM _migrations" | python3 -c 'import sys,json
+try: print("\n".join(r["name"] for r in json.load(sys.stdin)[0]["results"]))
+except Exception: pass')
+echo "== new migrations only =="
 for m in migrate_*.sql; do
-  npx wrangler d1 execute "$DB" --remote --file="$m" >/dev/null 2>&1 && echo "  applied $m" || echo "  $m already applied"
+  if printf '%s\n' "$done_list" | grep -qx "$m"; then continue; fi
+  out=$(npx wrangler d1 execute "$DB" --remote --command "$(grep -v '^[[:space:]]*--' "$m")" 2>&1); rc=$?
+  if [ $rc -eq 0 ] || printf '%s' "$out" | grep -qiE "duplicate column|already exists"; then
+    q "INSERT OR IGNORE INTO _migrations (name, at) VALUES ('$m', datetime('now'))" >/dev/null
+    [ $rc -eq 0 ] && echo "  applied $m" || echo "  $m was already in place"
+  else
+    echo "  FAILED $m (will retry next deploy):"; printf '%s\n' "$out" | tail -3; exit 1
+  fi
 done
 
 echo "== pages project =="
