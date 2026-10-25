@@ -56,13 +56,14 @@ if (-not $done) {
 }
 Unregister-ScheduledTask -TaskName "LOCKqz" -Confirm:$false
 
-# Per-user leftovers: the agent's student.json and log in every profile's %APPDATA%\LOCKqz (never
+# Per-user leftovers: the agent's log in every profile's %APPDATA%\LOCKqz; student.json (the confirmed
+# school email + its proof) is KEPT so a reinstall never asks again (never
 # through a junction: a planted link must not make this delete anything else).
 foreach ($prof in @(Get-CimInstance Win32_UserProfile | Where-Object { -not $_.Special -and $_.LocalPath })) {
   $d = Join-Path $prof.LocalPath "AppData\Roaming\LOCKqz"
   $di = Get-Item -LiteralPath $d -Force
   if (-not $di -or ($di.Attributes -band [IO.FileAttributes]::ReparsePoint)) { continue }
-  foreach ($n in "student.json", "agent.log", "agent.log.1") {
+  foreach ($n in "agent.log", "agent.log.1", "setup.json") {
     $f = Get-Item -LiteralPath (Join-Path $d $n) -Force
     if ($f -and -not ($f.Attributes -band [IO.FileAttributes]::ReparsePoint)) { Remove-Item -LiteralPath $f.FullName -Force }
   }

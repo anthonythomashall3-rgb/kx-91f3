@@ -30,12 +30,12 @@ if grep -q 'anchor "com.lockqz"' /etc/pf.conf 2>/dev/null; then
   grep -v 'anchor "com.lockqz"' /etc/pf.conf > "$T" && cat "$T" > /etc/pf.conf; rm -f "$T"
   pfctl -f /etc/pf.conf 2>/dev/null || true
 fi
-# Per-user leftovers: the agent's student.json and its log (the folder itself only if empty: an admin's
-# developer key lives there). Never through a symlinked folder.
+# Per-user leftovers: the agent's log. student.json (the confirmed school email + its proof) is KEPT so a
+# reinstall never asks again. Never through a symlinked folder.
 for H in /Users/*; do
   U="$H/Library/Application Support/LOCKqz"
   if [ -d "$U" ] && [ ! -L "$U" ] && [ ! -L "$H/Library" ] && [ ! -L "$H/Library/Application Support" ]; then
-    rm -f "$U/student.json"; rmdir "$U" 2>/dev/null || true
+    rmdir "$U" 2>/dev/null || true
   fi
   L="$H/Library/Logs"
   if [ -d "$L" ] && [ ! -L "$L" ] && [ ! -L "$H/Library" ]; then rm -f "$L/LOCKqz-agent.log" "$L/LOCKqz-agent.log.1"; fi

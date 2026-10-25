@@ -480,10 +480,19 @@ def setup_identity(call, ui, saved="", save=None, state=None):
     state["r"] = "server"
     st = call("status")
     if not st: return None
-    if st.get("verified") and st.get("student"): return (st["student"], True)
+    if st.get("verified") and st.get("student"):
+        if st.get("vtoken"): state["vtoken"] = st["vtoken"]
+        return (st["student"], True)
     if not st.get("codes") and st.get("student"): return (st["student"], False)   # codes off on server
     email = (saved or st.get("student") or "").strip().lower()
     if not EMAIL_RE.match(email): email = ""
+    if email and state.get("vtoken"):
+        # Confirmed before on this computer (e.g. LOCKqz was reinstalled): the saved proof does it, no dialog.
+        r = call("token", email=email, vtoken=state["vtoken"])
+        if r.get("verified"):
+            state["vtoken"] = r.get("vtoken") or state["vtoken"]; return (email, True)
+        if not r: return None
+        if r.get("error") == "bad_token": state.pop("vtoken", None)
     while True:
         if not email:
             email = _ask_email(call, ui, state)
@@ -514,6 +523,7 @@ def setup_identity(call, ui, saved="", save=None, state=None):
             r = call("code", email=email, code=code or "")
             if r.get("verified"):
                 state.pop("sent", None)
+                if r.get("vtoken"): state["vtoken"] = r["vtoken"]
                 ui.say("Done. LOCKqz is set up and won't ask again."); return (email, True)
             e = r.get("error")
             if r.get("resent"):
@@ -550,7 +560,8 @@ class Agent:
         except Exception: pass
         u = load(USER_CONF)
         self.student, self.verified = u.get("student"), bool(u.get("verified"))
-        self.id_busy, self.id_tried, self.id_next, self.id_fails, self.id_state = False, 0.0, 0.0, 0, {}
+        self.id_busy, self.id_tried, self.id_next, self.id_fails = False, 0.0, 0.0, 0
+        self.id_state = {"vtoken": u["vtoken"]} if u.get("vtoken") else {}   # proof of a confirmed email
         self.locked, self.quiz, self.url, self.missing_since, self.last_beat = False, None, None, None, 0.0
         self.pending = None          # (quiz, reason): an unlock the helper has not confirmed yet
         self.pending_try = 0.0
@@ -582,7 +593,9 @@ class Agent:
     def save_student(self, email, verified=False):
         self.student, self.verified = (email or None), bool(verified)
         try:
-            with open(USER_CONF, "w") as f: json.dump({"student": self.student, "verified": self.verified}, f)
+            d = {"student": self.student, "verified": self.verified}
+            if self.id_state.get("vtoken"): d["vtoken"] = self.id_state["vtoken"]
+            with open(USER_CONF, "w") as f: json.dump(d, f)
         except Exception as e: log("could not save student: %s" % e)
 
     def ensure_identity(self, force=False, quiz=False):

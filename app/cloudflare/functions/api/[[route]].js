@@ -710,7 +710,14 @@ export async function onRequest(context) {
       if (!v.ok) return denied(v);
       const dev = v.id, op = String(body.op || ""), email = String(body.email || "").trim().toLowerCase();
       const d = v.dev;
-      if (op === "status") return json({ student: d?.student || null, verified: Number(d?.student_verified) === 1, codes: codesOn });
+      // Proof of a confirmed email, kept by the app on the computer (survives uninstall/reinstall), so a
+      // student types their email + code ONCE EVER: a new install hands it back (op "token") instead.
+      const vSecret = env.ROT_SECRET || env.TEACHER_KEY;
+      const vtokenFor = async em => vSecret ? (await hmacHex(String(vSecret), "lqz-verified:" + em)).slice(0, 40) : null;
+      if (op === "status") {
+        const ver = Number(d?.student_verified) === 1 && !!d?.student;
+        return json({ student: d?.student || null, verified: ver, codes: codesOn, ...(ver ? { vtoken: await vtokenFor(String(d.student).toLowerCase()) } : {}) });
+      }
       if (!EMAIL_OK(email)) return json({ error: "bad_email" }, 400);
       const rosterName = async () => (await db.prepare("SELECT name FROM roster WHERE email=? AND name IS NOT NULL LIMIT 1").bind(email).first())?.name || null;
       const since = ms => new Date(Date.now() - ms).toISOString();
@@ -736,6 +743,15 @@ export async function onRequest(context) {
       // H10: before the code is typed, only a masked name ("J*** S***") is shown -- enough for the
       // student to see it is their class list, without revealing a classmate's full name.
       if (op === "check") { const nm = await rosterName(); return json({ email, found: !!nm, name: maskName(nm), codes: codesOn }); }
+      if (op === "token") {
+        const want = await vtokenFor(email), got = String(body.vtoken || "").toLowerCase();
+        if (!want || !sameHex(got, want)) return json({ error: "bad_token" }, 403);
+        await db.batch([
+          db.prepare("UPDATE devices SET student=?, student_verified=1 WHERE device_id=?").bind(email, dev),
+          db.prepare("DELETE FROM forgotten WHERE email=?").bind(email),
+          db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(dev, email, null, "email_verified", "token", now())]);
+        return json({ ok: true, verified: true, student: email, vtoken: want });
+      }
       const already = Number(d?.student_verified) === 1 && String(d?.student || "").toLowerCase() === email;
       if (op === "send") {
         if (!codesOn) {                       // codes off: accept after the roster check (pre-25-Oct behaviour)
@@ -746,7 +762,7 @@ export async function onRequest(context) {
       }
       if (op === "code") {
         // Re-submitting after success (double click, retried request) is a no-op, not a new email.
-        if (already) return json({ ok: true, verified: true, name: await rosterName() });
+        if (already) return json({ ok: true, verified: true, name: await rosterName(), vtoken: await vtokenFor(email) });
         const row = await db.prepare("SELECT email, code_hash, expires, tries FROM email_codes WHERE device_id=?").bind(dev).first();
         if (!row || row.email !== email) return (await issue()) || json({ error: "no_code", resent: true });
         if (Date.now() > Number(row.expires)) return (await issue()) || json({ error: "expired", resent: true });
@@ -761,7 +777,7 @@ export async function onRequest(context) {
           db.prepare("DELETE FROM email_codes WHERE device_id=?").bind(dev),
           db.prepare("DELETE FROM forgotten WHERE email=?").bind(email),     // confirmed again = consent to be listed again
           db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(dev, email, null, "email_verified", null, now())]);
-        return json({ ok: true, verified: true, name: await rosterName() });
+        return json({ ok: true, verified: true, name: await rosterName(), vtoken: await vtokenFor(email) });
       }
       return json({ error: "bad op" }, 400);
     }

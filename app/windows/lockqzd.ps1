@@ -557,11 +557,12 @@ while ($listener.IsListening) {
       # One-time student email setup (status | check | send | code), signed with the SYSTEM-only key
       # so an email can only ever be bound to THIS computer.
       $op = [string]$body.op
-      if (@("status","check","send","code") -notcontains $op) { $res.StatusCode = 400; $out = @{ error = "bad op" } }
+      if (@("status","check","send","code","token") -notcontains $op) { $res.StatusCode = 400; $out = @{ error = "bad op" } }
       else {
         $q = @{ op = $op; device_id = $Device }
         if ($body.email) { $em = [string]$body.email; $q.email = $em.Substring(0, [Math]::Min(200, $em.Length)) }
         if ($body.code)  { $q.code = [string]$body.code }
+        if ($body.vtoken) { $vt = [string]$body.vtoken; $q.vtoken = $vt.Substring(0, [Math]::Min(100, $vt.Length)) }
         $r = LQ-Call $Api "/verify" $q $Device $Key $State $true
         $out = @{ status = $r.code }
         if ($r.data) { foreach ($pp in $r.data.PSObject.Properties) { $out[$pp.Name] = $pp.Value } }

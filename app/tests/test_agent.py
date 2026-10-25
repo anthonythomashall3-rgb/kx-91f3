@@ -148,6 +148,22 @@ ok("code still fresh: not resent on the next try") if r == ("al@usc.edu", True) 
 U = FakeUI([("OK", "al@usc.edu")]); st = {}
 r = A.setup_identity(lambda op, **k: {"status": 200, "codes": True} if op == "status" else {}, U, "", saved.append, st)
 ok("check unreachable after typing: email kept, no popup") if r is None and saved[-1] == "al@usc.edu" and len(U.shown) == 1 else bad("check down %r %r" % (saved, U.shown))
+# Reinstall: the saved proof of a confirmed email confirms the new install - nothing typed at all.
+st = {}
+r = A.setup_identity(lambda op, **k: {"status": 200, "student": "al@usc.edu", "verified": True, "codes": True, "vtoken": "ab" * 20} if op == "status" else {}, FakeUI([]), "", None, st)
+ok("verified status: proof kept") if r == ("al@usc.edu", True) and st.get("vtoken") == "ab" * 20 else bad("vtoken %r" % st)
+calls = []
+def Srein(op, **kw):
+    calls.append(op)
+    if op == "status": return {"status": 200, "student": None, "verified": False, "codes": True}
+    if op == "token": return {"status": 200, "verified": True, "vtoken": kw["vtoken"]} if kw["vtoken"] == "ab" * 20 and kw["email"] == "al@usc.edu" else {"status": 403, "error": "bad_token"}
+    return {"status": 200, "sent": True}
+U = FakeUI([])
+r = A.setup_identity(Srein, U, "al@usc.edu", None, {"vtoken": "ab" * 20})
+ok("reinstall + saved proof: confirmed with NO dialog, no code") if r == ("al@usc.edu", True) and not U.shown and "send" not in calls else bad("reinstall %r %r %r" % (r, U.shown, calls))
+st = {"vtoken": "cd" * 20}; U = FakeUI([])
+r = A.setup_identity(Srein, U, "al@usc.edu", None, st)
+ok("bad proof: dropped, falls back to the code (email still not asked)") if r is None and "vtoken" not in st and len(U.shown) == 1 and "6-digit" in U.shown[0] else bad("bad proof %r %r" % (st, U.shown))
 S = FakeServer(codes=False); U = FakeUI([("OK", "al@usc.edu"), ("Yes", "")])
 ok("server codes off: roster check only, saved unconfirmed") if A.setup_identity(S, U) == ("al@usc.edu", False) else bad("codes off")
 import shutil, subprocess as _sp

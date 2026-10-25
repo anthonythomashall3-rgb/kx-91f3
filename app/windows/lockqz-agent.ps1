@@ -206,8 +206,11 @@ function Verify($op, $extra) {
 # agent retries in the background (2, 4, 8 ... 60 min). State between tries lives in setup.json.
 $SetupFile = "$UserDir\setup.json"
 $CodeFresh = 720   # a code sent < 12 min ago is still good (server: 15 min): ask for it, don't resend
+$script:VToken = $null   # proof of a confirmed email (kept on the computer, survives reinstall)
 function Save-Student($email, $verified) {
-  try { @{ student = $(if ($email) { $email } else { $null }); verified = [bool]$verified } | ConvertTo-Json | Set-Content $StudentFile -Encoding UTF8 }
+  $o = @{ student = $(if ($email) { $email } else { $null }); verified = [bool]$verified }
+  if ($script:VToken) { $o.vtoken = [string]$script:VToken }
+  try { $o | ConvertTo-Json | Set-Content $StudentFile -Encoding UTF8 }
   catch { Log "could not save student: $_" }
 }
 function Read-SetupState {
@@ -239,10 +242,17 @@ function Setup-Identity($saved, $state) {
   $state.r = "server"
   $st = Verify "status" $null
   if (-not $st) { return $null }
-  if ($st.verified -and $st.student) { return @{ student = $st.student; verified = $true } }
+  if ($st.verified -and $st.student) { if ($st.vtoken) { $script:VToken = [string]$st.vtoken }; return @{ student = $st.student; verified = $true } }
   if ((-not $st.codes) -and $st.student) { return @{ student = $st.student; verified = $false } }
   $email = ([string]$(if ($saved) { $saved } else { $st.student })).Trim().ToLower()
   if ($email -notmatch $EmailRe) { $email = "" }
+  if ($email -and $script:VToken) {
+    # Confirmed before on this computer (e.g. LOCKqz was reinstalled): the saved proof does it, no dialog.
+    $r = Verify "token" @{ email = $email; vtoken = [string]$script:VToken }
+    if ($r -and $r.verified) { if ($r.vtoken) { $script:VToken = [string]$r.vtoken }; return @{ student = $email; verified = $true } }
+    if (-not $r) { return $null }
+    if ($r.error -eq "bad_token") { $script:VToken = $null }
+  }
   while ($true) {
     if (-not $email) {
       $email = Ask-Email $state
@@ -267,7 +277,7 @@ function Setup-Identity($saved, $state) {
         $note = "New code sent.`n`n"; continue
       }
       $r = Verify "code" @{ email = $email; code = $a.t }
-      if ($r -and $r.verified) { $state.sent_email = ""; Say "Done. LOCKqz is set up and won't ask again."; return @{ student = $email; verified = $true } }
+      if ($r -and $r.verified) { $state.sent_email = ""; if ($r.vtoken) { $script:VToken = [string]$r.vtoken }; Say "Done. LOCKqz is set up and won't ask again."; return @{ student = $email; verified = $true } }
       if ($r -and $r.resent) {
         $state.sent_email = $email; $state.sent_at = Now-Sec
         if ($r.error -eq "expired") { $note = "That code expired. We sent a new one.`n`n" }
@@ -286,7 +296,7 @@ if ($Setup) {
   $mtx = New-Object System.Threading.Mutex($false, "Local\LOCKqzSetup")
   if (-not $mtx.WaitOne(0)) { exit }
   $state = Read-SetupState; $state.tried = Now-Sec
-  $saved = $null; try { if (Test-Path $StudentFile) { $saved = (Get-Content $StudentFile -Raw | ConvertFrom-Json).student } } catch {}
+  $saved = $null; try { if (Test-Path $StudentFile) { $sj = Get-Content $StudentFile -Raw | ConvertFrom-Json; $saved = $sj.student; if ($sj.vtoken) { $script:VToken = [string]$sj.vtoken } } } catch {}
   $got = $null
   try { $got = Setup-Identity $saved $state } catch { Log "identity setup error: $_"; $state.r = "server" }
   if ($got) {

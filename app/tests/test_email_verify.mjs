@@ -84,6 +84,22 @@ async function suite(label, oldSchema) {
   check("status now verified al@usc.edu", r.data?.verified === true && r.data?.student === "al@usc.edu", JSON.stringify(r.data));
   check("code row deleted after use", !sqlite.prepare("SELECT 1 FROM email_codes WHERE device_id=?").get(DEV));
 
+  console.log("V3b reinstall: the saved proof (vtoken) confirms a NEW install with no email/code typed");
+  const vt = r.data?.vtoken;
+  check("status of a verified device hands out a proof", typeof vt === "string" && vt.length === 40, JSON.stringify(r.data));
+  const DN = "mac-3b3b-0000-1111", KN = await reg(on, DN), SN = { key: KN, device: DN }, mailsBefore = mail.length;
+  r = await call(on, "/verify", { op: "token", email: "al@usc.edu", vtoken: vt }, SN);
+  check("token op: new install verified at once", r.data?.verified === true && r.data?.vtoken === vt, JSON.stringify(r.data));
+  check("... no email sent", mail.length === mailsBefore);
+  r = await call(on, "/verify", { op: "status" }, SN);
+  check("... status verified al@usc.edu", r.data?.verified === true && r.data?.student === "al@usc.edu", JSON.stringify(r.data));
+  const DX = "mac-3c3c-0000-1111", KX = await reg(on, DX), SX = { key: KX, device: DX };
+  r = await call(on, "/verify", { op: "token", email: "bo@usc.edu", vtoken: vt }, SX);
+  check("a proof for one email never confirms another (403)", r.status === 403 && r.data?.error === "bad_token", JSON.stringify(r.data));
+  r = await call(on, "/verify", { op: "token", email: "al@usc.edu", vtoken: "0".repeat(40) }, SX);
+  check("a forged proof is refused", r.status === 403 && r.data?.error === "bad_token");
+  check("... and nothing bound", !sqlite.prepare("SELECT student_verified AS v FROM devices WHERE device_id=?").get(DX)?.v);
+
   console.log("V4 a verified email can't be overwritten by a report (no switching to a classmate)");
   await call(on, "/report", { event: "install", student: "bo@usc.edu" }, S);
   check("student stays al@usc.edu", sqlite.prepare("SELECT student FROM devices WHERE device_id=?").get(DEV).student === "al@usc.edu");

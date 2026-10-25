@@ -78,6 +78,21 @@ $script:Answers = @(); $script:Shown = @(); $st = @{ sent_email = ""; sent_at = 
 function Helper($path, $body) { if ($body.op -eq "status") { return [pscustomobject]@{ status = 200; student = "al@usc.edu"; verified = $false; codes = $true } }; & $real $path $body }
 $r = Setup-Identity "" $st
 Check "server holds the unconfirmed email: no email dialog, code only" (($null -eq $r) -and ($st.r -eq "closed") -and $script:Shown.Count -eq 1 -and ($script:Shown[0] -match "6-digit"))
+# Reinstall: the saved proof of a confirmed email confirms the new install - nothing typed at all.
+function Helper($path, $body) {
+  $script:Calls += $body.op
+  if ($body.op -eq "status") { return [pscustomobject]@{ status = 200; student = $null; verified = $false; codes = $true } }
+  if ($body.op -eq "token") { if (($body.vtoken -eq ("ab" * 20)) -and ($body.email -eq "al@usc.edu")) { return [pscustomobject]@{ status = 200; verified = $true; vtoken = $body.vtoken } } else { return [pscustomobject]@{ status = 403; error = "bad_token" } } }
+  return [pscustomobject]@{ status = 200; sent = $true }
+}
+$script:VToken = "ab" * 20; $script:Answers = @(); $script:Shown = @(); $script:Calls = @()
+$r = Setup-Identity "al@usc.edu" @{ sent_email = ""; sent_at = 0; r = "" }
+Check "reinstall + saved proof: confirmed with NO dialog, no code" ($r.verified -and $script:Shown.Count -eq 0 -and -not ($script:Calls -contains "send"))
+Save-Student "al@usc.edu" $true
+Check "proof saved with the email" ((Get-Content $StudentFile -Raw | ConvertFrom-Json).vtoken -eq ("ab" * 20))
+$script:VToken = "cd" * 20; $script:Shown = @()
+$r = Setup-Identity "al@usc.edu" @{ sent_email = ""; sent_at = 0; r = "" }
+Check "bad proof: dropped, falls back to the code (email not asked)" (($null -eq $r) -and ($null -eq $script:VToken) -and $script:Shown.Count -eq 1 -and ($script:Shown[0] -match "6-digit"))
 function Helper($path, $body) { throw "offline" }
 $r = Run @() @{}
 Check "offline: nothing saved, no dialog" (($null -eq $r) -and $script:Shown.Count -eq 0)

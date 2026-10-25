@@ -830,9 +830,9 @@ class H(BaseHTTPRequestHandler):
             # One-time student email setup (status | check | send | code), signed with the device key
             # so an email can only ever be bound to THIS computer.
             op = str(body.get("op") or "")
-            if op not in ("status", "check", "send", "code"): return self._send(400, {"error": "bad op"})
+            if op not in ("status", "check", "send", "code", "token"): return self._send(400, {"error": "bad op"})
             req = {"op": op, "device_id": DEVICE}
-            for k in ("email", "code"):
+            for k in ("email", "code", "vtoken"):
                 if body.get(k) is not None: req[k] = str(body[k])[:200]
             code, j = call("/verify", req)
             out = dict(j) if isinstance(j, dict) else {}
