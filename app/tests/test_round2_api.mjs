@@ -371,7 +371,7 @@ console.log("R16 (H7, H14, H12, H13) terms, partial payments, void/reassign, res
   s = await tok("early@usc.edu");
   await call("/pay/notify", { payments: [{ txn: "venmo:E1", amount: 5, note: s.code }] }, { hdr: { "X-LOCKqz-Pay": env.PAY_SECRET } });
   check("late Nov, fall not yet paid -> credited to fall (finals still ahead)", one("SELECT term FROM payments WHERE txn='venmo:E1'")?.term === "20263");
-  setToday("2027-07-25");                               // 6 days of summer classes left, fall starts soon
+  setToday("2027-07-30");                               // 11 days of summer classes left (ends Aug 10), fall starts soon
   const sj = await tok("jul@usc.edu");
   await call("/pay/notify", { payments: [{ txn: "venmo:J1", amount: 5, note: sj.code }] }, { hdr: { "X-LOCKqz-Pay": env.PAY_SECRET } });
   check("late July, summer not paid -> credited to fall (summer nearly over)", one("SELECT term FROM payments WHERE txn='venmo:J1'")?.term === "20273", one("SELECT term FROM payments WHERE txn='venmo:J1'")?.term);
@@ -380,7 +380,7 @@ console.log("R16 (H7, H14, H12, H13) terms, partial payments, void/reassign, res
   setToday("2027-08-25");
   r = await call(`/pay/status?email=jul%40usc.edu&token=${sj.token}`, null, { get: true, envx: { STUDENT_FEE_FROM: "2026-01-01" } });
   check("... and in fall", r.data?.paid === true, JSON.stringify(r.data));
-  setToday("2026-11-25");                               // back to late November for the next checks
+  setToday("2026-12-01");                               // 41 days before spring (Jan 11) for the next checks
   await call("/pay/notify", { payments: [{ txn: "venmo:E2", amount: 5, note: s.code }] }, { hdr: { "X-LOCKqz-Pay": env.PAY_SECRET } });
   check("late Nov, fall already paid -> the next payment is for spring", one("SELECT term FROM payments WHERE txn='venmo:E2'")?.term === "20271");
   s = await tok("part@usc.edu");

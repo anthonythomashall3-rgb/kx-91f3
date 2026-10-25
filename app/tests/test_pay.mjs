@@ -76,7 +76,7 @@ async function getc(env, path, { teacher=null, sync=null } = {}) {
 
 const SECRET = "test-pay-secret-0123456789";
 const sqlite = makeDb(false);
-for (const m of ["migrate_017_sections.sql", "migrate_018_submissions.sql", "migrate_019_student_pay.sql"]) { try { sqlite.exec(readFileSync(join(CF, m), "utf8")); } catch (e) { if (!/duplicate column|already exists/.test(e.message)) throw e; } }
+for (const m of ["migrate_017_sections.sql", "migrate_018_submissions.sql", "migrate_019_student_pay.sql", "migrate_022_renewals.sql"]) { try { sqlite.exec(readFileSync(join(CF, m), "utf8")); } catch (e) { if (!/duplicate column|already exists/.test(e.message)) throw e; } }
 const base = { DB: d1real(sqlite), TEACHER_KEY: ADMIN, REQUIRE_SIGNED: "1", VENMO_HANDLE: "@Anthony-Hall-417", ZELLE_TO: "(858) 900-4347", PAY_SECRET: SECRET };
 const ON = { ...base, STUDENT_FEE_FROM: "2000-01-01" }, OFF = base;
 const ADMIN_TOK = (await call(ON, "/signup", { email: "admin@usc.edu", password: "adminpass1" })).data.token;
@@ -157,5 +157,41 @@ console.log("P9 no PAY_SECRET set: the admin page shows a derived script key tha
   check("derived key shown to admin", /^lqp_[0-9a-f]{40}$/.test(k||""), k);
   const rr = await onRequest({ request: new Request(BASE + "/api/pay/notify", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Pay": k }, body: JSON.stringify({ payments: [{ txn: "gmail:k1", amount: 5, note: "dd@usc.edu" }] }) }), env: env2 });
   check("derived key accepted by /pay/notify", rr.status === 200); }
+console.log("P10 USC terms: access through the term's last day of finals; renewal emails next term");
+{ r = await call(ON, "/pay/start", { email: "al@usc.edu" });
+  const realNow = Date.now, today = new Date(Date.now() - 7*3600000).toISOString().slice(0,10);
+  if (today >= "2026-08-24" && today <= "2026-12-16") check("Fall 2026 access lasts until 2026-12-16 (last final)", r.data?.until === "2026-12-16" && r.data.term === "20263", JSON.stringify(r.data));
+  check("renewal emails on by default", r.data?.renew === true);
+  const ADMIN_ROW = sqlite.prepare("SELECT active_until FROM teachers WHERE email='prof@usc.edu'").get();
+  if (today <= "2026-12-16") check("paid professor active until the term's end", ADMIN_ROW?.active_until === "2026-12-16", JSON.stringify(ADMIN_ROW));
+  const sent = [];
+  const envM = { ...ON, MAIL_SINK: m => { sent.push(m); return true; } };
+  const tick = env => onRequest({ request: new Request(BASE + "/api/pay/tick", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Pay": SECRET }, body: "{}" }), env }).then(r => r.json());
+  // Opt one payer out; the others get exactly one renewal email in the window before Spring 2027.
+  await call(ON, "/pay/renew", { email: "bo@usc.edu", on: false });
+  Date.now = () => Date.parse("2027-01-08T20:00:00Z");
+  try {
+    let t = await tick(envM);
+    check("renewal window: emails sent for Spring 2027", t.term === "20271" && t.sent >= 2, JSON.stringify(t));
+    check("opted-out payer gets nothing", !sent.some(m => m.to === "bo@usc.edu"), JSON.stringify(sent.map(m => m.to)));
+    check("student email has $5, memo, pay link and a stop link", sent.some(m => m.to === "al@usc.edu" && /\$5 /.test(m.text) && m.text.includes(CODE) && m.text.includes("renew=off")), JSON.stringify(sent.map(m => m.text.slice(0, 80))));
+    check("professor reminded too", sent.some(m => m.to === "prof@usc.edu" && /\$5,000/.test(m.text)));
+    const n = sent.length; t = await tick(envM);
+    check("no second email for the same term", sent.length === n && t.sent === 0, JSON.stringify(t));
+    check("Fall payment no longer counts in Spring: al is unpaid again", (await getc(ON, "/pay/status?email=al%40usc.edu&code=" + CODE)).data?.paid === false);
+    r = await notify([{ txn: "gmail:s27", amount: 5, note: CODE }]);
+    check("Spring payment: paid again", (await getc(ON, "/pay/status?email=al%40usc.edu&code=" + CODE)).data?.paid === true, JSON.stringify(r.data));
+    r = await call(ON, "/pay/start", { email: "al@usc.edu" });
+    check("Spring 2027 access until 2027-05-12", r.data?.until === "2027-05-12", JSON.stringify(r.data));
+    Date.now = () => Date.parse("2027-03-01T20:00:00Z");
+    t = await tick(envM);
+    check("mid-term: no renewal emails", t.sent === 0 && /not renewal/.test(t.why||""), JSON.stringify(t));
+    Date.now = () => Date.parse("2027-05-14T20:00:00Z");
+    check("between Spring and Summer a payment counts for Summer (al unpaid)", (await getc(ON, "/pay/status?email=al%40usc.edu&code=" + CODE)).data?.paid === false);
+  } finally { Date.now = realNow; }
+  r = await call(ON, "/pay/renew", { email: "bo@usc.edu", on: true });
+  check("renewal emails can be turned back on", r.data?.renew === true);
+  r = await onRequest({ request: new Request(BASE + "/api/pay/tick", { method: "POST", headers: { "X-LOCKqz-Pay": "nope-nope-nope-nope" }, body: "{}" }), env: envM });
+  check("tick needs the script key", r.status === 401); }
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -247,6 +247,8 @@ function route(){
   $("menu").removeAttribute("open");
   const h = location.hash.replace(/^#/,""), [v,a] = h.split("/");
   const app = $("app");
+  // Not paid: the payment screen is the only screen. It waits for the payment and opens LOCKqz by itself.
+  if(!ME.active && !ME.admin){ app.innerHTML = `<div id="pay"></div>`; loadPay(); waitPaid(); return; }
   if(v==="class" && a) return app.innerHTML = viewClass(a);
   if(v==="live" && a) { app.innerHTML = viewLive(a); loadLive(a); liveTimer = setInterval(()=>{ if(shown()) loadLive(a); }, 10000); return; }
   if(v==="connect") return app.innerHTML = viewConnect();
@@ -443,6 +445,9 @@ const money = n => "$"+Number(n).toLocaleString("en-US");
 async function loadPay(name){ const el=$("pay"); if(!el) return;
   const d = await get("/my-sections"+(name?("?name="+encodeURIComponent(name)):"")); if(d.error){ if(name) alert(d.error); return; }
   PAY=d; PAYAT=Date.now(); PAYSEL=new Set(d.sections.filter(s=>!s.paid).map(s=>s.section)); renderPay(); }
+let PAYWAIT=null;
+// Unpaid: check every 15 s while the tab is visible (stops when hidden); opens LOCKqz the moment the payment lands.
+function waitPaid(){ if(PAYWAIT) return; PAYWAIT = setInterval(async()=>{ if(document.visibilityState==="hidden") return; const m = await get("/me"); if(m && m.active){ clearInterval(PAYWAIT); PAYWAIT=null; ME=m; await refresh(); route(); } }, 15000); }
 function paySel(s,on){ on?PAYSEL.add(s):PAYSEL.delete(s); renderPay(); }
 function renderPay(){ const d=PAY, el=$("pay"); if(!el||!d) return;
   if(d.all_active || (d.sections.length && d.sections.every(s=>s.paid))){ el.innerHTML=""; return; }   // nothing left to pay
@@ -460,6 +465,7 @@ function renderPay(){ const d=PAY, el=$("pay"); if(!el||!d) return;
       ${d.invoice ? `<a class="btn" style="text-align:center;display:flex;align-items:center;justify-content:center" href="mailto:${esc(d.invoice)}?subject=${encodeURIComponent("LOCKqz invoice "+d.memo)}&body=${encodeURIComponent("Please send an invoice for LOCKqz, "+termName(d.term)+", "+money(total)+".")}">Bank transfer (invoice)</a>` : ""}
       ${!d.zelle && !link && !d.invoice ? `<p style="margin:0">Pay ${money(total)} to the LOCKqz admin.</p>` : ""}
     </div><p class="muted" style="margin:0">Memo: <b>${esc(note)}</b></p>
+    <p class="muted" style="margin:0"><span style="width:14px;height:14px;border:2px solid #ddd;border-top-color:#990000;border-radius:50%;display:inline-block;vertical-align:-2px;margin-right:8px;animation:lqspin 1s linear infinite"></span>Processing payment…</p><style>@keyframes lqspin{to{transform:rotate(360deg)}}</style>
     ${d.sections.length && usc ? `<details><summary class="muted">Not your sections?</summary>${nameBox}</details>` : ""}
   </section>`; }
 async function secAdmin(email){ const el=$("secpanel"); el.innerHTML="Loading…";

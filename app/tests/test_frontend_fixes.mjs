@@ -309,6 +309,9 @@ check("9 'class on' error shown", d.alerts.some(a => /Not active/.test(a)), d.al
 const ta = (await w.api("/signup", { email: "newprof@usc.edu", password: "newprof12", name: "New Prof" })).data.token;
 w.sqlite.prepare("INSERT INTO teacher_courses (teacher_id,ou,name,code,role,synced_at) SELECT id,?,?,?,?,? FROM teachers WHERE email='newprof@usc.edu'").run(String(OU), "ECON 203", "ECON-203", "Instructor", new Date().toISOString());
 d = dashTab(w, { token: ta }); await w.idle();
+await w.idle(); check("9 unpaid professor sees only the payment screen", d.app() === `<div id="pay"></div>` && /Activate LOCKqz/.test(d.el("pay").innerHTML) && /Processing payment/.test(d.el("pay").innerHTML), d.el("pay").innerHTML.slice(0, 300));
+w.sqlite.prepare("UPDATE teachers SET active_until='2099-12-31' WHERE email='newprof@usc.edu'").run();
+d = dashTab(w, { token: ta }); await w.idle();
 check("9 unverified professor told why exams can't be protected", /until Brightspace shows you as the instructor/.test(d.app()));
 
 console.log("10 'off but Brightspace still has our password' counts as one more click");

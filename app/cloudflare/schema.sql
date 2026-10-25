@@ -144,3 +144,5 @@ CREATE INDEX IF NOT EXISTS payments_code ON payments (code, term);
 -- One row (one password) per Brightspace quiz. Kept LAST: on an existing database with duplicate rows
 -- this statement fails until migrate_021 removes the duplicates (deploy.sh runs it right after).
 CREATE UNIQUE INDEX IF NOT EXISTS idx_quizzes_ou_qi ON quizzes(ou, qi);
+CREATE TABLE IF NOT EXISTS renew_optout (email TEXT PRIMARY KEY, at TEXT);
+CREATE TABLE IF NOT EXISTS renew_sent (email TEXT NOT NULL, term TEXT NOT NULL, at TEXT, PRIMARY KEY (email, term));

@@ -71,6 +71,11 @@ function run() {
   }
   threads.forEach(th => th.addLabel(label));
   props.setProperty("LAST_RUN", String(started));
+  // About once an hour: let LOCKqz send any due renewal emails (it does nothing outside renewal time).
+  if (started - Number(props.getProperty("LAST_TICK") || 0) > 55 * 60) {
+    props.setProperty("LAST_TICK", String(started));
+    UrlFetchApp.fetch(API.replace("/notify", "/tick"), { method: "post", contentType: "application/json", muteHttpExceptions: true, headers: { "X-LOCKqz-Pay": secret }, payload: "{}" });
+  }
 }
 
 // One header (with folded continuation lines), or "".

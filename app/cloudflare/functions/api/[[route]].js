@@ -46,7 +46,7 @@ const now = () => new Date().toISOString();
 // DST-correct (Intl, America/Los_Angeles); the fixed UTC-8 fallback only runs if Intl has no tz data.
 const LA_FMT = (() => { try { return new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }); } catch { return null; } })();
 const laToday = () => {
-  if (LA_FMT) { const p = {}; for (const x of LA_FMT.formatToParts(new Date())) p[x.type] = x.value; if (p.year && p.month && p.day) return `${p.year}-${p.month}-${p.day}`; }
+  if (LA_FMT) { const p = {}; for (const x of LA_FMT.formatToParts(new Date(Date.now()))) p[x.type] = x.value; if (p.year && p.month && p.day) return `${p.year}-${p.month}-${p.day}`; }
   return new Date(Date.now() - 8*3600000).toISOString().slice(0,10);
 };
 // A real calendar date "YYYY-MM-DD" (rejects "12/31/2026", "2026-02-31", "tomorrow").
@@ -419,7 +419,9 @@ export async function onRequest(context) {
     }
     await runBatches(db, st);
   }
-  const curTerms = () => { const d = laToday(), y = +d.slice(0,4), m = +d.slice(5,7), s = m <= 5 ? 1 : (m <= 7 ? 2 : 3); return [String(y*10+s), String(s < 3 ? y*10+s+1 : (y+1)*10+1)]; };
+  // [current term, next term] by USC's calendar (TERMS below): the term in session, or between terms
+  // the one that just ended (so a payment then counts for the next one).
+  const curTerms = () => { const d = laToday(); let c = payTerm(d); if (d < termDates(c)[0]) c = prevTerm(c); return [c, nextTerm(c)]; };
   const splitName = n => { const w = String(n||"").trim().split(/\s+/).filter(Boolean); return w.length >= 2 ? { first: w[0], last: w[w.length-1] } : null; };
   async function payCode(tid) {
     const ex = await db.prepare("SELECT code FROM pay_codes WHERE teacher_id=?").bind(tid).first();
@@ -451,12 +453,21 @@ export async function onRequest(context) {
   // /pay/notify. The memo code (LQSxxxxx student, LQxxxxx professor) says who paid.
   const STUDENT_FEE = Number(env.STUDENT_FEE || 5);
   const feeOn = () => { const from = String(env.STUDENT_FEE_FROM || ""); return /^\d{4}-\d{2}-\d{2}$/.test(from) && laToday() >= from; };
-  // ---- terms (USC: spring = Jan-May, summer = Jun-Jul, fall = Aug-Dec; codes YYYY1/2/3) ----
-  const termEndOf = term => { const y = String(term).slice(0,4), s = String(term).slice(4); return s === "1" ? `${y}-05-31` : (s === "2" ? `${y}-08-15` : `${y}-12-31`); };
+  // ---- terms: USC's academic calendar (usc.edu/academic-calendar), codes YYYY1/2/3 ----
+  // [first day of classes, last day of finals (summer: last day of classes)]. Access paid for a term
+  // lasts through its last day; after that the person is unpaid until they pay for the next term.
+  // Years not listed use typical USC dates until the table is updated.
+  const TERMS = { "20263": ["2026-08-24","2026-12-16"], "20271": ["2027-01-11","2027-05-12"], "20272": ["2027-05-19","2027-08-10"] };
+  const termDates = code => { code = String(code); return TERMS[code] || ({ 1:[`${code.slice(0,4)}-01-10`,`${code.slice(0,4)}-05-14`], 2:[`${code.slice(0,4)}-05-18`,`${code.slice(0,4)}-08-12`], 3:[`${code.slice(0,4)}-08-22`,`${code.slice(0,4)}-12-18`] })[code.slice(4)]; };
+  const nextTerm = code => { const y = +String(code).slice(0,4), t = +String(code).slice(4); return t < 3 ? `${y}${t+1}` : `${y+1}1`; };
+  const prevTerm = code => { const y = +String(code).slice(0,4), t = +String(code).slice(4); return t > 1 ? `${y}${t-1}` : `${y-1}3`; };
+  const termEndOf = term => termDates(term)[1];
   const termEnd = () => termEndOf(curTerms()[0]);
-  // Last day of classes (after it, a payment is for the next term) and first day of the next term.
-  const classesEndOf = term => { const y = String(term).slice(0,4), s = String(term).slice(4); return s === "1" ? `${y}-05-15` : (s === "2" ? `${y}-07-31` : `${y}-12-18`); };
-  const termStartOf = term => { const y = String(term).slice(0,4), s = String(term).slice(4); return s === "1" ? `${y}-01-01` : (s === "2" ? `${y}-06-01` : `${y}-08-01`); };
+  // After the last day of a term a payment is for the next term; termStartOf = its first day of classes.
+  const classesEndOf = term => termDates(term)[1];
+  const termStartOf = term => termDates(term)[0];
+  // The term in session today, else the next one to start (used for renewal emails).
+  const payTerm = (day = laToday()) => { let c = `${+day.slice(0,4) - 1}3`; for (let i = 0; i < 8; i++) { if (day <= termDates(c)[1]) return c; c = nextTerm(c); } return c; };
   const PAY_AHEAD_DAYS = 42;   // ~6 weeks before a term starts, a payment from someone already paid up -- or made in the last 2 weeks of classes -- counts for the next term (and still for what is left of this one)
   const ahead = () => { const [, nxt] = curTerms(); return laToday() >= new Date(Date.parse(termStartOf(nxt) + "T00:00:00Z") - PAY_AHEAD_DAYS * 86400000).toISOString().slice(0,10); };
   const inGap = () => laToday() > classesEndOf(curTerms()[0]);
@@ -498,7 +509,8 @@ export async function onRequest(context) {
     const sums = { [cur]: 0, [nxt]: 0 };
     if (c) for (const r of (await db.prepare(`SELECT term, COALESCE(SUM(amount),0) AS s FROM payments WHERE code=? AND term IN (?,?) AND ${COUNTS} GROUP BY term`).bind(c.code, cur, nxt).all()).results) sums[r.term] = Number(r.s);
     const early = ahead() || inGap();
-    const paidTerm = sums[cur] >= STUDENT_FEE || (early && sums[nxt] >= STUDENT_FEE);
+    // After a term's last day its payment no longer counts (access ends with the term).
+    const paidTerm = (!inGap() && sums[cur] >= STUDENT_FEE) || (early && sums[nxt] >= STUDENT_FEE);
     const term = payTermFor(sums[cur], STUDENT_FEE);
     return { paid: !feeOn() || paidTerm, received: sums[term], term, code: c ? c.code : null };
   }
@@ -578,6 +590,33 @@ export async function onRequest(context) {
     }
     await runBatches(db, acts);
     return out;
+  }
+  async function renewalTick() {
+    if (!(env.MAIL_USER && env.MAIL_APP_PASSWORD) && typeof env.MAIL_SINK !== "function") return { sent: 0, why: "mail off" };
+    const day = laToday(), cur = payTerm(day), [start] = termDates(cur), prev = prevTerm(cur);
+    // Window: from 7 days before the term starts to 14 days after.
+    const ms = d => Date.parse(d + "T12:00:00Z"), dd = (ms(day) - ms(start)) / 864e5;
+    if (dd < -7 || dd > 14) return { sent: 0, why: "not renewal time", term: cur };
+    const due = (await db.prepare(`SELECT DISTINCT s.email AS email, 'student' AS kind, s.code AS code FROM payments p JOIN pay_codes_students s ON s.code=p.code
+        WHERE p.term=? AND s.email NOT IN (SELECT email FROM renew_optout) AND s.email NOT IN (SELECT email FROM renew_sent WHERE term=?)
+        AND s.code NOT IN (SELECT code FROM payments WHERE term=? AND code IS NOT NULL)
+      UNION SELECT DISTINCT t.email, 'professor', c.code FROM payments p JOIN pay_codes c ON c.code=p.code JOIN teachers t ON t.id=c.teacher_id
+        WHERE p.term=? AND lower(t.email) NOT IN (SELECT email FROM renew_optout) AND lower(t.email) NOT IN (SELECT email FROM renew_sent WHERE term=?)
+        AND (t.active_until IS NULL OR t.active_until < ?) LIMIT 20`).bind(prev, cur, cur, prev, cur, termEndOf(cur)).all()).results;
+    let sent = 0;
+    for (const r of due) {
+      const email = String(r.email).toLowerCase(), amt = r.kind === "student" ? STUDENT_FEE : PRICE;
+      const link = r.kind === "student" ? `${PAY_URL}?email=${encodeURIComponent(email)}` : "https://prof.lockqz.pages.dev/";
+      const text = `LOCKqz renews for the new semester.\n\nPay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nVenmo @${(env.VENMO_HANDLE||"").replace(/^@/,"")}  ·  Zelle ${env.ZELLE_TO||""}\n\nAccess turns on as soon as the payment arrives and lasts until ${termEndOf(cur)}.\n\nStop these emails: ${PAY_URL}?email=${encodeURIComponent(email)}&renew=off`;
+      try {
+        if (typeof env.MAIL_SINK === "function") await env.MAIL_SINK({ to: email, subject: "Renew LOCKqz", text });
+        else await smtpSend(async () => (await import("cloudflare:sockets")).connect({ hostname: env.MAIL_HOST || "smtp.gmail.com", port: Number(env.MAIL_PORT || 465) }, { secureTransport: "on", allowHalfOpen: false }),
+                            { user: env.MAIL_USER, pass: String(env.MAIL_APP_PASSWORD).replace(/\s+/g, ""), to: email, subject: "Renew LOCKqz", text });
+        await db.prepare("INSERT OR IGNORE INTO renew_sent (email,term,at) VALUES (?,?,?)").bind(email, cur, now()).run();
+        sent++;
+      } catch (e) { break; }
+    }
+    return { sent, term: cur };
   }
   async function settle(code, term) {
     if (!code) return { matched:null };
@@ -1112,7 +1151,8 @@ export async function onRequest(context) {
       const info = await payInfo(email, clientIp);
       if (info.limited) return json({ error:"too many requests — try again in an hour" }, 429);
       const stt = await studentStatus(email);
-      return json({ ...info, paid: await studentPaid(email), required: feeOn(), term: stt.term, received: stt.received, token: await statusToken(email) });
+      const ro = await db.prepare("SELECT 1 FROM renew_optout WHERE email=?").bind(email).first().catch(() => null);
+      return json({ ...info, paid: await studentPaid(email), required: feeOn(), term: stt.term, until: termEndOf(stt.term), received: stt.received, token: await statusToken(email), renew: !ro });
     }
     if (p === "/pay/status") {
       const email = String(url.searchParams.get("email")||"").trim().toLowerCase();
@@ -1121,6 +1161,22 @@ export async function onRequest(context) {
       const tok = String(url.searchParams.get("token")||""), code = String(url.searchParams.get("code")||"").trim().toUpperCase();
       if (!((tok && sameHex(tok, await statusToken(email))) || (code && stt.code && code === stt.code))) return json({ error:"code or token required (from /pay/start)" }, 403);
       return json({ paid: await studentPaid(email), required: feeOn(), received: stt.received, amount: STUDENT_FEE, term: stt.term });
+    }
+    // Renewal: no card is stored (Venmo/Zelle can't be charged), so "auto-renew" = LOCKqz emails each
+    // past payer a one-tap pay link before the next term, and access continues as soon as it's paid.
+    // Anyone can turn those emails off (or back on) for their address.
+    if (p === "/pay/renew" && request.method === "POST") {
+      const email = String(body.email||"").trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"bad email" }, 400);
+      if (body.on) await db.prepare("DELETE FROM renew_optout WHERE email=?").bind(email).run();
+      else await db.prepare("INSERT OR IGNORE INTO renew_optout (email,at) VALUES (?,?)").bind(email, now()).run();
+      return json({ ok:true, renew: !!body.on });
+    }
+    // Called by the Gmail script about once an hour: sends due renewal emails, a few per call.
+    if (p === "/pay/tick" && request.method === "POST") {
+      const secret = await paySecret();
+      if (secret.length < 16 || String(request.headers.get("X-LOCKqz-Pay") || "") !== secret) return json({ error:"unauthorized" }, 401);
+      return json(await renewalTick());
     }
     if (p === "/pay/notify" && request.method === "POST") {
       const secret = await paySecret();
