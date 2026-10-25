@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.3.6"
+VERSION = "0.3.7"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -502,7 +502,8 @@ class H(BaseHTTPRequestHandler):
             report("heartbeat", {"quiz_id": qid, "source": "helper"})   # fresh signed proof of the lock
             code, j = call("/password", {"url": url, "device_id": DEVICE})
             pw = j.get("password") if isinstance(j, dict) else None
-            return self._send(200 if pw else 502, {"password": pw, "status": code})
+            pay = j.get("pay") if isinstance(j, dict) and isinstance(j.get("pay"), dict) else None
+            return self._send(200 if (pw or pay) else 502, {"password": pw, "status": code, "pay": pay})
         if self.path == "/event":
             if body.get("event") != "quiz_left":
                 return self._send(400, {"error": "event not allowed"})

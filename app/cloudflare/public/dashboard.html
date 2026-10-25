@@ -218,7 +218,7 @@ function route(){
   if(v==="live" && a) { app.innerHTML = viewLive(a); loadLive(a); liveTimer = setInterval(()=>loadLive(a), 10000); return; }
   if(v==="connect") return app.innerHTML = viewConnect();
   if(v==="activity") { app.innerHTML = viewActivity(); loadSessions(); return; }
-  if(v==="admin" && ME.admin) { app.innerHTML = viewAdmin(); loadTeachers(); loadInvites(); return; }
+  if(v==="admin" && ME.admin) { app.innerHTML = viewAdmin(); loadTeachers(); loadInvites(); loadPayments(); return; }
   app.innerHTML = viewHome(); loadPay();
 }
 
@@ -361,7 +361,12 @@ function viewAdmin(){ return `${BACK('', 'Home')}
   <section class="card"><h2 style="margin:0 0 12px">Professors</h2>
     <div style="overflow-x:auto"><table id="teachers"><thead><tr><th>Email</th><th>Name</th><th>Joined</th><th>All sections until</th><th>Paid sections</th><th>Venmo code</th><th></th></tr></thead><tbody></tbody></table></div>
     <div id="secpanel"></div>
-    <p class="muted">Activate after payment. Pick the semester end date; the account turns off by itself after that.</p></section>`; }
+    <p class="muted">Payments with the professor's memo code activate them automatically. Otherwise pick the semester end date and Activate.</p>
+  </section>
+  <section class="card"><div class="hrow"><h2>Payments</h2><span id="feeinfo"></span></div>
+    <p class="muted" style="margin:0 0 10px">Gmail script key: <code id="skey" style="user-select:all"></code></p>
+    <div style="overflow-x:auto"><table id="payments"><thead><tr><th>Received</th><th>Amount</th><th>Via</th><th>From</th><th>Memo</th><th>Who</th><th></th></tr></thead><tbody></tbody></table></div>
+</section>`; }
 async function loadTeachers(){ const d = await get("/teachers"); const tb=document.querySelector("#teachers tbody"); if(!tb) return; tb.innerHTML=""; const today=new Date().toISOString().slice(0,10);
   (d.teachers||[]).forEach(t=>{ const on = t.active_until && t.active_until>=today;
     tb.insertAdjacentHTML("beforeend",`<tr style="${on?'':'color:#888'}"><td>${esc(t.email)}</td><td>${esc(t.name||"")}</td><td>${when(t.created_at)}</td><td>${on?esc(t.active_until):"<b style='color:#990000'>off</b>"}</td><td>${t.paid_sections||0}</td><td>${esc(t.memo||"")}</td><td style="white-space:nowrap"><button class="btn" style="min-height:32px;padding:4px 10px" onclick="secAdmin('${esc(t.email)}')">Sections</button> <input type="date" id="d_${esc(t.id)}" value="${esc(t.active_until||semEnd())}" style="padding:4px"> <button class="btn" style="min-height:32px;padding:4px 10px" onclick="activate('${esc(t.email)}','${esc(t.id)}')">Activate</button> <button class="btn" style="min-height:32px;padding:4px 10px" onclick="deactivate('${esc(t.email)}')">Off</button> <button class="btn" style="min-height:32px;padding:4px 10px" onclick="resetPw('${esc(t.email)}')">Reset pw</button></td></tr>`); }); }
@@ -397,6 +402,10 @@ async function secAdmin(email){ const el=$("secpanel"); el.innerHTML="Loading…
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="muted">paid until</span><input type="date" id="secuntil" value="${semEnd()}" style="padding:6px"><button class="btn prime" onclick="markSecs('${esc(d.email)}','${esc(d.term)}',false)">Mark ticked paid</button><button class="btn" onclick="markSecs('${esc(d.email)}','${esc(d.term)}',true)">Mark ticked unpaid</button></div></div>`; }
 async function markSecs(email,term,off){ const sections=[...document.querySelectorAll(".secck:checked")].map(x=>x.value); if(!sections.length) return;
   const d=await post("/pay-sections",{email,term,sections,until:$("secuntil").value,off}); if(d.error) alert(d.error); secAdmin(email); loadTeachers(); }
+async function loadPayments(){ const d = await get("/payments"); const tb=document.querySelector("#payments tbody"); if(!tb||d.error) return;
+  $("skey").textContent = d.script_key||""; $("feeinfo").textContent = d.fee_on ? `Student fee $${d.fee} on` : (d.fee_from ? `Student fee starts ${d.fee_from}` : "Student fee off");
+  tb.innerHTML = (d.payments||[]).map(p=>`<tr><td>${when(p.received_at)}</td><td>${money(p.amount)}</td><td>${esc(p.via||"")}</td><td>${esc(p.payer||"")}</td><td>${esc(p.note||"")}</td><td>${p.who?esc(p.who):"<b style='color:#990000'>unmatched</b>"}</td><td>${p.who?"":`<input id="as_${esc(p.txn)}" placeholder="student email or code" style="padding:4px;width:180px"> <button class="btn" style="min-height:32px;padding:4px 10px" onclick="assignPay('${esc(p.txn)}')">Assign</button>`}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">No payments yet.</td></tr>`; }
+async function assignPay(txn){ const v=document.getElementById("as_"+txn).value.trim(); if(!v) return; const d=await post("/pay-assign",{txn,code:v}); if(d.error) alert(d.error); loadPayments(); }
 async function activate(email,id){ const d=await post("/activate",{email,until:$("d_"+id).value}); if(d.error) alert(d.error); loadTeachers(); }
 async function deactivate(email){ if(confirm("Turn off "+email+"?")){ await post("/activate",{email,until:null}); loadTeachers(); } }
 async function resetPw(email){ const d=await post("/reset",{email}); alert(d.error||("New password for "+email+": "+d.password)); }

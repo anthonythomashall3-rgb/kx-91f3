@@ -19,3 +19,7 @@ database_id = "02a0c476-d6b7-4bd4-8c59-2ddef91ad8a3"
 [vars]
 ADMIN_EMAIL = "athall@usc.edu"
 ZELLE_TO = "(858) 900-4347"
+VENMO_HANDLE = "Anthony-Hall-417"
+INVOICE_EMAIL = "athall@usc.edu"
+# Student fee ($5/semester): set a start date (YYYY-MM-DD) to turn it on. Empty = off.
+STUDENT_FEE_FROM = ""

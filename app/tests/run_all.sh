@@ -28,6 +28,8 @@ run "15/18 Professor Sync tab + quiz gate (real sync.js, simulated Brightspace)"
 run "16/18 Security regressions (cross-course, D1 limits, auth, rate limits)" node --no-warnings test_security.mjs
 run "17/18 Student email code (once per computer; real API + fake SMTP)" node --no-warnings test_email_verify.mjs
 run "Per-section billing (\$1,000 per USC section, Venmo code)" node --no-warnings test_sections.mjs
+run "Student fee + automatic Venmo/Zelle matching" node --no-warnings test_pay.mjs
+run "Gmail payment script parser (forged alerts refused)" node test_pay_script.mjs
 if command -v pwsh >/dev/null 2>&1; then
   run "18/18 Windows email setup (real Setup-Identity, scripted dialogs)" pwsh -NoProfile -File test_windows_email_setup.ps1
 else

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOCKqz — Pay</title>
+<style>
+  :root { --usc:#990000; }
+  html,body{min-height:100%} body{margin:0;display:grid;place-items:center;font:16px -apple-system,Segoe UI,sans-serif;background:#fafafa;color:#111}
+  .card{text-align:center;max-width:440px;padding:24px 20px 32px;box-sizing:border-box;width:100%;display:flex;flex-direction:column;gap:16px}
+  h1{color:var(--usc);font-size:42px;margin:0;letter-spacing:-1px}
+  .price{font-size:52px;font-weight:800;letter-spacing:-2px;margin:0}
+  .price span{font-size:17px;font-weight:400;color:#666;letter-spacing:0}
+  label{font-weight:700;font-size:14px;text-align:left}
+  input{min-height:50px;padding:0 14px;font-size:17px;border:1px solid #ccc;border-radius:10px;box-sizing:border-box;width:100%}
+  .btn{display:flex;align-items:center;justify-content:center;min-height:54px;border-radius:10px;font-weight:700;font-size:17px;text-decoration:none;border:0;cursor:pointer}
+  .prime{background:var(--usc);color:#fff}
+  .box{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border:1px solid #ddd;border-radius:10px;background:#fff}
+  .muted{color:#666;font-size:14px}
+  .memo{font-size:15px}
+  .memo b{font-size:20px;letter-spacing:1px}
+  .ok{color:#1a7f37;font-weight:800;font-size:22px}
+  [hidden]{display:none!important}
+</style></head>
+<body>
+<main class="card">
+  <h1>LOCKqz</h1>
+  <p class="price">$5 <span>per semester</span></p>
+
+  <form id="f" style="display:flex;flex-direction:column;gap:10px">
+    <label for="em">School email</label>
+    <input id="em" type="email" autocomplete="email" placeholder="you@usc.edu" required>
+    <button class="btn prime" type="submit">Continue</button>
+  </form>
+
+  <section id="pay" hidden style="display:flex;flex-direction:column;gap:12px">
+    <a class="btn prime" id="venmo" href="#" target="_blank" rel="noopener" hidden>Venmo $5</a>
+    <div class="box" id="zelle" hidden><span class="muted">Zelle $5</span><b id="zto"></b></div>
+    <p class="memo">Memo: <b id="code"></b></p>
+    <p class="muted" id="wait">Waiting for payment…</p>
+  </section>
+
+  <p class="ok" id="done" hidden>Paid ✓</p>
+  <p class="muted" id="err" hidden></p>
+</main>
+<script>
+const API = "/api", $ = id => document.getElementById(id);
+let timer = null;
+async function start(email){
+  $("err").hidden = true;
+  let d; try { d = await (await fetch(API + "/pay/start", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ email }) })).json(); } catch { d = { error:"No connection. Try again." }; }
+  if (d.error) { $("err").textContent = d.error; $("err").hidden = false; return; }
+  history.replaceState(null, "", "?email=" + encodeURIComponent(email));
+  if (d.paid) return paid();
+  $("code").textContent = d.code;
+  if (d.venmo) { $("venmo").href = `https://venmo.com/?txn=pay&recipients=${encodeURIComponent(d.venmo)}&amount=${d.amount}&note=${encodeURIComponent(d.code)}`; $("venmo").textContent = `Venmo $${d.amount} to @${d.venmo}`; $("venmo").hidden = false; }
+  if (d.zelle) { $("zto").textContent = d.zelle; $("zelle").hidden = false; }
+  $("f").hidden = true; $("pay").hidden = false;
+  clearInterval(timer); timer = setInterval(async () => {
+    try { const s = await (await fetch(API + "/pay/status?email=" + encodeURIComponent(email))).json(); if (s.paid) paid(); } catch {}
+  }, 10000);
+}
+function paid(){ clearInterval(timer); $("f").hidden = true; $("pay").hidden = true; $("done").hidden = false; }
+$("f").addEventListener("submit", e => { e.preventDefault(); start($("em").value.trim().toLowerCase()); });
+const q = new URLSearchParams(location.search).get("email");
+if (q) { $("em").value = q; start(q.trim().toLowerCase()); }
+</script>
+</body></html>

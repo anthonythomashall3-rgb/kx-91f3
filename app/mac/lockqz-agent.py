@@ -292,6 +292,21 @@ class Agent:
             finally: self.id_busy = False
         threading.Thread(target=run, daemon=True).start()
 
+    def payment(self, r):
+        # Student fee unpaid: open the payment page once per quiz. The password arrives by itself
+        # (re-checked every 15s) as soon as the Venmo/Zelle payment is matched.
+        pay = r.get("pay") if isinstance(r, dict) else None
+        if not isinstance(pay, dict): return False
+        if not getattr(self, "pay_shown", False):
+            self.pay_shown = True
+            u = str(pay.get("url") or "https://lockqz.pages.dev/pay")
+            if u.startswith("https://lockqz.pages.dev/"):
+                try: subprocess.run(["open", u], timeout=10)
+                except Exception: pass
+            dialog("Pay $%s for LOCKqz this semester to get the quiz password.\n\nMemo:  %s\n\nThe payment page is open. LOCKqz shows the password here as soon as your payment arrives."
+                   % (pay.get("amount") or 5, pay.get("code") or ""))
+        return True
+
     def helper(self, path, body=None, timeout=90):
         req = urllib.request.Request("http://127.0.0.1:%d%s" % (self.port, path),
                                      data=json.dumps(body).encode() if body is not None else None,
@@ -305,7 +320,7 @@ class Agent:
             # Cloudflare blocks the default "Python-urllib" user agent (403) — send our own. Bypass any
             # system proxy, which could block or MITM the call.
             req = urllib.request.Request(self.api + path, data=json.dumps(body).encode(),
-                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/0.3.6 (macOS)"})
+                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/0.3.7 (macOS)"})
             return json.loads(NOPROXY.open(req, timeout=8).read())
         except Exception as e:
             log("api %s failed: %s" % (path, e)); return None
@@ -318,9 +333,11 @@ class Agent:
             dialog("LOCKqz could not lock AI for this quiz. Is the LOCKqz app installed and running?"); return
         self.locked, self.missing_since, self.last_beat = True, None, time.time()
         log("LOCKED %s" % self.quiz)
-        pw = None
+        pw, self.pay_shown = None, False
         for attempt in range(3):   # the helper fetches it (signed); retry a brief network blip
-            try: pw = self.helper("/password", {"url": url}).get("password")
+            try:
+                r = self.helper("/password", {"url": url}); pw = r.get("password")
+                if not pw and self.payment(r): break
             except Exception as e: log("password via helper failed: %s" % e)
             if pw: break
             time.sleep(2)
@@ -331,7 +348,7 @@ class Agent:
         if pw:
             clipboard(pw)
             dialog("AI is locked for this quiz.\n\nQuiz password:  %s\n(copied to your clipboard — paste it into Brightspace)" % pw)
-        else:
+        elif not self.pay_shown:
             dialog("AI is locked for this quiz.\n\nIf it needs a password, LOCKqz will show it here as soon as the quiz opens.")
 
     def end(self, reason):
@@ -370,7 +387,8 @@ class Agent:
         if quiz_urls and "/attempt/" not in quiz_urls[0] and time.time() - getattr(self, "pw_checked", 0) > 15:
             self.pw_checked = time.time()
             try:
-                pw2 = self.helper("/password", {"url": self.url}).get("password")
+                r2 = self.helper("/password", {"url": self.url}); pw2 = r2.get("password")
+                if not pw2: self.payment(r2)
                 if pw2 and pw2 != getattr(self, "pw", None):
                     first = not getattr(self, "pw", None)
                     self.pw = pw2; clipboard(pw2)

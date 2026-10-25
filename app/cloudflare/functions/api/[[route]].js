@@ -266,6 +266,69 @@ export async function onRequest(context) {
     const term = sections.some(x => x.term === cur) ? cur : (sections.length ? nxt : cur);
     return { name: `${nm.first} ${nm.last}`, term, sections: sections.filter(x => x.term === term) };
   }
+  // ---- payments: Venmo / Zelle, matched automatically from the payment alert emails ----
+  // A Google Apps Script in the Gmail that receives the Venmo/Zelle alerts posts each payment to
+  // /pay/notify. The memo code (LQSxxxxx student, LQxxxxx professor) says who paid.
+  const STUDENT_FEE = Number(env.STUDENT_FEE || 5);
+  const feeOn = () => { const from = String(env.STUDENT_FEE_FROM || ""); return /^\d{4}-\d{2}-\d{2}$/.test(from) && laToday() >= from; };
+  const termEnd = () => { const d = laToday(), y = d.slice(0,4), m = +d.slice(5,7); return m <= 5 ? `${y}-05-31` : (m <= 7 ? `${y}-08-15` : `${y}-12-31`); };
+  const PAY_URL = "https://lockqz.pages.dev/pay";
+  // The Gmail script's key: PAY_SECRET if set, else derived from the server's own secret (the admin
+  // copies it from Admin -> Payments into the script once). Nothing new to configure in Cloudflare.
+  const paySecret = async () => env.PAY_SECRET ? String(env.PAY_SECRET) : ((env.ROT_SECRET || env.TEACHER_KEY) ? "lqp_" + (await hmacHex(String(env.ROT_SECRET || env.TEACHER_KEY), "lockqz-pay-notify")).slice(0, 40) : "");
+  async function studentCode(email) {
+    email = String(email||"").trim().toLowerCase(); if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return null;
+    const ex = await db.prepare("SELECT code FROM pay_codes_students WHERE email=?").bind(email).first();
+    if (ex) return ex.code;
+    for (let i = 0; i < 5; i++) {
+      const code = "LQS" + rid(5).toUpperCase().replace(/[^A-Z0-9]/g, "X");
+      const r = await db.prepare("INSERT OR IGNORE INTO pay_codes_students (email,code) VALUES (?,?)").bind(email, code).run();
+      if (r.meta.changes) return code;
+      const again = await db.prepare("SELECT code FROM pay_codes_students WHERE email=?").bind(email).first(); if (again) return again.code;
+    }
+    return null;
+  }
+  const paidSum = async (code, term) => Number((await db.prepare("SELECT COALESCE(SUM(amount),0) AS s FROM payments WHERE code=? AND term=?").bind(code, term).first())?.s || 0);
+  async function studentPaid(email) {
+    if (!feeOn()) return true;
+    email = String(email||"").trim().toLowerCase(); if (!email) return false;
+    const staff = await db.prepare("SELECT 1 FROM teachers WHERE lower(email)=? AND (role='admin' OR verified=1)").bind(email).first();
+    if (staff) return true;                                     // professors and the admin never pay the student fee
+    const c = await db.prepare("SELECT code FROM pay_codes_students WHERE email=?").bind(email).first();
+    return !!c && (await paidSum(c.code, curTerms()[0])) >= STUDENT_FEE;
+  }
+  async function payInfo(email) {
+    const code = await studentCode(email);
+    return { amount: STUDENT_FEE, code, venmo: (env.VENMO_HANDLE || "").replace(/^@/, "") || null, zelle: env.ZELLE_TO || null,
+             url: PAY_URL + (email ? "?email=" + encodeURIComponent(String(email).toLowerCase()) : "") };
+  }
+  // Record one payment (idempotent by txn) and apply it: student fee, or professor activation.
+  async function applyPayment(p) {
+    const txn = String(p.txn||"").slice(0,120); const amount = Number(p.amount);
+    if (!txn || !(amount > 0) || amount > 100000) return { ok:false, error:"bad payment" };
+    const text = `${p.note||""} ${p.subject||""}`.toUpperCase();
+    let code = (text.match(/LQS[A-Z0-9]{5}/) || [])[0] || (text.match(/(?<![A-Z0-9])LQ[A-Z0-9]{5}(?![A-Z0-9])/) || [])[0] || null;
+    if (!code) { const em = (String(p.note||"").match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/) || [])[0]; if (em) code = await studentCode(em); }
+    const term = curTerms()[0];
+    const ins = await db.prepare("INSERT OR IGNORE INTO payments (txn,code,amount,via,payer,note,term,received_at,matched) VALUES (?,?,?,?,?,?,?,?,?)")
+      .bind(txn, code, amount, String(p.via||"").slice(0,20), String(p.payer||"").slice(0,120), String(p.note||"").slice(0,300), term, now(), null).run();
+    if (!ins.meta.changes) return { ok:true, duplicate:true };
+    return { ok:true, ...(await settle(code, term)) };
+  }
+  async function settle(code, term) {
+    if (!code) return { matched:null };
+    if (code.startsWith("LQS")) {
+      const st = await db.prepare("SELECT email FROM pay_codes_students WHERE code=?").bind(code).first();
+      if (!st) return { matched:null };
+      const sum = await paidSum(code, term);
+      return { matched:"student", email: st.email, paid: sum >= STUDENT_FEE, total: sum };
+    }
+    const pc = await db.prepare("SELECT teacher_id FROM pay_codes WHERE code=?").bind(code).first();
+    if (!pc) return { matched:null };
+    const sum = await paidSum(code, term), done = sum >= PRICE;
+    if (done) await db.prepare("UPDATE teachers SET active_until=? WHERE id=? AND (active_until IS NULL OR active_until<?)").bind(termEnd(), pc.teacher_id, termEnd()).run();
+    return { matched:"professor", paid: done, total: sum };
+  }
   async function trustedInstructor(ou) {
     if (!me || !EMAIL) return false;
     if (me.admin) return true;
@@ -426,6 +489,11 @@ export async function onRequest(context) {
       if (!fresh) return json({ password: null, reason: "not locked" }, 403);
       const devLk = await db.prepare("SELECT 1 FROM events e JOIN devices d ON d.device_id=e.device_id WHERE e.device_id=? AND e.quiz_id=? AND e.event='lock' AND e.detail LIKE '%\"developer\":true%' AND lower(COALESCE(d.student,'')) NOT IN (SELECT lower(email) FROM teachers WHERE role='admin') LIMIT 1").bind(device_id, lockId).first();
       if (devLk) return json({ password: null, reason: "not locked" }, 403);   // dev mode is admin-only
+      // Student fee: no password until this semester's $5 is paid (matched automatically from Venmo/Zelle).
+      if (feeOn()) {
+        const stu = await db.prepare("SELECT student FROM devices WHERE device_id=?").bind(device_id).first();
+        if (!(await studentPaid(stu?.student))) return json({ password: null, reason: "unpaid", pay: await payInfo(stu?.student) }, 402);
+      }
       // Admit only at the quiz's scheduled start time -- even if the professor unhid it early. But a
       // student with an accommodation (in the gate's kept special-access list) may have an earlier
       // window, so let them through the start gate.
@@ -617,6 +685,42 @@ export async function onRequest(context) {
       }
       if (body.off) await releaseUnpaid({ id: t.id, admin: false, active: false });
       return json({ ok: true, sections: secs, until: body.off ? null : until });
+    }
+
+    // ---- payments (public + Apps Script + admin) ----
+    if (p === "/pay/start" && request.method === "POST") {
+      const email = String(body.email||"").trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"enter your school email" }, 400);
+      const info = await payInfo(email);
+      return json({ ...info, paid: await studentPaid(email), required: feeOn(), term: curTerms()[0] });
+    }
+    if (p === "/pay/status") {
+      const email = String(url.searchParams.get("email")||"").trim().toLowerCase();
+      if (!email) return json({ error:"email required" }, 400);
+      return json({ paid: await studentPaid(email), required: feeOn() });
+    }
+    if (p === "/pay/notify" && request.method === "POST") {
+      const secret = await paySecret();
+      const got = String(request.headers.get("X-LOCKqz-Pay") || "");
+      if (secret.length < 16 || got !== secret) return json({ error:"unauthorized" }, 401);
+      const list = Array.isArray(body.payments) ? body.payments.slice(0, 100) : [body];
+      const out = []; for (const x of list) out.push(await applyPayment(x || {}));
+      return json({ results: out });
+    }
+    if (p === "/payments") {
+      if (!me?.admin) return json({ error:"admin only" }, 401);
+      const r = await db.prepare("SELECT p.txn,p.code,p.amount,p.via,p.payer,p.note,p.term,p.received_at,COALESCE(s.email,t.email) AS who FROM payments p LEFT JOIN pay_codes_students s ON s.code=p.code LEFT JOIN pay_codes pc ON pc.code=p.code LEFT JOIN teachers t ON t.id=pc.teacher_id ORDER BY p.received_at DESC LIMIT 300").all();
+      return json({ payments: r.results, fee_on: feeOn(), fee: STUDENT_FEE, fee_from: env.STUDENT_FEE_FROM || null, script_key: await paySecret() });
+    }
+    if (p === "/pay-assign" && request.method === "POST") {
+      if (!me?.admin) return json({ error:"admin only" }, 401);
+      const txn = String(body.txn||""); let code = String(body.code||"").trim().toUpperCase();
+      if (/@/.test(code)) code = await studentCode(code.toLowerCase());
+      if (!txn || !/^LQS?[A-Z0-9]{5}$/.test(code||"")) return json({ error:"bad txn or code" }, 400);
+      const pr = await db.prepare("SELECT term FROM payments WHERE txn=?").bind(txn).first();
+      if (!pr) return json({ error:"no such payment" }, 404);
+      await db.prepare("UPDATE payments SET code=? WHERE txn=?").bind(code, txn).run();
+      return json({ ok:true, ...(await settle(code, pr.term)) });
     }
 
     // ---- teacher endpoints (need a logged-in teacher or the admin key) ----

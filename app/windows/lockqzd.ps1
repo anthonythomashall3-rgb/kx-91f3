@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.3.6"
+$Version = "0.3.7"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = "$env:ProgramData\LOCKqz\config.json"
@@ -316,9 +316,9 @@ while ($listener.IsListening) {
         else {
           Report "heartbeat" $null "helper"
           $r = LQ-Call $Api "/password" @{ url = $u; device_id = $Device } $Device $Key $State $true
-          $pw = $null; if ($r.data) { $pw = $r.data.password }
-          if (-not $pw) { $res.StatusCode = 502 }
-          $out = @{ password = $pw; status = $r.code }
+          $pw = $null; $pay = $null; if ($r.data) { $pw = $r.data.password; $pay = $r.data.pay }
+          if ((-not $pw) -and (-not $pay)) { $res.StatusCode = 502 }
+          $out = @{ password = $pw; status = $r.code; pay = $pay }
         }
       }
     }

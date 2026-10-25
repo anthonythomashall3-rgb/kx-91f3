@@ -68,6 +68,18 @@ function Api($path, $body) {
   if (-not $Api) { return $null }
   try { Invoke-RestMethod -Uri "$Api$path" -Method Post -Body ($body | ConvertTo-Json -Compress) -ContentType "application/json" -TimeoutSec 8 } catch { $null }
 }
+function Show-Pay($r) {
+  # Student fee unpaid: open the payment page once per quiz; the password follows when the payment arrives.
+  if (-not $r -or -not $r.pay) { return $false }
+  if (-not $script:PayShown) {
+    $script:PayShown = $true
+    $u = [string]$r.pay.url; if (-not $u.StartsWith("https://lockqz.pages.dev/")) { $u = "https://lockqz.pages.dev/pay" }
+    try { Start-Process $u } catch {}
+    $amt = if ($r.pay.amount) { $r.pay.amount } else { 5 }
+    Show-Message ("Pay `$$amt for LOCKqz this semester to get the quiz password.`n`nMemo:  " + $r.pay.code + "`n`nThe payment page is open. LOCKqz shows the password here as soon as your payment arrives.")
+  }
+  return $true
+}
 function Show-Message($text) {
   # Non-blocking: the box runs in its own process so the watch loop never stalls.
   $safe = $text.Replace([char]39, [char]34)
@@ -229,14 +241,14 @@ while ($true) {
         if ($r -and $r.ok) {
           $QuizUrl = $quizWin.Url; $LastCheck = Get-Date
           $Locked = $true; $MissingSince = $null; $LastBeat = Get-Date; Log "LOCKED $Quiz"
-          $pw = $null
+          $pw = $null; $script:PayShown = $false
           for ($i = 0; ($i -lt 3) -and (-not $pw); $i++) {
-            try { $pw = (Helper "/password" @{ url = $quizWin.Url }).password } catch { Log "password via helper failed: $_" }
+            try { $pr = Helper "/password" @{ url = $quizWin.Url }; $pw = $pr.password; if ((-not $pw) -and (Show-Pay $pr)) { break } } catch { Log "password via helper failed: $_" }
             if (-not $pw) { Start-Sleep -Seconds 2 }
           }
           $LastPw = $pw; $PwChecked = Get-Date
           if ($pw) { Set-Clipboard -Value $pw; Show-Message "AI is locked for this quiz.`n`nQuiz password:  $pw`n(copied to your clipboard - paste it into Brightspace)" }
-          else { Show-Message "AI is locked for this quiz.`n`nIf it needs a password, LOCKqz will show it here as soon as the quiz opens." }
+          elseif (-not $script:PayShown) { Show-Message "AI is locked for this quiz.`n`nIf it needs a password, LOCKqz will show it here as soon as the quiz opens." }
         } else { Show-Message "LOCKqz could not lock AI for this quiz. Is the LOCKqz app installed and running?"; Start-Sleep -Seconds 30 }
       }
     } else {
@@ -248,7 +260,7 @@ while ($true) {
         if ($quizWin -and ($quizWin.Url -notmatch "/attempt/") -and (((Get-Date) - $PwChecked).TotalSeconds -gt 15)) {
           $PwChecked = Get-Date
           try {
-            $pw2 = (Helper "/password" @{ url = $QuizUrl }).password
+            $pr2 = Helper "/password" @{ url = $QuizUrl }; $pw2 = $pr2.password; if (-not $pw2) { Show-Pay $pr2 | Out-Null }
             if ($pw2 -and ($pw2 -ne $LastPw)) { $hdr = if ($LastPw) { "The quiz password changed.`n`nNew password:  " } else { "Quiz password:  " }; $LastPw = $pw2; Set-Clipboard -Value $pw2; Show-Message ($hdr + $pw2 + "`n(copied to your clipboard)") }
           } catch { Log "password refresh failed: $_" }
         }
