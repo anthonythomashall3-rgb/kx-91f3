@@ -23,7 +23,7 @@ if ($Api -and -not $Api.EndsWith("/api")) { $Api += "/api" }   # accept a bare s
 $Device= if ($Conf.device_id) { $Conf.device_id } else { "unknown" }
 $UserDir = "$env:APPDATA\LOCKqz"; New-Item -ItemType Directory -Force -Path $UserDir | Out-Null
 $StudentFile = "$UserDir\student.json"
-$Poll = 2; $PollLocked = 1; $Grace = 30; $Beat = 300
+$Poll = 2; $PollLocked = 1; $Grace = 30; $Beat = 60; $HelperOk = $true   # agent reports only while the helper is unreachable
 $BrowserClasses = @("Chrome_WidgetWin_1","MozillaWindowClass")
 
 function Log($m) { Add-Content -Path "$UserDir\agent.log" -Value ("{0} {1}" -f (Get-Date -Format s), $m) }
@@ -269,8 +269,9 @@ while ($true) {
           $LastCheck = Get-Date
           try {
             $hs = (Helper "/status" $null).state
+            $HelperOk = $true
             if (($hs -ne "locked") -and ($hs -ne "developer")) { Log "helper not locked during an open quiz ($hs) - re-locking"; Helper "/lock" @{ quiz_id = $Quiz; student = $Student; url = $QuizUrl } | Out-Null }
-          } catch { Log "helper check failed: $_" }
+          } catch { $HelperOk = $false; Log "helper check failed: $_" }
         }
       }
       elseif ($leaving) { $reason = "submitted" }
@@ -286,7 +287,9 @@ while ($true) {
           if (-not $sent) { Api "/report" @{ device_id = $Device; event = "quiz_left"; quiz_id = $Quiz; student = $Student; source = "agent"; detail = $reason } | Out-Null }
         }
         Log "UNLOCKED ($reason)"; $Locked = $false; $Quiz = $null; $QuizTitle = $null; $MissingSince = $null
-      } elseif (((Get-Date) - $LastBeat).TotalSeconds -gt $Beat) {
+      } elseif ((-not $HelperOk) -and (((Get-Date) - $LastBeat).TotalSeconds -gt $Beat)) {
+        # only while the helper is unreachable (proof for "helper killed"); otherwise the helper's
+        # own signed pings say everything -> no routine agent traffic (free plan)
         $LastBeat = Get-Date
         Api "/report" @{ device_id = $Device; event = "heartbeat"; quiz_id = $Quiz; student = $Student; source = "agent" } | Out-Null
       }

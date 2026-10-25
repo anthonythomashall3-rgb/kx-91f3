@@ -153,7 +153,7 @@ check("password still matches Brightspace with the tab closed", r.data?.password
 check("Al keeps access (no 90s expiry)", BS.sa["4001"]?.EndDate === END);
 
 console.log("S4 wifi blip keeps access; tamper removes it; accommodation never touched");
-sqlite.prepare("UPDATE locks SET last_lock=?, helper_seen=?, ext_seen=? WHERE device_id=?").run(new Date(Date.now() - 800000).toISOString(), new Date(Date.now() - 800000).toISOString(), new Date(Date.now() - 800000).toISOString(), AL.id);
+sqlite.prepare("UPDATE locks SET last_lock=?, helper_seen=?, ext_seen=? WHERE device_id=?").run(new Date(Date.now() - 900000).toISOString(), new Date(Date.now() - 900000).toISOString(), new Date(Date.now() - 900000).toISOString(), AL.id);
 await page.tick();
 check("Al 'dark' (no contact) -> access kept", !!BS.sa["4001"]);
 sqlite.prepare("UPDATE locks SET ext_seen=? WHERE device_id=?").run(new Date().toISOString(), AL.id);   // agent alive, helper silent

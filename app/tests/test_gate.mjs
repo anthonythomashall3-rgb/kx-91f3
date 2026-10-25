@@ -180,8 +180,8 @@ async function suite(label, oldSchema) {
   let row = (r.data?.rows||[]).find(x => x.user_id === "4001");
   check("locked student is eligible, resolved to Brightspace user_id 4001", !!row && row.eligible === true, JSON.stringify(r.data?.rows));
   check("eligible row carries the student name from the roster", row?.student === "Al Student", JSON.stringify(row));
-  // age the lock past STALE (420s; helper beats every ~180s) -> no longer eligible
-  sqlite.prepare("UPDATE locks SET last_lock=?, helper_seen=? WHERE device_id=?").run(new Date(Date.now()-600000).toISOString(), new Date(Date.now()-600000).toISOString(), DEV);
+  // age the lock past STALE (660s; helper beats every ~300s) -> no longer eligible
+  sqlite.prepare("UPDATE locks SET last_lock=?, helper_seen=? WHERE device_id=?").run(new Date(Date.now()-900000).toISOString(), new Date(Date.now()-900000).toISOString(), DEV);
   r = await getc(env, "/live?quiz=" + LOCK_ID, { teacher: TOK });
   row = (r.data?.rows||[]).find(x => x.user_id === "4001");
   check("a gone-dark lock is NOT eligible (access would be revoked)", !row || row.eligible === false, JSON.stringify(row));

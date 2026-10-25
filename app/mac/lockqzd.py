@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.3.8"
+VERSION = "0.3.9"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -52,7 +52,7 @@ API     = CONF.get("api_base", "").rstrip("/")
 if API and not API.endswith("/api"): API += "/api"   # accept a bare site URL too
 DEVICE  = CONF.get("device_id", "unknown")
 MAX_MIN = int(CONF.get("max_minutes", 180))   # hard cap: auto-unlock after this
-BEAT    = max(1, int(CONF.get("beat_cycles", 36)))  # liveness ping every BEAT*5s (default ~180s; keeps D1 writes + requests inside the free plan)
+BEAT    = max(1, int(CONF.get("beat_cycles", 60)))  # liveness ping every BEAT*5s (default ~300s; keeps D1 writes + requests inside the free plan)
 DRYRUN  = os.environ.get("LOCKQZ_DRYRUN", "0")
 # Admin developer mode: AI stays available during quizzes ONLY on a Mac that holds the
 # matching developer key. The code ships with the key's SHA-256 only — a student install
@@ -398,7 +398,7 @@ def watcher():
                     if do_tamper:
                         log("TAMPER: block missing during quiz — re-applying")
                     engine("lock")   # idempotent; re-kills reopened AI apps
-                    do_beat = (cycles % BEAT == 0)   # liveness ping (default ~180s)
+                    do_beat = (cycles % BEAT == 0)   # liveness ping (default ~300s)
         if do_auto:   report("auto_unlock", {"quiz_id": qid, "reason": "max_minutes"}); continue
         if do_tamper: report("tamper", {"quiz_id": qid, "detail": "hosts_block_removed"})
         # Liveness ping: proves the helper is still running. If the student kills it

@@ -20,7 +20,7 @@ NOPROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))   # never
 SYS_CONF = "/Library/Application Support/LOCKqz/config.json"
 USER_DIR = os.path.expanduser("~/Library/Application Support/LOCKqz")
 USER_CONF = os.path.join(USER_DIR, "student.json")
-POLL, POLL_LOCKED, GRACE, BEAT = 2, 1, 30, 300   # agent beat only proves the agent runs; 300s keeps Cloudflare requests + writes inside the free plan
+POLL, POLL_LOCKED, GRACE, BEAT = 2, 1, 30, 60   # agent reports (every 60s) only while the helper is unreachable
 DEV_KEY = os.path.join(USER_DIR, "developer.key")
 DEV_KEY_HASH = "4695a520432e105e967dd2703366c24c039fe0a850fe35db03b73b6b9506aecd"
 
@@ -320,7 +320,7 @@ class Agent:
             # Cloudflare blocks the default "Python-urllib" user agent (403) — send our own. Bypass any
             # system proxy, which could block or MITM the call.
             req = urllib.request.Request(self.api + path, data=json.dumps(body).encode(),
-                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/0.3.8 (macOS)"})
+                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/0.3.9 (macOS)"})
             return json.loads(NOPROXY.open(req, timeout=8).read())
         except Exception as e:
             log("api %s failed: %s" % (path, e)); return None
@@ -400,14 +400,18 @@ class Agent:
             self.last_check = time.time()
             try:
                 st = self.helper("/status").get("state")
+                self.helper_ok = True
                 if st not in ("locked", "developer"):
                     log("helper not locked during an open quiz (%s) — re-locking" % st)
                     self.helper("/lock", {"quiz_id": self.quiz, "student": self.student, "url": self.url})
-            except Exception as e: log("helper check failed: %s" % e)
+            except Exception as e:
+                self.helper_ok = False; log("helper check failed: %s" % e)
         for (app, wi, ti, u) in ([] if dev else tabs):
             new = rewrite_search(u)
             if new and wi >= 0: set_tab_url(app, wi, ti, new)
-        if time.time() - self.last_beat > BEAT:
+        # Report to the server ONLY while the helper is unreachable (proof for "helper killed"); while the
+        # helper answers, its own signed pings say everything -> no routine agent traffic (free plan).
+        if not getattr(self, "helper_ok", True) and time.time() - self.last_beat > BEAT:
             self.last_beat = time.time()
             self.api_post("/report", {"device_id": self.device, "event": "heartbeat", "quiz_id": self.quiz,
                                       "student": self.student, "source": "agent"})

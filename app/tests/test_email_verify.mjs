@@ -21,7 +21,7 @@ const sign = (key, path, ts, body) => createHmac("sha256", key).update(`POST\n${
 function d1(sqlite) { return { prepare(sql) { const st = sqlite.prepare(sql); let a = [];
   const s = { bind(...x) { a = x.map(v => v === undefined ? null : typeof v === "boolean" ? Number(v) : v); return s; },
     first: async () => st.get(...a) ?? null, all: async () => ({ results: st.all(...a) }), run: async () => ({ meta: { changes: Number(st.run(...a).changes) } }) };
-  return s; } }; }
+  return s; }, async batch(sts) { for (const x of sts) await x.run(); } }; }
 const BASE = "https://lockqz.test", ADMIN = "admin-test-key", OU = "98765", QI = "12345", LOCK_ID = `${OU}-${QI}`;
 async function call(env, path, body, { key = null, device = null, teacher = null } = {}) {
   const raw = JSON.stringify(body ?? {}), h = { "Content-Type": "application/json" };
@@ -145,6 +145,25 @@ async function suite(label, oldSchema) {
   sqlite.prepare("UPDATE devices SET last_seen=? WHERE device_id=?").run(new Date(Date.now() - 700000).toISOString(), DEV);
   await call(on, "/report", { event: "heartbeat", quiz_id: LOCK_ID, source: "helper" }, S);
   check("stale last_seen (>10 min): heartbeat refreshes it", Date.now() - Date.parse(sqlite.prepare("SELECT last_seen FROM devices WHERE device_id=?").get(DEV).last_seen) < 5000);
+
+  console.log("V12 write budget: re-syncing an unchanged class writes nothing; changes write only the change");
+  const course = (list, quizzes = []) => ({ courses: [{ ou: "55555", name: "FBE 101", code: "FBE-101", role: "Instructor", classlist: list, quizzes }] });
+  const cl = [{ id: "7001", name: "Cy Student", email: "CY@usc.edu", role: "Student" }, { id: "7002", name: "Di Student", email: "di@usc.edu", role: "Student" }];
+  const qz = [{ qi: "880", name: "Quiz A", active: true }];
+  await call(on, "/sync", course(cl, qz), { teacher: ADMIN });
+  const stamp = () => sqlite.prepare("SELECT user_id, synced_at FROM roster WHERE ou='55555' ORDER BY user_id").all().map(r => r.user_id + "@" + r.synced_at).join(",");
+  const qstamp = () => sqlite.prepare("SELECT synced_at FROM bs_quizzes WHERE ou='55555' AND qi='880'").get()?.synced_at;
+  const s1 = stamp(), q1 = qstamp();
+  check("first sync stores the class (email lowercased)", sqlite.prepare("SELECT email FROM roster WHERE ou='55555' AND user_id='7001'").get()?.email === "cy@usc.edu" && !!q1);
+  await new Promise(r => setTimeout(r, 15));
+  await call(on, "/sync", course(cl, qz), { teacher: ADMIN });
+  check("identical re-sync rewrites no roster or quiz row", stamp() === s1 && qstamp() === q1, stamp() + " vs " + s1);
+  await call(on, "/sync", course([cl[0]], qz), { teacher: ADMIN });
+  check("a dropped student is removed, the other row untouched", sqlite.prepare("SELECT COUNT(*) AS n FROM roster WHERE ou='55555'").get().n === 1 && stamp() === s1.split(",")[0]);
+
+  console.log("V13 /live quiz match: exact id and course prefix both use the range (no LIKE)");
+  r = await get(on, "/live?quiz=" + OU);
+  check("course-level /live still finds the quiz's locks", (r.data?.rows || []).some(x => x.device_id === DEV), JSON.stringify(r.data).slice(0, 200));
 
   console.log("V10 SMTP client: real conversation with a fake Gmail server");
   const said = [];

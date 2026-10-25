@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.3.8"
+$Version = "0.3.9"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = "$env:ProgramData\LOCKqz\config.json"
@@ -246,8 +246,8 @@ $watcher.AddScript({
         try { $null = $mx.WaitOne(120000) } catch [System.Threading.AbandonedMutexException] { }
         try { if ($State.state -eq "locked") { & powershell -ExecutionPolicy Bypass -File $Engine lock | Out-Null } }
         finally { try { $mx.ReleaseMutex() } catch { } }
-        # liveness ping every ~180s so a killed helper shows up on the live monitor (free-plan budget)
-        if ($cycles % 36 -eq 0) { WReport "heartbeat" $null "helper" }
+        # liveness ping every ~300s so a killed helper shows up on the live monitor (free-plan budget)
+        if ($cycles % 60 -eq 0) { WReport "heartbeat" $null "helper" }
       }
     }
     # ~hourly until the server knows this device's key

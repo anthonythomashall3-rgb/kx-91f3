@@ -837,17 +837,28 @@ export async function onRequest(context) {
         st.push(db.prepare("INSERT INTO teacher_courses (teacher_id,ou,name,code,role,synced_at) VALUES (?,?,?,?,?,?) ON CONFLICT(teacher_id,ou) DO UPDATE SET name=excluded.name,code=excluded.code,role=excluded.role,synced_at=excluded.synced_at")
           .bind(me.id, ou, c.name||null, c.code||null, c.role||null, t));
         if (Array.isArray(c.classlist)) {
-          st.push(db.prepare("DELETE FROM roster WHERE ou=?").bind(ou));
-          for (const s of c.classlist.slice(0, 3000))
-            st.push(db.prepare("INSERT OR REPLACE INTO roster (ou,user_id,name,email,username,org_id,role,synced_at) VALUES (?,?,?,?,?,?,?,?)")
-              .bind(ou, String(s.id ?? ""), s.name||null, String(s.email||"").toLowerCase()||null, s.username||null, s.org_id ? String(s.org_id) : null, s.role||null, t));
+          // Free-plan write budget: compare with what is stored and write only changed/new/removed rows.
+          const old = new Map((await db.prepare("SELECT user_id,name,email,username,org_id,role FROM roster WHERE ou=?").bind(ou).all()).results.map(r => [String(r.user_id), r]));
+          const seen = new Set();
+          for (const s of c.classlist.slice(0, 3000)) {
+            const row = [String(s.id ?? ""), s.name||null, String(s.email||"").toLowerCase()||null, s.username||null, s.org_id ? String(s.org_id) : null, s.role||null];
+            seen.add(row[0]);
+            const o = old.get(row[0]);
+            if (o && o.name === row[1] && o.email === row[2] && o.username === row[3] && (o.org_id ?? null) === row[4] && o.role === row[5]) continue;
+            st.push(db.prepare("INSERT OR REPLACE INTO roster (ou,user_id,name,email,username,org_id,role,synced_at) VALUES (?,?,?,?,?,?,?,?)").bind(ou, ...row, t));
+          }
+          for (const id of old.keys()) if (!seen.has(id)) st.push(db.prepare("DELETE FROM roster WHERE ou=? AND user_id=?").bind(ou, id));
         }
         if (Array.isArray(c.quizzes)) {
-          const ours = new Set((await db.prepare("SELECT qi FROM bs_quizzes WHERE ou=? AND bs_password_is_ours=1").bind(ou).all()).results.map(x => String(x.qi)));
-          st.push(db.prepare("DELETE FROM bs_quizzes WHERE ou=?").bind(ou));
-          for (const q of c.quizzes.slice(0, 1000))
-            st.push(db.prepare("INSERT OR REPLACE INTO bs_quizzes (ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours,synced_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
-              .bind(ou, String(q.qi), q.name||null, q.active?1:0, q.start||null, q.end||null, q.due||null, q.has_password?1:0, ours.has(String(q.qi)) && q.has_password ? 1 : 0, t));
+          const oldQ = new Map((await db.prepare("SELECT qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours FROM bs_quizzes WHERE ou=?").bind(ou).all()).results.map(r => [String(r.qi), r]));
+          const seenQ = new Set();
+          for (const q of c.quizzes.slice(0, 1000)) {
+            const qi = String(q.qi), o = oldQ.get(qi); seenQ.add(qi);
+            const row = [q.name||null, q.active?1:0, q.start||null, q.end||null, q.due||null, q.has_password?1:0, (o && Number(o.bs_password_is_ours) === 1) && q.has_password ? 1 : 0];
+            if (o && o.name === row[0] && Number(o.active) === row[1] && o.start_date === row[2] && o.end_date === row[3] && o.due_date === row[4] && Number(o.bs_has_password) === row[5] && Number(o.bs_password_is_ours) === row[6]) continue;
+            st.push(db.prepare("INSERT OR REPLACE INTO bs_quizzes (ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours,synced_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(ou, qi, ...row, t));
+          }
+          for (const qi of oldQ.keys()) if (!seenQ.has(qi)) st.push(db.prepare("DELETE FROM bs_quizzes WHERE ou=? AND qi=?").bind(ou, qi));
         }
       }
       for (let i = 0; i < st.length; i += 90) await db.batch(st.slice(i, i + 90));
@@ -1029,14 +1040,20 @@ export async function onRequest(context) {
       const _ou0 = String(quiz).split("-")[0];
       if (!me.admin && !(await inCourse(_ou0)) && !(await trustedInstructor(_ou0))) return json({ error: "not your course" }, 403);
       const s = scope("l.quiz_id"), s2 = scope("e.quiz_id");
-      const STALE = 420000, nowMs = Date.now(), age = t => t ? (nowMs - Date.parse(t)) : null;
-      const locks = (await db.prepare(`SELECT l.device_id,l.quiz_id,l.last_lock,l.helper_seen,l.ext_seen,l.signed,l.ip,d.student,d.platform,d.student_verified FROM locks l LEFT JOIN devices d ON d.device_id=l.device_id WHERE (l.quiz_id=? OR l.quiz_id LIKE ?) AND ${s.sql}`).bind(quiz, like, ...s.args).all()).results;
-      const tamp = new Set(((await db.prepare("SELECT DISTINCT device_id FROM events WHERE (quiz_id=? OR quiz_id LIKE ?) AND event='tamper'").bind(quiz, like).all()).results).map(t=>t.device_id));
+      const STALE = 660000, nowMs = Date.now(), age = t => t ? (nowMs - Date.parse(t)) : null;   // helper pings every ~300s
+      // Free-plan read budget (5M rows/day): the Sync tab calls /live every 10s per gated quiz, so every
+      // query here must use an index. "quiz_id = q OR starts with q-" is written as a RANGE (an index
+      // can serve it; LIKE cannot), and the three events scans are one indexed query.
+      const QR = col => `(${col}=? OR (${col}>=? AND ${col}<?))`, qa = [quiz, quiz + "-", quiz + "."];
+      const locks = (await db.prepare(`SELECT l.device_id,l.quiz_id,l.last_lock,l.helper_seen,l.ext_seen,l.signed,l.ip,d.student,d.platform,d.student_verified FROM locks l LEFT JOIN devices d ON d.device_id=l.device_id WHERE ${QR("l.quiz_id")} AND ${s.sql}`).bind(...qa, ...s.args).all()).results;
+      const evs = (await db.prepare(`SELECT e.device_id, e.event, MAX(e.event='lock' AND e.detail LIKE '%"developer":true%') AS dev FROM events e WHERE ${QR("e.quiz_id")} AND e.event IN ('tamper','lock','unlock','auto_unlock') AND ${s2.sql} GROUP BY e.device_id, e.event`).bind(...qa, ...s2.args).all()).results;
+      const tamp = new Set(evs.filter(x => x.event === "tamper").map(x => x.device_id));
       // Developer mode: only the admin's own Mac may hold a lock without blocking AI. A dev claim
       // from any other device is a modified client -> tamper (never admitted).
-      const devClaim = new Set(((await db.prepare("SELECT DISTINCT device_id FROM events WHERE (quiz_id=? OR quiz_id LIKE ?) AND event='lock' AND detail LIKE '%\"developer\":true%'").bind(quiz, like).all()).results).map(t=>t.device_id));
+      const devClaim = new Set(evs.filter(x => x.event === "lock" && Number(x.dev) === 1).map(x => x.device_id));
       const adminEm = new Set(((await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin'").all()).results).map(x => x.e));
-      const done = (await db.prepare(`SELECT DISTINCT e.device_id,d.student,d.platform,d.student_verified FROM events e LEFT JOIN devices d ON d.device_id=e.device_id WHERE (e.quiz_id=? OR e.quiz_id LIKE ?) AND e.event IN ('unlock','auto_unlock') AND ${s2.sql}`).bind(quiz, like, ...s2.args).all()).results;
+      const doneIds = [...new Set(evs.filter(x => x.event === "unlock" || x.event === "auto_unlock").map(x => x.device_id))].filter(id => !locks.some(l => l.device_id === id));
+      const done = doneIds.length ? (await db.prepare("SELECT device_id,student,platform,student_verified FROM devices WHERE device_id IN (SELECT value FROM json_each(?))").bind(JSON.stringify(doneIds)).all()).results : [];
       const active = new Set(locks.map(l=>l.device_id));
       const rows = locks.map(l => {
         const a = age(l.last_lock), h = age(l.helper_seen), e = age(l.ext_seen);
@@ -1046,7 +1063,7 @@ export async function onRequest(context) {
         else if (a !== null && a > STALE) {
           // "helper_killed" needs PROOF: the agent kept reporting after the helper went silent. A wifi
           // drop silences both -> "dark" (never treated as cheating; access is kept).
-          const helperDown = h === null || h > STALE, extDown = e === null || e > 720000;   // agent beats every 300s
+          const helperDown = h === null || h > STALE, extDown = e === null || e > 720000;   // the agent reports only while it cannot reach the helper
           const agentAfterHelper = e !== null && (h === null || e < h - 30000);
           status = helperDown && agentAfterHelper ? "helper_killed" : (extDown && !helperDown ? "browser_closed" : "dark");
         }
@@ -1062,7 +1079,13 @@ export async function onRequest(context) {
       rows.forEach(r => { r.eligible = (started && (r.status === "locked" || r.status === "developer") && r.verified === true); });
       // Resolve each locked device to a Brightspace user_id, by email OR name OR username, from THIS
       // course's roster only (one query, no per-student bound params -> no D1 100-param limit).
-      const rl = (await db.prepare("SELECT lower(email) AS e, lower(name) AS n, lower(username) AS u, name AS display, user_id FROM roster WHERE ou=?").bind(_ou0).all()).results;
+      // Only the roster rows we need: by email through the email index (emails are stored lowercase).
+      // The whole-course scan is a fallback only for old installs that typed a name (codes off).
+      const whoList = [...new Set(rows.map(r => String(r.student||"").toLowerCase()).filter(Boolean))];
+      const byMail = whoList.filter(w => w.includes("@"));
+      let rl = byMail.length ? (await db.prepare("SELECT email AS e, lower(name) AS n, lower(username) AS u, name AS display, user_id FROM roster WHERE email IN (SELECT value FROM json_each(?)) AND ou=?").bind(JSON.stringify(byMail), _ou0).all()).results : [];
+      if (!codesOn && whoList.some(w => !w.includes("@")))
+        rl = (await db.prepare("SELECT lower(email) AS e, lower(name) AS n, lower(username) AS u, name AS display, user_id FROM roster WHERE ou=?").bind(_ou0).all()).results;
       const byEmail = {}, byName = {}, byUser = {};
       rl.forEach(x => { if (x.e) byEmail[x.e] = x; if (x.n) byName[x.n] = x; if (x.u) byUser[x.u] = x; });
       rows.forEach(r => {
@@ -1077,7 +1100,7 @@ export async function onRequest(context) {
       // reported "unlock" is a clean "done" ONLY if Brightspace shows its student submitted; otherwise,
       // while the quiz is still open, it is "left_early" (AI unblocked without a real submit) -- a red
       // flag, never a quiet green done. A forced local unlock therefore cannot pose as a submission.
-      const subs = new Set(((await db.prepare("SELECT user_id FROM submissions WHERE ou=? AND qi=?").bind(_ou, _qi).all()).results).map(x => String(x.user_id)));
+      const subs = rows.some(r => r.status === "done") ? new Set(((await db.prepare("SELECT user_id FROM submissions WHERE ou=? AND qi=?").bind(_ou, _qi).all()).results).map(x => String(x.user_id))) : new Set();
       rows.forEach(r => {
         if (r.status === "done") {
           const submitted = r.user_id && subs.has(String(r.user_id));
