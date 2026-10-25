@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- (none)
+- 2026-10-25 15:35 PT — 01CsgBZK: Content/Lessons quiz detection (agents + server ids), Brightspace AI chat widget (learnwise) blocked, v0.4.4. Files: app/mac/lockqz-agent.py, app/windows/lockqz-agent.ps1, [[route]].js ids()/AI_DOMAINS, blocklists, test_url_parsing.mjs, VERSION + helper versions.
 
 ## Recently finished
 - 2026-10-25 13:55 PT — 01DfSvcn: student email typed ONCE ever (saved at once, no error popups, quiet retries; proof of confirmed email survives reinstall); D1 write-cap -> 503 server_busy; USC sections run capped at 3,000 rows. 5pm PT (D1 reset): mark real users' devices verified, run full Release (workflow_dispatch), restart Anthony's agent.
