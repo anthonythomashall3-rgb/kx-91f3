@@ -130,11 +130,11 @@ if ($ossl -and $py) {
   try {
     $env:LOCKQZ_UPDATE_DIR = $inst
     $st = [hashtable]::Synchronized(@{ state = "locked" })
-    $r = LQ-CheckUpdate $st $inst "http://127.0.0.1:$($Port + 1)/download" "0.3.5"
+    $r = LQ-CheckUpdate $st $inst "http://127.0.0.1:$($Port + 1)/download" "0.3.6"
     Check "deferred while a quiz is locked" (-not $r)
-    Check "install untouched while locked" (((Get-Content "$inst/lockqzd.ps1" -Raw) -match '\$Version = "0\.3\.5"') -and -not (Test-Path "$inst/.update"))
+    Check "install untouched while locked" (((Get-Content "$inst/lockqzd.ps1" -Raw) -match '\$Version = "0\.3\.6"') -and -not (Test-Path "$inst/.update"))
     $st.state = "unlocked"
-    $r = LQ-CheckUpdate $st $inst "http://127.0.0.1:$($Port + 1)/download" "0.3.5"
+    $r = LQ-CheckUpdate $st $inst "http://127.0.0.1:$($Port + 1)/download" "0.3.6"
     Check "update installed when unlocked" $r
     Check "lockqzd.ps1 replaced by the new version" ((Get-Content "$inst/lockqzd.ps1" -Raw) -match '\$Version = "9\.9\.9"')
     Check "staging folder cleaned" (-not (Test-Path "$inst/.update"))
@@ -143,16 +143,16 @@ if ($ossl -and $py) {
     # tamper with a served file -> whole update refused, install untouched
     Add-Content -Path "$site/download/windows/blocklist.txt" -Value "#x"
     Fresh $inst; Copy-Item "$t/k.xml" "$inst/update.pub.xml" -Force
-    $r = LQ-CheckUpdate $st $inst "http://127.0.0.1:$($Port + 1)/download" "0.3.5"
+    $r = LQ-CheckUpdate $st $inst "http://127.0.0.1:$($Port + 1)/download" "0.3.6"
     Check "hash mismatch refused" (-not $r)
-    Check "install untouched after hash mismatch" ((Get-Content "$inst/lockqzd.ps1" -Raw) -match '\$Version = "0\.3\.5"')
+    Check "install untouched after hash mismatch" ((Get-Content "$inst/lockqzd.ps1" -Raw) -match '\$Version = "0\.3\.6"')
     # wrong key -> refused
     Fresh $inst; Set-Content "$inst/update.pub.xml" -Value $pubXml -Encoding ASCII
-    $r = LQ-CheckUpdate $st $inst "http://127.0.0.1:$($Port + 1)/download" "0.3.5"
+    $r = LQ-CheckUpdate $st $inst "http://127.0.0.1:$($Port + 1)/download" "0.3.6"
     Check "wrong signing key refused" (-not $r)
     # a source checkout never updates itself
     Remove-Item Env:LOCKQZ_UPDATE_DIR
-    $r = LQ-CheckUpdate $st $inst "http://127.0.0.1:$($Port + 1)/download" "0.3.5"
+    $r = LQ-CheckUpdate $st $inst "http://127.0.0.1:$($Port + 1)/download" "0.3.6"
     Check "non-install folder never updated" (-not $r)
   } finally { Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue; Remove-Item Env:LOCKQZ_UPDATE_DIR -ErrorAction SilentlyContinue; Remove-Item $t -Recurse -Force -ErrorAction SilentlyContinue; $ErrorActionPreference = $savedEAP }
 } else { Write-Host "  (openssl/python not found: cross-check with a CI-style signed release skipped)" }

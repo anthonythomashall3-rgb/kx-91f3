@@ -12,6 +12,7 @@ def load(name):
     m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
 
 tmp = tempfile.mkdtemp(); os.environ["LOCKQZ_POLICY_DIR"] = tmp
+os.environ["LOCKQZ_FF_IDS"] = "org.mozilla.firefox,org.mozilla.librewolf,net.waterfox.waterfox,one.ablaze.floorp,app.zen_browser.zen"
 A = load("lockqz-agent.py"); P = load("browser-policy.py")
 
 print("T1 quiz detection: attempt pages lock, list/submission pages never do")
@@ -67,6 +68,10 @@ ok("Chrome: AI off + Web search pinned") if ch["GeminiSettings"] == 1 and ch["Ge
 ok("Chrome: Web allowed beats search blocked") if "google.com/search" in ch["URLBlocklist"] and "google.com/search@udm=14" in ch["URLAllowlist"] else bad("url lists wrong")
 with open(os.path.join(tmp, "org.mozilla.firefox.plist"), "rb") as f: ff = plistlib.load(f)
 ok("Firefox: filter + AI chat off") if ff["WebsiteFilter"]["Block"] and ff["Preferences"]["browser.ml.chat.enabled"]["Value"] is False else bad("firefox policy wrong")
+for fork in ["org.mozilla.librewolf","net.waterfox.waterfox","one.ablaze.floorp","app.zen_browser.zen"]:
+    pth = os.path.join(tmp, fork + ".plist")
+    okfork = os.path.exists(pth) and plistlib.load(open(pth,"rb"))["WebsiteFilter"]["Block"]
+    ok("Firefox fork policed: " + fork) if okfork else bad("fork not policed: " + fork)
 P.unlock()
 ok("unlock leaves only the foreign file") if os.listdir(tmp) == ["com.apple.Other.plist"] else bad("after unlock: " + str(os.listdir(tmp)))
 

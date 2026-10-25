@@ -77,6 +77,45 @@ def firefox_policy():
                             "browser.ml.enable": {"Value": False, "Status": "locked"},
                             "browser.ml.linkPreview.enabled": {"Value": False, "Status": "locked"}}}
 
+def _bundle_id(app):
+    """CFBundleIdentifier of an .app, or None."""
+    try:
+        import plistlib as _pl
+        with open(os.path.join(app, "Contents", "Info.plist"), "rb") as f:
+            return _pl.load(f).get("CFBundleIdentifier")
+    except Exception:
+        return None
+
+def firefox_family_ids():
+    """Bundle ids of every installed Firefox-family browser (any .app whose Contents/MacOS holds a
+    `firefox` binary -- true for Firefox and all Gecko forks). Scans /Applications and each user's
+    ~/Applications. Env LOCKQZ_FF_IDS (comma list) overrides, for tests."""
+    override = os.environ.get("LOCKQZ_FF_IDS")
+    if override is not None:
+        return [x for x in override.split(",") if x]
+    roots, ids = ["/Applications"], set()
+    try:
+        for u in os.listdir("/Users"):
+            a = "/Users/%s/Applications" % u
+            if os.path.isdir(a): roots.append(a)
+    except Exception: pass
+    for root in roots:
+        try: entries = os.listdir(root)
+        except Exception: continue
+        for name in entries:
+            if not name.endswith(".app"): continue
+            app = os.path.join(root, name)
+            mac = os.path.join(app, "Contents", "MacOS")
+            try: binaries = os.listdir(mac)
+            except Exception: continue
+            # Gecko forks keep the `firefox` launcher name; match it (and a few known rebrands).
+            if any(b.lower() in ("firefox", "librewolf", "waterfox", "floorp", "zen", "mullvadbrowser") for b in binaries):
+                bid = _bundle_id(app)
+                if bid: ids.add(bid)
+    # Always include the canonical id even if the app wasn't found by scan.
+    ids.add("org.mozilla.firefox")
+    return sorted(ids)
+
 def path(domain): return os.path.join(DIR, domain + ".plist")
 
 def ours(domain):
@@ -96,18 +135,24 @@ def refresh():
 
 def lock():
     for d in CHROMIUM: write(d, chromium_policy(d))
-    write(FIREFOX, firefox_policy())
+    for d in firefox_family_ids(): write(d, firefox_policy())   # Firefox + every fork, by real bundle id
     refresh()
 
 def unlock():
-    for d in CHROMIUM + [FIREFOX]:
+    # Remove every managed-prefs plist we wrote (chromium list + any Firefox-family id). Scanning DIR
+    # for our mark catches forks even if the app has since been uninstalled.
+    try: present = [f[:-6] for f in os.listdir(DIR) if f.endswith(".plist")]
+    except Exception: present = []
+    for d in set(CHROMIUM + [FIREFOX] + present):
         if ours(d):
             try: os.remove(path(d))
             except Exception: pass
     refresh()
 
 def status():
-    on = [d for d in CHROMIUM + [FIREFOX] if ours(d)]
+    try: present = [f[:-6] for f in os.listdir(DIR) if f.endswith(".plist")]
+    except Exception: present = []
+    on = [d for d in set(CHROMIUM + [FIREFOX] + present) if ours(d)]
     print("LOCKqz browser policy: " + ("LOCKED (%d browsers)" % len(on) if on else "off"))
 
 if __name__ == "__main__":

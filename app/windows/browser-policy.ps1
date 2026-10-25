@@ -39,6 +39,70 @@ function Set-List($path,$items) {
   $i = 1; foreach ($it in $items) { New-ItemProperty -Path $path -Name "$i" -Value $it -PropertyType String -Force | Out-Null; $i++ }
 }
 
+# ---- Firefox family (Firefox + forks: LibreWolf, Waterfox, Floorp, Zen, Mullvad, dev/nightly) ----
+# Forks read a distribution\policies.json in their own install dir (safe to add; unlike a macOS app
+# bundle, adding a file here does not break anything). We find each install, back up any existing
+# policies.json, and drop ours (marked) for the quiz; Do-Unlock restores exactly what was there.
+function Get-FirefoxFamilyDirs {
+  $dirs = New-Object System.Collections.Generic.HashSet[string]
+  $bases = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA) | Where-Object { $_ }
+  $names = @("Mozilla Firefox","Firefox Developer Edition","Firefox Nightly","LibreWolf","Waterfox",
+             "Floorp","zen","Zen Browser","Mullvad Browser","Mozilla Firefox ESR")
+  foreach ($b in $bases) {
+    foreach ($n in $names) {
+      $d = Join-Path $b $n
+      if (Test-Path (Join-Path $d "firefox.exe")) { [void]$dirs.Add($d); continue }
+      # some forks rebrand the launcher
+      foreach ($exe in @("librewolf.exe","waterfox.exe","floorp.exe","zen.exe","mullvadbrowser.exe")) {
+        if (Test-Path (Join-Path $d $exe)) { [void]$dirs.Add($d) }
+      }
+    }
+  }
+  return $dirs
+}
+function FirefoxPoliciesJson {
+  $pol = @{ policies = @{
+      DNSOverHTTPS = @{ Enabled = $false; Locked = $true }
+      Proxy = @{ Mode = "none"; Locked = $true }
+      WebsiteFilter = @{ Block = $FfBlock; Exceptions = $FfAllow }
+      ExtensionSettings = @{ "*" = @{ installation_mode = "blocked" } }
+      Preferences = @{
+        "browser.ml.chat.enabled" = @{ Value = $false; Status = "locked" }
+        "browser.ml.enable" = @{ Value = $false; Status = "locked" }
+        "browser.ml.linkPreview.enabled" = @{ Value = $false; Status = "locked" }
+      }
+    }; "_lockqz" = $true }
+  return ($pol | ConvertTo-Json -Depth 8)
+}
+function Apply-FirefoxForkFiles {
+  foreach ($d in Get-FirefoxFamilyDirs) {
+    try {
+      $dist = Join-Path $d "distribution"
+      $pj = Join-Path $dist "policies.json"
+      New-Item -ItemType Directory -Force -Path $dist | Out-Null
+      if (Test-Path $pj) {
+        $existing = Get-Content $pj -Raw -ErrorAction SilentlyContinue
+        if ($existing -and ($existing -notmatch '"_lockqz"')) { Copy-Item $pj "$pj.lockqzbak" -Force }
+      }
+      Set-Content -Path $pj -Value (FirefoxPoliciesJson) -Encoding UTF8
+    } catch { }
+  }
+}
+function Remove-FirefoxForkFiles {
+  foreach ($d in Get-FirefoxFamilyDirs) {
+    try {
+      $pj = Join-Path (Join-Path $d "distribution") "policies.json"
+      if (Test-Path $pj) {
+        $c = Get-Content $pj -Raw -ErrorAction SilentlyContinue
+        if ($c -match '"_lockqz"') {
+          Remove-Item $pj -Force
+          if (Test-Path "$pj.lockqzbak") { Move-Item "$pj.lockqzbak" $pj -Force }
+        }
+      }
+    } catch { }
+  }
+}
+
 function Do-Lock {
   foreach ($root in $Chromium.Keys) {
     Set-Val $root $Mark 1
@@ -72,6 +136,7 @@ function Do-Lock {
   Set-Val "$Firefox\Preferences" "browser.ml.enable" "false" "String"
   Set-Val "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot" "TurnOffWindowsCopilot" 1
   Set-Val "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot" $Mark 1
+  Apply-FirefoxForkFiles
   "LOCKqz browser policy: LOCKED"
 }
 
@@ -92,6 +157,7 @@ function Do-Unlock {
   }
   $wc = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot"
   if ((Get-ItemProperty -Path $wc).$Mark -eq 1) { Remove-ItemProperty -Path $wc -Name "TurnOffWindowsCopilot",$Mark }
+  Remove-FirefoxForkFiles
   "LOCKqz browser policy: off"
 }
 

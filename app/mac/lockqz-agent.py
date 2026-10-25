@@ -141,10 +141,14 @@ def browser_tabs():
                 for ti, u in enumerate(urls or []): tabs.append((app, wi, ti, u or ""))
         except Exception as e:
             if "-1743" in str(e) or "not allowed" in str(e).lower(): permission_hint(app)
-    if "Firefox" in apps or "firefox" in apps:
-        for p in glob.glob(os.path.expanduser("~/Library/Application Support/Firefox/Profiles/*/sessionstore-backups/recovery.jsonlz4")):
+    # Firefox and every Gecko fork store open tabs in a per-app profile dir; read them all so a quiz
+    # opened in Firefox/LibreWolf/Waterfox/Floorp/Zen/Mullvad is detected and locked.
+    FF_SUPPORT = ["Firefox", "LibreWolf", "Waterfox", "Floorp", "zen", "Zen", "MullvadBrowser",
+                  "Firefox Developer Edition", "Firefox Nightly"]
+    for base in FF_SUPPORT:
+        for p in glob.glob(os.path.expanduser("~/Library/Application Support/%s/Profiles/*/sessionstore-backups/recovery.jsonlz4" % base)):
             try:
-                for u in firefox_urls(mozlz4_json(p)): tabs.append(("Firefox", -1, -1, u))
+                for u in firefox_urls(mozlz4_json(p)): tabs.append((base, -1, -1, u))
             except Exception: pass
     return tabs
 
@@ -301,7 +305,7 @@ class Agent:
             # Cloudflare blocks the default "Python-urllib" user agent (403) — send our own. Bypass any
             # system proxy, which could block or MITM the call.
             req = urllib.request.Request(self.api + path, data=json.dumps(body).encode(),
-                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/0.3.5 (macOS)"})
+                                         headers={"Content-Type": "application/json", "User-Agent": "LOCKqz/0.3.6 (macOS)"})
             return json.loads(NOPROXY.open(req, timeout=8).read())
         except Exception as e:
             log("api %s failed: %s" % (path, e)); return None
