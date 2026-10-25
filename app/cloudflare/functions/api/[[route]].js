@@ -291,8 +291,8 @@ export async function onRequest(context) {
     const nm = splitName(name);
     const [cur, nxt] = curTerms();
     if (!nm) return { name: name||null, sections: [] };
-    let rows = (await db.prepare("SELECT term,section,course,title,first,last,seats,registered FROM usc_sections WHERE term IN (?,?) AND lower(last)=lower(?) AND lower(first)=lower(?) ORDER BY term,course,section").bind(cur, nxt, nm.last, nm.first).all()).results;
-    if (!rows.length) rows = (await db.prepare("SELECT term,section,course,title,first,last,seats,registered FROM usc_sections WHERE term IN (?,?) AND lower(last)=lower(?) AND lower(first) LIKE lower(?) ORDER BY term,course,section").bind(cur, nxt, nm.last, nm.first.slice(0,1) + "%").all()).results;
+    let rows = (await db.prepare("SELECT term,section,course,title,first,last FROM usc_sections WHERE term IN (?,?) AND lower(last)=lower(?) AND lower(first)=lower(?) ORDER BY term,course,section").bind(cur, nxt, nm.last, nm.first).all()).results;
+    if (!rows.length) rows = (await db.prepare("SELECT term,section,course,title,first,last FROM usc_sections WHERE term IN (?,?) AND lower(last)=lower(?) AND lower(first) LIKE lower(?) ORDER BY term,course,section").bind(cur, nxt, nm.last, nm.first.slice(0,1) + "%").all()).results;
     const paid = new Map((await db.prepare("SELECT term,section,until FROM paid_sections WHERE teacher_id=?").bind(tid).all()).results.map(r => [r.term + ":" + r.section, r.until]));
     const today = laToday();
     const seen = new Set(), sections = [];

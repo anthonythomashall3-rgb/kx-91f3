@@ -48,7 +48,7 @@ def main(out, current=None):
                         for i in s.get("instructors") or []:
                             f, l = (i.get("firstName") or "").strip(), (i.get("lastName") or "").strip()
                             if not l: continue
-                            rows.append((str(term), str(s.get("sisSectionId")), course, title, f, l, s.get("totalSeats"), s.get("registeredSeats")))
+                            rows.append((str(term), str(s.get("sisSectionId")), course, title, f, l, None, None))
         print(f"term {term}: {len(pairs)} programs", file=sys.stderr)
     rows = sorted(set(rows))
     if len(rows) < 1000: sys.exit(f"only {len(rows)} sections found; refusing to replace the index")
@@ -66,11 +66,11 @@ def load_current(path):
     d = json.load(open(path))
     res = d[0]["results"] if isinstance(d, list) else d.get("results", [])
     return {(str(x["term"]), str(x["section"]), x["last"] or "", x["first"] or ""):
-            (str(x["term"]), str(x["section"]), x["course"], x["title"], x["first"] or "", x["last"] or "", x["seats"], x["registered"]) for x in res}
+            (str(x["term"]), str(x["section"]), x["course"], x["title"], x["first"] or "", x["last"] or "", None, None) for x in res}
 
 def diff(rows, terms, cur):
-    """Only the writes needed: new or changed sections, removed ones. Enrollment counts move every day
-    during registration, so a count change alone is written only when it moved by 5 or more."""
+    """Only the writes needed: new or changed sections (course, title, instructor), removed ones.
+    Seat and enrollment counts are not kept (LOCKqz does not use them)."""
     if cur is None:
         out = ["DELETE FROM usc_sections WHERE term IN (%s);" % ",".join(q(t) for t in terms)]
         return out + [ins(r) for r in rows]
@@ -78,7 +78,7 @@ def diff(rows, terms, cur):
     out = []
     for k, r in want.items():
         old = cur.get(k)
-        if old is None or not same(old, r) or big_move(old, r):
+        if old is None or not same(old, r):
             out.append(ins(r))
     for k in cur:
         if k[0] in terms and k not in want:
@@ -87,12 +87,7 @@ def diff(rows, terms, cur):
 
 def same(old, r):
     norm = lambda v: None if v is None else str(v)
-    return [norm(x) for x in old[:7]] == [norm(x) for x in r[:7]]
-
-def big_move(old, r):
-    if old is None: return False
-    try: return abs(int(old[7] or 0) - int(r[7] or 0)) >= 5
-    except Exception: return str(old[7]) != str(r[7])
+    return [norm(x) for x in old[:6]] == [norm(x) for x in r[:6]]
 
 def ins(r):
     return "INSERT OR REPLACE INTO usc_sections (term,section,course,title,first,last,seats,registered) VALUES (%s);" % ",".join(q(v) for v in r)

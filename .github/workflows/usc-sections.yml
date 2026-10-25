@@ -26,7 +26,7 @@ jobs:
           [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::warning::missing CLOUDFLARE_API_TOKEN"; exit 0; }
           npm ci --no-audit --no-fund
           # What D1 already holds (reads are cheap; writes are the free-plan limit).
-          npx wrangler d1 execute lockqz --remote --json --command "SELECT term,section,course,title,first,last,seats,registered FROM usc_sections" > "$RUNNER_TEMP/current.json"
+          npx wrangler d1 execute lockqz --remote --json --command "SELECT term,section,course,title,first,last FROM usc_sections" > "$RUNNER_TEMP/current.json"
           python3 ../usc/build_sections.py "$RUNNER_TEMP/changes.sql" "$RUNNER_TEMP/current.json"
           # Apply in small batches with --command (never --file: a failed --file restores the whole DB).
           python3 - "$RUNNER_TEMP/changes.sql" <<'PY'
