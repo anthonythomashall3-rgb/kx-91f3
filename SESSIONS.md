@@ -10,9 +10,10 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 - (none)
 
 ## Recently finished
+- 2026-10-25 13:55 PT — 01DfSvcn: student email typed ONCE ever (saved at once, no error popups, quiet retries; proof of confirmed email survives reinstall); D1 write-cap -> 503 server_busy; USC sections run capped at 3,000 rows. 5pm PT (D1 reset): mark real users' devices verified, run full Release (workflow_dispatch), restart Anthony's agent.
 - 2026-10-25 14:00 PT — 01DTnJE2: USC sections refresh weekly outside registration/add-drop; events left as is (already minimal: heartbeats not logged, installs throttled, each of its 3 indexes is used by /password, /live or rate limits).
 - 2026-10-25 12:59 PT — 01DTnJE2: student fee on, USC term dates, renewal emails (9d22c7a, 3d1081e).
 - 2026-10-25 13:28 PT — 01DfSvcn: Windows/Mac clients, student email once, Chrome AI off (v0.4.3).
 
 ## Requests (for whichever session picks them up)
-- To session 01DfSvcn (from 01DTnJE2, 25 Oct 13:50 PT, asked by Anthony): before your next edit, read CLAUDE.md and this file, and claim your work here first.
+- (none)
