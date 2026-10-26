@@ -349,7 +349,7 @@ export async function onRequest(context) {
   const purgeStmts = () => {
     const ago = d => new Date(Date.now() - d * 86400000).toISOString();
     return [db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id LIMIT 300) AND ts<?").bind(ago(EVENT_DAYS)),
-      db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE event IN ('login_fail','pay_code_new','pay_start','code_sent','code_send_failed') AND ts<? LIMIT 300)").bind(ago(2)),
+      db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE event IN ('login_fail','pay_code_new','pay_start','pay_stripe','code_sent','code_send_failed') AND ts<? LIMIT 300)").bind(ago(2)),
       db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE event='reset_request' AND ts<? LIMIT 100)").bind(ago(30)),
       db.prepare("DELETE FROM email_codes WHERE expires<?").bind(Date.now() - 86400000)];
   };
@@ -511,6 +511,47 @@ export async function onRequest(context) {
   const stuZelle = () => String(env.ZELLE_BUSINESS_TO || env.ZELLE_TO || "") || null;
   const stuVenmo = () => env.STUDENT_VENMO === "1" ? ((env.VENMO_HANDLE || "").replace(/^@/, "") || null) : null;
   const stuBank = () => String(env.INVOICE_EMAIL || env.ADMIN_EMAIL || "") || null;
+  // ---- Stripe: card + US bank account (ACH). Off until STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET are set.
+  // Prices carry Stripe's fee so LOCKqz nets at least the base price: card 2.9% + 30c (student $200
+  // nets $193.90; professor $5,150 nets $5,000.05), bank 0.8% capped at $5 (student $181.45 nets $180;
+  // professor $5,005 nets $5,000). Only Stripe's signed webhook records a payment; the amount is Stripe's.
+  const stripeOn = () => !!(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET);
+  const cts = (v, d) => { const n = Math.round(Number(v || d) * 100); return n > 0 ? n : Math.round(d * 100); };
+  // Cents to charge for what is still due (cents): the set price when nothing is paid yet, else the
+  // remainder grossed up by Stripe's fee.
+  const stripeCents = (kind, method, dueC) => {
+    const fullC = Math.round((kind === "student" ? STUDENT_FEE : PRICE) * 100);
+    const set = kind === "student" ? (method === "card" ? cts(env.STUDENT_CARD_PRICE, 200) : cts(env.STUDENT_BANK_PRICE, 181.45))
+                                   : (method === "card" ? cts(env.PROF_CARD_PRICE, 5150) : cts(env.PROF_BANK_PRICE, 5005));
+    if (dueC >= fullC) return set;
+    if (dueC <= 0) return 0;
+    return method === "card" ? Math.max(50, Math.ceil((dueC + 30) / 0.971)) : Math.min(Math.ceil(dueC / 0.992), dueC + 500);
+  };
+  const stripeInfo = (kind, dueC) => stripeOn() && dueC > 0 ? { card: stripeCents(kind, "card", dueC) / 100, bank: stripeCents(kind, "bank", dueC) / 100 } : null;
+  async function stripeCheckout({ kind, method, code, email, term, dueC, back }) {
+    const amt = stripeCents(kind, method, dueC);
+    const f = new URLSearchParams({
+      mode: "payment", "payment_method_types[0]": method === "card" ? "card" : "us_bank_account",
+      "line_items[0][quantity]": "1", "line_items[0][price_data][currency]": "usd",
+      "line_items[0][price_data][unit_amount]": String(amt),
+      "line_items[0][price_data][product_data][name]": `LOCKqz ${kind === "student" ? "student" : "professor"} · ${({1:"Spring",2:"Summer",3:"Fall"})[String(term).slice(4)] || ""} ${String(term).slice(0,4)}`.trim(),
+      client_reference_id: code, "metadata[code]": code, "metadata[kind]": kind, "metadata[term]": String(term),
+      "payment_intent_data[metadata][code]": code, "payment_intent_data[description]": "LOCKqz " + code,
+      success_url: back + (back.includes("?") ? "&" : "?") + "stripe=" + method, cancel_url: back });
+    if (email) f.set("customer_email", email);
+    const r = await fetch("https://api.stripe.com/v1/checkout/sessions", { method: "POST", body: f,
+      headers: { Authorization: "Bearer " + env.STRIPE_SECRET_KEY, "Content-Type": "application/x-www-form-urlencoded" } });
+    const d = await r.json().catch(() => ({}));
+    return r.ok && d.url ? { url: d.url, amount: amt / 100 } : { error: "Card payments are not available right now. Try again in a minute." };
+  }
+  // Stripe-Signature: t=<unix>,v1=<hex HMAC-SHA256 of "t.body"> (5 minutes tolerance).
+  async function stripeVerified(header, rawText) {
+    const parts = Object.fromEntries(String(header||"").split(",").map(x => x.split("=")).filter(x => x.length === 2 && x[0] === "t").map(x => [x[0], x[1]]));
+    const v1 = String(header||"").split(",").filter(x => x.startsWith("v1=")).map(x => x.slice(3));
+    const t = Number(parts.t); if (!t || Math.abs(unixNow() - t) > 300 || !v1.length) return false;
+    const want = await hmacHex(String(env.STRIPE_WEBHOOK_SECRET), `${parts.t}.${rawText}`);
+    return v1.some(v => sameHex(v, want));
+  }
   const feeOn = () => { const from = String(env.STUDENT_FEE_FROM || ""); return /^\d{4}-\d{2}-\d{2}$/.test(from) && laToday() >= from; };
   // ---- terms: USC's academic calendar (usc.edu/academic-calendar), codes YYYY1/2/3 ----
   // [first day of classes, last day of finals (summer: last day of classes)]. Access paid for a term
@@ -599,7 +640,8 @@ export async function onRequest(context) {
   async function payInfo(email, limitIp = null) {
     const code = await studentCode(email, limitIp);
     if (code && typeof code === "object") return code;   // { limited: true }
-    return { amount: STUDENT_FEE, code, venmo: stuVenmo(), zelle: stuZelle(), bank: stuBank(),
+    const due = stripeOn() && email ? Math.round(STUDENT_FEE * 100) - Math.round((await studentStatus(email)).received * 100) : Math.round(STUDENT_FEE * 100);
+    return { amount: STUDENT_FEE, code, venmo: stuVenmo(), zelle: stuZelle(), bank: stuBank(), po: stuBank(), stripe: stripeInfo("student", due),
              url: PAY_URL + (email ? "?email=" + encodeURIComponent(String(email).toLowerCase()) : "") };
   }
   // Memo codes typed by people: "lqs-ab12c", "LQS AB12C", "LQ AB12C". Student (LQS+5) first, then
@@ -1279,6 +1321,43 @@ export async function onRequest(context) {
       if (!((tok && sameHex(tok, await statusToken(email))) || (code && stt.code && code === stt.code))) return json({ error:"code or token required (from /pay/start)" }, 403);
       return json({ paid: await studentPaid(email), required: feeOn(), received: stt.received, amount: STUDENT_FEE, term: stt.term });
     }
+    // Student: start a Stripe Checkout (card or bank) for what is still due this term.
+    if (p === "/pay/stripe" && request.method === "POST") {
+      if (!stripeOn()) return json({ error:"Card payments are not on yet." }, 503);
+      const email = String(body.email||"").trim().toLowerCase(), method = body.method === "bank" ? "bank" : "card";
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"enter your school email" }, 400);
+      const hr = new Date(Date.now() - 3600000).toISOString();
+      if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_stripe' AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 20)
+        return json({ error:"too many requests — try again in an hour" }, 429);
+      await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + clientIp, null, null, "pay_stripe", null, now()).run();
+      const code = await studentCode(email, clientIp);
+      if (!code || typeof code === "object") return json({ error:"too many requests — try again in an hour" }, 429);
+      if (await studentPaid(email)) return json({ error:"already paid" }, 409);
+      const st = await studentStatus(email), due = Math.round(STUDENT_FEE * 100) - Math.round(st.received * 100);
+      const r = await stripeCheckout({ kind: "student", method, code, email, term: st.term, dueC: due, back: `${PAY_URL}?email=${encodeURIComponent(email)}` });
+      return json(r, r.url ? 200 : 502);
+    }
+    // Stripe's webhook (signed). Paid checkouts are recorded like any other payment (txn = the
+    // PaymentIntent, so the card "completed" and the bank "async succeeded" events count once);
+    // refunds and disputes void the payment.
+    if (p === "/pay/stripe/webhook" && request.method === "POST") {
+      if (!stripeOn()) return json({ error:"off" }, 503);
+      const text = new TextDecoder().decode(raw);
+      if (!(await stripeVerified(request.headers.get("Stripe-Signature"), text))) return json({ error:"bad signature" }, 400);
+      const ev = body, o = ev?.data?.object || {};
+      if ((ev.type === "checkout.session.completed" || ev.type === "checkout.session.async_payment_succeeded") && o.payment_status === "paid" && o.mode === "payment" && String(o.currency).toLowerCase() === "usd") {
+        const code = String(o.metadata?.code || o.client_reference_id || "");
+        const res = await applyPayments([{ txn: "stripe:" + (o.payment_intent || o.id), amount: Number(o.amount_total) / 100, note: code,
+          via: "stripe-" + ((o.payment_method_types || [])[0] === "us_bank_account" ? "bank" : "card"), payer: String(o.customer_details?.email || o.customer_email || "") }]);
+        return json({ ok: true, result: res[0] });
+      }
+      if (ev.type === "charge.refunded" || ev.type === "charge.dispute.created") {
+        const pi = String(ev.type === "charge.dispute.created" ? o.payment_intent : o.payment_intent || "");
+        if (pi) await db.prepare("UPDATE payments SET matched='void' WHERE txn=?").bind("stripe:" + pi).run();
+        return json({ ok: true });
+      }
+      return json({ ok: true, ignored: ev.type || null });
+    }
     // Renewal: no card is stored (Venmo/Zelle can't be charged), so "auto-renew" = LOCKqz emails each
     // past payer a one-tap pay link before the next term, and access continues as soon as it's paid.
     // Anyone can turn those emails off (or back on) for their address.
@@ -1385,7 +1464,20 @@ export async function onRequest(context) {
       const memo = await payCode(me.id), [cur, nxt] = curTerms(), sums = { [cur]: 0, [nxt]: 0 };
       for (const x of (await db.prepare(`SELECT term, COALESCE(SUM(amount),0) AS s FROM payments WHERE code=? AND term IN (?,?) AND ${COUNTS} GROUP BY term`).bind(memo, cur, nxt).all()).results) sums[x.term] = Number(x.s);
       const payTerm = payTermFor(sums[cur], PRICE);   // H14: partial payments add up per term
-      return json({ ...r, price: PRICE, venmo: (env.VENMO_HANDLE || "").replace(/^@/, "") || null, zelle: env.ZELLE_TO || null, invoice: env.INVOICE_EMAIL || env.ADMIN_EMAIL || null, memo, all_active: !!me.active, received: sums[payTerm], pay_term: payTerm });
+      const dueC = Math.round(PRICE * 100) - Math.round(sums[payTerm] * 100);
+      return json({ ...r, price: PRICE, venmo: (env.VENMO_HANDLE || "").replace(/^@/, "") || null, zelle: env.ZELLE_TO || null, invoice: env.INVOICE_EMAIL || env.ADMIN_EMAIL || null, po: env.INVOICE_EMAIL || env.ADMIN_EMAIL || null, stripe: me.active ? null : stripeInfo("professor", dueC), memo, all_active: !!me.active, received: sums[payTerm], pay_term: payTerm });
+    }
+    // Professor: Stripe Checkout (card or bank) for what is still due this term.
+    if (p === "/pay/stripe-prof" && request.method === "POST") {
+      if (me.admin || me.active) return json({ error:"already active" }, 409);
+      if (!stripeOn()) return json({ error:"Card payments are not on yet." }, 503);
+      const memo = await payCode(me.id), [cur, nxt] = curTerms(), sums = { [cur]: 0, [nxt]: 0 };
+      for (const x of (await db.prepare(`SELECT term, COALESCE(SUM(amount),0) AS s FROM payments WHERE code=? AND term IN (?,?) AND ${COUNTS} GROUP BY term`).bind(memo, cur, nxt).all()).results) sums[x.term] = Number(x.s);
+      const term = payTermFor(sums[cur], PRICE), dueC = Math.round(PRICE * 100) - Math.round(sums[term] * 100);
+      if (dueC <= 0) return json({ error:"already paid" }, 409);
+      const back = /^https:\/\/([a-z0-9-]+\.)*lockqz\.pages\.dev\/[^\s]*$/i.test(String(body.back||"")) ? String(body.back) : "https://prof.lockqz.pages.dev/";
+      const r = await stripeCheckout({ kind: "professor", method: body.method === "bank" ? "bank" : "card", code: memo, email: me.email, term, dueC, back });
+      return json(r, r.url ? 200 : 502);
     }
     if (p === "/quiz" && request.method === "POST") {
       const { qi, ou } = ids(String(body.url||""));

@@ -31,6 +31,7 @@ run "16/18 Security regressions (cross-course, D1 limits, auth, rate limits)" no
 run "17/18 Student email code (once per computer; real API + fake SMTP)" node --no-warnings test_email_verify.mjs
 run "Per-section billing (\$1,000 per USC section, Venmo code)" node --no-warnings test_sections.mjs
 run "Student fee + automatic Venmo/Zelle matching" node --no-warnings test_pay.mjs
+run "Stripe card + bank (ACH): fee-inclusive prices, signed webhook, refunds void" node --no-warnings test_stripe.mjs
 run "Gmail payment script parser (forged alerts refused)" node test_pay_script.mjs
 run "API audit regressions (query/row budgets, auth, identity)" node --no-warnings test_api_audit.mjs
 run "Round-2 API regressions (verify, FERPA, capacity, submissions, payments, deploy contracts)" node --no-warnings test_round2_api.mjs

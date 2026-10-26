@@ -514,14 +514,19 @@ function renderPay(){ const d=PAY, el=$("pay"); if(!el||!d) return;
     <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b style="font-size:44px">${money(total)}</b><span class="muted">per semester · all your sections</span>${got>0?`<b style="color:var(--warn)">Received ${money(got)} of ${money(total)}</b>`:""}</div>
     ${d.sections.length ? `<ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px">${d.sections.map(s=>`<li style="display:flex;gap:12px;align-items:center;min-height:40px;padding:0 12px;border:1px solid #e3e0d8;border-radius:10px"><b>${esc(s.course)}</b><span class="muted">Section ${esc(s.section)}</span></li>`).join("")}</ul>` : `${!usc?"":!d.term?`<p class="muted" style="margin:0">Enter your first and last name.</p>`:d.name?`<p class="muted" style="margin:0">No sections found for ${esc(d.name)}.</p>`:""}${nameBox}`}
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
+      ${d.stripe ? `<button class="btn prime" onclick="stripePay('card',this)">Card ${money(d.stripe.card)}</button><button class="btn" onclick="stripePay('bank',this)">Bank account ${money(d.stripe.bank)}</button>` : ""}
       ${d.zelle ? `<div style="padding:14px;border:1px solid #e3e0d8;border-radius:10px"><span class="muted">Zelle</span><br><b>${esc(d.zelle)}</b></div>` : ""}
       ${link ? `<a class="btn prime" style="text-align:center;display:flex;align-items:center;justify-content:center" href="${link}" target="_blank" rel="noopener">Venmo ${money(total)}</a>` : ""}
-      ${d.invoice ? `<a class="btn" style="text-align:center;display:flex;align-items:center;justify-content:center" href="mailto:${esc(d.invoice)}?subject=${encodeURIComponent("LOCKqz invoice "+d.memo)}&body=${encodeURIComponent("Please send an invoice for LOCKqz, "+termName(d.term)+", "+money(total)+".")}">Bank transfer (invoice)</a>` : ""}
+      ${d.invoice ? `<a class="btn" style="text-align:center;display:flex;align-items:center;justify-content:center" href="mailto:${esc(d.invoice)}?subject=${encodeURIComponent("LOCKqz invoice "+d.memo)}&body=${encodeURIComponent("Please send an invoice for LOCKqz, "+termName(d.term)+", "+money(total)+".")}">Bank transfer (ACH / wire)</a>` : ""}
+      ${d.po ? `<a class="btn" style="text-align:center;display:flex;align-items:center;justify-content:center" href="mailto:${esc(d.po)}?subject=${encodeURIComponent("LOCKqz purchase order "+d.memo)}&body=${encodeURIComponent("PO number:\nBilling contact:\nAmount: "+money(total)+"\nTerm: "+termName(d.term)+"\nMemo: "+d.memo)}">Purchase order (PO)</a>` : ""}
       ${!d.zelle && !link && !d.invoice ? `<p style="margin:0">Pay ${money(total)} to the LOCKqz admin.</p>` : ""}
     </div><p class="muted" style="margin:0">Memo: <b>${esc(note)}</b></p>
     ${lqL("Processing your payment", "This should take no longer than a minute")}
     ${d.sections.length && usc ? `<details><summary class="muted">Not your sections?</summary>${nameBox}</details>` : ""}
   </section>`; }
+async function stripePay(method,btn){ btn.disabled=true; const t=btn.textContent; btn.textContent="…";
+  const d = await post("/pay/stripe-prof",{method, back: location.origin + location.pathname});
+  if(d && d.url){ location.href=d.url; return; } btn.disabled=false; btn.textContent=t; alert((d&&d.error)||"Try again."); }
 async function secAdmin(email){ const el=$("secpanel"); el.innerHTML=lqL("Loading sections", "This takes about 2 seconds", {small:true});
   const d = await get("/teacher-sections?email="+encodeURIComponent(email)); if(d.error){ el.innerHTML=esc(d.error); return; }
   el.innerHTML = `<div class="card" style="margin-top:12px;display:flex;flex-direction:column;gap:10px"><b>${esc(d.email)} · ${esc(d.name||"no name")} · ${termName(d.term)} · Venmo code ${esc(d.memo)}</b>
