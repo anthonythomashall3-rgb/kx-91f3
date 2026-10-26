@@ -189,7 +189,7 @@ async function go(){
   $("lerr").innerHTML = lqL(signup ? "Creating your account" : "Signing you in", "This takes about 2 seconds", {small:true});
   const d = await post(signup?"/signup":"/login",{email:$("email").value,password:$("pw").value,name:$("name").value,invite:INVITE});
   $("lerr").textContent = "";
-  if(d.error){ $("lerr").textContent = !signup && d._status===401 ? "Incorrect email or password." : d.error; return; }
+  if(d.error){ $("lerr").textContent = !signup && d._status===401 ? "Incorrect password — try again." : d.error; return; }
   token=d.token; localStorage.setItem("lockqz_token",token);
   if(INVITE){ INVITE=""; history.replaceState(null,"",location.pathname); }
   boot();

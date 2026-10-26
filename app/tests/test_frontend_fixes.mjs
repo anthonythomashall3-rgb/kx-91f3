@@ -365,7 +365,7 @@ for (let i = 0; i < 5; i++) await w.api("/login", { email: "prof@usc.edu", passw
 d = dashTab(w); d.el("email").value = "prof@usc.edu"; d.el("pw").value = "profpass1"; await d.run("go()"); await w.idle();
 check("17 lockout text shown", /too many attempts/.test(d.el("lerr").textContent), d.el("lerr").textContent);
 d = dashTab(w); d.el("email").value = "admin@usc.edu"; d.el("pw").value = "nope-nope"; await d.run("go()"); await w.idle();
-check("17 wrong password still says 'Incorrect email or password.'", d.el("lerr").textContent === "Incorrect email or password.", d.el("lerr").textContent);
+check("17 wrong password says 'Incorrect password \u2014 try again.'", d.el("lerr").textContent === "Incorrect password \u2014 try again.", d.el("lerr").textContent);
 
 console.log("low: Activate needs a date; a big class gets Copy emails");
 w = await world(); d = dashTab(w, { token: w.ADMIN, hash: "#admin" }); await w.idle();
