@@ -511,6 +511,38 @@ export async function onRequest(context) {
   const stuZelle = () => String(env.ZELLE_BUSINESS_TO || env.ZELLE_TO || "") || null;
   const stuVenmo = () => env.STUDENT_VENMO === "1" ? ((env.VENMO_HANDLE || "").replace(/^@/, "") || null) : null;
   const stuBank = () => String(env.INVOICE_EMAIL || env.ADMIN_EMAIL || "") || null;
+  // ---- income tax on top (Anthony, 26 Oct 2026). From TAX_FROM on, every price = base / (1 - TAX_RATE), so
+  // LOCKqz keeps the base after setting aside income tax; the payer sees "Income tax (25%)" as its own line.
+  // Bases: Zelle and bank transfer = the fee ($180 student, $5,000 professor); Venmo and PO =
+  // STUDENT_OTHER_PRICE ($200) / PROF_OTHER_PRICE; card = STUDENT_CARD_PRICE / PROF_CARD_PRICE.
+  // A payment counts by how it came: credit = amount x fee / that way's total (a $240 Zelle = $180 of a
+  // student's fee; a $266.67 Venmo = $180). Payments received before TAX_FROM count 1:1, as before.
+  const TAX_FROM = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?Z)?$/.test(String(env.TAX_FROM || "")) ? String(env.TAX_FROM) : "";
+  const taxOn = () => !!TAX_FROM;
+  const TAX_RATE = taxOn() ? Math.min(0.6, Math.max(0, Number(env.TAX_RATE) || 0)) : 0;
+  const grossUp = x => Math.round(Number(x) * 100 / (1 - TAX_RATE)) / 100;
+  const WAYS = ["zelle", "bank", "venmo", "card", "po"];
+  const wayOf = via => { via = String(via || "").toLowerCase(); return via === "venmo" ? "venmo" : via === "stripe-card" ? "card" : via === "stripe-bank" ? "sbank" : via === "po" ? "po" : "zelle"; };
+  const isStu = code => /^LQS[A-Z0-9]{5}$/.test(String(code || ""));
+  const baseOf = (kind, way) => {
+    const n = (v, d) => Number(v) > 0 ? Number(v) : d, other = way === "venmo" || way === "po";
+    if (kind === "student") return way === "card" ? n(env.STUDENT_CARD_PRICE, 200) : way === "sbank" ? n(env.STUDENT_BANK_PRICE, 181.45) : other && taxOn() ? n(env.STUDENT_OTHER_PRICE, 200) : STUDENT_FEE;
+    return way === "card" ? n(env.PROF_CARD_PRICE, 5150) : way === "sbank" ? n(env.PROF_BANK_PRICE, 5005) : other && taxOn() ? n(env.PROF_OTHER_PRICE, PRICE) : PRICE;
+  };
+  const feeOf = kind => kind === "student" ? STUDENT_FEE : PRICE;
+  const totalOf = (kind, way) => grossUp(baseOf(kind, way === "bank" ? "zelle" : way));
+  const factorOf = (kind, way) => taxOn() ? feeOf(kind) / totalOf(kind, way) : 1;
+  const creditOf = (code, via, amount) => Number(amount) * factorOf(isStu(code) ? "student" : "professor", wayOf(via));
+  // The same credit in SQL, for every SUM over payments.
+  const CREDIT = () => { if (!taxOn()) return "amount";
+    const f = k => { const w = way => factorOf(k, way).toFixed(12); return `(CASE lower(COALESCE(via,'')) WHEN 'venmo' THEN ${w("venmo")} WHEN 'stripe-card' THEN ${w("card")} WHEN 'stripe-bank' THEN ${w("sbank")} WHEN 'po' THEN ${w("po")} ELSE ${w("zelle")} END)`; };
+    return `(CASE WHEN COALESCE(received_at,'') < '${TAX_FROM}' THEN amount ELSE amount * (CASE WHEN length(code)=8 AND substr(code,1,3)='LQS' THEN ${f("student")} ELSE ${f("professor")} END) END)`; };
+  const FULL = (sum, fee) => Number(sum) >= fee - 0.005;   // credits are fractions of cents
+  // What each way costs for what is still owed (credit left): { total, base, tax }.
+  const waysFor = (kind, left) => Object.fromEntries(WAYS.map(w => {
+    const total = Math.max(0, Math.ceil(Number(left) / factorOf(kind, w) * 100 - 1e-6) / 100), base = Math.round(total * (1 - TAX_RATE) * 100) / 100;
+    return [w, { total, base, tax: Math.round((total - base) * 100) / 100 }]; }));
+  const taxInfo = () => taxOn() ? { rate: TAX_RATE, label: "Income tax" } : null;
   // ---- Stripe: card + US bank account (ACH). Off until STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET are set.
   // Prices carry Stripe's fee so LOCKqz nets at least the base price: card 2.9% + 30c (student $200
   // nets $193.90; professor $5,150 nets $5,000.05), bank 0.8% capped at $5 (student $181.45 nets $180;
@@ -520,6 +552,7 @@ export async function onRequest(context) {
   // Cents to charge for what is still due (cents): the set price when nothing is paid yet, else the
   // remainder grossed up by Stripe's fee.
   const stripeCents = (kind, method, dueC) => {
+    if (taxOn()) return dueC > 0 ? Math.max(50, Math.ceil(dueC / factorOf(kind, method === "card" ? "card" : "sbank") - 1e-6)) : 0;
     const fullC = Math.round((kind === "student" ? STUDENT_FEE : PRICE) * 100);
     const set = kind === "student" ? (method === "card" ? cts(env.STUDENT_CARD_PRICE, 200) : cts(env.STUDENT_BANK_PRICE, 181.45))
                                    : (method === "card" ? cts(env.PROF_CARD_PRICE, 5150) : cts(env.PROF_BANK_PRICE, 5005));
@@ -577,7 +610,7 @@ export async function onRequest(context) {
   // Which term a new payment counts for, given what this code already paid this term (H7).
   // studentStatus and professor activation also honor a next-term payment for what is left of the current term.
   const nearEnd = () => { const ce = Date.parse(classesEndOf(curTerms()[0]) + "T00:00:00Z"), t = Date.parse(laToday() + "T00:00:00Z"); return ce - t <= 14 * 86400000; };
-  const payTermFor = (paidThisTerm, price) => { const [cur, nxt] = curTerms(); return inGap() || (ahead() && (paidThisTerm >= price || nearEnd())) ? nxt : cur; };
+  const payTermFor = (paidThisTerm, price) => { const [cur, nxt] = curTerms(); return inGap() || (ahead() && (FULL(paidThisTerm, price) || nearEnd())) ? nxt : cur; };
   const PAY_URL = "https://lockqz.pages.dev/pay";
   // The Gmail script's key: PAY_SECRET if set, else derived from the server's own secret (the admin
   // copies it from Admin -> Payments into the script once). Nothing new to configure in Cloudflare.
@@ -602,20 +635,20 @@ export async function onRequest(context) {
   }
   // Voided payments and alerts waiting for the admin's review never count (H12, H9).
   const COUNTS = "COALESCE(matched,'') NOT IN ('void','review')";
-  const paidSum = async (code, term) => Number((await db.prepare(`SELECT COALESCE(SUM(amount),0) AS s FROM payments WHERE code=? AND term=? AND ${COUNTS}`).bind(code, term).first())?.s || 0);
+  const paidSum = async (code, term) => Number((await db.prepare(`SELECT COALESCE(SUM(${CREDIT()}),0) AS s FROM payments WHERE code=? AND term=? AND ${COUNTS}`).bind(code, term).first())?.s || 0);
   // Paid = this term's fee paid, or (in the weeks before the next term / after classes end) the next term's.
   async function studentStatus(email) {
     email = String(email||"").trim().toLowerCase();
     const [cur, nxt] = curTerms();
     if (!email) return { paid: !feeOn(), received: 0, term: cur, code: null };
     const c = await db.prepare("SELECT code FROM pay_codes_students WHERE email=?").bind(email).first();
-    const sums = { [cur]: 0, [nxt]: 0 };
-    if (c) for (const r of (await db.prepare(`SELECT term, COALESCE(SUM(amount),0) AS s FROM payments WHERE code=? AND term IN (?,?) AND ${COUNTS} GROUP BY term`).bind(c.code, cur, nxt).all()).results) sums[r.term] = Number(r.s);
+    const sums = { [cur]: 0, [nxt]: 0 }, money = { [cur]: 0, [nxt]: 0 };
+    if (c) for (const r of (await db.prepare(`SELECT term, COALESCE(SUM(${CREDIT()}),0) AS s, COALESCE(SUM(amount),0) AS m FROM payments WHERE code=? AND term IN (?,?) AND ${COUNTS} GROUP BY term`).bind(c.code, cur, nxt).all()).results) { sums[r.term] = Number(r.s); money[r.term] = Number(r.m); }
     const early = ahead() || inGap();
     // After a term's last day its payment no longer counts (access ends with the term).
-    const paidTerm = (!inGap() && sums[cur] >= STUDENT_FEE) || (early && sums[nxt] >= STUDENT_FEE);
+    const paidTerm = (!inGap() && FULL(sums[cur], STUDENT_FEE)) || (early && FULL(sums[nxt], STUDENT_FEE));
     const term = payTermFor(sums[cur], STUDENT_FEE);
-    return { paid: !feeOn() || paidTerm, received: sums[term], term, code: c ? c.code : null };
+    return { paid: !feeOn() || paidTerm, received: sums[term], money: money[term], term, code: c ? c.code : null };
   }
   async function studentPaid(email) {
     if (!feeOn()) return true;
@@ -636,13 +669,13 @@ export async function onRequest(context) {
     const codes = new Map((await db.prepare("SELECT email, code FROM pay_codes_students WHERE email IN (SELECT value FROM json_each(?))").bind(j).all()).results.map(r => [r.code, r.email]));
     if (!codes.size) return ok;
     const sums = {};
-    for (const r of (await db.prepare(`SELECT code, term, COALESCE(SUM(amount),0) AS s FROM payments WHERE code IN (SELECT value FROM json_each(?)) AND term IN (?,?) AND ${COUNTS} GROUP BY code, term`).bind(JSON.stringify([...codes.keys()]), cur, nxt).all()).results) sums[r.code + "|" + r.term] = Number(r.s);
-    for (const [c, e] of codes) if ((!inGap() && (sums[c + "|" + cur] || 0) >= STUDENT_FEE) || (early && (sums[c + "|" + nxt] || 0) >= STUDENT_FEE)) ok.add(e);
+    for (const r of (await db.prepare(`SELECT code, term, COALESCE(SUM(${CREDIT()}),0) AS s FROM payments WHERE code IN (SELECT value FROM json_each(?)) AND term IN (?,?) AND ${COUNTS} GROUP BY code, term`).bind(JSON.stringify([...codes.keys()]), cur, nxt).all()).results) sums[r.code + "|" + r.term] = Number(r.s);
+    for (const [c, e] of codes) if ((!inGap() && FULL(sums[c + "|" + cur] || 0, STUDENT_FEE)) || (early && FULL(sums[c + "|" + nxt] || 0, STUDENT_FEE))) ok.add(e);
     return ok;
   }
   // Unique Zelle amount (OFF unless ZELLE_UNIQUE="1"; Anthony chose one price + memo): each unpaid student
   // gets $fee + $0.01..$9.99 for the term, so a Zelle with no memo still says who paid. Freed once paid.
-  const zelleUnique = () => String(env.ZELLE_UNIQUE || "0") === "1";
+  const zelleUnique = () => String(env.ZELLE_UNIQUE || "0") === "1" && !taxOn();
   const slotAmt = c => Math.round(STUDENT_FEE * 100 + c) / 100;
   async function zelleAmount(code, term) {
     const has = await db.prepare("SELECT cents FROM pay_slots WHERE term=? AND code=?").bind(term, code).first();
@@ -662,8 +695,10 @@ export async function onRequest(context) {
     if (code && typeof code === "object") return code;   // { limited: true }
     let zelle_amount = null;
     if (slot && zelleUnique() && feeOn() && stuZelle() && email) { const st = await studentStatus(email); if (!st.paid && !(st.received > 0)) zelle_amount = await zelleAmount(code, st.term); }
-    const due = stripeOn() && email ? Math.round(STUDENT_FEE * 100) - Math.round((await studentStatus(email)).received * 100) : Math.round(STUDENT_FEE * 100);
+    const got = email ? (await studentStatus(email)).received : 0;
+    const due = Math.round(STUDENT_FEE * 100) - Math.round(got * 100);
     return { amount: STUDENT_FEE, code, venmo: stuVenmo(), zelle: stuZelle(), bank: stuBank(), po: stuBank(), zelle_amount, stripe: stripeInfo("student", due),
+             tax: taxInfo(), ways: taxOn() ? waysFor("student", Math.max(0, STUDENT_FEE - got)) : null, bank_auto: true,
              url: PAY_URL + (email ? "?email=" + encodeURIComponent(String(email).toLowerCase()) : "") };
   }
   // Memo codes typed by people: "lqs-ab12c", "LQS AB12C", "LQ AB12C". Student (LQS+5) first, then
@@ -711,12 +746,12 @@ export async function onRequest(context) {
     }
     // What each code already paid this term and next (for the term each new payment counts for).
     const [cur, nxt] = curTerms(), codes = [...new Set(fresh.map(x => x.code).filter(Boolean))], sums = new Map();
-    for (const part of chunk(codes, 97)) (await db.prepare(`SELECT code, term, COALESCE(SUM(amount),0) AS s FROM payments WHERE code IN (${placeholders(part.length)}) AND term IN (?,?) AND ${COUNTS} GROUP BY code, term`).bind(...part, cur, nxt).all()).results.forEach(r => sums.set(r.code + "|" + r.term, Number(r.s)));
+    for (const part of chunk(codes, 97)) (await db.prepare(`SELECT code, term, COALESCE(SUM(${CREDIT()}),0) AS s FROM payments WHERE code IN (${placeholders(part.length)}) AND term IN (?,?) AND ${COUNTS} GROUP BY code, term`).bind(...part, cur, nxt).all()).results.forEach(r => sums.set(r.code + "|" + r.term, Number(r.s)));
     const priceOf = c => /^LQS[A-Z0-9]{5}$/.test(c) ? STUDENT_FEE : PRICE;
     const rows = [], t = now();
     for (const x of fresh) {
       x.term = x.code ? payTermFor(sums.get(x.code + "|" + cur) || 0, priceOf(x.code)) : cur;
-      if (x.code && !x.review) sums.set(x.code + "|" + x.term, (sums.get(x.code + "|" + x.term) || 0) + x.amount);
+      if (x.code && !x.review) sums.set(x.code + "|" + x.term, (sums.get(x.code + "|" + x.term) || 0) + creditOf(x.code, x.via, x.amount));
       rows.push([x.txn, x.code, x.amount, x.via, x.payer, x.why ? `${x.note} [review: ${x.why}]`.slice(0, 400) : x.note, x.term, t, x.review ? "review" : null]);
     }
     await runBatches(db, multiInsert(db, "INSERT OR IGNORE INTO payments (txn,code,amount,via,payer,note,term,received_at,matched)", 9, rows));
@@ -730,10 +765,10 @@ export async function onRequest(context) {
       const total = x.code ? (sums.get(x.code + "|" + x.term) || 0) : 0;
       let res = { matched: null };
       if (x.review) res = { matched: null, review: true };
-      else if (x.code && stuEmail.has(x.code)) { res = { matched: "student", email: stuEmail.get(x.code), paid: total >= STUDENT_FEE, total, term: x.term };
+      else if (x.code && stuEmail.has(x.code)) { res = { matched: "student", email: stuEmail.get(x.code), paid: FULL(total, STUDENT_FEE), total, term: x.term };
         if (res.paid) acts.push(db.prepare("DELETE FROM pay_slots WHERE code=?").bind(x.code)); }
       else if (x.code && profId.has(x.code)) {
-        const done = total >= PRICE; res = { matched: "professor", paid: done, total, term: x.term };
+        const done = FULL(total, PRICE); res = { matched: "professor", paid: done, total, term: x.term };
         if (done) acts.push(db.prepare("UPDATE teachers SET active_until=? WHERE id=? AND (active_until IS NULL OR active_until<?)").bind(termEndOf(x.term), profId.get(x.code), termEndOf(x.term)));
       }
       out[x.i] = { ok: true, ...res };
@@ -755,9 +790,9 @@ export async function onRequest(context) {
         AND (t.active_until IS NULL OR t.active_until < ?) LIMIT 20`).bind(prev, cur, cur, prev, cur, termEndOf(cur)).all()).results;
     let sent = 0;
     for (const r of due) {
-      const email = String(r.email).toLowerCase(), amt = r.kind === "student" ? STUDENT_FEE : PRICE;
+      const email = String(r.email).toLowerCase(), amt = totalOf(r.kind === "student" ? "student" : "professor", "zelle");
       const link = r.kind === "student" ? `${PAY_URL}?email=${encodeURIComponent(email)}` : "https://prof.lockqz.pages.dev/";
-      const text = `LOCKqz renews for the new semester.\n\n${r.kind === "student" ? `Pay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nZelle ${stuZelle()||""} (paste ${r.code} in the Zelle memo/note)${stripeOn() ? "  ·  Card" : ""}${stuVenmo() ? `  ·  Venmo @${stuVenmo()}` : ""}  ·  Bank transfer: email ${stuBank()||""}` : `Pay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nVenmo @${(env.VENMO_HANDLE||"").replace(/^@/,"")}  ·  Zelle ${env.ZELLE_TO||""}`}\n\nAccess turns on as soon as the payment arrives and lasts until ${termEndOf(cur)}.\n\nStop these emails: ${PAY_URL}?email=${encodeURIComponent(email)}&renew=off`;
+      const text = `LOCKqz renews for the new semester.\n\n${r.kind === "student" ? `Pay $${amt.toLocaleString("en-US")}${taxOn() ? " (includes income tax)" : ""} with memo ${r.code}:\n${link}\n\nZelle ${stuZelle()||""} (paste ${r.code} in the Zelle memo/note)${stripeOn() ? "  ·  Card" : ""}${stuVenmo() ? `  ·  Venmo @${stuVenmo()}` : ""}  ·  Bank transfer: email ${stuBank()||""}` : `Pay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nVenmo @${(env.VENMO_HANDLE||"").replace(/^@/,"")}  ·  Zelle ${env.ZELLE_TO||""}`}\n\nAccess turns on as soon as the payment arrives and lasts until ${termEndOf(cur)}.\n\nStop these emails: ${PAY_URL}?email=${encodeURIComponent(email)}&renew=off`;
       try {
         if (typeof env.MAIL_SINK === "function") await env.MAIL_SINK({ to: email, subject: "Renew LOCKqz", text });
         else await smtpSend(async () => (await import("cloudflare:sockets")).connect({ hostname: env.MAIL_HOST || "smtp.gmail.com", port: Number(env.MAIL_PORT || 465) }, { secureTransport: "on", allowHalfOpen: false }),
@@ -776,11 +811,11 @@ export async function onRequest(context) {
       const st = await db.prepare("SELECT email FROM pay_codes_students WHERE code=?").bind(code).first();
       if (!st) return { matched:null };
       const sum = await paidSum(code, term);
-      return { matched:"student", email: st.email, paid: sum >= STUDENT_FEE, total: sum };
+      return { matched:"student", email: st.email, paid: FULL(sum, STUDENT_FEE), total: sum };
     }
     const pc = await db.prepare("SELECT teacher_id FROM pay_codes WHERE code=?").bind(code).first();
     if (!pc) return { matched:null };
-    const sum = await paidSum(code, term), done = sum >= PRICE;
+    const sum = await paidSum(code, term), done = FULL(sum, PRICE);
     if (done) await db.prepare("UPDATE teachers SET active_until=? WHERE id=? AND (active_until IS NULL OR active_until<?)").bind(termEndOf(term), pc.teacher_id, termEndOf(term)).run();
     return { matched:"professor", paid: done, total: sum };
   }
@@ -792,7 +827,7 @@ export async function onRequest(context) {
     if (!pc) return;
     const [cur, nxt] = curTerms();
     if (![termEndOf(cur), termEndOf(nxt)].includes(pc.until)) return;
-    const want = (await paidSum(code, nxt)) >= PRICE ? termEndOf(nxt) : (await paidSum(code, cur)) >= PRICE ? termEndOf(cur) : null;
+    const want = FULL(await paidSum(code, nxt), PRICE) ? termEndOf(nxt) : FULL(await paidSum(code, cur), PRICE) ? termEndOf(cur) : null;
     if (want !== pc.until) await db.prepare("UPDATE teachers SET active_until=? WHERE id=?").bind(want, pc.id).run();
   }
   // Must be listed as Instructor on a TRUSTED roster for the course, by BOTH email and the caller's own
@@ -1355,7 +1390,7 @@ export async function onRequest(context) {
       if (info.limited) return json({ error:"too many requests — try again in an hour" }, 429);
       const stt = await studentStatus(email);
       const ro = await db.prepare("SELECT 1 FROM renew_optout WHERE email=?").bind(email).first().catch(() => null);
-      return json({ ...info, paid: await studentPaid(email), required: feeOn(), term: stt.term, until: termEndOf(stt.term), received: stt.received, token: await statusToken(email), renew: !ro });
+      return json({ ...info, paid: await studentPaid(email), required: feeOn(), term: stt.term, until: termEndOf(stt.term), received: stt.received, money: stt.money, token: await statusToken(email), renew: !ro });
     }
     if (p === "/pay/status") {
       const email = String(url.searchParams.get("email")||"").trim().toLowerCase();
@@ -1363,7 +1398,7 @@ export async function onRequest(context) {
       const stt = await studentStatus(email);
       const tok = String(url.searchParams.get("token")||""), code = String(url.searchParams.get("code")||"").trim().toUpperCase();
       if (!((tok && sameHex(tok, await statusToken(email))) || (code && stt.code && code === stt.code))) return json({ error:"code or token required (from /pay/start)" }, 403);
-      return json({ paid: await studentPaid(email), required: feeOn(), received: stt.received, amount: STUDENT_FEE, term: stt.term });
+      return json({ paid: await studentPaid(email), required: feeOn(), received: stt.received, money: stt.money, amount: STUDENT_FEE, term: stt.term, ways: taxOn() ? waysFor("student", Math.max(0, STUDENT_FEE - stt.received)) : null });
     }
     // Student: start a Stripe Checkout (card or bank) for what is still due this term.
     if (p === "/pay/stripe" && request.method === "POST") {
@@ -1407,6 +1442,49 @@ export async function onRequest(context) {
     // Renewal: no card is stored (Venmo/Zelle can't be charged), so "auto-renew" = LOCKqz emails each
     // past payer a one-tap pay link before the next term, and access continues as soon as it's paid.
     // Anyone can turn those emails off (or back on) for their address.
+    // Bank transfer (ACH / wire): emails the payer LOCKqz's bank details, the amount (income tax included)
+    // and their memo at once. Called by the pay page, the professor dashboard, and the Gmail script (which
+    // answers anyone who emails LOCKqz about a bank transfer). BANK_DETAILS = a Pages secret (several lines:
+    // bank, account holder, routing, account number); until it is set, the payer is told the details follow
+    // and the admin is emailed to send them.
+    if (p === "/pay/bank" && request.method === "POST") {
+      const sec = await paySecret(), script = sec.length >= 16 && sameHex(String(request.headers.get("X-LOCKqz-Pay") || ""), sec);
+      const email = String(body.email || "").trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: "enter your school email" }, 400);
+      const hr = new Date(Date.now() - 3600000).toISOString(), ten = new Date(Date.now() - 600000).toISOString();
+      if (!script && Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_bank' AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 10)
+        return json({ error: "too many requests — try again in an hour" }, 429);
+      if (await db.prepare("SELECT 1 FROM events WHERE event='pay_bank' AND student=? AND ts>?").bind(email, ten).first())
+        return json({ ok: true, sent: true, to: email, again: true });   // one email per address per 10 minutes
+      const prof = await db.prepare("SELECT id FROM teachers WHERE lower(email)=?").bind(email).first();
+      let kind = "student", code, left;
+      if (prof) {
+        kind = "professor"; code = await payCode(prof.id);
+        const [cur, nxt] = curTerms(), sums = { [cur]: 0, [nxt]: 0 };
+        for (const x of (await db.prepare(`SELECT term, COALESCE(SUM(${CREDIT()}),0) AS s FROM payments WHERE code=? AND term IN (?,?) AND ${COUNTS} GROUP BY term`).bind(code, cur, nxt).all()).results) sums[x.term] = Number(x.s);
+        left = PRICE - sums[payTermFor(sums[cur], PRICE)];
+      } else {
+        code = await studentCode(email, script ? null : clientIp);
+        if (!code || typeof code === "object") return json({ error: "too many requests — try again in an hour" }, 429);
+        left = (await studentPaid(email)) ? 0 : STUDENT_FEE - (await studentStatus(email)).received;
+      }
+      await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + (script ? "gmail" : clientIp), email, null, "pay_bank", kind, now()).run();
+      if (!(left > 0.005)) return json({ ok: true, paid: true });
+      const w = taxOn() ? waysFor(kind, left).bank : { total: Math.round(left * 100) / 100, base: Math.round(left * 100) / 100, tax: 0 };
+      const m = n => "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const details = String(env.BANK_DETAILS || "").trim();
+      const text = `LOCKqz — bank transfer (ACH or wire)\n\n`
+        + `Amount: ${m(w.total)}` + (w.tax > 0 ? `  (LOCKqz ${m(w.base)} + income tax ${Math.round(TAX_RATE * 100)}% ${m(w.tax)})` : "") + `\n`
+        + `Memo / reference: ${code}\nPut ${code} in the memo, or LOCKqz can't tell the payment is yours.\n\n`
+        + (details ? details + "\n\n" : "LOCKqz's bank account details follow in a separate email.\n\n")
+        + `Access turns on by itself within a minute of the money arriving (ACH usually 1–3 business days, wire same day).\n`
+        + (stuZelle() ? `Faster: Zelle ${m(w.total)} to ${stuZelle()} with memo ${code}. It arrives in minutes.\n` : "")
+        + `\nQuestions: reply to this email.`;
+      try { await sendMail(env, email, `LOCKqz bank transfer details · ${code}`, text); }
+      catch (e) { return json({ error: "Could not send the email. Try again in a minute." }, 502); }
+      if (!details && env.ADMIN_EMAIL) try { await sendMail(env, String(env.ADMIN_EMAIL), `Send bank details: ${email} (${code})`, `${email} asked to pay ${m(w.total)} by bank transfer (memo ${code}).\nReply to them with LOCKqz's bank details.\nTo answer automatically: set the Pages secret BANK_DETAILS.`); } catch {}
+      return json({ ok: true, sent: true, to: email, amount: w.total });
+    }
     if (p === "/pay/renew" && request.method === "POST") {
       const email = String(body.email||"").trim().toLowerCase();
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"bad email" }, 400);
@@ -1508,18 +1586,18 @@ export async function onRequest(context) {
       const nm = url.searchParams.get("name");
       if (nm && splitName(nm)) await db.prepare("UPDATE teachers SET name=? WHERE id=?").bind(String(nm).trim().slice(0,80), me.id).run();
       const r = await sectionsFor(me.id, nm || me.name);
-      const memo = await payCode(me.id), [cur, nxt] = curTerms(), sums = { [cur]: 0, [nxt]: 0 };
-      for (const x of (await db.prepare(`SELECT term, COALESCE(SUM(amount),0) AS s FROM payments WHERE code=? AND term IN (?,?) AND ${COUNTS} GROUP BY term`).bind(memo, cur, nxt).all()).results) sums[x.term] = Number(x.s);
+      const memo = await payCode(me.id), [cur, nxt] = curTerms(), sums = { [cur]: 0, [nxt]: 0 }, paidMoney = { [cur]: 0, [nxt]: 0 };
+      for (const x of (await db.prepare(`SELECT term, COALESCE(SUM(${CREDIT()}),0) AS s, COALESCE(SUM(amount),0) AS m FROM payments WHERE code=? AND term IN (?,?) AND ${COUNTS} GROUP BY term`).bind(memo, cur, nxt).all()).results) { sums[x.term] = Number(x.s); paidMoney[x.term] = Number(x.m); }
       const payTerm = payTermFor(sums[cur], PRICE);   // H14: partial payments add up per term
       const dueC = Math.round(PRICE * 100) - Math.round(sums[payTerm] * 100);
-      return json({ ...r, price: PRICE, venmo: (env.VENMO_HANDLE || "").replace(/^@/, "") || null, zelle: env.ZELLE_TO || null, invoice: env.INVOICE_EMAIL || env.ADMIN_EMAIL || null, po: env.INVOICE_EMAIL || env.ADMIN_EMAIL || null, stripe: me.active ? null : stripeInfo("professor", dueC), memo, all_active: !!me.active, received: sums[payTerm], pay_term: payTerm });
+      return json({ ...r, price: PRICE, venmo: (env.VENMO_HANDLE || "").replace(/^@/, "") || null, zelle: env.ZELLE_TO || null, invoice: env.INVOICE_EMAIL || env.ADMIN_EMAIL || null, po: env.INVOICE_EMAIL || env.ADMIN_EMAIL || null, stripe: me.active ? null : stripeInfo("professor", dueC), memo, all_active: !!me.active, received: sums[payTerm], pay_term: payTerm, money: paidMoney[payTerm], tax: taxInfo(), ways: taxOn() ? waysFor("professor", Math.max(0, PRICE - sums[payTerm])) : null });
     }
     // Professor: Stripe Checkout (card or bank) for what is still due this term.
     if (p === "/pay/stripe-prof" && request.method === "POST") {
       if (me.admin || me.active) return json({ error:"already active" }, 409);
       if (!stripeOn()) return json({ error:"Card payments are not on yet." }, 503);
       const memo = await payCode(me.id), [cur, nxt] = curTerms(), sums = { [cur]: 0, [nxt]: 0 };
-      for (const x of (await db.prepare(`SELECT term, COALESCE(SUM(amount),0) AS s FROM payments WHERE code=? AND term IN (?,?) AND ${COUNTS} GROUP BY term`).bind(memo, cur, nxt).all()).results) sums[x.term] = Number(x.s);
+      for (const x of (await db.prepare(`SELECT term, COALESCE(SUM(${CREDIT()}),0) AS s FROM payments WHERE code=? AND term IN (?,?) AND ${COUNTS} GROUP BY term`).bind(memo, cur, nxt).all()).results) sums[x.term] = Number(x.s);
       const term = payTermFor(sums[cur], PRICE), dueC = Math.round(PRICE * 100) - Math.round(sums[term] * 100);
       if (dueC <= 0) return json({ error:"already paid" }, 409);
       const back = /^https:\/\/([a-z0-9-]+\.)*lockqz\.pages\.dev\/[^\s]*$/i.test(String(body.back||"")) ? String(body.back) : "https://prof.lockqz.pages.dev/";

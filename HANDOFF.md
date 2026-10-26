@@ -5,6 +5,33 @@ rules: pull --rebase, claim in SESSIONS.md, `bash app/tests/run_all.sh` before e
 commit as `Claude <noreply@anthropic.com>`). The claude.ai Project "LOCKqz" has the same handoff
 (`claude/LOCKqz-HANDOFF.md`) plus topic docs (`claude/LOCKqz-payments.md` and others).
 
+## 26 Oct 2026 06:30 PT — income tax on top, Venmo, bank auto-email, professor tour (session 01359vfr)
+- **Income tax 25% on top of every price** (Anthony's call; wording "Income tax (25%)", NOT "sales tax"):
+  price = base ÷ 0.75 so Anthony keeps the base after setting aside income tax. Vars: TAX_RATE="0.25",
+  TAX_FROM="2026-10-26T13:00:00Z" (empty = off). Payments before TAX_FROM count 1:1.
+  | Student | base | total |  | Professor | base | total |
+  |---|---|---|---|---|---|---|
+  | Zelle / bank transfer | $180 | $240 | | Zelle / bank / Venmo / PO | $5,000 | $6,666.67 |
+  | Venmo / card / PO | $200 | $266.67 | | Card | $5,150 | $6,866.67 |
+  A payment counts by how it came: credit = amount × fee ÷ that way's total (SQL `CREDIT()` in [[route]].js).
+  Pay page + dashboard: Zelle first; each way shows its base; tapping one opens its steps, the big price jumps
+  to the total and a "LOCKqz $180 / Income tax (25%) + $60 / Total $240" box shows.
+- **Venmo on for students** (STUDENT_VENMO="1"). Note: personal Venmo's terms forbid business use; a Venmo
+  business profile is the safe version.
+- **Bank transfer is automatic now:** "Email me the bank details" (pay page + dashboard) → POST /api/pay/bank →
+  LOCKqz emails the payer the bank details, amount with tax, and memo (once per 10 min per address). The Gmail
+  script also answers any email mentioning "lockqz" + bank transfer/ACH/wire by calling /pay/bank for the
+  sender. Bank deposits with a LQ memo are now matched automatically (via "bank"), no admin review.
+  **Needs Pages secret BANK_DETAILS** (bank, account holder, routing, account number); until then the payer is
+  told details follow and the admin (ADMIN_EMAIL) is emailed to send them. The new Gmail script must be pasted
+  into script.google.com (replace the old code) for the email answers + bank auto-match.
+- **Professor tour:** first visit to the dashboard home → spotlight + speech bubbles + arrows over status,
+  switch, Sync now, class, tiles, install reminder, Watch live, menu (connect page gets a setup version).
+  Once per professor per browser (localStorage); "Take the tour" in the name menu re-runs it.
+- **CA sales tax:** SB 122 makes SaaS taxable in California from 1 Jan 2027. Anthony needs a (free) CDTFA
+  seller's permit and a real "Sales tax" line for Spring 2027 payments — NOT done yet.
+- Tests: test_tax.mjs (31). Known pre-existing local fail: test_daemon_reporting "no signed developer lock".
+
 ## What LOCKqz is
 Blocks ALL AI on a student's Mac/PC only while a Brightspace (USC) quiz runs, then restores it. One-click
 install from https://lockqz.pages.dev. Professors: https://prof.lockqz.pages.dev (invite-only).

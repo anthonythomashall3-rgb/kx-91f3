@@ -42,7 +42,7 @@ check("memo saying $180 on a $1 payment counts as $1", p && p.amount === 1, JSON
 p = parse(msg("dkim=pass header.i=@alerts.bankofamerica.com", "Zelle payment received", "Memo: LQS4M8TX paid $180\nAmount: $1.00"));
 check("memo before the amount: still the real $1", p && p.amount === 1, JSON.stringify(p));
 p = parse(msg("dkim=pass header.i=@alerts.bankofamerica.com", "You received a deposit", "ACH deposit $180.00 from JOHN DOE\nLQS4M8TX"));
-check("bank transfer with memo -> admin review (not auto-counted)", p && p.needs_review === true && /bank transfer/.test(p.review_reason) && p.amount === 180, JSON.stringify(p));
+check("bank transfer with memo -> counted automatically (via bank)", p && !p.needs_review && p.via === "bank" && p.note === "LQS4M8TX" && p.amount === 180, JSON.stringify(p));
 p = parse(msg("dkim=pass header.i=@alerts.bankofamerica.com", "You received a deposit", "Payroll deposit $2,000.00"));
 check("other deposits ignored", p === null, JSON.stringify(p));
 console.log("H9 parsing: codes typed with spaces/dashes/lowercase, amounts without cents");

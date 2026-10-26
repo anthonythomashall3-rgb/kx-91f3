@@ -12,6 +12,10 @@
  *   ZELLEPAY_OK   = 1 only if your Zelle alerts really come from zellepay.com (else they wait for review)
  * Then run `setup` once and allow access.
  *
+ * It also answers bank-transfer emails: anyone who emails this mailbox about paying by bank transfer / ACH /
+ * wire gets LOCKqz's bank details, their amount (income tax included) and their memo within a minute
+ * (LOCKqz sends that email; set the BANK_DETAILS secret in Cloudflare).
+ *
  * Gmail quota: one search per run over only new mail (after the last run), already-sent alerts are
  * labelled and skipped, so a quiet mailbox costs one cheap search a minute.
  */
@@ -32,6 +36,10 @@ const SENDERS = {
 // Signed, but not known to be a RECEIVING alert for this account: posted for the admin's review only.
 const REVIEW_SENDERS = { "zellepay.com": "zelle" };
 const WORDS = '("paid you" OR "sent you" OR "received" OR "deposited" OR "deposit")';
+const ASKED = "LOCKqz/bank-answered";
+// Emails about LOCKqz asking how to pay by bank transfer (not from banks / payment services, not from this
+// mailbox). "lockqz" must appear, so a personal Gmail's other mail is never answered.
+const ASK_QUERY = 'lockqz ("bank transfer" OR "ACH" OR "wire transfer" OR "wire" OR "bank details" OR "routing number" OR "account number")';
 
 function setup() {
   GmailApp.getUserLabelByName(DONE) || GmailApp.createLabel(DONE);
@@ -80,11 +88,29 @@ function run() {
   }
   threads.forEach(th => th.addLabel(label));
   props.setProperty("LAST_RUN", String(started));
+  try { answerBankAsks_(secret, own); } catch (e) { Logger.log("bank answers: " + e); }
   // About once an hour: let LOCKqz send any due renewal emails (it does nothing outside renewal time).
   if (started - Number(props.getProperty("LAST_TICK") || 0) > 55 * 60) {
     props.setProperty("LAST_TICK", String(started));
     UrlFetchApp.fetch(API.replace("/notify", "/tick"), { method: "post", contentType: "application/json", muteHttpExceptions: true, headers: { "X-LOCKqz-Pay": secret }, payload: "{}" });
   }
+}
+
+// Someone emailed LOCKqz asking to pay by bank transfer: LOCKqz emails them the details (once per thread).
+function answerBankAsks_(secret, owners) {
+  const label = GmailApp.getUserLabelByName(ASKED) || GmailApp.createLabel(ASKED);
+  const notFrom = Object.keys(SENDERS).concat(Object.keys(REVIEW_SENDERS), ["zelle.com", "venmo.com", "stripe.com", "paypal.com"]).map(d => "-from:" + d).join(" ");
+  const threads = GmailApp.search("in:inbox newer_than:2d -label:" + ASKED.replace(/\//g, "-") + " " + notFrom + " " + ASK_QUERY, 0, 20);
+  threads.forEach(th => {
+    const m = th.getMessages()[0];
+    const from = ((m.getFrom() || "").match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/) || [""])[0].toLowerCase();
+    if (from && owners.indexOf(from) < 0 && !/no-?reply|mailer-daemon|notifications?@/.test(from)) {
+      const r = UrlFetchApp.fetch(API.replace("/notify", "/bank"), { method: "post", contentType: "application/json", muteHttpExceptions: true,
+        headers: { "X-LOCKqz-Pay": secret }, payload: JSON.stringify({ email: from }) });
+      if (r.getResponseCode() >= 500) return;            // try again next minute
+    }
+    th.addLabel(label);
+  });
 }
 
 // One header (with folded continuation lines), or "".
@@ -107,7 +133,7 @@ function parse(m, opts) {
   const pick = list => Object.keys(list).find(d => dom === d || dom.endsWith("." + d));
   const known = pick(SENDERS), revDom = known ? null : pick(REVIEW_SENDERS);
   if (!known && !revDom) return null;
-  const via = known ? SENDERS[known] : REVIEW_SENDERS[revDom];
+  let via = known ? SENDERS[known] : REVIEW_SENDERS[revDom];
   const subject = m.getSubject() || "", body = m.getPlainBody() || "";
   if (/you paid|you sent|request|charged|refund/i.test(subject)) return null;       // money out, requests, refunds
   // Transfers to/from the bank and deposit notices are not payments to LOCKqz.
@@ -116,7 +142,7 @@ function parse(m, opts) {
   const bankIn = /\btransfer(?:red)?\b|deposit|ach\b/i.test(subject) && !/zelle|paid you|sent you/i.test(subject);
   if (bankIn && (/withdraw|cash ?out|to your bank|from your/i.test(subject) || !/(?:^|[^A-Za-z0-9])LQ[\s-]?S?[\s-]?[A-Za-z0-9]{5}(?![A-Za-z0-9])/i.test(body))) return null;
   const reasons = [];
-  if (bankIn) reasons.push("bank transfer");
+  if (bankIn) via = "bank";            // ACH / wire the payer sent: matched by its memo like a Zelle
   if (revDom && !opts.zellepayOk) reasons.push("sender " + revDom + " not confirmed as a receiving alert");
   // Replay of someone else's real alert: the signed To: must be THIS mailbox, and "to" must be among
   // the headers the sender's DKIM signature covers.
