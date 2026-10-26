@@ -49,6 +49,7 @@
     <a class="box" id="po" href="#" hidden style="text-decoration:none;color:inherit"><span class="muted">Purchase order (PO)</span><b id="poto"></b></a>
     <p class="memo">Memo: <b id="code"></b></p>
     <p class="muted" id="memohint">Put the memo on the payment. It only pays for this email.</p>
+    <p class="muted">All payments are final. No refunds or cancellations.</p>
     <p class="muted" id="got" hidden></p>
     <div id="wait"></div>
     <button class="btn" id="again" type="button" style="background:#fff;border:1px solid #ccc">Check again</button>
@@ -105,7 +106,7 @@ async function start(email){
   if (d.po) { $("poto").textContent = "Email " + d.po; $("po").href = `mailto:${d.po}?subject=${encodeURIComponent("LOCKqz purchase order " + d.code)}&body=${encodeURIComponent("PO number:\nBilling contact:\nAmount: " + amt + "\nMemo: " + d.code + " (" + email + ")")}`; $("po").hidden = false; }
   if (d.stripe) {
     $("card").textContent = "Card " + money(d.stripe.card); $("card").onclick = () => stripe(email, "card"); $("card").hidden = false;
-    $("ach").textContent = "Bank account " + money(d.stripe.bank); $("ach").onclick = () => stripe(email, "bank"); $("ach").hidden = false;
+    $("ach").textContent = "Bank account " + money(d.stripe.bank); $("ach").onclick = () => stripe(email, "bank"); $("ach").hidden = !d.stripe.bank;
     $("or0").hidden = !(d.venmo || d.zelle || d.bank);
   }
   $("achwait").hidden = qs.get("stripe") !== "bank";

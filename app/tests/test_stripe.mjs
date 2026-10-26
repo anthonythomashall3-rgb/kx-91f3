@@ -80,7 +80,7 @@ const sqlite = makeDb(false);
 for (const m of ["migrate_017_sections.sql", "migrate_018_submissions.sql", "migrate_019_student_pay.sql", "migrate_022_renewals.sql", "migrate_027_pay_slots.sql"]) { try { sqlite.exec(readFileSync(join(CF, m), "utf8")); } catch (e) { if (!/duplicate column|already exists/.test(e.message)) throw e; } }
 const base = { DB: d1real(sqlite), TEACHER_KEY: ADMIN, REQUIRE_SIGNED: "1", ZELLE_TO: "(858) 900-4347", INVOICE_EMAIL: "pay@usc.edu", STUDENT_FEE: "180", STUDENT_FEE_FROM: "2000-01-01", PAY_SECRET: SECRET,
   STUDENT_CARD_PRICE: "200", STUDENT_BANK_PRICE: "181.45", PROF_CARD_PRICE: "5150", PROF_BANK_PRICE: "5005" };
-const OFF = base, ON = { ...base, STRIPE_SECRET_KEY: "sk_test_x", STRIPE_WEBHOOK_SECRET: WH };
+const OFF = base, ON = { ...base, STRIPE_SECRET_KEY: "sk_test_x", STRIPE_WEBHOOK_SECRET: WH, STRIPE_BANK: "1" };
 // Stripe API mock: records each Checkout Session request.
 const sessions = []; const realFetch = globalThis.fetch;
 globalThis.fetch = async (u, init) => {
@@ -204,6 +204,41 @@ check("paid student gets no Zelle amount", (await call(ON, "/pay/start", { email
 const ph = readFileSync(join(CF, "public", "pay.html"), "utf8"), lq = readFileSync(join(CF, "public", "lq.js"), "utf8");
 check("pay page shows the exact Zelle amount", /Zelle exactly/.test(ph) && /zelle_amount/.test(ph));
 check("no fun facts in loaders", !/Did you know|FACTS/.test(lq));
+
+console.log("S12 cancelled payments = no access (professors too)");
+r = await hook({ type: "charge.refunded", data: { object: { payment_intent: "pi_prof" } } });
+check("professor refund voided", r.data?.voided === true, JSON.stringify(r.data));
+check("professor no longer active", (await getc(ON, "/me", { teacher: PT })).data?.active === false);
+const FX = (await call(ON, "/pay/start", { email: "fay@usc.edu" })).data.code;
+await hook(done(FX, 18145, "pi_fay", { method: "bank", type: "checkout.session.async_payment_succeeded" }));
+check("bank payment cleared: paid", await paidNow("fay@usc.edu"));
+r = await hook({ type: "charge.failed", data: { object: { payment_intent: "pi_fay" } } });
+check("bank payment returned/failed later: unpaid", r.data?.voided === true && !(await paidNow("fay@usc.edu")), JSON.stringify(r.data));
+r = await hook({ type: "payment_intent.payment_failed", data: { object: { id: "pi_never" } } });
+check("failure for an unknown payment: nothing happens", r.status === 200 && r.data?.voided === false);
+{ // admin void (Zelle/bank refunded by hand) also turns a professor off
+  r = await call(ON, "/signup", { email: "prof2@usc.edu", password: "profpass1", name: "Ann Lee" });
+  const P2 = r.data.token, M2 = (await getc(ON, "/my-sections", { teacher: P2 })).data.memo;
+  await notify2([{ txn: "zelle:p2", amount: 5000, note: M2, via: "zelle" }]);
+  check("prof2 active after Zelle", (await getc(ON, "/me", { teacher: P2 })).data?.active === true);
+  const ADM = sqlite.prepare("SELECT token FROM teachers WHERE email='admin@usc.edu'").get().token;
+  r = await call(ON, "/pay-void", { txn: "zelle:p2" }, { teacher: ADM });
+  check("admin void -> prof2 inactive", r.data?.ok === true && (await getc(ON, "/me", { teacher: P2 })).data?.active === false, JSON.stringify(r.data));
+}
+
+console.log("S13 Stripe bank is OFF by default (ACH can be returned); STRIPE_BANK=0 hides it");
+{ const DEF = { ...ON }; delete DEF.STRIPE_BANK;
+  r = await call(DEF, "/pay/start", { email: "hal@usc.edu" });
+  check("default: no Stripe bank option, card only", r.data?.stripe?.bank === null && r.data.stripe.card === 200, JSON.stringify(r.data?.stripe));
+  const wt = readFileSync(join(CF, "wrangler.toml"), "utf8");
+  check("wrangler.toml ships STRIPE_BANK = \"0\"", /^STRIPE_BANK = "0"$/m.test(wt)); }
+check("checkout says payments are final", sessions.some(x => x.f.get("custom_text[submit][message]") === "All payments are final. No refunds or cancellations."));
+check("pay page + dashboard say final, and show no cancel/refund control", /All payments are final/.test(readFileSync(join(CF, "public", "pay.html"), "utf8")) && /All payments are final/.test(readFileSync(join(CF, "public", "dashboard.html"), "utf8")) && !/\/pay\/(cancel|refund)/.test(readFileSync(join(CF, "public", "pay.html"), "utf8") + readFileSync(join(CF, "public", "dashboard.html"), "utf8")));
+console.log("S13 STRIPE_BANK=0 hides the Stripe bank option");
+r = await call({ ...ON, STRIPE_BANK: "0" }, "/pay/start", { email: "gus@usc.edu" });
+check("bank null, card still there", r.data?.stripe?.bank === null && r.data.stripe.card === 200, JSON.stringify(r.data?.stripe));
+await call({ ...ON, STRIPE_BANK: "0" }, "/pay/stripe", { email: "gus@usc.edu", method: "bank" });
+check("asking for bank anyway -> card checkout", sessions.at(-1).f.get("payment_method_types[0]") === "card");
 
 console.log(`\nStripe: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

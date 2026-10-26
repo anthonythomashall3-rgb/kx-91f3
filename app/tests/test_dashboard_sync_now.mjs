@@ -112,7 +112,8 @@ await dash.click("button:has-text('Sync now')");
 const bs = await popP;
 await bs.waitForLoadState();
 check("Brightspace opened in a new tab", new URL(bs.url()).host === "brightspace.usc.edu", bs.url());
-check("the dashboard says to click the bookmark there once", /click your LOCKqz Sync bookmark there once/.test(await status()), await status());
+check("the dashboard shows the 3 setup steps (bookmarks bar, drag, click)", /Brightspace opened in a new tab[\s\S]*bookmarks bar[\s\S]*(⌘|Ctrl) Shift B[\s\S]*Drag[\s\S]*click LOCKqz Sync/.test(await status()), await status());
+check("the draggable LOCKqz Sync bookmark is right there", await dash.evaluate(() => [...document.querySelectorAll(".syncst a.bmk")].some(a => a.getAttribute("href").startsWith("javascript:") && /sync\.js\?k=/.test(a.getAttribute("href")))));
 check("nothing synced yet", syncs() === 0);
 
 console.log("S2 the bookmark is clicked in that tab: it syncs and the dashboard fills in by itself");

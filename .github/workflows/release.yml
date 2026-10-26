@@ -205,6 +205,15 @@ jobs:
           rm -f "$RUNNER_TEMP/update_key.pem"
           cp app/mac/install.sh app/mac/uninstall.sh app/windows/install.ps1 app/windows/uninstall.ps1 app/cloudflare/public/
           ls -la app/cloudflare/public/download app/cloudflare/public/download/mac app/cloudflare/public/download/windows
+      - name: Stripe (key + webhook into Cloudflare; skipped until the STRIPE_SECRET_KEY GitHub secret exists)
+        if: steps.chk.outputs.ok == 'true'
+        working-directory: app/cloudflare
+        env:
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_RESET_WEBHOOK: ${{ vars.STRIPE_RESET_WEBHOOK }}
+        run: |
+          if [ -n "$STRIPE_SECRET_KEY" ]; then npm ci --no-audit --no-fund; fi
+          bash ../payments/stripe-setup.sh
       - name: Deploy (schema + migrations + site + API + teacher site + legacy forwarders)
         if: steps.chk.outputs.ok == 'true'
         working-directory: app/cloudflare

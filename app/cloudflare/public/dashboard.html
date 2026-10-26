@@ -237,10 +237,20 @@ window.addEventListener("hashchange", route);
 const BS_ORIGINS = ["https://brightspace.usc.edu", "https://usc.brightspace.com"];
 const BS_HOME = "https://brightspace.usc.edu/d2l/home";
 let BSWIN = null, SYNCWAIT = null, SYNCMSG = "";
-const SYNCBTN = prime => `<button class="btn${prime?" prime":""}" onclick="syncNow()">Sync now</button><span class="syncst muted">${syncHtml(SYNCMSG)}</span>`;
+const SYNCBTN = prime => `<button class="btn${prime?" prime":""}" onclick="syncNow()">Sync now</button><span class="syncst muted">${syncHtml(SYNCMSG)}${SYNCHELPON ? SYNCHELP() : ""}</span>`;
 // While a sync runs, the status shows the red lock loader (with how long it should take); otherwise plain text.
 const syncHtml = t => t === "Syncing…" ? lqL("Syncing with Brightspace", "This usually takes under a minute", {small:true}) : esc(t);
-function syncMsg(t){ SYNCMSG = t; document.querySelectorAll(".syncst").forEach(e => e.innerHTML = syncHtml(t)); }
+// The LOCKqz Sync bookmark (runs sync.js inside the professor's Brightspace tab).
+const bmkHref = () => SYNCKEY ? `javascript:(function(){var s=document.createElement('script');s.src='${location.origin}/sync.js?k=${SYNCKEY}&v='+Date.now();document.body.appendChild(s)})()` : "#";
+const BMK = () => `<a class="bmk" href="${esc(bmkHref())}" onclick="alert('Drag this button to your bookmarks bar, then click it while you are in Brightspace.');return false">${SHIELD('#fff',18)} LOCKqz Sync</a>`;
+const BARKEY = /Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent||"") ? "⌘ Shift B" : "Ctrl Shift B";
+// Shown with Sync now whenever Brightspace has not answered: the 3 steps, right there.
+const SYNCHELP = () => `<ol class="steps" style="margin:10px 0 0;text-align:left">
+  <li>Show your bookmarks bar: press <b>${BARKEY}</b>.</li>
+  <li>Drag ${BMK()} onto it.</li>
+  <li>In the Brightspace tab, click <b>LOCKqz Sync</b>. Leave that tab open.</li></ol>`;
+let SYNCHELPON = false;
+function syncMsg(t, help = false){ SYNCMSG = t; SYNCHELPON = help; document.querySelectorAll(".syncst").forEach(e => e.innerHTML = syncHtml(t) + (help ? SYNCHELP() : "")); }
 function askSync(w){ BS_ORIGINS.forEach(o => { try { w.postMessage({ lqz: "sync" }, o); } catch {} }); }
 function syncNow(){
   if (SYNCWAIT) return;
@@ -251,12 +261,12 @@ function syncNow(){
     if (t && !blank) w = t;
     else {
       if (t) t.location.href = BS_HOME; else window.open(BS_HOME, "lqzbs");
-      syncMsg("Brightspace opened in a new tab: click your LOCKqz Sync bookmark there once. After that, this button syncs by itself.");
+      syncMsg("Brightspace opened in a new tab. Once:", true);
       return;
     }
   }
   syncMsg("Syncing…"); askSync(w);
-  SYNCWAIT = setTimeout(() => { SYNCWAIT = null; syncMsg("No answer from Brightspace: click your LOCKqz Sync bookmark in the Brightspace tab."); }, BSWIN ? 180000 : 10000);
+  SYNCWAIT = setTimeout(() => { SYNCWAIT = null; syncMsg("Brightspace didn't answer. Once:", true); }, BSWIN ? 180000 : 10000);
 }
 window.addEventListener("message", async e => {
   if (!BS_ORIGINS.includes(e.origin) || !e.data || typeof e.data !== "object" || !e.source) return;
@@ -325,7 +335,7 @@ function viewHome(){
     <div style="display:flex;align-items:center;gap:20px;min-width:0">
       <div class="orb ${allOff?'off':''}">${SHIELD(allOff?'#6b6861':'#1a7f37',30)}</div>
       <div><h1>${headline}</h1><p class="sub">Synced with Brightspace ${ago(synced)} · ${BS.courses.length} class${BS.courses.length===1?"":"es"} · ${students} students${pendingSync()?"":" · nothing for you to do"}</p>
-        <p class="sub" style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">${SYNCBTN()}</p></div>
+        <div class="sub" style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">${SYNCBTN()}</div></div>
     </div>
     ${exams ? `<button class="sw big" aria-pressed="${!allOff}" aria-label="LOCKqz on for all exams" onclick="setAll(${allOff})"><b>${allOff?"Off":"On"}</b><i></i></button>` : ""}
   </section>`;
@@ -434,19 +444,19 @@ async function loadLive(id){
 
 // ---- CONNECT (the one manual step; shown on first visit and from the menu) ----
 function viewConnect(first){
-  const bmk = SYNCKEY ? `javascript:(function(){var s=document.createElement('script');s.src='${location.origin}/sync.js?k=${SYNCKEY}&v='+Date.now();document.body.appendChild(s)})()` : "#";
   return `${first?"":BACK('', 'Home')}
   <section class="card" style="display:flex;flex-direction:column;gap:18px">
     <div><h1 style="margin:0;font-size:24px;font-weight:700;letter-spacing:-.015em">${first?"One step, once.":"Brightspace connection"}</h1>
     <p class="sub">LOCKqz reads your classes, rosters and exams from Brightspace and protects every exam.</p></div>
     <ol class="steps">
-      <li>Drag this button to your bookmarks bar: &nbsp;<a class="bmk" href="${esc(bmk)}" onclick="alert('Drag this button to your bookmarks bar, then click it while you are in Brightspace.');return false">${SHIELD('#fff',18)} LOCKqz Sync</a></li>
+      <li>Show your bookmarks bar: press <b>${BARKEY}</b>.</li>
+      <li>Drag this button onto it: &nbsp;${BMK()}</li>
       <li>Open <a href="https://brightspace.usc.edu" target="_blank" rel="noopener">brightspace.usc.edu</a> and click the bookmark. Leave that tab open: it re-syncs by itself every 15 minutes (new quizzes, added students). Keep it open during exams.</li>
       <li>Come back here. Your classes are filled in and every exam is on.</li>
       <li>New quiz later? Press <b>Sync now</b>. If a student opens a quiz LOCKqz hasn't seen, LOCKqz emails you.</li>
     </ol>
     ${BS.courses.length ? `<p class="muted">Last synced ${ago(BS.courses.map(c=>c.synced_at).sort().pop())}. ${pendingSync()?"Some changes you made here are waiting for the next click.":"Everything is up to date."}</p>` : ""}
-    <p style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0">${SYNCBTN(true)}</p>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0">${SYNCBTN(true)}</div>
   </section>
   <p class="foot">Students install LOCKqz once from <a href="${INSTALL}">${INSTALL.replace("https://","")}</a>. You never see or type an exam password.</p>`;
 }
@@ -514,13 +524,13 @@ function renderPay(){ const d=PAY, el=$("pay"); if(!el||!d) return;
     <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b style="font-size:44px">${money(total)}</b><span class="muted">per semester · all your sections</span>${got>0?`<b style="color:var(--warn)">Received ${money(got)} of ${money(total)}</b>`:""}</div>
     ${d.sections.length ? `<ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px">${d.sections.map(s=>`<li style="display:flex;gap:12px;align-items:center;min-height:40px;padding:0 12px;border:1px solid #e3e0d8;border-radius:10px"><b>${esc(s.course)}</b><span class="muted">Section ${esc(s.section)}</span></li>`).join("")}</ul>` : `${!usc?"":!d.term?`<p class="muted" style="margin:0">Enter your first and last name.</p>`:d.name?`<p class="muted" style="margin:0">No sections found for ${esc(d.name)}.</p>`:""}${nameBox}`}
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
-      ${d.stripe ? `<button class="btn prime" onclick="stripePay('card',this)">Card ${money(d.stripe.card)}</button><button class="btn" onclick="stripePay('bank',this)">Bank account ${money(d.stripe.bank)}</button>` : ""}
+      ${d.stripe ? `<button class="btn prime" onclick="stripePay('card',this)">Card ${money(d.stripe.card)}</button>${d.stripe.bank ? `<button class="btn" onclick="stripePay('bank',this)">Bank account ${money(d.stripe.bank)}</button>` : ""}` : ""}
       ${d.zelle ? `<div style="padding:14px;border:1px solid #e3e0d8;border-radius:10px"><span class="muted">Zelle</span><br><b>${esc(d.zelle)}</b></div>` : ""}
       ${link ? `<a class="btn prime" style="text-align:center;display:flex;align-items:center;justify-content:center" href="${link}" target="_blank" rel="noopener">Venmo ${money(total)}</a>` : ""}
       ${d.invoice ? `<a class="btn" style="text-align:center;display:flex;align-items:center;justify-content:center" href="mailto:${esc(d.invoice)}?subject=${encodeURIComponent("LOCKqz invoice "+d.memo)}&body=${encodeURIComponent("Please send an invoice for LOCKqz, "+termName(d.term)+", "+money(total)+".")}">Bank transfer (ACH / wire)</a>` : ""}
       ${d.po ? `<a class="btn" style="text-align:center;display:flex;align-items:center;justify-content:center" href="mailto:${esc(d.po)}?subject=${encodeURIComponent("LOCKqz purchase order "+d.memo)}&body=${encodeURIComponent("PO number:\nBilling contact:\nAmount: "+money(total)+"\nTerm: "+termName(d.term)+"\nMemo: "+d.memo)}">Purchase order (PO)</a>` : ""}
       ${!d.zelle && !link && !d.invoice ? `<p style="margin:0">Pay ${money(total)} to the LOCKqz admin.</p>` : ""}
-    </div><p class="muted" style="margin:0">Memo: <b>${esc(note)}</b></p>
+    </div><p class="muted" style="margin:0">Memo: <b>${esc(note)}</b> · All payments are final. No refunds or cancellations.</p>
     ${lqL("Processing your payment", "This should take no longer than a minute")}
     ${d.sections.length && usc ? `<details><summary class="muted">Not your sections?</summary>${nameBox}</details>` : ""}
   </section>`; }

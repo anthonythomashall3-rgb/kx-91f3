@@ -36,6 +36,8 @@ STUDENT_CARD_PRICE = "200"
 STUDENT_BANK_PRICE = "181.45"
 PROF_CARD_PRICE = "5150"
 PROF_BANK_PRICE = "5005"
+# Stripe bank account (ACH) off: consumers can return ACH debits for 60 days. "1" turns it on.
+STRIPE_BANK = "0"
 # Trial testers: never pay (student or professor fee) and get the test-run welcome. Comma-separated.
 FEE_EXEMPT = "dbristow@usc.edu,dbristow@marshall.usc.edu,huutienn@usc.edu"
 # Every LOCKqz-protected quiz is gated: the professor's Sync tab hides it and admits only students LOCKqz is

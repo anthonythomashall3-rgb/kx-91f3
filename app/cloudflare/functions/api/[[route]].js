@@ -527,7 +527,10 @@ export async function onRequest(context) {
     if (dueC <= 0) return 0;
     return method === "card" ? Math.max(50, Math.ceil((dueC + 30) / 0.971)) : Math.min(Math.ceil(dueC / 0.992), dueC + 500);
   };
-  const stripeInfo = (kind, dueC) => stripeOn() && dueC > 0 ? { card: stripeCents(kind, "card", dueC) / 100, bank: stripeCents(kind, "bank", dueC) / 100 } : null;
+  // Stripe bank account (ACH) is OFF unless STRIPE_BANK="1": a consumer can return an ACH debit for up to
+  // 60 days, while Zelle and a bank transfer the payer sends cannot be pulled back. Card stays on.
+  const stripeBank = () => String(env.STRIPE_BANK || "0") === "1";
+  const stripeInfo = (kind, dueC) => stripeOn() && dueC > 0 ? { card: stripeCents(kind, "card", dueC) / 100, bank: stripeBank() ? stripeCents(kind, "bank", dueC) / 100 : null } : null;
   async function stripeCheckout({ kind, method, code, email, term, dueC, back }) {
     const amt = stripeCents(kind, method, dueC);
     const f = new URLSearchParams({
@@ -537,6 +540,7 @@ export async function onRequest(context) {
       "line_items[0][price_data][product_data][name]": `LOCKqz ${kind === "student" ? "student" : "professor"} · ${({1:"Spring",2:"Summer",3:"Fall"})[String(term).slice(4)] || ""} ${String(term).slice(0,4)}`.trim(),
       client_reference_id: code, "metadata[code]": code, "metadata[kind]": kind, "metadata[term]": String(term),
       "payment_intent_data[metadata][code]": code, "payment_intent_data[description]": "LOCKqz " + code,
+      "custom_text[submit][message]": "All payments are final. No refunds or cancellations.",
       success_url: back + (back.includes("?") ? "&" : "?") + "stripe=" + method, cancel_url: back });
     if (email) f.set("customer_email", email);
     const r = await fetch("https://api.stripe.com/v1/checkout/sessions", { method: "POST", body: f,
@@ -753,7 +757,7 @@ export async function onRequest(context) {
     for (const r of due) {
       const email = String(r.email).toLowerCase(), amt = r.kind === "student" ? STUDENT_FEE : PRICE;
       const link = r.kind === "student" ? `${PAY_URL}?email=${encodeURIComponent(email)}` : "https://prof.lockqz.pages.dev/";
-      const text = `LOCKqz renews for the new semester.\n\nPay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\n${r.kind === "student" ? `Zelle ${stuZelle()||""}${stuVenmo() ? `  ·  Venmo @${stuVenmo()}` : ""}  ·  Bank transfer: email ${stuBank()||""}` : `Venmo @${(env.VENMO_HANDLE||"").replace(/^@/,"")}  ·  Zelle ${env.ZELLE_TO||""}`}\n\nAccess turns on as soon as the payment arrives and lasts until ${termEndOf(cur)}.\n\nStop these emails: ${PAY_URL}?email=${encodeURIComponent(email)}&renew=off`;
+      const text = `LOCKqz renews for the new semester.\n\n${r.kind === "student" ? `Pay $${amt.toLocaleString("en-US")} here:\n${link}\n\nZelle ${stuZelle()||""} (the exact amount on that page; no memo needed)${stripeOn() ? "  ·  Card" : ""}${stuVenmo() ? `  ·  Venmo @${stuVenmo()}` : ""}  ·  Bank transfer: email ${stuBank()||""}, memo ${r.code}` : `Pay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nVenmo @${(env.VENMO_HANDLE||"").replace(/^@/,"")}  ·  Zelle ${env.ZELLE_TO||""}`}\n\nAccess turns on as soon as the payment arrives and lasts until ${termEndOf(cur)}.\n\nStop these emails: ${PAY_URL}?email=${encodeURIComponent(email)}&renew=off`;
       try {
         if (typeof env.MAIL_SINK === "function") await env.MAIL_SINK({ to: email, subject: "Renew LOCKqz", text });
         else await smtpSend(async () => (await import("cloudflare:sockets")).connect({ hostname: env.MAIL_HOST || "smtp.gmail.com", port: Number(env.MAIL_PORT || 465) }, { secureTransport: "on", allowHalfOpen: false }),
@@ -779,6 +783,17 @@ export async function onRequest(context) {
     const sum = await paidSum(code, term), done = sum >= PRICE;
     if (done) await db.prepare("UPDATE teachers SET active_until=? WHERE id=? AND (active_until IS NULL OR active_until<?)").bind(termEndOf(term), pc.teacher_id, termEndOf(term)).run();
     return { matched:"professor", paid: done, total: sum };
+  }
+  // A payment was voided (refund, dispute, failed bank payment, admin): a professor whose paid total
+  // drops below the price loses the activation that payments gave (an admin's own Activate date is kept).
+  async function unsettle(code) {
+    if (!code || /^LQS[A-Z0-9]{5}$/.test(code)) return;   // students: computed on read, nothing to undo
+    const pc = await db.prepare("SELECT c.teacher_id AS id, t.active_until AS until FROM pay_codes c JOIN teachers t ON t.id=c.teacher_id WHERE c.code=?").bind(code).first();
+    if (!pc) return;
+    const [cur, nxt] = curTerms();
+    if (![termEndOf(cur), termEndOf(nxt)].includes(pc.until)) return;
+    const want = (await paidSum(code, nxt)) >= PRICE ? termEndOf(nxt) : (await paidSum(code, cur)) >= PRICE ? termEndOf(cur) : null;
+    if (want !== pc.until) await db.prepare("UPDATE teachers SET active_until=? WHERE id=?").bind(want, pc.id).run();
   }
   // Must be listed as Instructor on a TRUSTED roster for the course, by BOTH email and the caller's own
   // Brightspace user id (bound from a trusted roster at sync) -- so holding someone else's email is not
@@ -831,7 +846,7 @@ export async function onRequest(context) {
     // ---- device endpoints (signed by the device key; see verifyDevice) ----
     if (p === "/blocklist") return json({ domains: AI_DOMAINS });
     // C7: what this host runs (deploy.sh compares lockqz.pages.dev and lockdownqz.pages.dev). No auth.
-    if (p === "/version") return json({ ...buildInfo(), codes_on: codesOn, strict, fee_on: feeOn() });
+    if (p === "/version") return json({ ...buildInfo(), codes_on: codesOn, strict, fee_on: feeOn(), stripe: stripeOn() });
 
     // One-time device registration (trust on first use). A device id can never be re-keyed, so a
     // registered student's device cannot be taken over by registering the same id again.
@@ -1353,7 +1368,7 @@ export async function onRequest(context) {
     // Student: start a Stripe Checkout (card or bank) for what is still due this term.
     if (p === "/pay/stripe" && request.method === "POST") {
       if (!stripeOn()) return json({ error:"Card payments are not on yet." }, 503);
-      const email = String(body.email||"").trim().toLowerCase(), method = body.method === "bank" ? "bank" : "card";
+      const email = String(body.email||"").trim().toLowerCase(), method = body.method === "bank" && stripeBank() ? "bank" : "card";
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"enter your school email" }, 400);
       const hr = new Date(Date.now() - 3600000).toISOString();
       if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_stripe' AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 20)
@@ -1380,10 +1395,12 @@ export async function onRequest(context) {
           via: "stripe-" + ((o.payment_method_types || [])[0] === "us_bank_account" ? "bank" : "card"), payer: String(o.customer_details?.email || o.customer_email || "") }]);
         return json({ ok: true, result: res[0] });
       }
-      if (ev.type === "charge.refunded" || ev.type === "charge.dispute.created") {
-        const pi = String(ev.type === "charge.dispute.created" ? o.payment_intent : o.payment_intent || "");
-        if (pi) await db.prepare("UPDATE payments SET matched='void' WHERE txn=?").bind("stripe:" + pi).run();
-        return json({ ok: true });
+      // Cancelled money = no access: refunds, disputes (card chargebacks, bank-account returns) and failed payments.
+      if (["charge.refunded", "charge.dispute.created", "charge.failed", "payment_intent.payment_failed", "payment_intent.canceled"].includes(ev.type)) {
+        const pi = String(ev.type.startsWith("payment_intent.") ? o.id : o.payment_intent || "");
+        const pr = pi ? await db.prepare("SELECT code FROM payments WHERE txn=?").bind("stripe:" + pi).first() : null;
+        if (pr) { await db.prepare("UPDATE payments SET matched='void' WHERE txn=?").bind("stripe:" + pi).run(); await unsettle(pr.code); }
+        return json({ ok: true, voided: !!pr });
       }
       return json({ ok: true, ignored: ev.type || null });
     }
@@ -1437,6 +1454,7 @@ export async function onRequest(context) {
       const pr = await db.prepare("SELECT term, code FROM payments WHERE txn=?").bind(txn).first();
       if (!pr) return json({ error:"no such payment" }, 404);
       await db.prepare("UPDATE payments SET matched='void' WHERE txn=?").bind(txn).run();
+      await unsettle(pr.code);
       return json({ ok:true, txn, code: pr.code || null, total: pr.code ? await paidSum(pr.code, pr.term) : 0 });
     }
     // Admin: professor password-reset requests (made on the sign-in page), newest first.
@@ -1505,7 +1523,7 @@ export async function onRequest(context) {
       const term = payTermFor(sums[cur], PRICE), dueC = Math.round(PRICE * 100) - Math.round(sums[term] * 100);
       if (dueC <= 0) return json({ error:"already paid" }, 409);
       const back = /^https:\/\/([a-z0-9-]+\.)*lockqz\.pages\.dev\/[^\s]*$/i.test(String(body.back||"")) ? String(body.back) : "https://prof.lockqz.pages.dev/";
-      const r = await stripeCheckout({ kind: "professor", method: body.method === "bank" ? "bank" : "card", code: memo, email: me.email, term, dueC, back });
+      const r = await stripeCheckout({ kind: "professor", method: body.method === "bank" && stripeBank() ? "bank" : "card", code: memo, email: me.email, term, dueC, back });
       return json(r, r.url ? 200 : 502);
     }
     if (p === "/quiz" && request.method === "POST") {
