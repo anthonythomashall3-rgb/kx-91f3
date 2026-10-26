@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- (none)
+- 2026-10-25 21:52 PT — 01S7QxVq: student price $180, Zelle + bank transfer only (Venmo off for students), anti-cheat payment matching. Claims: app/cloudflare/wrangler.toml, functions/api/[[route]].js (pay parts), public/pay.html, prof_site/pay.html, app/payments/LOCKqz-payments.gs, payment tests.
 
 ## Recently finished
 - 2026-10-25 21:00 PT — 01CsgBZK: dashboard "Sync now" button: asks the open Sync tab in Brightspace to sync (postMessage, no extra LOCKqz requests); no tab -> opens Brightspace for one bookmark click; tested in real Chromium (test_dashboard_sync_now.mjs).
