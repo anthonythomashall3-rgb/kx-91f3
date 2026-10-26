@@ -38,6 +38,16 @@ POLL, POLL_LOCKED, GRACE, BEAT = 2, 1, 30, 60   # agent reports (every 60s) only
 DEV_KEY = os.path.join(USER_DIR, "developer.key")
 DEV_KEY_HASH = "4695a520432e105e967dd2703366c24c039fe0a850fe35db03b73b6b9506aecd"
 
+def at_console():
+    """True when this account is the one at the screen. With fast user switching a switched-away
+    account's agent keeps running but sees no browser: it must stay out of the way (the helper refuses
+    it too). Unknown (no /dev/console, e.g. tests) = True."""
+    try:
+        out = subprocess.run(["stat", "-f", "%u", "/dev/console"], capture_output=True, text=True, timeout=5).stdout.strip()
+        return int(out) == os.getuid() if out.isdigit() else True
+    except Exception:
+        return True
+
 def developer_mode():
     """True only when this Mac holds the admin developer key. Students have no key file
     and cannot forge one from the shipped hash, so for them this is always False and
@@ -836,9 +846,11 @@ class Agent:
             if not (isinstance(r, dict) and r.get("ok")): raise RuntimeError("helper answered %r" % (r,))
         except Exception as e:
             log("helper lock failed: %s" % e)
+            busy = isinstance(e, urllib.error.HTTPError) and e.code == 409
             if time.time() - self.lock_fail_shown.get(quiz, 0) > 120:   # retried every tick; tell the student once
                 self.lock_fail_shown[quiz] = time.time()
-                dialog("LOCKqz could not lock AI for this quiz. Is the LOCKqz app installed and running?")
+                dialog("Another account on this Mac is taking a LOCKqz quiz right now. Switch back to it, or log it out, to take this quiz here."
+                       if busy else "LOCKqz could not lock AI for this quiz. Is the LOCKqz app installed and running?")
             return
         self.quiz, self.url, self.quiz_app, self.opera_warned = quiz, url, app, False
         self.locked, self.missing_since, self.last_beat, self.pending = True, None, time.time(), None
@@ -931,9 +943,23 @@ class Agent:
             elif now - self.capped[q] > GRACE:
                 self.forget_cap(q, "page closed")
 
+    def console_step(self, now_console=None):
+        """Fast user switching: while another account is at the screen this agent does nothing (it cannot
+        see its browser, so it would wrongly think the quiz closed). It forgets its own view of the lock,
+        never unlocking it; back at the screen it re-reads the helper and adopts its own lock again."""
+        c = at_console() if now_console is None else now_console
+        if not c:
+            if self.locked or self.pending:
+                log("another account is at the screen - pausing (lock left as it is)")
+            self.locked, self.quiz, self.url, self.missing_since, self.pending = False, None, None, None, None
+            self.last_check = 0.0
+            return False
+        return True
+
     def tick(self, tabs=None, dev=None):
         # Developer mode (admin only): same quiz flow (gate password, start/end reporting) but the
         # daemon never blocks AI and search tabs are never rewritten.
+        if not self.console_step(): return
         dev = developer_mode() if dev is None else dev
         tabs = browser_tabs() if tabs is None else tabs
         # A quiz opened from Brightspace Content/Lessons runs in a frame, so its submission never shows

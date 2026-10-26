@@ -23,14 +23,17 @@ $BlockFile = Join-Path $Here "blocklist.txt"
 $Policy    = Join-Path $Here "browser-policy.ps1"
 # (no "dia": that name is also the Dia diagram editor; M365Copilot = the Microsoft 365 Copilot app)
 $AiApps = @("chatgpt","claude","copilot","perplexity","ollama","lmstudio","LM Studio","gpt4all","msty","cluely","jan","comet","atlas","notion ai","deepseek","poe","mistral","sider","grammarly",
-            "AnythingLLM","Chatbox","Cherry Studio","M365Copilot")
+            "AnythingLLM","Chatbox","Cherry Studio","M365Copilot",
+            # local-model chat apps (their servers: $ModelProcs)
+            "Msty Studio","Backyard AI","Faraday","Sanctum","Open WebUI","Pinokio","Witsy","Reor","ollama app")
 # Non-browser routes to AI or a human helper, all closed during the quiz:
 $VmApps     = @("Parallels","prl_vm_app","vmware","vmware-vmx","VirtualBox","VirtualBoxVM","VBoxHeadless","qemu-system-x86_64","qemu-system-aarch64","vmwp","vmms","Docker Desktop","com.docker.backend",
                 "WindowsSandbox","WindowsSandboxClient","WindowsSandboxServer","WindowsSandboxRemoteSession","wsl","wslhost","wslrelay")
 $RemoteApps = @("TeamViewer","AnyDesk","RustDesk","remoting_host","ScreenConnect","ConnectWiseControl","LogMeIn","Splashtop","SRServer","vncserver","winvnc","tvnserver","Parsec","GoToMyPC",
                 "mstsc","msrdc","QuickAssist")
 $OverlayApps= @("Cluely","InterviewCoder","Interview Coder","LockedInAI","FinalRound","Ohmni","Sensei","UltraCode","Pieces")
-$ModelProcs = @("ollama","llama-server","llama-cli","llama-run","llamafile","koboldcpp","localai","local-ai","jan","gpt4all","text-generation-webui","vllm")
+$ModelProcs = @("ollama","llama-server","llama-cli","llama-run","llamafile","koboldcpp","localai","local-ai","jan","gpt4all","text-generation-webui","vllm",
+                "ollama_llama_server","lms","llama-mtmd-cli","koboldcpp_cu12","koboldcpp_nocuda","cortex","cortex-server","open-webui","lmdeploy","text-generation-launcher")
 # tor = the Tor Browser's network daemon (Tor resolves names remotely, past the hosts block).
 $VpnApps    = @("nordvpn","expressvpn","surfshark","protonvpn","mullvad","pia","piaservice","Cloudflare WARP","warp-svc","openvpn","wireguard","windscribe","tunnelbear","hssvpn","cyberghost","tor")
 $ModelPorts = @(11434,1234,4891,1337,7860)

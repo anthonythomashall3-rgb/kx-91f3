@@ -54,7 +54,7 @@ $MaxMin = $CapMin
 # verified in place at least once during this lock (only then can its absence be tampering).
 # capped_quiz: released by the safety cap or the server (submitted / ended / other school) - the agent
 # never re-locks it while its page stays open.
-$State  = [hashtable]::Synchronized(@{ state="unlocked"; quiz_id=$null; student=$Conf.student; locked_since=0; max_minutes=$MaxMin; cap_at=0; end_known=$false; applied=$false; skew=0; registered=$false; capped_quiz=$null; capped_at=0; capped_reason=$null })
+$State  = [hashtable]::Synchronized(@{ state="unlocked"; quiz_id=$null; student=$Conf.student; locked_since=0; max_minutes=$MaxMin; cap_at=0; end_known=$false; mono_since=$null; applied=$false; skew=0; registered=$false; capped_quiz=$null; capped_at=0; capped_reason=$null })
 $KeyPath = "$env:ProgramData\LOCKqz\device.key"
 
 # Signing + API calls. Kept as text so the watcher runspace can load the same code.
@@ -399,7 +399,11 @@ $watcher.AddScript({
     $now = [int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
     if ($State.state -eq "locked") {
       $capAt = [int64]$State.cap_at; if ($capAt -le 0) { $capAt = [int64]$State.locked_since + 60 * [int64]$State.max_minutes }
-      if ($State.locked_since -gt 0 -and $now -ge $capAt) {
+      # Wall clock AND monotonic clock must both say the cap is reached (as on the Mac): someone who moves
+      # the PC's date forward must not end the lock. Stopwatch ticks ignore clock changes (PS 5.1 + 7).
+      $monoNow = [int64]([Diagnostics.Stopwatch]::GetTimestamp() / [Diagnostics.Stopwatch]::Frequency)
+      $monoOk = ($null -eq $State.mono_since) -or (($monoNow - [int64]$State.mono_since) -ge ($capAt - [int64]$State.locked_since))
+      if ($State.locked_since -gt 0 -and $now -ge $capAt -and $monoOk) {
         # safety cap (quiz end + 15 min, or 6 h when the end is unknown, never > 24 h): a failsafe for a
         # broken agent - normally AI comes back the moment the quiz is submitted.
         WRelease $State.quiz_id "cap" @{ end_known = [bool]$State.end_known } | Out-Null
@@ -474,6 +478,8 @@ if ($saved) {
   $State.state="locking"; $State.quiz_id=$saved.quiz_id; if ($saved.student) { $State.student=$saved.student }
   $State.locked_since=[int64]$saved.locked_since; $State.cap_at=[int64]$saved.cap_at; $State.end_known=[bool]$saved.end_known
   $State.max_minutes=[int](([int64]$saved.cap_at - [int64]$saved.locked_since) / 60)
+  # monotonic start = now minus the time already locked (the wall clock is all a restart has)
+  $State.mono_since = [int64]([Diagnostics.Stopwatch]::GetTimestamp() / [Diagnostics.Stopwatch]::Frequency) - [Math]::Max([int64]0, [int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - [int64]$saved.locked_since)
 }
 $watcher.BeginInvoke() | Out-Null
 if ($saved) {
@@ -527,6 +533,7 @@ while ($listener.IsListening) {
         $State.max_minutes = Clamp-Minutes $(if ($body.max_minutes) { $body.max_minutes } else { $MaxMin })
         $State.locked_since=[int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); $State.applied=$false
         $State.cap_at = [int64]$State.locked_since + 60 * [int64]$State.max_minutes; $State.end_known = $false
+        $State.mono_since = [int64]([Diagnostics.Stopwatch]::GetTimestamp() / [Diagnostics.Stopwatch]::Frequency)
       }
       if ($State.capped_quiz -eq $body.quiz_id) { $State.capped_quiz = $null; $State.capped_at = 0; $State.capped_reason = $null }
       $ok = (Engine "lock") -cmatch "LOCKqz: LOCKED"

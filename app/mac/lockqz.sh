@@ -34,7 +34,9 @@ AI_APPS=("ChatGPT" "Claude" "Copilot" "Perplexity" "Ollama" "LM Studio" \
          "GPT4All" "Msty" "Cluely" "Google Gemini" "Jan" "Pieces" "MacGPT" \
          "Dia" "Comet" "ChatGPT Atlas" "Atlas" "Raycast" "Notion AI" \
          "Grammarly" "GrammarlyDesktop" "DeepSeek" "Poe" "Mistral" "Le Chat" "Sider" \
-         "AnythingLLM" "Chatbox" "Cherry Studio" "Enchanted" "Ollamac" "BoltAI" "MindMac")
+         "AnythingLLM" "Chatbox" "Cherry Studio" "Enchanted" "Ollamac" "BoltAI" "MindMac" \
+         "Private LLM" "Backyard AI" "Faraday" "LlamaChat" "FreeChat" "Sanctum" "Msty Studio" \
+         "Open WebUI" "Pinokio" "Witsy" "Reor")   # local-model chat apps (their servers: extra-block.sh)
 
 say() { echo "LOCKqz: $*"; }
 

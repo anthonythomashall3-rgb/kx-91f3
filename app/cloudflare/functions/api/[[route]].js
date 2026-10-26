@@ -324,7 +324,7 @@ export async function onRequest(context) {
   // in that list, this lock began before the end, and the end passed (+15 min, the helper's cap grace).
   // Never for a non-gated quiz: the server cannot see Brightspace special access there (makeup exams,
   // extended end dates), and bs_quizzes.end_date may be stale. A stopped gate (gated=0) never ends one.
-  async function serverUnlock(dev, device_id, qid) {
+  async function serverUnlock(dev, device_id, qid, anyEnd = false) {
     const [ou, qi] = qid.split("-");
     const em = dev && dev.student && (!codesOn || Number(dev.student_verified) === 1) ? String(dev.student).toLowerCase() : null;
     const r = await db.prepare("SELECT b.end_date AS end_date, q.gated AS gated, q.sa_keep AS sa_keep, (SELECT locked_at FROM locks WHERE device_id=? AND quiz_id=?) AS locked_at, r.user_id AS uid, (SELECT s.at FROM submissions s WHERE s.ou=? AND s.qi=? AND s.user_id=r.user_id) AS sub_at FROM (SELECT 1) one LEFT JOIN bs_quizzes b ON b.ou=? AND b.qi=? LEFT JOIN quizzes q ON q.ou=? AND q.qi=? LEFT JOIN roster r ON r.ou=? AND r.email=?")
@@ -337,6 +337,8 @@ export async function onRequest(context) {
       try { kept = !r.uid || JSON.parse(r.sa_keep || "[]").map(String).includes(String(r.uid)); } catch {}
       if (!kept) return "quiz_ended";
     }
+    // anyEnd (checking a local unlock, not releasing one): the quiz's scheduled end has passed.
+    if (anyEnd && !isNaN(end) && Date.now() > end) return "quiz_ended";
     return null;
   }
   // Per course: owned = an admin, or a verified professor who is INSTRUCTOR (same email + Brightspace
@@ -358,7 +360,7 @@ export async function onRequest(context) {
   const purgeStmts = () => {
     const ago = d => new Date(Date.now() - d * 86400000).toISOString();
     return [db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id LIMIT 300) AND ts<?").bind(ago(EVENT_DAYS)),
-      db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE event IN ('login_fail','pay_code_new','pay_start','pay_stripe','pay_bank','signup','code_sent','code_send_failed') AND ts<? LIMIT 300)").bind(ago(2)),
+      db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE event IN ('login_fail','pay_code_new','pay_start','pay_stripe','pay_bank','signup','stripe_sess','code_sent','code_send_failed') AND ts<? LIMIT 300)").bind(ago(2)),
       db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE event='reset_request' AND ts<? LIMIT 100)").bind(ago(30)),
       db.prepare("DELETE FROM email_codes WHERE expires<?").bind(Date.now() - 86400000)];
   };
@@ -577,8 +579,49 @@ export async function onRequest(context) {
   // 60 days, while Zelle and a bank transfer the payer sends cannot be pulled back. Card stays on.
   const stripeBank = () => String(env.STRIPE_BANK || "0") === "1";
   const stripeInfo = (kind, dueC) => stripeOn() && dueC > 0 ? { card: stripeCents(kind, "card", dueC) / 100, bank: stripeBank() ? stripeCents(kind, "bank", dueC) / 100 : null } : null;
-  async function stripeCheckout({ kind, method, code, email, term, dueC, back }) {
-    const amt = stripeCents(kind, method, dueC);
+  // One payable Checkout Session per code at a time (two tabs / a double click must never let the payer
+  // pay twice): the still-open session made in the last 30 minutes for the same amount, method and term is
+  // handed out again; any other earlier session of that code is expired at Stripe before a new one is made.
+  // Remembered as an events row (device_id "code:<code>", event "stripe_sess"): 1 read per checkout, 1 write
+  // per new session (D1 Free), purged after 2 days.
+  const STRIPE_REUSE_MS = 30 * 60000;
+  const stripeApi = async (path, form) => {
+    const r = await fetch("https://api.stripe.com/v1/" + path, form ? { method: "POST", body: form,
+      headers: { Authorization: "Bearer " + env.STRIPE_SECRET_KEY, "Content-Type": "application/x-www-form-urlencoded" } }
+      : { headers: { Authorization: "Bearer " + env.STRIPE_SECRET_KEY } });
+    return { ok: r.ok, d: await r.json().catch(() => ({})) };
+  };
+  const BUSY_PAYING = { error: "A card payment for this code is already being processed. Access turns on within a minute.", processing: true };
+  async function stripeCheckout(args) {
+    const { kind, method, code, term, dueC } = args, amt = stripeCents(kind, method, dueC), key = "code:" + code;
+    const last = await db.prepare("SELECT id, detail, ts FROM events WHERE device_id=? AND event='stripe_sess' ORDER BY id DESC LIMIT 1").bind(key).first();
+    let prev = null; try { prev = last ? JSON.parse(last.detail) : null; } catch {}
+    if (prev && /^cs_[A-Za-z0-9_]+$/.test(String(prev.id || "")) && Date.now() - Date.parse(last.ts) < 24 * 3600000) {
+      const same = prev.amt === amt && prev.method === method && String(prev.term) === String(term) && Date.now() - Date.parse(last.ts) < STRIPE_REUSE_MS;
+      const g = await stripeApi("checkout/sessions/" + prev.id);
+      if (g.ok && g.d.status === "complete") return BUSY_PAYING;          // paid; the webhook is on its way
+      if (g.ok && g.d.status === "open") {
+        if (same && g.d.url) return { url: g.d.url, amount: amt / 100, reused: true };
+        const x = await stripeApi("checkout/sessions/" + prev.id + "/expire", new URLSearchParams());
+        if (!x.ok) { const again = await stripeApi("checkout/sessions/" + prev.id); if (again.d?.status !== "expired") return again.d?.status === "complete" ? BUSY_PAYING : { error: "Card payments are not available right now. Try again in a minute." }; }
+      }
+      if (!g.ok && g.d?.error?.code !== "resource_missing") return { error: "Card payments are not available right now. Try again in a minute." };
+    }
+    const made = await stripeCreate(args, amt);
+    if (!made.url) return made;
+    const t = now();
+    await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(key, null, null, "stripe_sess", JSON.stringify({ id: made.id, url: made.url, amt, method, term: String(term) }), t).run();
+    // Two requests at the same moment both made one: the first one recorded after the row this request saw wins,
+    // the other is expired at once.
+    const first = await db.prepare("SELECT detail FROM events WHERE device_id=? AND event='stripe_sess' AND id>? ORDER BY id ASC LIMIT 1").bind(key, last ? last.id : 0).first();
+    let win = null; try { win = first ? JSON.parse(first.detail) : null; } catch {}
+    if (win && win.id && win.id !== made.id && win.url) {
+      await stripeApi("checkout/sessions/" + made.id + "/expire", new URLSearchParams());
+      return { url: win.url, amount: win.amt / 100, reused: true };
+    }
+    return { url: made.url, amount: amt / 100 };
+  }
+  async function stripeCreate({ kind, method, code, email, term, back }, amt) {
     const f = new URLSearchParams({
       mode: "payment", "payment_method_types[0]": method === "card" ? "card" : "us_bank_account",
       "line_items[0][quantity]": "1", "line_items[0][price_data][currency]": "usd",
@@ -586,12 +629,11 @@ export async function onRequest(context) {
       "line_items[0][price_data][product_data][name]": `LOCKqz ${kind === "student" ? "student" : "professor"} · ${({1:"Spring",2:"Summer",3:"Fall"})[String(term).slice(4)] || ""} ${String(term).slice(0,4)}`.trim(),
       client_reference_id: code, "metadata[code]": code, "metadata[kind]": kind, "metadata[term]": String(term),
       "payment_intent_data[metadata][code]": code, "payment_intent_data[description]": "LOCKqz " + code,
-      success_url: back + (back.includes("?") ? "&" : "?") + "stripe=" + method, cancel_url: back });
+      success_url: back + (back.includes("?") ? "&" : "?") + "stripe=" + method, cancel_url: back,
+      expires_at: String(unixNow() + 2 * 3600) });   // never payable for long; reused for 30 min, expired when replaced
     if (email) f.set("customer_email", email);
-    const r = await fetch("https://api.stripe.com/v1/checkout/sessions", { method: "POST", body: f,
-      headers: { Authorization: "Bearer " + env.STRIPE_SECRET_KEY, "Content-Type": "application/x-www-form-urlencoded" } });
-    const d = await r.json().catch(() => ({}));
-    return r.ok && d.url ? { url: d.url, amount: amt / 100 } : { error: "Card payments are not available right now. Try again in a minute." };
+    const { ok, d } = await stripeApi("checkout/sessions", f);
+    return ok && d.url ? { url: d.url, id: String(d.id || ""), amount: amt / 100 } : { error: "Card payments are not available right now. Try again in a minute." };
   }
   // Stripe-Signature: t=<unix>,v1=<hex HMAC-SHA256 of "t.body"> (5 minutes tolerance).
   async function stripeVerified(header, rawText) {
@@ -774,13 +816,21 @@ export async function onRequest(context) {
         byC.set(Number(r.cents), byC.has(Number(r.cents)) && byC.get(Number(r.cents)) !== r.code ? null : r.code);   // same cents in both terms = ambiguous
       fresh.forEach(x => { const c = slotC(x); if (c && byC.get(c)) { x.code = byC.get(c); x.note = `${x.note} [amount match]`.trim().slice(0, 300); } });
     }
-    // What each code already paid this term and next (for the term each new payment counts for).
-    const [cur, nxt] = curTerms(), codes = [...new Set(fresh.map(x => x.code).filter(Boolean))], sums = new Map();
-    for (const part of chunk(codes, 97)) (await db.prepare(`SELECT code, term, COALESCE(SUM(${CREDIT()}),0) AS s FROM payments WHERE code IN (${placeholders(part.length)}) AND term IN (?,?) AND ${COUNTS} GROUP BY code, term`).bind(...part, cur, nxt).all()).results.forEach(r => sums.set(r.code + "|" + r.term, Number(r.s)));
+    // What each code already paid this term, next and the one after (for the term each new payment counts for).
+    const [cur, nxt] = curTerms(), nn = nextTerm(nxt), codes = [...new Set(fresh.map(x => x.code).filter(Boolean))], sums = new Map();
+    for (const part of chunk(codes, 96)) (await db.prepare(`SELECT code, term, COALESCE(SUM(${CREDIT()}),0) AS s FROM payments WHERE code IN (${placeholders(part.length)}) AND term IN (?,?,?) AND ${COUNTS} GROUP BY code, term`).bind(...part, cur, nxt, nn).all()).results.forEach(r => sums.set(r.code + "|" + r.term, Number(r.s)));
     const priceOf = c => /^LQS[A-Z0-9]{5}$/.test(c) ? STUDENT_FEE : PRICE;
     const rows = [], t = now();
     for (const x of fresh) {
       x.term = x.code ? payTermFor(sums.get(x.code + "|" + cur) || 0, priceOf(x.code)) : cur;
+      // Overpaid (e.g. two card checkouts both paid, or card + Zelle): a payment for a term that is already
+      // paid in full counts for the next term instead (at most 2 terms ahead), never lost. Tagged in the
+      // note so Admin -> Payments shows it (the admin may refund it instead: Void, then refund at the source).
+      if (x.code && !x.review) {
+        const from = x.term;
+        while (x.term !== nn && FULL(sums.get(x.code + "|" + x.term) || 0, priceOf(x.code))) x.term = nextTerm(x.term);
+        if (x.term !== from) { x.carried = from; x.note = `${x.note} [overpaid ${from}: counts for ${x.term}]`.trim().slice(0, 300); }
+      }
       if (x.code && !x.review) sums.set(x.code + "|" + x.term, (sums.get(x.code + "|" + x.term) || 0) + creditOf(x.code, x.via, x.amount));
       rows.push([x.txn, x.code, x.amount, x.via, x.payer, x.why ? `${x.note} [review: ${x.why}]`.slice(0, 400) : x.note, x.term, t, x.review ? "review" : null]);
     }
@@ -801,7 +851,7 @@ export async function onRequest(context) {
         const done = FULL(total, PRICE); res = { matched: "professor", paid: done, total, term: x.term };
         if (done) acts.push(db.prepare("UPDATE teachers SET active_until=? WHERE id=? AND (active_until IS NULL OR active_until<?)").bind(termEndOf(x.term), profId.get(x.code), termEndOf(x.term)));
       }
-      out[x.i] = { ok: true, ...res };
+      out[x.i] = { ok: true, ...res, ...(x.carried ? { carried_from: x.carried } : {}) };
     }
     await runBatches(db, acts);
     return out;
@@ -1049,7 +1099,15 @@ export async function onRequest(context) {
       // Unlock reports carry {reason} (quiz_submitted / quiz_left / quiz_tab_closed / cap ...): keep it
       // in the event detail so the live monitor can tell a clean submit from a mid-quiz unlock.
       const reason = typeof body.reason === "string" && body.reason ? body.reason.slice(0, 40) : null;
-      const detailObj = reason ? (detail != null && detail !== "" ? { reason, detail } : { reason }) : detail;
+      let detailObj = reason ? (detail != null && detail !== "" ? { reason, detail } : { reason }) : detail;
+      // A LOCAL unlock (asked on the student's own Mac - by the agent, or by anyone holding its token) is
+      // checked against what the server knows: Brightspace's submission (Sync tab) after this lock began,
+      // or the quiz's end. Neither = "unexpected": /live shows it red until Brightspace's completion time
+      // proves the student had submitted. One read, only on signed local unlocks (rare).
+      if (ev === "unlock" && v.ok && detail && typeof detail === "object" && detail.local === true && typeof quiz_id === "string" && /^\d+-\d+$/.test(quiz_id)) {
+        const why = await serverUnlock(v.dev, v.id, quiz_id, true);
+        detailObj = { ...detail, ...(why ? { expected: why } : { unexpected: true }) };
+      }
       const detailStr = detailObj ? JSON.stringify(detailObj).slice(0, 2000) : null;
       // A developer-mode lock claim is logged as "dev_lock", so /live and /password find the few claims
       // through the index without reading every student's lock event.
@@ -1156,9 +1214,11 @@ export async function onRequest(context) {
         }
       }
       // Everything about this quiz in ONE read: LOCKqz password + gate state, Brightspace dates, a
-      // password still waiting to be removed from Brightspace (I-M9), and the course-wide password.
-      const q = await db.prepare("SELECT q.password AS password, q.gated AS gated, q.bs_code AS bs_code, q.sa_keep AS sa_keep, b.start_date AS start_date, b.end_date AS end_date, (SELECT password FROM pending_clear WHERE ou=? AND qi=?) AS pc, (SELECT password FROM courses WHERE ou=?) AS cpw, b.qi AS bq FROM (SELECT 1) one LEFT JOIN quizzes q ON q.ou=? AND q.qi=? LEFT JOIN bs_quizzes b ON b.ou=? AND b.qi=?")
-        .bind(ou, qi, ou, ou, qi, ou, qi).first();
+      // password still waiting to be removed from Brightspace (I-M9). The old course-wide static password
+      // (courses.password, set by the retired /course page) is never released: it skipped the gate and
+      // rotation rules. Every quiz is protected one by one (Sync's protect-by-default).
+      const q = await db.prepare("SELECT q.password AS password, q.gated AS gated, q.bs_code AS bs_code, q.sa_keep AS sa_keep, b.start_date AS start_date, b.end_date AS end_date, (SELECT password FROM pending_clear WHERE ou=? AND qi=?) AS pc, b.qi AS bq FROM (SELECT 1) one LEFT JOIN quizzes q ON q.ou=? AND q.qi=? LEFT JOIN bs_quizzes b ON b.ou=? AND b.qi=?")
+        .bind(ou, qi, ou, qi, ou, qi).first();
       const gated = Number(q?.gated) === 1;
       // C2: the start check applies only while the quiz is GATED (the gate hides the quiz, so LOCKqz
       // decides who may enter and when). Otherwise Brightspace enforces its own start date and every
@@ -1187,7 +1247,7 @@ export async function onRequest(context) {
         return json({ password: null, reason: "gate_off" }, 402);
       }
       const rot = gated && q.bs_code ? q.bs_code : null;
-      const given = rot || q?.password || q?.pc || q?.cpw || null;
+      const given = rot || q?.password || q?.pc || null;
       if (!given && !q?.bq) await nudgeUnsynced(ou, qi);   // a quiz newer than the professor's last Sync
       // Logged once per device + quiz + released code (+ IP): agents re-ask often, and every repeat
       // would be a row written (D1 Free: 100k/day). A new code or a new IP is logged again.
@@ -1469,7 +1529,7 @@ export async function onRequest(context) {
       if (await studentPaid(email)) return json({ error:"already paid" }, 409);
       const st = await studentStatus(email), due = Math.round(STUDENT_FEE * 100) - Math.round(st.received * 100);
       const r = await stripeCheckout({ kind: "student", method, code, email, term: st.term, dueC: due, back: `${PAY_URL}?email=${encodeURIComponent(email)}` });
-      return json(r, r.url ? 200 : 502);
+      return json(r, r.url ? 200 : r.processing ? 409 : 502);
     }
     // Stripe's webhook (signed). Paid checkouts are recorded like any other payment (txn = the
     // PaymentIntent, so the card "completed" and the bank "async succeeded" events count once);
@@ -1677,7 +1737,7 @@ export async function onRequest(context) {
       if (dueC <= 0) return json({ error:"already paid" }, 409);
       const back = /^https:\/\/([a-z0-9-]+\.)*lockqz\.pages\.dev\/[^\s]*$/i.test(String(body.back||"")) ? String(body.back) : "https://prof.lockqz.pages.dev/";
       const r = await stripeCheckout({ kind: "professor", method: body.method === "bank" && stripeBank() ? "bank" : "card", code: memo, email: me.email, term, dueC, back });
-      return json(r, r.url ? 200 : 502);
+      return json(r, r.url ? 200 : r.processing ? 409 : 502);
     }
     if (p === "/quiz" && request.method === "POST") {
       const { qi, ou } = ids(String(body.url||""));
@@ -1705,18 +1765,10 @@ export async function onRequest(context) {
       const okQ = await trustedOus(r.results.map(x => String(x.ou || "")));
       return json({ quizzes: r.results.map(x => okQ.has(String(x.ou || "")) ? x : { ...x, password: null }) });
     }
-    if (p === "/course" && request.method === "POST") {
-      const u = String(body.url || "");
-      const ou = (u.match(/ou=(\d+)/) || u.match(/\/home\/(\d+)/) || u.match(/\/(\d+)(?:\/|$)/) || [])[1];
-      if (!ou) return json({ error: "could not find the course id (ou=) in that link" }, 400);
-      if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this course can protect it." }, 403);
-      const ex = await db.prepare("SELECT teacher_id FROM courses WHERE ou=?").bind(ou).first();
-      if (ex && ex.teacher_id && ex.teacher_id !== me.id && !me.admin) return json({ error:"that course is already protected by another professor" }, 409);
-      const password = "LQ-" + rid(8);
-      await db.prepare("INSERT INTO courses (ou,title,password,created_at,teacher_id) VALUES (?,?,?,?,?) ON CONFLICT(ou) DO UPDATE SET password=excluded.password,title=excluded.title,teacher_id=excluded.teacher_id")
-        .bind(ou, str(body.title), password, now(), me.id).run();
-      return json({ ou, password });
-    }
+    // Retired (26 Oct 2026): a course-wide static password bypassed the gate and the 5-minute rotation.
+    // No page uses it (the dashboard and Sync protect each quiz); old rows are listed/removable below.
+    if (p === "/course" && request.method === "POST")
+      return json({ error: "Course-wide passwords are retired. Run LOCKqz Sync: every quiz is protected by itself." }, 410);
     if (p === "/courses") {
       const m = mine();
       const r = await db.prepare(`SELECT ou,title,password,created_at,teacher_id FROM courses WHERE ${m.sql} ORDER BY created_at DESC`).bind(...m.args).all();
@@ -2245,12 +2297,15 @@ export async function onRequest(context) {
           const w = whenOf(e);
           if (!overlaps(e, qi)) return false;
           const clean = e.event === "unlock" && reasonOf(e) === "quiz_submitted";
+          const unexp = e.event === "unlock" && /"unexpected":true/.test(String(e.detail || ""));
           // Completion time unknown (old Sync tab): the submission itself is the proof (pre-C5 rule).
           // A "quiz_submitted" unlock is clean only if it came AFTER Brightspace's completion time (60 s
           // slack for clocks): the reason is chosen by the student's own agent (any navigation to the
           // quiz list / a submissions page sends it, and so does a local /unlock call).
           if (submitted) return !isNaN(doneAt) && Date.parse(w) < doneAt - (clean ? 60000 : 0);
-          return !(clean && (!subsFor.has(qi) || nowMs - Date.parse(e.ts) < 120000));
+          // A local unlock the server did not expect stays red when Brightspace has no completion for the
+          // student (even if the Sync tab reports no submissions for this quiz); 2 minutes for a report to arrive.
+          return !(clean && (nowMs - Date.parse(e.ts) < 120000 || (!subsFor.has(qi) && !unexp)));
         });
         if (submitted) r.submitted = true;
         // Dark lock + Brightspace completion while dark: the laptop was online enough to submit, so the
@@ -2261,7 +2316,7 @@ export async function onRequest(context) {
         if (r.status === "locked" || r.status === "done" || r.status === "browser_closed") {
           const last = inc[inc.length - 1];
           r.status = "left_early"; r.submitted = submitted;
-          r.reason = last.event === "lock_gap" ? "went_dark" : (reasonOf(last) || (last.event === "auto_unlock" ? "cap" : "unlock"));
+          r.reason = last.event === "lock_gap" ? "went_dark" : /"unexpected":true/.test(String(last.detail || "")) && reasonOf(last) === "quiz_submitted" ? "unverified" : (reasonOf(last) || (last.event === "auto_unlock" ? "cap" : "unlock"));
           r.flagged_at = whenOf(last);
         }
       });

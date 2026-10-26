@@ -16,10 +16,12 @@ REMOTE_APPS=("TeamViewer" "AnyDesk" "RustDesk" "remoting_host" "chrome_remote_de
 OVERLAY_APPS=("Cluely" "Interview Coder" "InterviewCoder" "LockedIn AI" "LockedInAI" "Final Round" \
               "FinalRound" "Ohmni" "Sensei" "Leetcode Wizard" "UltraCode" "ExamShield helper" "Pieces")
 LOCAL_MODEL_PROCS=("ollama" "llama-server" "llama-cli" "llama-run" "llama_cpp" "llamafile" "koboldcpp" \
-                   "text-generation" "localai" "local-ai" "lm-studio-server" "jan-server" "gpt4all" "mlx_lm" "vllm")
+                   "text-generation" "localai" "local-ai" "lm-studio-server" "jan-server" "gpt4all" "mlx_lm" "vllm" \
+                   "lms" "ollama_llama_server" "llama-mtmd-cli" "cortex" "cortex-server" "open-webui" "mlc_llm" "lmdeploy" "sglang")
 # Model tools that run as "python3 ..." (their process name is python3): matched on their own
 # script/module name in the command line only (extended regex, pkill -f).
-LOCAL_MODEL_CMD_RES=('/bin/mlx_lm[._][a-z_]+( |$)' ' -m mlx_lm([. ]|$)' '/bin/vllm( |$)' ' -m vllm[. ]')
+LOCAL_MODEL_CMD_RES=('/bin/mlx_lm[._][a-z_]+( |$)' ' -m mlx_lm([. ]|$)' '/bin/vllm( |$)' ' -m vllm[. ]' \
+                     ' -m llama_cpp\.server( |$)' '/bin/open-webui( |$)' ' -m open_webui( |$)' ' -m sglang\.launch_server' '/bin/text-generation-launcher( |$)')
 VPN_APPS=("NordVPN" "ExpressVPN" "Surfshark" "ProtonVPN" "Proton VPN" "Mullvad VPN" "Mullvad" \
           "Private Internet Access" "pia" "Cloudflare WARP" "Cloudflare_WARP" "Tunnelblick" \
           "OpenVPN Connect" "WireGuard" "Windscribe" "TunnelBear" "Hotspot Shield" "CyberGhost" \
