@@ -462,6 +462,12 @@ function Handle-Pw($pr, [bool]$first, [string]$note) {
     return "other"
   }
   if (($why -eq "verify") -and (((Get-Date) - $script:SetupAt).TotalSeconds -gt 60)) { Start-Setup -Quiz }   # school email first
+  if ((($why -eq "in_use") -or ($why -eq "too_many_devices")) -and ($script:ShareTold -ne $script:Quiz)) {
+    # One payment = one student: the paid email is in use on another computer.
+    $script:ShareTold = $script:Quiz
+    if ($why -eq "in_use") { Show-Message "This school email is in a quiz on another computer right now.`n`nOne payment covers one student." }
+    else { Show-Message "This school email is already used on 2 computers.`n`nEmail athall@usc.edu to remove one." }
+  }
   $script:PwNext = $now.AddSeconds(15)
   return $null
 }

@@ -1,6 +1,6 @@
 /**
  * LOCKqz payments — runs in the Gmail that receives your Venmo and Zelle alerts (Google Apps Script,
- * free, on Google's servers; your computer can be off). Every 5 minutes it reads only the payment
+ * free, on Google's servers; your computer can be off). Every minute (Google's fastest) it reads only the payment
  * alerts that arrived since its last run, checks they really came from Venmo / your bank (DKIM-signed)
  * and were really sent TO this mailbox, and sends amount + memo to LOCKqz, which matches the memo code
  * and turns the student (or professor) on.
@@ -13,7 +13,7 @@
  * Then run `setup` once and allow access.
  *
  * Gmail quota: one search per run over only new mail (after the last run), already-sent alerts are
- * labelled and skipped, so a quiet mailbox costs one cheap search every 5 minutes.
+ * labelled and skipped, so a quiet mailbox costs one cheap search a minute.
  */
 const API = "https://lockqz.pages.dev/api/pay/notify";
 const DONE = "LOCKqz/processed";
@@ -31,12 +31,12 @@ const SENDERS = {
 };
 // Signed, but not known to be a RECEIVING alert for this account: posted for the admin's review only.
 const REVIEW_SENDERS = { "zellepay.com": "zelle" };
-const WORDS = '("paid you" OR "sent you" OR "received" OR "deposited")';
+const WORDS = '("paid you" OR "sent you" OR "received" OR "deposited" OR "deposit")';
 
 function setup() {
   GmailApp.getUserLabelByName(DONE) || GmailApp.createLabel(DONE);
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
-  ScriptApp.newTrigger("run").timeBased().everyMinutes(5).create();
+  ScriptApp.newTrigger("run").timeBased().everyMinutes(1).create();
   run();
 }
 
@@ -102,8 +102,12 @@ function parse(m, opts) {
   const subject = m.getSubject() || "", body = m.getPlainBody() || "";
   if (/you paid|you sent|request|charged|refund/i.test(subject)) return null;       // money out, requests, refunds
   // Transfers to/from the bank and deposit notices are not payments to LOCKqz.
-  if (/\btransfer(?:red)?\b|direct deposit|withdraw|cash ?out/i.test(subject) && !/zelle|paid you|sent you/i.test(subject)) return null;
+  // A bank transfer (ACH) INTO the account with a LOCKqz memo waits for the admin's one-click Assign
+  // (bank deposit alerts do not prove who sent it); any other transfer / deposit is not a payment.
+  const bankIn = /\btransfer(?:red)?\b|deposit|ach\b/i.test(subject) && !/zelle|paid you|sent you/i.test(subject);
+  if (bankIn && (/withdraw|cash ?out|to your bank|from your/i.test(subject) || !/(?:^|[^A-Za-z0-9])LQ[\s-]?S?[\s-]?[A-Za-z0-9]{5}(?![A-Za-z0-9])/i.test(body))) return null;
   const reasons = [];
+  if (bankIn) reasons.push("bank transfer");
   if (revDom && !opts.zellepayOk) reasons.push("sender " + revDom + " not confirmed as a receiving alert");
   // Replay of someone else's real alert: the signed To: must be THIS mailbox, and "to" must be among
   // the headers the sender's DKIM signature covers.
@@ -118,7 +122,12 @@ function parse(m, opts) {
     else return null;                                   // not sent to us at all
   }
   if (owners.length && !signedTo) reasons.push("To: not covered by the DKIM signature");
-  const amt = (subject.match(/\$\s?([0-9][0-9,]*(?:\.[0-9]{1,2})?)/) || body.match(/\$\s?([0-9][0-9,]*(?:\.[0-9]{1,2})?)/) || [])[1];
+  // The amount comes from the bank's own text, never from what the payer typed in the memo
+  // (a memo of "$180" on a $1 payment must not count as $180).
+  const AMT = /\$\s?([0-9][0-9,]*(?:\.[0-9]{1,2})?)/;
+  const bodyNoMemo = body.replace(/(?:memo|note|message)\s*[:\-][^\n]*/gi, "").replace(/LQ[\s-]?S?[\s-]?[A-Za-z0-9]{5}[^\n]*/gi, "");
+  const amts = (bodyNoMemo.match(/amount[^$\n]{0,20}\$\s?[0-9][0-9,]*(?:\.[0-9]{1,2})?/i) || [""])[0];
+  const amt = (subject.match(AMT) || amts.match(AMT) || bodyNoMemo.match(AMT) || [])[1];
   if (!amt) reasons.push("no amount found");
   // Memo codes as people type them: "LQS4M8TX", "lqs-4m8tx", "LQ S 4M8TX", professor "LQ7K3PXA".
   const code = (body.match(/(?:^|[^A-Za-z0-9])(LQ[\s-]?S?[\s-]?[A-Za-z0-9]{5})(?![A-Za-z0-9])/i) || [])[1];

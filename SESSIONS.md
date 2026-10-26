@@ -7,9 +7,10 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-10-25 21:52 PT — 01S7QxVq: student price $180, Zelle + bank transfer only (Venmo off for students), anti-cheat payment matching. Claims: app/cloudflare/wrangler.toml, functions/api/[[route]].js (pay parts), public/pay.html, prof_site/pay.html, app/payments/LOCKqz-payments.gs, payment tests.
+- (none)
 
 ## Recently finished
+- 2026-10-25 22:30 PT — 01S7QxVq: students pay $180 (STUDENT_FEE), Zelle + bank transfer only (Venmo off unless STUDENT_VENMO=1; ZELLE_BUSINESS_TO replaces personal Zelle when the business account opens); fee on = confirmed email always; a paid email cannot be in a quiz on 2 computers at once or on >2 computers (402 in_use / too_many_devices, agents explain); Gmail script every 1 min, amount never read from the memo, bank deposits with a memo -> admin review. Mac/Windows agent text needs the next release. Known pre-existing fail: test_daemon_reporting 'no signed developer lock'.
 - 2026-10-25 21:00 PT — 01CsgBZK: dashboard "Sync now" button: asks the open Sync tab in Brightspace to sync (postMessage, no extra LOCKqz requests); no tab -> opens Brightspace for one bookmark click; tested in real Chromium (test_dashboard_sync_now.mjs).
 - 2026-10-25 18:45 PT — 01CsgBZK: v0.4.6. Content-quiz move tested in REAL browsers (Windows CI: Chrome, Edge, Firefox via test_windows_content_move.ps1 in release.yml; Mac: Safari + Chrome via test_safari_content_move.py, real Mac only). Fixed: Windows agent never read Firefox's address bar (ComboBox urlbar-input); Mac move throttled 10 s. Sync panel auto re-syncs every 15 min while open (0 LOCKqz requests when Brightspace is unchanged; forced hourly); professor emailed once when a student opens a quiz newer than the last Sync (migrate_026 sync_nudges).
 - 2026-10-25 17:15 PT — 01DfSvcn: D1 reset done: typed-email devices verified (Anthony's 2 Macs), full Release 40247705357 green, v0.4.5 live; Anthony's agent back on, verified, no dialog.

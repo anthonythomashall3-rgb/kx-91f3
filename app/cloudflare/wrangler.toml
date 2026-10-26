@@ -21,5 +21,10 @@ ADMIN_EMAIL = "athall@usc.edu"
 ZELLE_TO = "(858) 900-4347"
 VENMO_HANDLE = "LOCKqz"
 INVOICE_EMAIL = "athall@usc.edu"
-# Student fee ($5/semester): set a start date (YYYY-MM-DD) to turn it on. Empty = off.
+# Student fee per semester (USD) and the date it starts (YYYY-MM-DD; empty = off).
+STUDENT_FEE = "180"
 STUDENT_FEE_FROM = "2026-10-25"
+# Students pay by Zelle or bank transfer only (no fees). Venmo for students: STUDENT_VENMO = "1".
+# Business checking: once it is open, put its Zelle email/phone here; students are then shown it
+# instead of ZELLE_TO, and its bank's alerts must reach the Gmail that runs LOCKqz-payments.gs.
+ZELLE_BUSINESS_TO = ""

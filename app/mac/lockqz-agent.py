@@ -767,6 +767,11 @@ class Agent:
             return "other"
         if reason == "verify":
             self.ensure_identity(force=True)   # the server needs the confirmed school email first
+        if reason in ("in_use", "too_many_devices") and getattr(self, "share_told", None) != self.quiz:
+            # One payment = one student: the paid email is in use on another computer.
+            self.share_told = self.quiz
+            dialog("This school email is in a quiz on another computer right now.\n\nOne payment covers one student." if reason == "in_use"
+                   else "This school email is already used on 2 computers.\n\nEmail athall@usc.edu to remove one.")
         self.pw_next = now + 15
         return None
 

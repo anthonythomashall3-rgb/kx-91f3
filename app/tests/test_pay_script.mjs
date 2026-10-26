@@ -37,6 +37,14 @@ p = parse(msg("dkim=pass header.d=chase.com header.s=x", "You received money wit
 check("Chase Zelle alert parsed (comma amount, confirmation id)", p && p.amount === 2500 && p.via === "zelle" && p.note === "LQ7K3PX" && p.txn === "zelle:ABC12345", JSON.stringify(p));
 p = parse(msg("dkim=pass header.i=@alerts.bankofamerica.com", "Zelle payment received", "You received $5.00 from Cy. Memo: for cy@usc.edu"));
 check("BofA subdomain + email memo", p && p.amount === 5 && /cy@usc.edu/.test(p.note), JSON.stringify(p));
+p = parse(msg("dkim=pass header.i=@alerts.bankofamerica.com", "Zelle payment received", "You received $1.00 from Cy.\nMemo: LQS4M8TX $180.00"));
+check("memo saying $180 on a $1 payment counts as $1", p && p.amount === 1, JSON.stringify(p));
+p = parse(msg("dkim=pass header.i=@alerts.bankofamerica.com", "Zelle payment received", "Memo: LQS4M8TX paid $180\nAmount: $1.00"));
+check("memo before the amount: still the real $1", p && p.amount === 1, JSON.stringify(p));
+p = parse(msg("dkim=pass header.i=@alerts.bankofamerica.com", "You received a deposit", "ACH deposit $180.00 from JOHN DOE\nLQS4M8TX"));
+check("bank transfer with memo -> admin review (not auto-counted)", p && p.needs_review === true && /bank transfer/.test(p.review_reason) && p.amount === 180, JSON.stringify(p));
+p = parse(msg("dkim=pass header.i=@alerts.bankofamerica.com", "You received a deposit", "Payroll deposit $2,000.00"));
+check("other deposits ignored", p === null, JSON.stringify(p));
 console.log("H9 parsing: codes typed with spaces/dashes/lowercase, amounts without cents");
 p = parse(msg(VENMO_OK, "Bo paid you $5", "Bo paid you $5\nlqs-4m8tx thanks"));
 check("'$5' (no cents) + 'lqs-4m8tx' -> 5, LQS4M8TX", p && p.amount === 5 && p.note === "LQS4M8TX", JSON.stringify(p));

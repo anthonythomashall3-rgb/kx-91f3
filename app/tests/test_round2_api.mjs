@@ -45,7 +45,7 @@ for (const m of readdirSync(CF).filter(f => /^migrate_\d+.*\.sql$/.test(f)).sort
   for (const st of readFileSync(join(CF, m), "utf8").replace(/^\s*--.*$/gm, "").split(";")) { try { if (st.trim()) sqlite.exec(st); } catch {} }
 const MAILS = [];
 const env = { DB: d1(sqlite), TEACHER_KEY: "admin-key-r2", REQUIRE_SIGNED: "1", ADMIN_EMAIL: "admin@usc.edu", ROT_SECRET: "rot-secret-r2",
-              PAY_SECRET: "pay-secret-r2-0123456789", LIVE_CACHE_MS: "0", MAIL_SINK: async m => { MAILS.push(m); return true; } };
+              STUDENT_FEE: "5", PAY_SECRET: "pay-secret-r2-0123456789", LIVE_CACHE_MS: "0", MAIL_SINK: async m => { MAILS.push(m); return true; } };
 const BASE = "https://lockqz.test";
 const sign = (key, path, ts, raw) => createHmac("sha256", key).update(`POST\n${path}\n${ts}\n${createHash("sha256").update(raw).digest("hex")}`).digest("hex");
 async function call(path, body, { teacher = null, sync = null, dev = null, get = false, ip = "10.0.0.9", hdr = {}, envx = {} } = {}) {

@@ -480,7 +480,12 @@ export async function onRequest(context) {
   // ---- payments: Venmo / Zelle, matched automatically from the payment alert emails ----
   // A Google Apps Script in the Gmail that receives the Venmo/Zelle alerts posts each payment to
   // /pay/notify. The memo code (LQSxxxxx student, LQxxxxx professor) says who paid.
-  const STUDENT_FEE = Number(env.STUDENT_FEE || 5);
+  const STUDENT_FEE = Number(env.STUDENT_FEE || 180);
+  // Student payment routes (no fees): Zelle (the business account's Zelle when ZELLE_BUSINESS_TO is set)
+  // and bank transfer by invoice. Venmo only if STUDENT_VENMO=1 (off: personal Venmo bans business use).
+  const stuZelle = () => String(env.ZELLE_BUSINESS_TO || env.ZELLE_TO || "") || null;
+  const stuVenmo = () => env.STUDENT_VENMO === "1" ? ((env.VENMO_HANDLE || "").replace(/^@/, "") || null) : null;
+  const stuBank = () => String(env.INVOICE_EMAIL || env.ADMIN_EMAIL || "") || null;
   const feeOn = () => { const from = String(env.STUDENT_FEE_FROM || ""); return /^\d{4}-\d{2}-\d{2}$/.test(from) && laToday() >= from; };
   // ---- terms: USC's academic calendar (usc.edu/academic-calendar), codes YYYY1/2/3 ----
   // [first day of classes, last day of finals (summer: last day of classes)]. Access paid for a term
@@ -553,7 +558,7 @@ export async function onRequest(context) {
   async function payInfo(email, limitIp = null) {
     const code = await studentCode(email, limitIp);
     if (code && typeof code === "object") return code;   // { limited: true }
-    return { amount: STUDENT_FEE, code, venmo: (env.VENMO_HANDLE || "").replace(/^@/, "") || null, zelle: env.ZELLE_TO || null,
+    return { amount: STUDENT_FEE, code, venmo: stuVenmo(), zelle: stuZelle(), bank: stuBank(),
              url: PAY_URL + (email ? "?email=" + encodeURIComponent(String(email).toLowerCase()) : "") };
   }
   // Memo codes typed by people: "lqs-ab12c", "LQS AB12C", "LQ AB12C". Student (LQS+5) first, then
@@ -636,7 +641,7 @@ export async function onRequest(context) {
     for (const r of due) {
       const email = String(r.email).toLowerCase(), amt = r.kind === "student" ? STUDENT_FEE : PRICE;
       const link = r.kind === "student" ? `${PAY_URL}?email=${encodeURIComponent(email)}` : "https://prof.lockqz.pages.dev/";
-      const text = `LOCKqz renews for the new semester.\n\nPay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nVenmo @${(env.VENMO_HANDLE||"").replace(/^@/,"")}  ·  Zelle ${env.ZELLE_TO||""}\n\nAccess turns on as soon as the payment arrives and lasts until ${termEndOf(cur)}.\n\nStop these emails: ${PAY_URL}?email=${encodeURIComponent(email)}&renew=off`;
+      const text = `LOCKqz renews for the new semester.\n\nPay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\n${r.kind === "student" ? `Zelle ${stuZelle()||""}${stuVenmo() ? `  ·  Venmo @${stuVenmo()}` : ""}  ·  Bank transfer: email ${stuBank()||""}` : `Venmo @${(env.VENMO_HANDLE||"").replace(/^@/,"")}  ·  Zelle ${env.ZELLE_TO||""}`}\n\nAccess turns on as soon as the payment arrives and lasts until ${termEndOf(cur)}.\n\nStop these emails: ${PAY_URL}?email=${encodeURIComponent(email)}&renew=off`;
       try {
         if (typeof env.MAIL_SINK === "function") await env.MAIL_SINK({ to: email, subject: "Renew LOCKqz", text });
         else await smtpSend(async () => (await import("cloudflare:sockets")).connect({ hostname: env.MAIL_HOST || "smtp.gmail.com", port: Number(env.MAIL_PORT || 465) }, { secureTransport: "on", allowHalfOpen: false }),
@@ -925,16 +930,30 @@ export async function onRequest(context) {
       if (!fresh) return json({ password: null, reason: "not locked" }, 403);
       const devLk = await db.prepare("SELECT 1 FROM events e JOIN devices d ON d.device_id=e.device_id WHERE e.device_id=? AND e.quiz_id=? AND (e.event='dev_lock' OR (e.event='lock' AND e.detail LIKE '%\"developer\":true%')) AND lower(COALESCE(d.student,'')) NOT IN (SELECT lower(email) FROM teachers WHERE role='admin') LIMIT 1").bind(device_id, lockId).first();
       if (devLk) return json({ password: null, reason: "not locked" }, 403);   // dev mode is admin-only
-      // Student fee: no password until this semester's $5 is paid (matched automatically from Venmo/Zelle).
+      // Student fee: no password until this semester's fee is paid (matched automatically from Zelle / bank alerts).
       const stu = v.ok ? v.dev : (feeOn() ? await db.prepare("SELECT student, student_verified FROM devices WHERE device_id=?").bind(device_id).first() : null);
       if (feeOn()) {
         // With email codes on, only a CONFIRMED email counts: an unverified device cannot claim a
         // professor's (fee-exempt) or a paid classmate's email just by reporting it.
-        const unconfirmed = codesOn && Number(stu?.student_verified) !== 1;
+        // Always a CONFIRMED email while the fee is on (even if email codes are off): a typed email
+        // is never enough to ride on someone else's payment.
+        const unconfirmed = Number(stu?.student_verified) !== 1;
         const who = unconfirmed ? null : stu?.student;
         if (!(await studentPaid(who))) return unconfirmed
           ? json({ password: null, reason: "verify", needs_verify: true }, 402)   // no pay block: the agent re-runs email setup
           : json({ password: null, reason: "unpaid", pay: await payInfo(who) }, 402);
+        // One payment = one student. A paid email cannot be shared: (1) never on two computers in a quiz
+        // at the same time; (2) at most 2 computers per email (seen in the last 30 days, not revoked).
+        // Staff (professors / admin) are exempt.
+        const wl = String(who).toLowerCase();
+        if (!(await db.prepare("SELECT 1 FROM teachers WHERE email=? AND (role='admin' OR verified=1)").bind(wl).first())) {
+          const sh = await db.prepare(`SELECT
+              (SELECT COUNT(DISTINCT l.device_id) FROM locks l JOIN devices d ON d.device_id=l.device_id WHERE d.student=? AND d.student_verified=1 AND COALESCE(d.revoked,0)=0 AND l.device_id<>? AND l.last_lock>?) AS live,
+              (SELECT COUNT(*) FROM devices WHERE student=? AND student_verified=1 AND COALESCE(revoked,0)=0 AND device_id<>? AND last_seen>?) AS other`)
+            .bind(wl, device_id, new Date(Date.now() - 120000).toISOString(), wl, device_id, new Date(Date.now() - 30 * 864e5).toISOString()).first();
+          if (Number(sh?.live) > 0) return json({ password: null, reason: "in_use", error: "This email is in a quiz on another computer." }, 402);
+          if (Number(sh?.other) >= 2) return json({ password: null, reason: "too_many_devices", error: "This email is already used on 2 computers. Email athall@usc.edu to remove one." }, 402);
+        }
       }
       // Everything about this quiz in ONE read: LOCKqz password + gate state, Brightspace dates, a
       // password still waiting to be removed from Brightspace (I-M9), and the course-wide password.

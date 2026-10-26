@@ -382,9 +382,9 @@ check("low install mailto stays under 2000 characters", mails.length > 0 && mail
 console.log("12 student pay page");
 w = await world(); let p = payTab(w, "al@usc.edu"); await w.idle();
 check("12 fee off -> 'No payment needed yet', not 'Paid'", p.el("free").hidden === false && p.el("done").hidden !== false);
-Object.assign(w.env, { STUDENT_FEE_FROM: "2000-01-01", STUDENT_FEE: "7", VENMO_HANDLE: "lqz-pay", ZELLE_TO: "pay@lqz.test" });
+Object.assign(w.env, { STUDENT_FEE_FROM: "2000-01-01", STUDENT_FEE: "7", VENMO_HANDLE: "lqz-pay", ZELLE_TO: "pay@lqz.test", INVOICE_EMAIL: "bill@lqz.test" });
 p = payTab(w, "al@usc.edu"); await w.idle();
-check("12 amount comes from the server", p.el("amt").textContent === "$7" && /Venmo \$7 /.test(p.el("venmo").textContent) && p.el("zamt").textContent === "Zelle $7", `${p.el("amt").textContent} | ${p.el("venmo").textContent} | ${p.el("zamt").textContent}`);
+check("12 amount comes from the server; Zelle + bank transfer, no Venmo", p.el("amt").textContent === "$7" && p.el("venmo").hidden !== false && p.el("zamt").textContent === "Zelle $7" && p.el("bank").hidden === false && /bill@lqz.test/.test(p.el("bto").textContent) && /LQS/.test(decodeURIComponent(p.el("bank").href)), `${p.el("amt").textContent} | ${p.el("venmo").hidden} | ${p.el("zamt").textContent} | ${p.el("bank").hidden}`);
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

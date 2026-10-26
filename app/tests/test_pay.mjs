@@ -77,12 +77,17 @@ async function getc(env, path, { teacher=null, sync=null } = {}) {
 const SECRET = "test-pay-secret-0123456789";
 const sqlite = makeDb(false);
 for (const m of ["migrate_017_sections.sql", "migrate_018_submissions.sql", "migrate_019_student_pay.sql", "migrate_022_renewals.sql"]) { try { sqlite.exec(readFileSync(join(CF, m), "utf8")); } catch (e) { if (!/duplicate column|already exists/.test(e.message)) throw e; } }
-const base = { DB: d1real(sqlite), TEACHER_KEY: ADMIN, REQUIRE_SIGNED: "1", VENMO_HANDLE: "@Anthony-Hall-417", ZELLE_TO: "(858) 900-4347", PAY_SECRET: SECRET };
+const base = { DB: d1real(sqlite), TEACHER_KEY: ADMIN, REQUIRE_SIGNED: "1", VENMO_HANDLE: "@Anthony-Hall-417", ZELLE_TO: "(858) 900-4347", INVOICE_EMAIL: "pay@usc.edu", STUDENT_FEE: "5", PAY_SECRET: SECRET };
 const ON = { ...base, STUDENT_FEE_FROM: "2000-01-01" }, OFF = base;
 const ADMIN_TOK = (await call(ON, "/signup", { email: "admin@usc.edu", password: "adminpass1" })).data.token;
 sqlite.prepare("INSERT INTO quizzes (quiz_id,title,password,created_at,qi,teacher_id,lock_id,ou) VALUES ('q1','Midterm','LQ-SEEDPW01',datetime('now'),?,'x',?,?)").run(QI, LOCK_ID, OU);
 const DEV = "mac-pay-1", K = randomBytes(32).toString("hex");
 await call(ON, "/register", { device_id: DEV, key: K, student: "al@usc.edu", platform: "mac-15" });
+console.log("P0 fee on: an unconfirmed email never gets the password (no riding on a classmate's payment)");
+{ await call(ON, "/report", { event: "lock", quiz_id: LOCK_ID, student: "al@usc.edu" }, { key: K, device: DEV });
+  const unv = await call(ON, "/password", { url: QUIZ_URL, device_id: DEV }, { key: K, device: DEV });
+  check("unconfirmed email -> verify, no password", unv.status === 402 && unv.data?.reason === "verify" && !unv.data?.password, JSON.stringify(unv.data)); }
+sqlite.prepare("UPDATE devices SET student_verified=1 WHERE device_id=?").run(DEV);
 const lock = () => call(ON, "/report", { event: "lock", quiz_id: LOCK_ID, student: "al@usc.edu" }, { key: K, device: DEV });
 const pw = env => call(env, "/password", { url: QUIZ_URL, device_id: DEV }, { key: K, device: DEV });
 const notify = (payments, secret = SECRET) => onRequest({ request: new Request(BASE + "/api/pay/notify", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Pay": secret }, body: JSON.stringify({ payments }) }), env: ON }).then(async r => ({ status: r.status, data: await r.json() }));
@@ -95,7 +100,7 @@ check("fee off: password released", r.status === 200 && r.data?.password === "LQ
 console.log("P2 fee on, unpaid: no password, payment info instead");
 r = await pw(ON);
 check("unpaid: 402", r.status === 402, `got ${r.status}`);
-check("pay info: $5, Venmo, Zelle, LQS code, pay page", r.data?.pay?.amount === 5 && r.data.pay.venmo === "Anthony-Hall-417" && r.data.pay.zelle === "(858) 900-4347" && /^LQS[A-Z0-9]{5}$/.test(r.data.pay.code||"") && r.data.pay.url === "https://lockqz.pages.dev/pay?email=al%40usc.edu", JSON.stringify(r.data));
+check("pay info: $5, Zelle + bank transfer, NO Venmo, LQS code, pay page", r.data?.pay?.amount === 5 && r.data.pay.venmo === null && r.data.pay.bank === "pay@usc.edu" && r.data.pay.zelle === "(858) 900-4347" && /^LQS[A-Z0-9]{5}$/.test(r.data.pay.code||"") && r.data.pay.url === "https://lockqz.pages.dev/pay?email=al%40usc.edu", JSON.stringify(r.data));
 const CODE = r.data.pay.code;
 r = await call(ON, "/pay/start", { email: "AL@usc.edu" });
 check("pay page gives the same code", r.data?.code === CODE && r.data.paid === false && r.data.required === true, JSON.stringify(r.data));
@@ -174,6 +179,7 @@ console.log("P10 USC terms: access through the term's last day of finals; renewa
     let t = await tick(envM);
     check("renewal window: emails sent for Spring 2027", t.term === "20271" && t.sent >= 2, JSON.stringify(t));
     check("opted-out payer gets nothing", !sent.some(m => m.to === "bo@usc.edu"), JSON.stringify(sent.map(m => m.to)));
+    check("student renewal email: Zelle + bank transfer, no Venmo", sent.some(m => m.to === "al@usc.edu" && /Zelle/.test(m.text) && /Bank transfer/.test(m.text) && !/Venmo/.test(m.text)), JSON.stringify(sent.map(m => m.text)));
     check("student email has $5, memo, pay link and a stop link", sent.some(m => m.to === "al@usc.edu" && /\$5 /.test(m.text) && m.text.includes(CODE) && m.text.includes("renew=off")), JSON.stringify(sent.map(m => m.text.slice(0, 80))));
     check("professor reminded too", sent.some(m => m.to === "prof@usc.edu" && /\$5,000/.test(m.text)));
     const n = sent.length; t = await tick(envM);
@@ -193,5 +199,42 @@ console.log("P10 USC terms: access through the term's last day of finals; renewa
   check("renewal emails can be turned back on", r.data?.renew === true);
   r = await onRequest({ request: new Request(BASE + "/api/pay/tick", { method: "POST", headers: { "X-LOCKqz-Pay": "nope-nope-nope-nope" }, body: "{}" }), env: envM });
   check("tick needs the script key", r.status === 401); }
+
+console.log("P11 price: $180 by default; business Zelle replaces the personal one; Venmo only if STUDENT_VENMO=1");
+{ const E = { ...ON }; delete E.STUDENT_FEE;
+  let s = (await call(E, "/pay/start", { email: "new180@usc.edu" })).data;
+  check("default student price is $180", s.amount === 180 && s.venmo === null && s.zelle === "(858) 900-4347" && s.bank === "pay@usc.edu", JSON.stringify(s));
+  s = (await call({ ...E, ZELLE_BUSINESS_TO: "pay@lockqz.com" }, "/pay/start", { email: "new180@usc.edu" })).data;
+  check("business Zelle shown instead of personal", s.zelle === "pay@lockqz.com", JSON.stringify(s));
+  s = (await call({ ...E, STUDENT_VENMO: "1" }, "/pay/start", { email: "new180@usc.edu" })).data;
+  check("STUDENT_VENMO=1 brings Venmo back", s.venmo === "Anthony-Hall-417", JSON.stringify(s));
+  const c = s.code;
+  r = await onRequest({ request: new Request(BASE + "/api/pay/notify", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Pay": SECRET }, body: JSON.stringify({ payments: [{ txn: "gmail:e1", amount: 179.99, note: c, via: "zelle" }] }) }), env: E }).then(async x => ({ data: await x.json() }));
+  check("$179.99 is not enough", r.data?.results?.[0]?.paid === false, JSON.stringify(r.data));
+  r = await onRequest({ request: new Request(BASE + "/api/pay/notify", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Pay": SECRET }, body: JSON.stringify({ payments: [{ txn: "gmail:e2", amount: 0.01, note: c, via: "zelle" }] }) }), env: E }).then(async x => x.json());
+  check("+$0.01 -> $180 paid", r.results?.[0]?.paid === true, JSON.stringify(r)); }
+
+console.log("P12 one payment = one student: a paid email cannot be shared between computers");
+{ const mk = async (id) => { const k = randomBytes(32).toString("hex"); await call(ON, "/register", { device_id: id, key: k, student: "al@usc.edu", platform: "mac-15" });
+    sqlite.prepare("UPDATE devices SET student_verified=1 WHERE device_id=?").run(id); return k; };
+  // al is paid (P10 ended with a Spring payment; make sure this term is paid too)
+  await notify([{ txn: "gmail:share-pay", amount: 5, note: CODE }]);
+  const K2 = await mk("mac-pay-2");
+  sqlite.prepare("UPDATE devices SET last_seen=? WHERE device_id IN (?,?)").run(new Date().toISOString(), DEV, "mac-pay-2");
+  await lock();                                                        // al's own computer is in the quiz now
+  await call(ON, "/report", { event: "lock", quiz_id: LOCK_ID, student: "al@usc.edu" }, { key: K2, device: "mac-pay-2" });
+  r = await call(ON, "/password", { url: QUIZ_URL, device_id: "mac-pay-2" }, { key: K2, device: "mac-pay-2" });
+  check("same paid email on a 2nd computer DURING the quiz -> refused", r.status === 402 && r.data?.reason === "in_use" && !r.data?.password, JSON.stringify(r.data));
+  sqlite.prepare("UPDATE locks SET last_lock=? WHERE device_id=?").run(new Date(Date.now() - 600000).toISOString(), DEV);
+  r = await call(ON, "/password", { url: QUIZ_URL, device_id: "mac-pay-2" }, { key: K2, device: "mac-pay-2" });
+  check("2nd computer alone (laptop swap) -> allowed", r.status === 200 && !!r.data?.password, JSON.stringify(r.data));
+  const K3 = await mk("mac-pay-3");
+  sqlite.prepare("UPDATE devices SET last_seen=? WHERE device_id=?").run(new Date().toISOString(), "mac-pay-3");
+  sqlite.prepare("UPDATE locks SET last_lock=? WHERE device_id=?").run(new Date(Date.now() - 600000).toISOString(), "mac-pay-2");
+  await call(ON, "/report", { event: "lock", quiz_id: LOCK_ID, student: "al@usc.edu" }, { key: K3, device: "mac-pay-3" });
+  r = await call(ON, "/password", { url: QUIZ_URL, device_id: "mac-pay-3" }, { key: K3, device: "mac-pay-3" });
+  check("3rd computer on one paid email -> refused", r.status === 402 && r.data?.reason === "too_many_devices", JSON.stringify(r.data));
+  r = await notify([{ txn: "gmail:other-code", amount: 5, note: CODE, payer: "Bo" }]);
+  check("someone paying with al's code pays for al only (bo still unpaid)", r.data?.results?.[0]?.email === "al@usc.edu" && (await call(ON, "/pay/start", { email: "zed@usc.edu" })).data?.paid === false, JSON.stringify(r.data)); }
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
