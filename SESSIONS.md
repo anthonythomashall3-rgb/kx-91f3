@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- (none)
+- 2026-10-25 20:35 PT — 01CsgBZK: "Sync now" button on the professor dashboard (talks to an open Sync tab). Files: cloudflare/public/dashboard.html, cloudflare/public/sync.js, tests/.
 
 ## Recently finished
 - 2026-10-25 18:45 PT — 01CsgBZK: v0.4.6. Content-quiz move tested in REAL browsers (Windows CI: Chrome, Edge, Firefox via test_windows_content_move.ps1 in release.yml; Mac: Safari + Chrome via test_safari_content_move.py, real Mac only). Fixed: Windows agent never read Firefox's address bar (ComboBox urlbar-input); Mac move throttled 10 s. Sync panel auto re-syncs every 15 min while open (0 LOCKqz requests when Brightspace is unchanged; forced hourly); professor emailed once when a student opens a quiz newer than the last Sync (migrate_026 sync_nudges).
