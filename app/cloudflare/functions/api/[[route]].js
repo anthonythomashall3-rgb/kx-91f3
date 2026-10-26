@@ -38,7 +38,8 @@ const AI_DOMAINS = [
   "chat.webllm.ai","webllm.mlc.ai","remotedesktop.google.com","remotedesktop-pa.googleapis.com","web.teamviewer.com","my.anydesk.com","web.parsec.app","api.sec-tunnel.com",
   "mask.icloud.com","mask-h2.icloud.com","cloudflare-dns.com","chrome.cloudflare-dns.com","mozilla.cloudflare-dns.com","dns.google","dns.google.com","dns.quad9.net",
   "doh.opendns.com","dns.nextdns.io","firefox.dns.nextdns.io","chromium.dns.nextdns.io","doh.xfinity.com","private.canadianshield.cira.ca","wikimedia-dns.org","dns.adguard-dns.com",
-  "doh.mullvad.net","freedns.controld.com","dns.alidns.com","doh.pub","appsgenaiserver-pa.clients6.google.com","appsgenaiserver-pa.googleapis.com","chat.learnwise.ai","learnwise.ai"
+  "doh.mullvad.net","freedns.controld.com","dns.alidns.com","doh.pub","appsgenaiserver-pa.clients6.google.com","appsgenaiserver-pa.googleapis.com","chat.learnwise.ai","learnwise.ai",
+  "blackbox.ai","www.blackbox.ai","hf.space","translate.goog","lens.google.com","abacus.ai","chatllm.abacus.ai","anakin.ai","notegpt.io","perchance.org/ai-chat"
 ];
 const now = () => new Date().toISOString();
 // "Today" in America/Los_Angeles as YYYY-MM-DD, so a professor stays active through the end of their
@@ -106,6 +107,11 @@ async function checkPw(pw, salt, stored, pepper = "") {
 // unlock shows within 8 s -- the gate loop itself only runs every 10 s. Starting/stopping a gate and a
 // Sync that changed quiz dates clear it.
 const LIVE_MEM = new Map();
+// /live paid check (D1 Free: 5M rows read/day): a "paid" answer is reused for PAID_TTL ms -- in this
+// isolate, and in this data center's cache per quiz (one Sync tab = one data center). Unpaid emails are
+// re-checked every round, so a new payment admits at once; a voided payment stops admitting within PAID_TTL.
+const PAID_MEM = new Map(), PAID_TTL = 300000;
+const WRITE_CAP = e => /row write limit|exceeded D1.*writ/i.test(String(e));
 const liveKey = (quiz, codes) => `${quiz}|${codes ? 1 : 0}`;
 const liveCacheReq = (origin, key) => new Request(`${origin}/__lqz_cache/live/${encodeURIComponent(key)}`);
 async function liveBust(origin, quizId) {
@@ -614,7 +620,7 @@ export async function onRequest(context) {
   // Which term a new payment counts for, given what this code already paid this term (H7).
   // studentStatus and professor activation also honor a next-term payment for what is left of the current term.
   const nearEnd = () => { const ce = Date.parse(classesEndOf(curTerms()[0]) + "T00:00:00Z"), t = Date.parse(laToday() + "T00:00:00Z"); return ce - t <= 14 * 86400000; };
-  const payTermFor = (paidThisTerm, price) => { const [cur, nxt] = curTerms(); return inGap() || (ahead() && (FULL(paidThisTerm, price) || nearEnd())) ? nxt : cur; };
+  const payTermFor = (paidThisTerm, price) => { const [cur, nxt] = curTerms(); return inGap() || (ahead() && (FULL(paidThisTerm, price) || (nearEnd() && !(Number(paidThisTerm) > 0)))) ? nxt : cur; };   // a balance on a part-paid term stays on that term
   const PAY_URL = "https://lockqz.pages.dev/pay";
   // The Gmail script's key: PAY_SECRET if set, else derived from the server's own secret (the admin
   // copies it from Admin -> Payments into the script once). Nothing new to configure in Cloudflare.
@@ -675,6 +681,22 @@ export async function onRequest(context) {
     const sums = {};
     for (const r of (await db.prepare(`SELECT code, term, COALESCE(SUM(${CREDIT()}),0) AS s FROM payments WHERE code IN (SELECT value FROM json_each(?)) AND term IN (?,?) AND ${COUNTS} GROUP BY code, term`).bind(JSON.stringify([...codes.keys()]), cur, nxt).all()).results) sums[r.code + "|" + r.term] = Number(r.s);
     for (const [c, e] of codes) if ((!inGap() && FULL(sums[c + "|" + cur] || 0, STUDENT_FEE)) || (early && FULL(sums[c + "|" + nxt] || 0, STUDENT_FEE))) ok.add(e);
+    return ok;
+  }
+  async function paidEmailsCached(list, quiz) {
+    const ttl = Number(env.PAID_CACHE_MS ?? PAID_TTL); if (!(ttl > 0)) return paidEmails(list);   // tests: 0 = off
+    const t = Date.now(), ems = [...new Set(list.map(e => String(e||"").trim().toLowerCase()).filter(e => e.includes("@")))];
+    const ok = new Set(); if (!ems.length) return ok;
+    const ck = new Request(`${url.origin}/__lqz_cache/paid/${encodeURIComponent(quiz)}`);
+    let shared = {};
+    try { if (typeof caches !== "undefined" && caches.default) { const h = await caches.default.match(ck); if (h) shared = await h.json() || {}; } } catch {}
+    const until = e => Math.max(PAID_MEM.get(e) || 0, Number(shared[e]) || 0);
+    const todo = ems.filter(e => { if (until(e) > t) { ok.add(e); return false; } return true; });
+    if (!todo.length) return ok;
+    for (const e of await paidEmails(todo)) { ok.add(e); PAID_MEM.set(e, t + ttl); shared[e] = t + ttl; }
+    if (PAID_MEM.size > 20000) PAID_MEM.clear();
+    for (const e of Object.keys(shared)) if (!(Number(shared[e]) > t)) delete shared[e];
+    try { if (typeof caches !== "undefined" && caches.default) await caches.default.put(ck, new Response(JSON.stringify(shared), { headers: { "Content-Type": "application/json", "Cache-Control": `max-age=${Math.ceil(ttl / 1000)}` } })); } catch {}
     return ok;
   }
   // Unique Zelle amount (OFF unless ZELLE_UNIQUE="1"; Anthony chose one price + memo): each unpaid student
@@ -944,6 +966,10 @@ export async function onRequest(context) {
       // H10: before the code is typed, only a masked name ("J*** S***") is shown -- enough for the
       // student to see it is their class list, without revealing a classmate's full name.
       if (op === "check") { const nm = await rosterName(); return json({ email, found: !!nm, name: maskName(nm), codes: codesOn }); }
+      // A computer in a quiz keeps its email until the quiz ends (else one paid email is handed from computer to
+      // computer while each keeps its lock and password).
+      if ((op === "token" || op === "code" || op === "send") && d?.student && String(d.student).toLowerCase() !== email && await db.prepare("SELECT 1 FROM locks WHERE device_id=? AND last_lock>?").bind(dev, since(120000)).first())
+        return json({ error: "in_quiz", message: "Finish your quiz first." }, 409);
       if (op === "token") {
         const want = await vtokenFor(email), got = String(body.vtoken || "").toLowerCase();
         if (!want || !sameHex(got, want)) return json({ error: "bad_token" }, 403);
@@ -1027,17 +1053,17 @@ export async function onRequest(context) {
       // "install" (sent at every helper start): logged only when the version/platform changed or the
       // device was quiet for a day (C6); the device row keeps the reported version for the gap rule.
       const ver = str(body.version, 60), plat = str(body.platform, 60);
-      const quietDay = !dev || !dev.last_seen || dev.last_seen < new Date(Date.now() - 86400000).toISOString();
+      const quietDay = !dev || !dev.last_seen || dev.last_seen < new Date(Date.now() - 7 * 86400000).toISOString();
       const changed = !!dev && ((ver && ver !== dev.version) || (plat && plat !== dev.platform));
       const logIt = ev !== "heartbeat" && (ev !== "install" || !dev || changed || quietDay);
       if (logIt) st.push(db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(device_id||null, studentStr, qidOk, evName, detailStr, now()));
       if (device_id && !dev) st.push(db.prepare("INSERT OR IGNORE INTO devices (device_id,installed_at) VALUES (?,?)").bind(device_id, now()));
       if (ev === "install" && changed) st.push(db.prepare("UPDATE devices SET version=COALESCE(?,version), platform=COALESCE(?,platform) WHERE device_id=?").bind(ver, plat, device_id));
-      // D1 free plan = 100k row writes/day: a heartbeat refreshes last_seen at most every 10 minutes
+      // D1 free plan = 100k row writes/day: a heartbeat refreshes last_seen at most every 60 minutes
       // (an UPDATE that matches no row writes nothing). Real events always update it; the student
       // (indexed) is written only when it actually changes.
       if (ev === "heartbeat" || (ev === "install" && !logIt))
-        st.push(db.prepare("UPDATE devices SET last_seen=? WHERE device_id=? AND (last_seen IS NULL OR last_seen < ?)").bind(now(), device_id||null, new Date(Date.now() - 600000).toISOString()));
+        st.push(db.prepare("UPDATE devices SET last_seen=? WHERE device_id=? AND (last_seen IS NULL OR last_seen < ?)").bind(now(), device_id||null, new Date(Date.now() - 3600000).toISOString()));
       else {
         st.push(db.prepare("UPDATE devices SET last_seen=? WHERE device_id=?").bind(now(), device_id||null));
         if (studentStr) st.push(db.prepare("UPDATE devices SET student=? WHERE device_id=? AND COALESCE(student_verified,0)<>1 AND student IS NOT ?").bind(studentStr, device_id||null, studentStr));
@@ -1091,7 +1117,8 @@ export async function onRequest(context) {
         const st = [];
         if (newerOrSame(v.dev?.version, "0.4.0")) st.push(gapStmt(db, device_id, lockId));
         st.push(db.prepare("UPDATE locks SET last_lock=?, helper_seen=?, signed=1, ip=COALESCE(?,ip) WHERE device_id=? AND quiz_id=?").bind(now(), now(), request.headers.get("CF-Connecting-IP") || null, device_id, lockId));
-        await runBatches(db, st);
+        // D1 daily write cap reached: the signed request is still the lock's proof -> never fail the exam.
+        try { await runBatches(db, st); } catch (e) { if (!WRITE_CAP(e)) throw e; }
         fresh = true;
       }
       if (!fresh) return json({ password: null, reason: "not locked" }, 403);
@@ -1116,8 +1143,9 @@ export async function onRequest(context) {
         if (!isExempt(env, wl) && !(await db.prepare("SELECT 1 FROM teachers WHERE email=? AND (role='admin' OR verified=1)").bind(wl).first())) {
           const sh = await db.prepare(`SELECT
               (SELECT COUNT(DISTINCT l.device_id) FROM locks l JOIN devices d ON d.device_id=l.device_id WHERE d.student=? AND d.student_verified=1 AND COALESCE(d.revoked,0)=0 AND l.device_id<>? AND l.last_lock>?) AS live,
-              (SELECT COUNT(*) FROM devices WHERE student=? AND student_verified=1 AND COALESCE(revoked,0)=0 AND device_id<>? AND last_seen>?) AS other`)
-            .bind(wl, device_id, new Date(Date.now() - 120000).toISOString(), wl, device_id, new Date(Date.now() - 30 * 864e5).toISOString()).first();
+              (SELECT COUNT(*) FROM (SELECT device_id FROM devices WHERE student=? AND student_verified=1 AND COALESCE(revoked,0)=0 AND device_id<>? AND last_seen>?
+                 UNION SELECT e.device_id FROM events e JOIN devices d2 ON d2.device_id=e.device_id WHERE e.event='password_released' AND e.student=? AND e.device_id<>? AND e.ts>? AND COALESCE(d2.revoked,0)=0)) AS other`)
+            .bind(wl, device_id, new Date(Date.now() - 120000).toISOString(), wl, device_id, new Date(Date.now() - 30 * 864e5).toISOString(), wl, device_id, new Date(Date.now() - 30 * 864e5).toISOString()).first();
           if (Number(sh?.live) > 0) return json({ password: null, reason: "in_use", error: "This email is in a quiz on another computer." }, 402);
           if (Number(sh?.other) >= 2) return json({ password: null, reason: "too_many_devices", error: "This email is already used on 2 computers. Email lockqz.app@gmail.com to remove one." }, 402);
         }
@@ -1160,8 +1188,11 @@ export async function onRequest(context) {
       // would be a row written (D1 Free: 100k/day). A new code or a new IP is logged again.
       if (given) {
         const det = JSON.stringify({ verified: v.ok, ip: request.headers.get("CF-Connecting-IP") || null, v: (await sha256hex(enc.encode(lockId + ":" + given))).slice(0, 8) });
-        await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) SELECT ?,(SELECT student FROM devices WHERE device_id=?),?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM events WHERE device_id=? AND quiz_id=? AND event='password_released' AND detail=?)")
-          .bind(device_id, device_id, lockId, "password_released", det, now(), device_id, lockId, det).run();
+        // A gated quiz's code changes every 5 min: a new code for the same device + quiz + IP is not a new
+        // row (5 rows written each with the indexes); the first release keeps its code hash.
+        const pre = gated ? det.slice(0, det.indexOf(',"v":')) : det;
+        await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) SELECT ?,(SELECT student FROM devices WHERE device_id=?),?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM events WHERE device_id=? AND quiz_id=? AND event='password_released' AND substr(detail,1,length(?))=?)")
+          .bind(device_id, device_id, lockId, "password_released", det, now(), device_id, lockId, pre, pre).run().catch(e => { if (!WRITE_CAP(e)) throw e; });
       }
       // C2: end = the quiz's Brightspace end (the helper's failsafe cap = end + 15 min) ONLY while the
       // quiz is gated (LOCKqz then knows the accommodations) and this student is not accommodated.
@@ -1169,7 +1200,13 @@ export async function onRequest(context) {
       // a later personal end date) or an end changed in Brightspace since the last Sync must never cut
       // a student's lock short.
       const end = gated && q?.end_date && !accommodated && !isNaN(Date.parse(q.end_date)) ? new Date(Date.parse(q.end_date)).toISOString() : null;
-      return json({ password: given, lockId, end });
+      // Gated: the code changes only at the next 5-min bucket (+ the Sync tab's round), so the agent may
+      // wait until then; older agents ignore it and keep their 15 s schedule.
+      // Only when Brightspace already holds this bucket's code (else the Sync tab is about to change it).
+      let recheck = null;
+      if (rot) { const b = minuteBucket();
+        if (rot === await rotatingPw(env.ROT_SECRET || env.TEACHER_KEY || "lqz-fallback", ou, qi, b)) recheck = Math.max(15, Math.ceil(((b + 1) * ROT_MS + 40000 - Date.now()) / 1000)); }
+      return json({ password: given, lockId, end, ...(recheck ? { recheck } : {}) });
     }
 
     if (p === "/match" && request.method === "POST") {
@@ -1436,10 +1473,23 @@ export async function onRequest(context) {
         return json({ ok: true, result: res[0] });
       }
       // Cancelled money = no access: refunds, disputes (card chargebacks, bank-account returns) and failed payments.
-      if (["charge.refunded", "charge.dispute.created", "charge.failed", "payment_intent.payment_failed", "payment_intent.canceled"].includes(ev.type)) {
+      // Failed / cancelled attempts are never recorded (only payment_status "paid" is), and a PaymentIntent that
+      // succeeded cannot fail later, so for a card a failure event is an attempt before the success (Stripe does
+      // not deliver events in order). Refund / dispute arriving BEFORE the paid event leaves a
+      // void tombstone, so the late "completed" event is a duplicate and never grants access.
+      if (["charge.failed", "payment_intent.payment_failed", "payment_intent.canceled"].includes(ev.type)) {
+        // Only a Stripe bank-account (ACH) payment can fail after it counted (a return); a card PaymentIntent that
+        // succeeded never fails later, so a card failure is a stale earlier attempt.
         const pi = String(ev.type.startsWith("payment_intent.") ? o.id : o.payment_intent || "");
+        const pr = pi ? await db.prepare("SELECT code FROM payments WHERE txn=? AND via='stripe-bank'").bind("stripe:" + pi).first() : null;
+        if (pr) { await db.prepare("UPDATE payments SET matched='void' WHERE txn=?").bind("stripe:" + pi).run(); await unsettle(pr.code); }
+        return json({ ok: true, voided: !!pr });
+      }
+      if (["charge.refunded", "charge.dispute.created"].includes(ev.type)) {
+        const pi = String(o.payment_intent || "");
         const pr = pi ? await db.prepare("SELECT code FROM payments WHERE txn=?").bind("stripe:" + pi).first() : null;
         if (pr) { await db.prepare("UPDATE payments SET matched='void' WHERE txn=?").bind("stripe:" + pi).run(); await unsettle(pr.code); }
+        else if (pi) await db.prepare("INSERT OR IGNORE INTO payments (txn,code,amount,via,payer,note,term,received_at,matched) VALUES (?,NULL,0,'stripe-card','',?,NULL,?,'void')").bind("stripe:" + pi, ev.type, now()).run();
         return json({ ok: true, voided: !!pr });
       }
       return json({ ok: true, ignored: ev.type || null });
@@ -1522,11 +1572,14 @@ export async function onRequest(context) {
       const txn = String(body.txn||""); let code = String(body.code||"").trim().toUpperCase();
       if (/@/.test(code)) code = await studentCode(code.toLowerCase());
       if (!txn || !/^LQS?[A-Z0-9]{5}$/.test(code||"")) return json({ error:"bad txn or code" }, 400);
-      const pr = await db.prepare("SELECT term, code FROM payments WHERE txn=?").bind(txn).first();
+      const pr = await db.prepare("SELECT term, code, matched FROM payments WHERE txn=?").bind(txn).first();
       if (!pr) return json({ error:"no such payment" }, 404);
+      // A no-memo / review row was stored under the current term without a code: put it on the term a payment
+      // with this code would count for now (else a gap-time Zelle credits the term that just ended).
+      if (!pr.code || pr.matched === "review") { const [cur] = curTerms(); pr.term = payTermFor(await paidSum(code, cur), /^LQS[A-Z0-9]{5}$/.test(code) ? STUDENT_FEE : PRICE); }
       const amt = body.amount != null && body.amount !== "" ? Number(body.amount) : null;
       if (amt !== null && !(amt > 0 && amt <= 100000)) return json({ error:"bad amount" }, 400);
-      await db.prepare(`UPDATE payments SET code=?, matched=NULL${amt !== null ? ", amount=?" : ""} WHERE txn=?`).bind(...(amt !== null ? [code, amt, txn] : [code, txn])).run();
+      await db.prepare(`UPDATE payments SET code=?, term=?, matched=NULL${amt !== null ? ", amount=?" : ""} WHERE txn=?`).bind(...(amt !== null ? [code, pr.term, amt, txn] : [code, pr.term, txn])).run();
       return json({ ok:true, was: pr.code || null, ...(await settle(code, pr.term)) });
     }
     // Admin: void a payment (refunded, duplicate, wrong alert). It stops counting at once for students;
@@ -2137,8 +2190,9 @@ export async function onRequest(context) {
       });
       // Student fee: the gate never admits an unpaid student (no Brightspace user -> no special access),
       // so a quiz password passed on by a paid classmate is useless to them.
-      if (feeOn()) { const okPaid = await paidEmails(rows.map(r => r.email));
-        rows.forEach(r => { if (r.user_id && !okPaid.has(String(r.email||"").toLowerCase())) { r.user_id = null; r.eligible = false; r.unpaid = true; } }); }
+      // Rows with an email but no class-list match are marked too: the Sync tab may resolve them itself.
+      if (feeOn()) { const okPaid = await paidEmailsCached(rows.map(r => r.email), quiz);
+        rows.forEach(r => { if ((r.user_id || r.email) && !okPaid.has(String(r.email||"").toLowerCase())) { r.user_id = null; r.eligible = false; r.unpaid = true; } }); }
       // Server-confirmed submissions (reported by the professor's trusted Sync session), with the time
       // Brightspace says each student completed (C5). Any unlock -- or a period the helper went dark --
       // inside the quiz window and BEFORE that completion is "left_early" (red: AI may have been open),
@@ -2166,10 +2220,17 @@ export async function onRequest(context) {
           if (!overlaps(e, qi)) return false;
           const clean = e.event === "unlock" && reasonOf(e) === "quiz_submitted";
           // Completion time unknown (old Sync tab): the submission itself is the proof (pre-C5 rule).
-          if (submitted) return !clean && !isNaN(doneAt) && Date.parse(w) < doneAt;
+          // A "quiz_submitted" unlock is clean only if it came AFTER Brightspace's completion time (60 s
+          // slack for clocks): the reason is chosen by the student's own agent (any navigation to the
+          // quiz list / a submissions page sends it, and so does a local /unlock call).
+          if (submitted) return !isNaN(doneAt) && Date.parse(w) < doneAt - (clean ? 60000 : 0);
           return !(clean && (!subsFor.has(qi) || nowMs - Date.parse(e.ts) < 120000));
         });
         if (submitted) r.submitted = true;
+        // Dark lock + Brightspace completion while dark: the laptop was online enough to submit, so the
+        // helper was stopped (not a wifi drop). Red, even with no unlock event.
+        if (submitted && !isNaN(doneAt) && (r.status === "dark" || r.status === "helper_killed") && r.last_lock && Date.parse(r.last_lock) + STALE < doneAt) {
+          r.status = "left_early"; r.reason = "went_dark"; r.flagged_at = r.last_lock; return; }
         if (!inc.length) return;
         if (r.status === "locked" || r.status === "done" || r.status === "browser_closed") {
           const last = inc[inc.length - 1];

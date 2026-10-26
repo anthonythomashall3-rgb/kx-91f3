@@ -154,14 +154,14 @@ async function suite(label, oldSchema) {
   r = await call(off, "/verify", { op: "send", email: "bo@usc.edu" }, S);
   check("verified device keeps al@usc.edu", sqlite.prepare("SELECT student FROM devices WHERE device_id=?").get(DEV).student === "al@usc.edu");
 
-  console.log("V11 write budget: a heartbeat touches devices.last_seen at most every 10 minutes");
+  console.log("V11 write budget: a heartbeat touches devices.last_seen at most every 60 minutes");
   sqlite.prepare("UPDATE devices SET last_seen=? WHERE device_id=?").run(new Date(Date.now() - 60000).toISOString(), DEV);
   const ls1 = sqlite.prepare("SELECT last_seen FROM devices WHERE device_id=?").get(DEV).last_seen;
   await call(on, "/report", { event: "heartbeat", quiz_id: LOCK_ID, source: "helper" }, S);
   check("recent last_seen: heartbeat writes no devices row", sqlite.prepare("SELECT last_seen FROM devices WHERE device_id=?").get(DEV).last_seen === ls1);
-  sqlite.prepare("UPDATE devices SET last_seen=? WHERE device_id=?").run(new Date(Date.now() - 700000).toISOString(), DEV);
+  sqlite.prepare("UPDATE devices SET last_seen=? WHERE device_id=?").run(new Date(Date.now() - 3700000).toISOString(), DEV);
   await call(on, "/report", { event: "heartbeat", quiz_id: LOCK_ID, source: "helper" }, S);
-  check("stale last_seen (>10 min): heartbeat refreshes it", Date.now() - Date.parse(sqlite.prepare("SELECT last_seen FROM devices WHERE device_id=?").get(DEV).last_seen) < 5000);
+  check("stale last_seen (>60 min): heartbeat refreshes it", Date.now() - Date.parse(sqlite.prepare("SELECT last_seen FROM devices WHERE device_id=?").get(DEV).last_seen) < 5000);
 
   console.log("V12 write budget: re-syncing an unchanged class writes nothing; changes write only the change");
   const course = (list, quizzes = []) => ({ courses: [{ ou: "55555", name: "FBE 101", code: "FBE-101", role: "Instructor", classlist: list, quizzes }] });

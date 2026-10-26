@@ -280,7 +280,7 @@ check("6 the button still carries the exact email", [...thtml.matchAll(/data-ema
 
 console.log("7 the home refresh never re-draws over open or typed things");
 d = dashTab(w, { token: w.ADMIN, hash: "#admin" }); await w.idle();
-const auto = d.intervals.find(i => i.ms === 300000);   // round 2: every 5 min while visible
+const auto = d.intervals.find(i => i.ms === 900000);   // every 15 min while visible (D1 reads)
 d.el("app").innerHTML = "MARK"; await auto.fn(); await w.idle();
 check("7 Admin page not re-drawn", d.app() === "MARK");
 d.loc.hash = ""; d.openDetails = true; d.el("app").innerHTML = "MARK"; await auto.fn(); await w.idle();

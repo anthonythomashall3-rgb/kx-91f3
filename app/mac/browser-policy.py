@@ -65,7 +65,14 @@ SAFE_EXTENSIONS = ["nngceckbapebfimnlniiiahkandclblb", "aeblfdkhhhdcdjpifhhbdioj
                    "jbkfoedolllekgbhcbcoahefnbanhhlh", "dppgmdbiimibapkepcbdbmkaabgiofem",
                    "bbcinlkgjjkejfdpemiealijmmooekmp", "gehmmocbbkpblljhkekmfhjpfbkclbph"]
 
-SEARCH_BLOCK = ["google.com/search", "google.com/webhp", "bing.com/search", "bing.com/copilotsearch",
+# Google's country sites carry the same AI Overviews / AI Mode (google.co.uk/search?udm=50): blocked too
+# (the udm=14 allowlist is google.com only, so plain web search keeps working through the default engine).
+GOOGLE_CC = ["co.uk", "ca", "com.au", "co.in", "de", "fr", "es", "it", "nl", "be", "ch", "at", "ie", "se",
+             "no", "dk", "fi", "pl", "pt", "gr", "cz", "hu", "ro", "co.jp", "co.kr", "com.hk", "com.tw",
+             "com.sg", "com.ph", "co.id", "com.my", "co.th", "com.vn", "com.mx", "com.br", "com.ar", "cl",
+             "com.co", "com.pe", "co.nz", "co.za", "com.ng", "com.eg", "com.sa", "ae", "co.il", "com.tr",
+             "ru", "com.ua", "com.pk", "com.bd", "lk", "is", "lu"]
+SEARCH_BLOCK = ["google.%s/search" % c for c in GOOGLE_CC] + ["google.%s/webhp" % c for c in GOOGLE_CC] + ["google.com/search", "google.com/webhp", "bing.com/search", "bing.com/copilotsearch",
                 "bing.com/chat", "copilot.microsoft.com", "duckduckgo.com", "duck.ai",
                 "search.yahoo.com", "search.brave.com", "you.com", "kagi.com",
                 "yandex.com/search", "ecosia.org/search", "startpage.com"]
@@ -123,7 +130,7 @@ def firefox_policy():
            "https://www.google.com/search?*udm=36*", "https://www.google.com/search?*tbm=isch*",
            "https://www.google.com/search?*tbm=nws*", "https://www.google.com/search?*tbm=vid*",
            "https://www.google.com/search?*tbm=bks*"]
-    blk = ["https://www.google.com/search*", "https://www.google.com/webhp*", "https://www.bing.com/*search*",
+    blk = ["https://www.google.%s/search*" % c for c in GOOGLE_CC] + ["https://www.google.com/search*", "https://www.google.com/webhp*", "https://www.bing.com/*search*",
            "https://www.bing.com/chat*", "https://copilot.microsoft.com/*", "https://duckduckgo.com/*",
            "https://duck.ai/*", "https://search.yahoo.com/*", "https://search.brave.com/*",
            "https://you.com/*", "https://kagi.com/*", "https://yandex.com/search*",

@@ -93,6 +93,9 @@ rm -rf "$STAGE" && mkdir -p "$STAGE"
 cp -R functions wrangler.toml "$STAGE"/
 cp -R public prof_site legacy_site legacy_prof "$STAGE"/
 ROUTE="$STAGE/functions/api/[[route]].js"
+# Static copy of the AI blocklist: agents read it 2-3 times a day, and static files never count against
+# the free plan's 100,000 Functions requests/day (/api/blocklist stays for older installs).
+node -e 'const fs=require("fs"); const m=fs.readFileSync(process.argv[1],"utf8").match(/const AI_DOMAINS = (\[[\s\S]*?\]);/); const d=JSON.parse(m[1]); if(d.length<90) process.exit(1); fs.writeFileSync(process.argv[2], JSON.stringify({domains:d}));' "$ROUTE" "$STAGE/public/blocklist.json"
 python3 - "$ROUTE" "$VERSION" "$BUILD" <<'PY'
 import sys
 p, v, b = sys.argv[1:4]

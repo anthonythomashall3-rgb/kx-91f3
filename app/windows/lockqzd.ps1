@@ -584,6 +584,8 @@ while ($listener.IsListening) {
           $pw = $null; $pay = $null; $why = $null
           if ($r.data) { $pw = $r.data.password; $pay = $r.data.pay; $why = [string]$r.data.reason }
           $out = @{ password = $pw; status = $r.code; pay = $pay }
+          if ($r.data -and ($null -ne $r.data.recheck)) { $out.recheck = $r.data.recheck }   # gated: next code change
+          if (($r.code -eq 0) -or ($r.code -eq 502) -or ($r.code -eq 503)) { $out.error = "server_busy" }   # agent backs off
           $nowS = [int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
           if (($r.code -eq 200) -and $pw) {
             # C2: the server names the quiz end -> safety cap = end + 15 min (never > 24 h)

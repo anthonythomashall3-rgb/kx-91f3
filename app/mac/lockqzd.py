@@ -203,7 +203,7 @@ UPDATE_NEVER = {"config.json", "device.key", "active_lock.json", "lockqzd.log", 
 
 STATE = {"state": "unlocked", "quiz_id": None, "student": CONF.get("student"),
          "locked_at": None, "locked_since": 0.0, "max_minutes": MAX_MIN, "cap_at": 0.0, "end_known": False,
-         "unlock_pending": False, "capped_quiz": None, "capped_at": 0.0, "capped_reason": None}
+         "mono_since": None, "unlock_pending": False, "capped_quiz": None, "capped_at": 0.0, "capped_reason": None}
 LOCK = threading.Lock()
 QUIZ_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 UNLOCK_REASONS = {"quiz_submitted", "quiz_left", "quiz_tab_closed"}   # what the agent may say
@@ -346,7 +346,9 @@ def device_key():
         log("could not save device key: %s" % e)
     return k
 
-KEY = device_key()
+# Dry-run (tests) never signs with this install's real key: otherwise `sudo LOCKQZ_DRYRUN=1 lockqzd.py`
+# would send real, signed lock/heartbeats while blocking nothing.
+KEY = secrets.token_hex(32) if DRYRUN == "1" and not os.environ.get("LOCKQZ_KEY_PATH") else device_key()
 
 def lock_id(url):
     """Same rule as the agent and the server: '<ou>-<qi>' from the quiz URL's own ?ou= / &qi= parameters."""
@@ -520,8 +522,15 @@ def report_install():
 def refresh_blocklist():
     if not API: return
     try:
-        r = urllib.request.urlopen(urllib.request.Request(API + "/blocklist", headers=UA), timeout=8, context=ssl.create_default_context())
-        doms = json.loads(r.read()).get("domains", [])
+        # Static copy first (free on Cloudflare Pages: no Functions request), the API as a fallback.
+        doms = []
+        for u in ([SITE + "/blocklist.json"] if SITE else []) + [API + "/blocklist"]:
+            try:
+                r = urllib.request.urlopen(urllib.request.Request(u, headers=UA), timeout=8, context=ssl.create_default_context())
+                doms = json.loads(r.read()).get("domains", [])
+                if doms: break
+            except Exception as e:
+                log("blocklist %s: %s" % (u, e))
         # Validate before trusting: must be a healthy list of well-formed hosts, and
         # must still contain the anchors. A bad/empty download never wipes the list.
         # host names AND host/path entries (bing.com/chat): the browser policy enforces the paths
@@ -706,7 +715,10 @@ def watcher():
                 # safety cap (quiz end + 15 min, or 6 h when the end is unknown, never > 24 h): a
                 # failsafe for a broken agent - normally AI comes back the moment the quiz is submitted.
                 cap_at = STATE["cap_at"] or (STATE["locked_since"] + STATE["max_minutes"] * 60)
-                if STATE["locked_since"] and time.time() >= cap_at:
+                # Wall clock AND monotonic clock must both say the cap is reached: an admin who moves the
+                # Mac's date forward 24 h must not end the lock (time.monotonic() ignores date changes).
+                mono_ok = STATE.get("mono_since") is None or time.monotonic() - STATE["mono_since"] >= cap_at - STATE["locked_since"]
+                if STATE["locked_since"] and time.time() >= cap_at and mono_ok:
                     log("safety cap reached — auto-unlocking")
                     cap_end_known = STATE["end_known"]
                     save_capped(qid)
@@ -808,7 +820,7 @@ class H(BaseHTTPRequestHandler):
                 if not same:   # a repeat /lock for the running quiz never extends the cap
                     now = time.time()
                     STATE.update(max_minutes=mx, locked_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                                 locked_since=now, cap_at=now + mx * 60, end_known=False)
+                                 locked_since=now, cap_at=now + mx * 60, end_known=False, mono_since=time.monotonic())
                 if STATE["capped_quiz"] == qid: forget_capped()
                 save_lock(); engine("lock")
             report_lock_async(qid)
@@ -866,6 +878,8 @@ class H(BaseHTTPRequestHandler):
             pay = j.get("pay") if isinstance(j.get("pay"), dict) else None
             out = {"password": pw, "status": code, "pay": pay}
             reason = j.get("reason") if isinstance(j.get("reason"), str) else None
+            if isinstance(j.get("recheck"), (int, float)): out["recheck"] = j["recheck"]   # gated: next code change
+            if code in (0, 502, 503) or j.get("error") == "server_busy": out["error"] = "server_busy"   # agent backs off
             if code == 200 and pw:
                 # C2: the server names the quiz end -> the safety cap becomes end + 15 min (<= 24 h).
                 with LOCK:
@@ -924,7 +938,8 @@ def main():
         # auto-unlocks on time, so nobody is ever left locked.
         STATE.update(state="locked", quiz_id=rec["quiz_id"], student=rec.get("student") or STATE["student"],
                       locked_at=rec.get("locked_at"), locked_since=float(rec["locked_since"]),
-                      max_minutes=rec["max_minutes"], cap_at=rec["cap_at"], end_known=rec["end_known"])
+                      max_minutes=rec["max_minutes"], cap_at=rec["cap_at"], end_known=rec["end_known"],
+                      mono_since=time.monotonic() - max(0.0, time.time() - float(rec["locked_since"])))
         engine("lock")
         # A restart from our own signed self-update is expected, not tampering. The updater drops a
         # marker; consume it and report a benign "resumed" instead of "tamper".

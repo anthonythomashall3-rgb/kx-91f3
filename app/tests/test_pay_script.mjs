@@ -8,7 +8,7 @@ const GS = process.env.LQZ_GS || join(dirname(fileURLToPath(import.meta.url)), "
 const src = readFileSync(GS, "utf8");
 const ctx = {}; vm.createContext(ctx); vm.runInContext(src + "\nthis.parse = parse;", ctx);
 let pass = 0, fail = 0; const check = (m, c, i = "") => { if (c) { pass++; console.log("  ok:", m); } else { fail++; console.log("  FAIL:", m, i); } };
-const OWN = "lockqz.pay@gmail.com", OPTS = { owners: [OWN] };
+const OWN = "lockqz.pay@gmail.com", OPTS = { owners: [OWN], accountMarks: ["1234"] };
 // A raw alert: Gmail's DKIM verdict, the sender's DKIM-Signature (h= lists the signed headers), To:.
 const msg = (auth, subject, body, { id = "m1", to = OWN, d = null, h = "from:to:subject:date" } = {}) => {
   const dom = d || ((auth.match(/header\.(?:i=[^@\s;]*@|d=)([A-Za-z0-9.-]+)/) || [])[1] || "x.com");
@@ -17,7 +17,7 @@ const msg = (auth, subject, body, { id = "m1", to = OWN, d = null, h = "from:to:
 };
 const parse = (m, o = OPTS) => ctx.parse(m, o);
 const VENMO_OK = "dkim=pass header.i=@venmo.com header.s=x header.b=y; spf=pass";
-let p = parse(msg(VENMO_OK, "Al Student paid you $5.00", "Al Student paid you $5.00\nLQS4M8TX\nTransaction ID 123456"));
+let p2; let p = parse(msg(VENMO_OK, "Al Student paid you $5.00", "Al Student paid you $5.00\nLQS4M8TX\nTransaction ID 123456"));
 check("real Venmo alert parsed; txn = Venmo's own transaction id", p && p.amount === 5 && p.note === "LQS4M8TX" && p.via === "venmo" && p.payer === "Al Student" && p.txn === "venmo:123456" && p.msg === "m1" && !p.needs_review, JSON.stringify(p));
 p = parse(msg(VENMO_OK, "Al Student paid you $5.00", "Al Student paid you $5.00\nLQS4M8TX\nTransaction ID 123456", { id: "m2" }));
 check("same payment re-sent under another Gmail id -> same txn (deduped by LOCKqz)", p && p.txn === "venmo:123456");
@@ -41,7 +41,7 @@ p = parse(msg("dkim=pass header.i=@alerts.bankofamerica.com", "Zelle payment rec
 check("memo saying $180 on a $1 payment counts as $1", p && p.amount === 1, JSON.stringify(p));
 p = parse(msg("dkim=pass header.i=@alerts.bankofamerica.com", "Zelle payment received", "Memo: LQS4M8TX paid $180\nAmount: $1.00"));
 check("memo before the amount: still the real $1", p && p.amount === 1, JSON.stringify(p));
-p = parse(msg("dkim=pass header.i=@alerts.bankofamerica.com", "You received a deposit", "ACH deposit $180.00 from JOHN DOE\nLQS4M8TX"));
+p = parse(msg("dkim=pass header.i=@alerts.bankofamerica.com", "You received a deposit", "ACH deposit $180.00 from JOHN DOE to account ending 1234\nLQS4M8TX"));
 check("bank transfer with memo -> counted automatically (via bank)", p && !p.needs_review && p.via === "bank" && p.note === "LQS4M8TX" && p.amount === 180, JSON.stringify(p));
 p = parse(msg("dkim=pass header.i=@alerts.bankofamerica.com", "You received a deposit", "Payroll deposit $2,000.00"));
 check("other deposits ignored", p === null, JSON.stringify(p));
@@ -59,7 +59,9 @@ p = parse(msg(VENMO_OK, "Al paid you $5.00", "LQS4M8TX", { h: "from:subject:date
 check("To: not covered by the DKIM signature -> review only", p && p.needs_review === true, JSON.stringify(p));
 p = parse(msg("dkim=pass header.d=zellepay.com", "You received $5.00 with Zelle", "Memo: LQS4M8TX"));
 check("zellepay.com alert -> review only (not a confirmed receiving alert)", p && p.needs_review === true && /zellepay/.test(p.review_reason), JSON.stringify(p));
-p = parse(msg("dkim=pass header.d=zellepay.com", "You received $5.00 with Zelle", "Memo: LQS4M8TX"), { owners: [OWN], zellepayOk: true });
+p = parse(msg("dkim=pass header.d=zellepay.com", "You received $5.00 with Zelle", "Sent to account ending 1234\nMemo: LQS4M8TX"), { owners: [OWN], zellepayOk: true, accountMarks: ["1234"] });
+p2 = parse(msg("dkim=pass header.i=@alerts.bankofamerica.com", "You received a deposit", "ACH deposit $180.00 from JOHN DOE\nLQS4M8TX"));
+check("alert not naming LOCKqz's account -> review (someone else's bank)", p2 && p2.needs_review === true, JSON.stringify(p2));
 check("zellepay.com with ZELLEPAY_OK=1 -> counts", p && !p.needs_review && p.amount === 5, JSON.stringify(p));
 p = parse(msg(VENMO_OK, "Al paid you $5.00", "LQS4M8TX"), {});
 check("owner address unknown -> review only", p && p.needs_review === true, JSON.stringify(p));

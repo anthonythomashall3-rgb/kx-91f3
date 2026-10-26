@@ -14,6 +14,7 @@ Chromium, Vivaldi, Arc, Safari via Apple Events; Firefox via its session file) a
 First run asks the student's school email ONCE (confirmed by an emailed code) so the
 professor's roster and the quiz gate know who is locked.
 """
+import random
 import hashlib, json, os, re, subprocess, threading, time, urllib.error, urllib.request, urllib.parse, glob
 NOPROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))   # never go through a system proxy
 
@@ -388,6 +389,46 @@ def no_policy_pids(procs, keep_app):
         if m and m.group(1) in OPERA_APPS and m.group(1) != keep_app: out.append((pid, m.group(1)))
     return out
 
+# Browsers LOCKqz can police (policy plist and/or tab reading). Any OTHER running app that handles
+# http(s) links (Orion, Helium, Thorium, a re-signed Chrome copy with a new bundle id ...) has no policy:
+# its own DNS-over-HTTPS / proxy skips /etc/hosts and Google AI Mode is open in it -> closed while locked.
+POLICED_IDS = {"com.apple.Safari", "com.apple.SafariTechnologyPreview",
+               "com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.dev", "com.google.Chrome.canary",
+               "com.microsoft.edgemac", "com.microsoft.edgemac.Beta", "com.microsoft.edgemac.Dev", "com.microsoft.edgemac.Canary",
+               "com.brave.Browser", "com.brave.Browser.beta", "com.brave.Browser.nightly", "org.chromium.Chromium",
+               "com.vivaldi.Vivaldi", "company.thebrowser.Browser", "org.mozilla.firefox",
+               "org.mozilla.firefoxdeveloperedition", "org.mozilla.nightly", "org.mozilla.librewolf",
+               "net.waterfox.waterfox", "one.ablaze.floorp", "app.zen-browser.zen", "net.mullvad.mullvadbrowser",
+               "org.torproject.torbrowser"}
+_bundle_cache = {}
+def _bundle_info(comm):
+    """(bundle id, handles http) for a main binary path '/X.app/Contents/MacOS/x', cached."""
+    m = re.search(r"^(.*?\.app)/Contents/MacOS/[^/]+$", comm or "")
+    if not m: return None, False
+    app = m.group(1)
+    if app not in _bundle_cache:
+        bid, web = None, False
+        try:
+            import plistlib
+            with open(os.path.join(app, "Contents", "Info.plist"), "rb") as f: info = plistlib.load(f)
+            bid = str(info.get("CFBundleIdentifier") or "")
+            for t in info.get("CFBundleURLTypes") or []:
+                if {"http", "https"} & {str(x).lower() for x in (t.get("CFBundleURLSchemes") or [])}: web = True
+        except Exception: pass
+        _bundle_cache[app] = (bid, web)
+    return _bundle_cache[app]
+
+def unpoliced_browser_pids(procs, keep_app, denied=()):
+    """Main processes of web browsers LOCKqz cannot police, plus browsers whose tabs the student
+    refused to let LOCKqz read (Automation 'Don't Allow': no tab rewrite, e.g. Safari + Google AI Mode)."""
+    out = []
+    for pid, _, comm in procs:
+        m = APP_MAIN_RE.search(comm)
+        if not m or m.group(1) == keep_app or "/System/" in comm: continue
+        bid, web = _bundle_info(comm)
+        if (web and bid not in POLICED_IDS) or m.group(1) in denied: out.append((pid, m.group(1)))
+    return out
+
 RESTART_APPS = ("Brave Browser",)   # read new policies (Leo, Tor windows, VPN off) only when they start
 def restart_pids(procs, keep_app):
     """Main processes of browsers closed once at lock so their quiz policies apply on reopen."""
@@ -735,7 +776,9 @@ class Agent:
         pw, reason = r.get("password"), r.get("reason")
         if pw:
             changed, had = pw != self.pw, self.pw
-            self.pw, self.pw_next = pw, now + 15
+            # Gated quiz: the server says when the code can next change (older servers: every 15 s).
+            rc = r.get("recheck")
+            self.pw, self.pw_next = pw, now + (max(15, min(360, rc)) if isinstance(rc, (int, float)) else 15)
             if changed:
                 clipboard(pw)
                 if first and developer_mode():
@@ -776,6 +819,13 @@ class Agent:
             self.share_told = self.quiz
             dialog("This school email is in a quiz on another computer right now.\n\nOne payment covers one student." if reason == "in_use"
                    else "This school email is already used on 2 computers.\n\nEmail lockqz.app@gmail.com to remove one.")
+        # LOCKqz busy (free-plan limit, 503 server_busy) or unreachable: back off with jitter (30 s .. 5 min)
+        # so thousands of waiting students do not burn the daily request budget; any answer resets it.
+        if reason is None and (not r or r.get("error") == "server_busy"):
+            self.busy_n = getattr(self, "busy_n", 0) + 1
+            self.pw_next = now + min(300, 15 * 2 ** min(self.busy_n, 5)) * (0.5 + random.random() / 2)
+            return None
+        self.busy_n = 0
         self.pw_next = now + 15
         return None
 
@@ -929,8 +979,10 @@ class Agent:
             if not self.url or "/attempt/" in url_parts(present[self.quiz])[0]: self.url = present[self.quiz]
             if not self.quiz_app: self.quiz_app = next((a for (a, _, _, u) in tabs if u == present[self.quiz]), None)
         else:
-            if self.quiz in left or (any_leaving and not open_quizzes):
+            if self.quiz in left:
                 self.end("quiz_submitted"); return
+            if any_leaving and not open_quizzes:   # quiz list / another quiz's page: not proof of a submit
+                self.end("quiz_left"); return
             if open_quizzes:          # our quiz is gone and another one is open: hand over at once
                 self.end("quiz_left"); return
             self.missing_since = self.missing_since or now
@@ -974,7 +1026,8 @@ class Agent:
             # Opera reopened during the quiz (no policy layer, built-in VPN) -> closed again.
             if now - getattr(self, "opera_check", 0) >= 5:
                 self.opera_check = now
-                o = no_policy_pids(ps_procs(), self.quiz_app)
+                procs = ps_procs()
+                o = no_policy_pids(procs, self.quiz_app) + unpoliced_browser_pids(procs, self.quiz_app, set(_denied))
                 if close_pids(o) and not self.opera_warned:
                     self.opera_warned = True
                     dialog("Opera was closed: it cannot turn its AI off during a quiz. Use it again after the quiz.")

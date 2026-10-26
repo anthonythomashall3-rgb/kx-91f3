@@ -148,7 +148,8 @@ do_unlock() {
 }
 
 do_status() {
-  if is_locked; then echo "LOCKqz: LOCKED"; else echo "LOCKqz: unlocked"; fi
+  # LOCKED only when the hosts block is complete: a hand-edited block reads as tamper and is re-applied.
+  if hosts_block_intact "$HOSTS" "$BLOCKLIST"; then echo "LOCKqz: LOCKED"; else echo "LOCKqz: unlocked"; fi
 }
 
 # --- Admin developer mode (no sudo needed; acts on the admin's own key file) ---

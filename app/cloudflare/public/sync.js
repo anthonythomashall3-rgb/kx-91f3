@@ -376,9 +376,23 @@
       } catch (e) { if (e.expired) throw e; return []; }
       return Object.keys(by).filter(function (u) { return by[u].at && !by[u].open; }).map(function (u) { return { id: u, completed: by[u].at }; });
     }
+    // A student enrolled after the last Sync is not in LOCKqz's class list yet (and no re-sync runs while
+    // a gate is on): match their confirmed email against Brightspace's own class list, read here at most
+    // once a minute per course and only while such a student is waiting. Costs LOCKqz no request.
+    var BSIDS = {};
+    async function bsIds(ou) {
+      var c = BSIDS[ou]; if (c && Date.now() - c.at < 60000) return c.map;
+      var map = {}, cl = null;
+      try { cl = await pages("/d2l/api/le/" + LE + "/" + ou + "/classlist/paged/"); } catch (e) { if (e.expired) throw e; }
+      (Array.isArray(cl) ? cl : []).forEach(function (s) { if (s && s.Email && s.Identifier != null && !STAFF.test(s.ClasslistRoleDisplayName || "")) map[String(s.Email).toLowerCase()] = String(s.Identifier); });
+      BSIDS[ou] = { at: Date.now(), map: map };
+      return map;
+    }
     async function gateStep(ou, qi) {
       var g = GATES[qi], live = await lqget("/live?quiz=" + ou + "-" + qi);
       if (!live || !live.rows) throw new Error("LOCKqz not reachable");
+      var miss = live.rows.filter(function (r) { return !r.user_id && r.email && r.sv && !r.unpaid && r.verified === true && r.status === "locked"; });
+      if (miss.length) { var ids = await bsIds(ou); miss.forEach(function (r) { var u = ids[String(r.email).toLowerCase()]; if (u) r.user_id = u; }); }
       // Brightspace dates changed during the gate (professor moved the start / extended the end): the
       // server's start check and quiz end follow (/gate on keeps the gate's accommodation list).
       if (g.datesNew) { var nd = g.datesNew;
@@ -397,7 +411,7 @@
         if (r.eligible || (begun && r.verified === true && r.status === "locked")) want[u] = true; else if (REVOKE[r.status]) revoke[u] = true; });
       var have = await saList(ou, qi), haveMap = {};
       have.forEach(function (x) { if (x && x.UserId != null) haveMap[String(x.UserId)] = x.SpecialAccess || {}; });
-      var res = { n: 0, bad: 0, stuck: 0, tried: 0, rows: live.rows.length };   // admitted, could not admit, could not remove
+      var res = { n: 0, bad: 0, stuck: 0, tried: 0, del: 0, rows: live.rows.length };   // admitted, could not admit, could not remove
       var add = Object.keys(want).filter(function (u) { if (g.keep[u] || haveMap[u]) { res.n++; return false; } return true; });
       await pool(add, 8, async function (u) {
         res.tried++; var pr = await saPut(ou, qi, u, g.qs[g.qs.length - 1]).catch(function () { return null; });
@@ -405,6 +419,7 @@
       });
       // Only a grant that still looks exactly like LOCKqz's (one the professor edited is theirs now).
       var del = Object.keys(revoke).filter(function (u) { return haveMap[u] && !g.keep[u] && !want[u] && ourGrant(haveMap[u], g.qs); });
+      res.del = del.length;
       await pool(del, 8, async function (u) {
         var dr = await saDel(ou, qi, u).catch(function () { return null; });
         if (!dr || !dr.ok) res.stuck++;
@@ -475,7 +490,11 @@
           }
           if (G.idleUntil && Date.now() < G.idleUntil) { G.busy = false; return; }
           var r = await gateStep(ou, qi);
-          G.idleUntil = r.rows || !AUTOGATE ? 0 : Date.now() + 20000;
+          // Rounds: 10 s while anything changes; 30 s once the quiz has run 5 min and 3 rounds changed nothing
+          // (any new lock / admit / removal goes back to 10 s); 60 s after the quiz's end (submissions only).
+          var calm = !r.tried && !r.del && r.rows === G.lastRows; G.lastRows = r.rows; G.calm = calm ? (G.calm || 0) + 1 : 0;
+          var s0 = dt(g0 && g0.StartDate), late = s0 === null || Date.now() > s0 + 300000, now0 = Date.now();
+          G.idleUntil = G.endMs !== null && now0 > G.endMs ? now0 + 50000 : (!r.rows && AUTOGATE) || (late && G.calm >= 3) ? now0 + 20000 : 0;
           if (G.allFail >= 3) { G.busy = false; await stopGate(ou, qi, st, "stopped: Brightspace refused special access, quiz shown again"); showGateBtn(ou, qi); return; }
           st.textContent = "LIVE — " + r.n + " locked in" + (r.bad ? " · " + r.bad + " not admitted (Brightspace error)" : "") +
             (r.stuck ? " · " + r.stuck + " not removed (Brightspace error)" : "") + (G.rotNote ? " · " + G.rotNote : "") + (G.note ? " · " + G.note : "");

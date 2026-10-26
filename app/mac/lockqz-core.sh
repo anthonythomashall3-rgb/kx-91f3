@@ -25,10 +25,18 @@ build_block_from() {
 
 hosts_is_locked() { grep -qF "$MARK_START" "$1" 2>/dev/null; }
 
-# hosts_add_block <hosts-file> <blocklist-file> : idempotent — never double-adds.
+# hosts_block_intact <hosts-file> <blocklist-file> : our block is there AND line-for-line complete
+# (an admin who deletes the chatgpt.com lines but keeps the markers must not pass as "locked").
+hosts_block_intact() {
+  hosts_is_locked "$1" || return 1
+  [ "$(sed -n "/$MARK_START/,/$MARK_END/p" "$1" 2>/dev/null)" = "$(build_block_from "$2")" ]
+}
+
+# hosts_add_block <hosts-file> <blocklist-file> : idempotent — never double-adds; repairs an edited block.
 hosts_add_block() {
   local hosts="$1" bl="$2"
-  hosts_is_locked "$hosts" && return 0
+  hosts_block_intact "$hosts" "$bl" && return 0
+  hosts_remove_block "$hosts"
   { echo ""; build_block_from "$bl"; } >> "$hosts"
 }
 

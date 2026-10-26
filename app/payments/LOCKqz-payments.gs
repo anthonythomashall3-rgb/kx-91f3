@@ -74,7 +74,8 @@ function run() {
   const since = last - 600;
   const query = "after:" + since + " -label:" + DONE.replace(/\//g, "-") + " (zelle OR " + Object.keys(SENDERS).map(d => "from:" + d).join(" OR ") + ") " + WORDS;
   const threads = GmailApp.search(query, 0, 50);
-  const own = owners_(props), opts = { owners: own, zellepayOk: props.getProperty("ZELLEPAY_OK") === "1" };
+  const own = owners_(props), opts = { owners: own, zellepayOk: props.getProperty("ZELLEPAY_OK") === "1",
+    accountMarks: String(props.getProperty("ACCOUNT_MARKS") || "").split(",").map(s => s.trim()).filter(Boolean) };
   const out = [];
   threads.forEach(th => th.getMessages().forEach(m => {
     if (m.getDate && m.getDate().getTime() / 1000 < since) return;     // older message in the thread
@@ -151,11 +152,23 @@ function parse(m, opts) {
   const mine = sigs.find(s => { const d = (s.match(/\bd=([A-Za-z0-9.-]+)/) || [])[1]; return d && (dom === d.toLowerCase() || dom.endsWith("." + d.toLowerCase())); });
   const signedTo = !!mine && /\bh=[^;]*\bto\b/i.test(mine);
   const owners = opts.owners || [];
+  // Exact addresses only: "x" + owner, owner + ".evil.com" or a display name holding the owner address must not pass.
+  const addrs = s => (s.replace(/^[^:]*:/, "").replace(/"[^"]*"/g, "").match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) || []).map(x => x.toLowerCase());
+  const toAddrs = addrs(header_(head, "To")), anyAddrs = toAddrs.concat(addrs(header_(head, "Delivered-To")));
   if (!owners.length) reasons.push("owner address unknown (set OWNER_EMAILS)");
-  else if (!owners.some(o => header_(head, "To").toLowerCase().indexOf(o) >= 0)) {
-    if (owners.some(o => to.indexOf(o) >= 0)) reasons.push("To: is not this mailbox (forwarded?)");
+  else if (!owners.some(o => toAddrs.indexOf(o) >= 0)) {
+    if (owners.some(o => anyAddrs.indexOf(o) >= 0)) reasons.push("To: is not this mailbox (forwarded?)");
     else return null;                                   // not sent to us at all
   }
+  // An alert email proves money reached SOME account, not LOCKqz's: anyone can point their own bank's alerts at
+  // this Gmail. Require LOCKqz's receiving account (last 4 digits / Zelle token, Script property ACCOUNT_MARKS,
+  // comma-separated) in the bank's text outside the payer's memo; otherwise the payment waits for review.
+  const marks = (opts.accountMarks || []).filter(Boolean);
+  const bodyNoMemoAcct = body.replace(/(?:memo|note|message)\s*[:\-][^\n]*/gi, "");
+  // Venmo alerts come from Venmo to the account's own verified email and name no bank account: not needed there.
+  if (via === "venmo") {}
+  else if (!marks.length) reasons.push("receiving account unknown (set ACCOUNT_MARKS)");
+  else if (!marks.some(k => bodyNoMemoAcct.toLowerCase().indexOf(String(k).toLowerCase()) >= 0)) reasons.push("receiving account not named in the alert");
   if (owners.length && !signedTo) reasons.push("To: not covered by the DKIM signature");
   // The amount comes from the bank's own text, never from what the payer typed in the memo
   // (a memo of "$180" on a $1 payment must not count as $180).

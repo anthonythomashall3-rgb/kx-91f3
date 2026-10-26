@@ -433,7 +433,8 @@ function Handle-Pw($pr, [bool]$first, [string]$note) {
   # sets when the next check may run ($PwNext).
   $now = Get-Date
   if ($pr -and $pr.password) {
-    $pw = [string]$pr.password; $script:PwNext = $now.AddSeconds(15)
+    $rc = 15; if ($null -ne $pr.recheck) { $rc = [Math]::Max(15, [Math]::Min(360, [int]$pr.recheck)) }   # gated: next code change
+    $pw = [string]$pr.password; $script:PwNext = $now.AddSeconds($rc)
     if ($pw -ne $script:LastPw) {
       $had = $script:LastPw; $script:LastPw = $pw; Set-Clipboard -Value $pw
       if ($first) { Show-Message ("AI is locked for this quiz.`n`nQuiz password:  $pw`n(copied to your clipboard - paste it into Brightspace)" + $note) }
@@ -473,6 +474,13 @@ function Handle-Pw($pr, [bool]$first, [string]$note) {
     if ($why -eq "in_use") { Show-Message "This school email is in a quiz on another computer right now.`n`nOne payment covers one student." }
     else { Show-Message "This school email is already used on 2 computers.`n`nEmail lockqz.app@gmail.com to remove one." }
   }
+  # LOCKqz busy (free-plan limit) or unreachable: back off with jitter (30 s .. 5 min); any answer resets it.
+  if ((-not $why) -and ((-not $pr) -or ($pr.error -eq "server_busy"))) {
+    $script:BusyN = [int]$script:BusyN + 1
+    $script:PwNext = $now.AddSeconds([Math]::Min(300, 15 * [Math]::Pow(2, [Math]::Min($script:BusyN, 5))) * (0.5 + (Get-Random -Maximum 1.0) / 2))
+    return $null
+  }
+  $script:BusyN = 0
   $script:PwNext = $now.AddSeconds(15)
   return $null
 }

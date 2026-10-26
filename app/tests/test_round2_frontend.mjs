@@ -380,11 +380,11 @@ console.log("C10 host sent; the server's other_school answer is shown");
 }
 
 // ================= dashboard =================
-console.log("dashboard: polling pauses while hidden; home refresh is /bs only every 5 min");
+console.log("dashboard: polling pauses while hidden; home refresh is /bs only every 15 min");
 w = await world(); await syncTab(w).run();
 d = dashTab(w, { token: w.PROF }); await w.idle(); await sleep(10);
-const auto = d.intervals.find(i => i.ms === 300000);
-check("home refresh every 5 min", !!auto && !d.intervals.some(i => i.ms === 60000), d.intervals.map(i => i.ms).join(","));
+const auto = d.intervals.find(i => i.ms === 900000);
+check("home refresh every 15 min", !!auto && !d.intervals.some(i => i.ms === 60000), d.intervals.map(i => i.ms).join(","));
 d.hidden = true; let f0 = d.fetched.length; if (auto) await auto.fn(); await w.idle();
 check("hidden tab: no requests", d.fetched.length === f0, d.fetched.slice(f0).join(","));
 d.hidden = false; f0 = d.fetched.length; if (auto) await auto.fn(); await w.idle();
