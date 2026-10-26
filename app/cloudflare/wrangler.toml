@@ -30,3 +30,7 @@ STUDENT_FEE_FROM = "2026-10-25"
 ZELLE_BUSINESS_TO = ""
 # Trial testers: never pay (student or professor fee) and get the test-run welcome. Comma-separated.
 FEE_EXEMPT = "dbristow@usc.edu,dbristow@marshall.usc.edu,huutienn@usc.edu"
+# Every LOCKqz-protected quiz is gated: the professor's Sync tab hides it and admits only students LOCKqz is
+# locking (it starts the gate by itself from 1 h before the start), and no password is given for an
+# ungated protected quiz until it ends (the professor is emailed to open the Sync tab). "0" = off.
+REQUIRE_GATE = "1"

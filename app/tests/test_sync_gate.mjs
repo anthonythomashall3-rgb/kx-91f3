@@ -183,5 +183,27 @@ check("fixed password restored in Brightspace", BS.quiz.Password === SEED);
 r = await pw(BO);
 check("app's password === Brightspace's again", r.data?.password === BS.quiz.Password);
 
+console.log("S7 REQUIRE_GATE: an ungated protected quiz gives NO password (professor emailed); the Sync tab gates it by itself");
+env.REQUIRE_GATE = "1"; const MAILS = []; env.MAIL_SINK = async m => { MAILS.push(m); return true; };
+sqlite.prepare("UPDATE devices SET student_verified=1").run();   // email codes are on in this env (MAIL_SINK)
+await lock(BO);
+r = await pw(BO);
+check("gate off -> no password, reason gate_off", r.status === 402 && r.data?.reason === "gate_off" && !r.data?.password, JSON.stringify(r.data));
+check("professor emailed to open the Sync tab", MAILS.some(m => m.to === "prof@usc.edu" && /Sync/.test(m.text)), JSON.stringify(MAILS.map(m => m.to)));
+const nMail = MAILS.length; await pw(BO);
+check("no second email within the hour", MAILS.length === nMail);
+page = makePage(SRC); await page.done; await settle(); await page.tick(); await settle(); await page.tick();
+check("Sync tab started the gate by itself: quiz hidden", BS.quiz.AllowOnlyUsersWithSpecialAccess === true);
+check("server knows the quiz is gated", sqlite.prepare("SELECT gated FROM quizzes WHERE qi=?").get(String(QI)).gated === 1);
+check("locked Bo admitted by the automatic gate", !!BS.sa["4002"]);
+check("Al (tampered, not locked) not admitted", !BS.sa["4001"]);
+check("accommodation still unchanged", JSON.stringify(BS.sa["4005"]) === before4005);
+r = await pw(BO);
+check("gated -> password released and equal to Brightspace's", r.data?.password && r.data.password === BS.quiz.Password, `${r.data?.password} vs ${BS.quiz.Password}`);
+sqlite.prepare("UPDATE quizzes SET gated=0 WHERE qi=?").run(String(QI));
+sqlite.prepare("UPDATE bs_quizzes SET end_date=? WHERE qi=?").run(new Date(Date.now() - 60000).toISOString(), String(QI));
+r = await pw(BO);
+check("after the quiz end: password given again (late accommodations)", !!r.data?.password, JSON.stringify(r.data));
+delete env.REQUIRE_GATE; delete env.MAIL_SINK;
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

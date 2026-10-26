@@ -52,6 +52,7 @@
   try { if (SRC && !LW.lqLoading && document.head) { var lqs = document.createElement("script"); lqs.src = new URL(SRC).origin + "/lq.js"; document.head.appendChild(lqs); } } catch (e) {}
   if (!AUTO) document.body.appendChild(box);   // an auto re-check shows its panel only if something changed
   var B = box.querySelector("#lqz-b");
+  var AUTOGATE = false;   // the server's REQUIRE_GATE: gate every protected quiz by itself (set by /sync)
   var GATES = {};   // qi -> { ou, timer, tick, busy, keep:{uid:true}, qs:[every quiz-date version seen], endMs, note, written }
   // box.dataset.gates = "1" while any gate runs: an automatic re-sync never replaces a panel that owns a gate.
   var markGates = function () { if (box.dataset) box.dataset.gates = Object.keys(GATES).length ? "1" : ""; };
@@ -232,6 +233,7 @@
     // ---- 2. save to LOCKqz ----
     wait("Saving to LOCKqz", "This takes a few seconds");
     var state = await lq("/sync", { host: location.host, whoami: { id: me.Identifier, name: ((me.FirstName || "") + " " + (me.LastName || "")).trim() }, courses: courses });
+    AUTOGATE = !!(state && state.auto_gate);
     // What the SERVER confirms it saved (C3): orig_password_saved / orig_hidden_saved. A row with neither
     // saved -> null (nothing known yet), so saveOrig still saves the professor's settings first.
     var origOf = function (row) {
@@ -391,7 +393,7 @@
         if (r.eligible || (begun && r.verified === true && r.status === "locked")) want[u] = true; else if (REVOKE[r.status]) revoke[u] = true; });
       var have = await saList(ou, qi), haveMap = {};
       have.forEach(function (x) { if (x && x.UserId != null) haveMap[String(x.UserId)] = x.SpecialAccess || {}; });
-      var res = { n: 0, bad: 0, stuck: 0, tried: 0 };   // admitted, could not admit, could not remove
+      var res = { n: 0, bad: 0, stuck: 0, tried: 0, rows: live.rows.length };   // admitted, could not admit, could not remove
       var add = Object.keys(want).filter(function (u) { if (g.keep[u] || haveMap[u]) { res.n++; return false; } return true; });
       await pool(add, 8, async function (u) {
         res.tried++; var pr = await saPut(ou, qi, u, g.qs[g.qs.length - 1]).catch(function () { return null; });
@@ -460,7 +462,16 @@
         var G = GATES[qi]; if (!G || G.busy) return; G.busy = true;
         try {
           if (G.endMs !== null && Date.now() > G.endMs + GRACE) { G.busy = false; await stopGate(ou, qi, st, "quiz ended"); showGateBtn(ou, qi); return; }
+          // Hidden and waiting: no LOCKqz requests until 2 min before the start; while nobody has locked
+          // in yet, one round every 30 s instead of every 10 s (Cloudflare free plan).
+          var g0 = G.qs[G.qs.length - 1], sMs = AUTOGATE ? dt(g0 && g0.StartDate) : null;
+          if (sMs !== null && Date.now() < sMs - 120000) {
+            st.textContent = "Gate on · quiz hidden · admits locked students from " + new Date(sMs).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+            st.style.color = "#1a7f37"; G.busy = false; return;
+          }
+          if (G.idleUntil && Date.now() < G.idleUntil) { G.busy = false; return; }
           var r = await gateStep(ou, qi);
+          G.idleUntil = r.rows || !AUTOGATE ? 0 : Date.now() + 20000;
           if (G.allFail >= 3) { G.busy = false; await stopGate(ou, qi, st, "stopped: Brightspace refused special access, quiz shown again"); showGateBtn(ou, qi); return; }
           st.textContent = "LIVE — " + r.n + " locked in" + (r.bad ? " · " + r.bad + " not admitted (Brightspace error)" : "") +
             (r.stuck ? " · " + r.stuck + " not removed (Brightspace error)" : "") + (G.rotNote ? " · " + G.rotNote : "") + (G.note ? " · " + G.note : "");
@@ -530,6 +541,7 @@
       gb.onclick = async function () {
         gb.disabled = true;
         var stopping = !!GATES[qi];
+        if (stopping && typeof AG_DONE !== "undefined") AG_DONE[qi] = true;
         try {
           if (!stopping) await startGate(ou, qi, pw_of(qi), st);
           else await stopGate(ou, qi, st);
@@ -550,6 +562,28 @@
       startGate(String(p.ou), String(p.qi), pw_of(p.qi), st, true).then(function () { showGateBtn(String(p.ou), String(p.qi)); })
         .catch(function (e) { st.textContent = "resume failed: " + e.message.slice(0, 60); st.style.color = "#990000"; });
     });
+
+    // ---- automatic gate: every LOCKqz-protected quiz is gated (hidden; only students LOCKqz is locking
+    // are let in), from 60 min before its start until it ends. Started once per quiz per tab; a professor
+    // who presses Stop gate keeps it off in this tab. Checked every minute in the browser (no requests).
+    var AG_DONE = {}, AG_MS = 60 * 60000;
+    var qInfo = function (ou, qi) { for (var i = 0; i < courses.length; i++) if (String(courses[i].ou) === String(ou))
+      for (var j = 0; j < (courses[i].quizzes || []).length; j++) if (String(courses[i].quizzes[j].qi) === String(qi)) return courses[i].quizzes[j]; return null; };
+    var autoGate = function () {
+      (state.protect || []).forEach(function (p) {
+        var ou = String(p.ou), qi = String(p.qi);
+        if (GATES[qi] || AG_DONE[qi] || Number(p.gated) === 1 || !pw_of(qi)) return;
+        var q = qInfo(ou, qi) || {}, s = dt(q.start), e = dt(q.end), now = Date.now();
+        if (q.active === false || (e !== null && now > e) || (s !== null && s - now > AG_MS)) return;
+        var gb = gateBtn(ou, qi), st = B.querySelector('[data-gst="' + qi + '"]');
+        if (!gb || !st) return;
+        AG_DONE[qi] = true;
+        startGate(ou, qi, pw_of(qi), st).then(function () { showGateBtn(ou, qi); })
+          .catch(function (er) { st.textContent = "auto gate failed: " + er.message.slice(0, 60) + " (click Start gate)"; st.style.color = "#990000"; showGateBtn(ou, qi); });
+      });
+    };
+    if (state.auto_gate) autoGate();
+    var agTimer = state.auto_gate && setInterval(function () { if (!(document.body.contains && document.body.contains(box))) { clearInterval(agTimer); return; } autoGate(); }, 60000);
 
     // ---- the dashboard's "Sync now" button ----
     // The dashboard link opens the dashboard as this tab's child (so it can talk to this tab); a dashboard

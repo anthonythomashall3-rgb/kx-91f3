@@ -767,6 +767,10 @@ class Agent:
             return "other"
         if reason == "verify":
             self.ensure_identity(force=True)   # the server needs the confirmed school email first
+        if reason == "gate_off" and getattr(self, "gate_told", None) != self.quiz:
+            # The professor's gate is not running yet: the password is held; it arrives by itself.
+            self.gate_told = self.quiz
+            dialog("AI is locked for this quiz.\n\nThe quiz opens once your professor's LOCKqz is running. The password appears here by itself." + note)
         if reason in ("in_use", "too_many_devices") and getattr(self, "share_told", None) != self.quiz:
             # One payment = one student: the paid email is in use on another computer.
             self.share_told = self.quiz

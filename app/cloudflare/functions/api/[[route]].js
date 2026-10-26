@@ -353,6 +353,25 @@ export async function onRequest(context) {
       db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE event='reset_request' AND ts<? LIMIT 100)").bind(ago(30)),
       db.prepare("DELETE FROM email_codes WHERE expires<?").bind(Date.now() - 86400000)];
   };
+  // REQUIRE_GATE=1: every LOCKqz-protected quiz is gated (the Sync tab hides it and admits only students
+  // LOCKqz is locking, and starts the gate by itself), and no password is given for a protected quiz
+  // that is not gated while it can still be taken -- so a password passed around opens nothing.
+  const gateRequired = () => String(env.REQUIRE_GATE || "") === "1";
+  const nudgeGate = async (ou, qi) => {
+    try {
+      if (!codesOn) return false;
+      const since = new Date(Date.now() - 3600000).toISOString(), key = "gate:" + qi;
+      const t = await db.prepare("SELECT t.email AS email, tc.name AS course FROM teacher_courses tc JOIN teachers t ON t.id=tc.teacher_id WHERE tc.ou=? AND (t.verified=1 OR t.role='admin') AND NOT EXISTS (SELECT 1 FROM sync_nudges n WHERE n.ou=? AND n.qi=? AND n.at>?) ORDER BY t.role='admin' LIMIT 1")
+        .bind(ou, ou, key, since).first();
+      if (!t || !t.email) return false;
+      await db.prepare("INSERT OR REPLACE INTO sync_nudges (ou,qi,at) VALUES (?,?,?)").bind(ou, key, now()).run();
+      const course = String(t.course || "your class").replace(/^\d+_\d+\s*/, "").slice(0, 120);
+      const text = `A student is waiting to start a LOCKqz quiz in ${course}, but its gate is not running, so LOCKqz is holding the password.\n\nOpen Brightspace and click your LOCKqz Sync bookmark, and leave that tab open during the quiz. The gate starts by itself and the student gets in.\n\nLOCKqz`;
+      const go = sendMail(env, t.email, "LOCKqz: open your Sync tab — a student is waiting", text).catch(() => {});
+      if (typeof context.waitUntil === "function") context.waitUntil(go); else await go;
+      return true;
+    } catch { return false; }
+  };
   const purgeDue = () => Math.random() * Math.max(1, Number(env.PURGE_EVERY || 200)) < 1;
   // A student opened a quiz LOCKqz has never seen (made after the professor's last Sync, so it carries no
   // LOCKqz password): email that course's professor once per quiz, at most once per 6 h per course.
@@ -1002,6 +1021,12 @@ export async function onRequest(context) {
       // so a closed or sleeping Sync tab can never cause a wrong password. A quiz turned off moments
       // before the exam still holds our password in Brightspace until the next Sync removes it, so that
       // password keeps being released until then (pending_clear).
+      // REQUIRE_GATE: a protected quiz that can still be taken is only opened through the gate. Its
+      // professor is emailed (at most once an hour per quiz) to open the Sync tab; the app keeps asking.
+      if (gateRequired() && q?.password && !gated && !(q.end_date && Date.now() > Date.parse(q.end_date))) {
+        await nudgeGate(ou, qi);
+        return json({ password: null, reason: "gate_off" }, 402);
+      }
       const rot = gated && q.bs_code ? q.bs_code : null;
       const given = rot || q?.password || q?.pc || q?.cpw || null;
       if (!given && !q?.bq) await nudgeUnsynced(ou, qi);   // a quiz newer than the professor's last Sync
@@ -1597,7 +1622,7 @@ export async function onRequest(context) {
       await runBatches(db, st2);
       await releaseUnpaid(me);
       // Only hand back passwords for courses this caller instructs (never leak another course's).
-      return json(await bsState(mineA));
+      return json({ ...(await bsState(mineA)), auto_gate: gateRequired() });
     }
     if (p === "/sync-result" && request.method === "POST") {
       const list = (Array.isArray(body.results) ? body.results : []).slice(0, 1000).filter(r => r && typeof r === "object");

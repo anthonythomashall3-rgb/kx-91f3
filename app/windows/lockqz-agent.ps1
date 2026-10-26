@@ -462,6 +462,11 @@ function Handle-Pw($pr, [bool]$first, [string]$note) {
     return "other"
   }
   if (($why -eq "verify") -and (((Get-Date) - $script:SetupAt).TotalSeconds -gt 60)) { Start-Setup -Quiz }   # school email first
+  if (($why -eq "gate_off") -and ($script:GateTold -ne $script:Quiz)) {
+    # The professor's gate is not running yet: the password is held; it arrives by itself.
+    $script:GateTold = $script:Quiz
+    Show-Message ("AI is locked for this quiz.`n`nThe quiz opens once your professor's LOCKqz is running. The password appears here by itself." + $note)
+  }
   if ((($why -eq "in_use") -or ($why -eq "too_many_devices")) -and ($script:ShareTold -ne $script:Quiz)) {
     # One payment = one student: the paid email is in use on another computer.
     $script:ShareTold = $script:Quiz

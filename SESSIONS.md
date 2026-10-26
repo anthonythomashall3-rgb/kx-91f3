@@ -7,9 +7,10 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-10-26 03:50 PT — 01S7QxVq: auto-gate every protected quiz (sync.js), no password for an ungated protected quiz (REQUIRE_GATE) + professor email, agent text gate_off. Claims sync.js, functions/api, agents, tests.
+- (none)
 
 ## Recently finished
+- 2026-10-26 04:20 PT — 01S7QxVq: v0.4.9. REQUIRE_GATE=1: the Sync tab gates every protected quiz by itself (from 1 h before start; no LOCKqz requests until 2 min before; 30 s rounds while nobody is locked in); /password gives no password for an ungated protected quiz until it ends (reason gate_off, agents explain) and emails the professor once an hour to open Sync. test_sync_gate S7.
 - 2026-10-25 23:59 PT — 01S7QxVq: v0.4.8. Trial testers (FEE_EXEMPT: Bristow x2, Huu) never pay + test-run welcome (dashboard, once; code email); public/lq.js = LOCK black/qz red everywhere + red lock loaders (ETA + fun fact) on dashboard, pay page, Sync panel; no uninstall option on the download page; privacy contact lockqz.app@gmail.com; owner's name removed from every page; gate never admits unpaid students.
 - 2026-10-25 22:30 PT — 01S7QxVq: students pay $180 (STUDENT_FEE), Zelle + bank transfer only (Venmo off unless STUDENT_VENMO=1; ZELLE_BUSINESS_TO replaces personal Zelle when the business account opens); fee on = confirmed email always; a paid email cannot be in a quiz on 2 computers at once or on >2 computers (402 in_use / too_many_devices, agents explain); Gmail script every 1 min, amount never read from the memo, bank deposits with a memo -> admin review. Mac/Windows agent text needs the next release. Known pre-existing fail: test_daemon_reporting 'no signed developer lock'.
 - 2026-10-25 21:00 PT — 01CsgBZK: dashboard "Sync now" button: asks the open Sync tab in Brightspace to sync (postMessage, no extra LOCKqz requests); no tab -> opens Brightspace for one bookmark click; tested in real Chromium (test_dashboard_sync_now.mjs).
