@@ -99,7 +99,13 @@ const document = {
   body: { contains: el => attached.has(el),
     appendChild(el) { attached.add(el); if (el.id === "lqz-sync") current = el; if (el.tag === "script") inject(el); } },
 };
-const ctx = { document, location: { pathname: "/d2l/home/98765", host: "brightspace.usc.edu" },
+// The LOCKqz dashboard tab that opened this Brightspace tab (window.opener), and this tab's window.
+const DASHMSG = [], LISTEN = [];
+const DASHWIN = { closed: false, postMessage: (m, origin) => DASHMSG.push({ m, origin }) };
+const EVIL = { closed: false, postMessage: () => {} };
+const window = { opener: DASHWIN, addEventListener: (t, f) => { if (t === "message") LISTEN.push(f); }, open: () => null };
+const dashSays = (data, origin = "https://lockqz.test", source = DASHWIN) => LISTEN.forEach(f => f({ origin, data, source }));
+const ctx = { window, document, location: { pathname: "/d2l/home/98765", host: "brightspace.usc.edu" },
   localStorage: { getItem: k => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: k => store.delete(k) },
   fetch: (url, opt) => { if (String(url).startsWith(API)) { lqCalls.push(String(url).slice(API.length).split("?")[0]); return onRequest({ request: new Request(url, opt), env }); } return brightspace(url, opt); },
   setInterval: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearInterval: i => { if (timers[i - 1]) timers[i - 1].fn = null; },
@@ -175,6 +181,34 @@ const before = current;
 await recheck();
 check("no LOCKqz request", lqCalls.length === 0, lqCalls.join(","));
 check("panel unchanged (no error popped over it)", current === before && attached.has(before));
+BS.expired = false;
+
+console.log("D1 the dashboard's Sync now button (messages between the two tabs, no extra LOCKqz requests)");
+check("the Sync tab said hello to the dashboard that opened it", DASHMSG.some(x => x.m.lqz === "hello" && x.origin === "https://lockqz.test"), JSON.stringify(DASHMSG.slice(0, 3)));
+check("one message listener for the whole page (not one per re-sync)", LISTEN.length === 1, LISTEN.length);
+DASHMSG.length = 0; dashSays({ lqz: "ping" });
+check("ping -> hello, to the dashboard's own origin only", DASHMSG.length === 1 && DASHMSG[0].m.lqz === "hello" && DASHMSG[0].origin === "https://lockqz.test", JSON.stringify(DASHMSG));
+lqCalls = []; DASHMSG.length = 0; const pBefore = current;
+dashSays({ lqz: "sync" }); await settle();
+check("Sync now syncs even though nothing changed in Brightspace", syncs() === 1, lqCalls.join(","));
+check("... and tells the dashboard it is done", DASHMSG.some(x => x.m.lqz === "synced" && x.m.ok === true), JSON.stringify(DASHMSG));
+check("... with no class data in the message", DASHMSG.every(x => !/al@usc|LQ-|Al\b/.test(JSON.stringify(x.m))), JSON.stringify(DASHMSG));
+check("the panel was refreshed in place (one panel)", current && current !== pBefore && !attached.has(pBefore));
+lqCalls = []; DASHMSG.length = 0;
+dashSays({ lqz: "sync" }, "https://evil.example", EVIL); await settle();
+check("another site cannot trigger a sync", lqCalls.length === 0 && DASHMSG.length === 0, lqCalls.join(","));
+dashSays({ lqz: "steal" }); dashSays("sync"); await settle();
+check("anything but ping/sync is ignored", lqCalls.length === 0, lqCalls.join(","));
+current.dataset.gates = "1";
+dashSays({ lqz: "sync" }); await settle();
+check("a gate running: no sync, the dashboard is told why", lqCalls.length === 0 && DASHMSG.some(x => x.m.lqz === "busy"), JSON.stringify(DASHMSG));
+current.dataset.gates = "";
+current.remove(); lqCalls = []; DASHMSG.length = 0;
+dashSays({ lqz: "sync" }); await settle();
+check("panel closed: Sync now runs a normal Sync and opens the panel again", syncs() === 1 && current && attached.has(current), lqCalls.join(","));
+BS.expired = true; lqCalls = []; DASHMSG.length = 0;
+dashSays({ lqz: "sync" }); await settle();
+check("Brightspace session expired: the dashboard is told it failed", DASHMSG.some(x => x.m.lqz === "failed" && /expired/i.test(x.m.error)), JSON.stringify(DASHMSG));
 BS.expired = false;
 
 console.log("N1 a student opens a quiz newer than the last Sync -> one email to the professor");

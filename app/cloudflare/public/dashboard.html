@@ -224,6 +224,49 @@ document.addEventListener("visibilitychange", ()=>{ if(!shown() || !ME) return; 
   if(h[0]==="live" && h[1]) loadLive(h[1]); else if(Date.now()-LAST > 300000) autoRefresh(); });
 function nav(h){ location.hash = h; }
 window.addEventListener("hashchange", route);
+
+// ---- "Sync now": asks the LOCKqz Sync tab open in Brightspace to sync (the dashboard itself cannot read
+// Brightspace: only the professor's own Brightspace tab can). Messages carry no data, and only to and from
+// Brightspace's own address. No tab yet -> Brightspace opens in a new tab for one bookmark click.
+const BS_ORIGINS = ["https://brightspace.usc.edu", "https://usc.brightspace.com"];
+const BS_HOME = "https://brightspace.usc.edu/d2l/home";
+let BSWIN = null, SYNCWAIT = null, SYNCMSG = "";
+const SYNCBTN = prime => `<button class="btn${prime?" prime":""}" onclick="syncNow()">Sync now</button><span class="syncst muted">${esc(SYNCMSG)}</span>`;
+function syncMsg(t){ SYNCMSG = t; document.querySelectorAll(".syncst").forEach(e => e.textContent = t); }
+function askSync(w){ BS_ORIGINS.forEach(o => { try { w.postMessage({ lqz: "sync" }, o); } catch {} }); }
+function syncNow(){
+  if (SYNCWAIT) return;
+  let w = BSWIN && !BSWIN.closed ? BSWIN : null;
+  if (!w) {
+    const t = window.open("", "lqzbs");     // the Brightspace tab this dashboard opened before, if still open
+    let blank = true; try { blank = !t || t.location.href === "about:blank"; } catch { blank = false; }
+    if (t && !blank) w = t;
+    else {
+      if (t) t.location.href = BS_HOME; else window.open(BS_HOME, "lqzbs");
+      syncMsg("Brightspace opened in a new tab: click your LOCKqz Sync bookmark there once. After that, this button syncs by itself.");
+      return;
+    }
+  }
+  syncMsg("Syncing…"); askSync(w);
+  SYNCWAIT = setTimeout(() => { SYNCWAIT = null; syncMsg("No answer from Brightspace: click your LOCKqz Sync bookmark in the Brightspace tab."); }, BSWIN ? 180000 : 10000);
+}
+window.addEventListener("message", async e => {
+  if (!BS_ORIGINS.includes(e.origin) || !e.data || typeof e.data !== "object" || !e.source) return;
+  const m = e.data;
+  if (m.lqz === "hello") { BSWIN = e.source; return; }
+  if (m.lqz === "synced") {
+    BSWIN = e.source; const asked = !!SYNCWAIT; clearTimeout(SYNCWAIT); SYNCWAIT = null;
+    if (shown() && ME) { await refresh(); route(); }
+    if (asked) syncMsg(m.ok ? "Synced just now." : `Synced, but ${Number(m.errors)||0} quiz(zes) could not be updated: see the Brightspace tab.`);
+    return;
+  }
+  if ((m.lqz === "failed" || m.lqz === "busy") && SYNCWAIT) {
+    clearTimeout(SYNCWAIT); SYNCWAIT = null;
+    syncMsg(m.lqz === "busy" ? String(m.why || "Brightspace is busy.").slice(0, 160) : "Sync failed: " + String(m.error || "").slice(0, 160));
+  }
+});
+// A dashboard opened from the Sync panel: tell that Brightspace tab it is here.
+try { if (window.opener) BS_ORIGINS.forEach(o => { try { window.opener.postMessage({ lqz: "ping" }, o); } catch {} }); } catch {}
 document.addEventListener("click", e=>{ const m=$("menu"); if(m && !m.contains(e.target)) m.removeAttribute("open"); });
 
 // ---- derived state ----
@@ -273,11 +316,12 @@ function viewHome(){
   h += `<section class="card band" aria-label="Status">
     <div style="display:flex;align-items:center;gap:20px;min-width:0">
       <div class="orb ${allOff?'off':''}">${SHIELD(allOff?'#6b6861':'#1a7f37',30)}</div>
-      <div><h1>${headline}</h1><p class="sub">Synced with Brightspace ${ago(synced)} · ${BS.courses.length} class${BS.courses.length===1?"":"es"} · ${students} students${pendingSync()?"":" · nothing for you to do"}</p></div>
+      <div><h1>${headline}</h1><p class="sub">Synced with Brightspace ${ago(synced)} · ${BS.courses.length} class${BS.courses.length===1?"":"es"} · ${students} students${pendingSync()?"":" · nothing for you to do"}</p>
+        <p class="sub" style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">${SYNCBTN()}</p></div>
     </div>
     ${exams ? `<button class="sw big" aria-pressed="${!allOff}" aria-label="LOCKqz on for all exams" onclick="setAll(${allOff})"><b>${allOff?"Off":"On"}</b><i></i></button>` : ""}
   </section>`;
-  if(pendingSync()) h += `<div class="note warn"><span>One more click: press your <b>LOCKqz Sync</b> bookmark in Brightspace (a Sync tab left open does it within the hour).</span><button class="btn warn" onclick="nav('connect')">How</button></div>`;
+  if(pendingSync()) h += `<div class="note warn"><span>One more click to send these changes to Brightspace.</span><button class="btn warn" onclick="syncNow()">Sync now</button></div>`;
   inprog.forEach(({q,c}) => h += `<div class="note ok"><span style="display:flex;align-items:center;gap:10px"><span class="pulse"></span><b>${esc(q.name)}</b> is in progress · ${esc(cname(c))}</span><a class="btn ok" href="#live/${esc(c.ou)}-${esc(q.qi)}">Watch live</a></div>`);
   h += `<section aria-label="Your classes" style="display:flex;flex-direction:column;gap:16px"><h2 class="eyebrow">Your classes</h2>`;
   BS.courses.forEach((c,i) => {
@@ -391,9 +435,10 @@ function viewConnect(first){
       <li>Drag this button to your bookmarks bar: &nbsp;<a class="bmk" href="${esc(bmk)}" onclick="alert('Drag this button to your bookmarks bar, then click it while you are in Brightspace.');return false">${SHIELD('#fff',18)} LOCKqz Sync</a></li>
       <li>Open <a href="https://brightspace.usc.edu" target="_blank" rel="noopener">brightspace.usc.edu</a> and click the bookmark. Leave that tab open: it re-syncs by itself every 15 minutes (new quizzes, added students). Keep it open during exams.</li>
       <li>Come back here. Your classes are filled in and every exam is on.</li>
-      <li>New quiz later? Click the bookmark again. If a student opens a quiz LOCKqz hasn't seen, LOCKqz emails you.</li>
+      <li>New quiz later? Press <b>Sync now</b>. If a student opens a quiz LOCKqz hasn't seen, LOCKqz emails you.</li>
     </ol>
     ${BS.courses.length ? `<p class="muted">Last synced ${ago(BS.courses.map(c=>c.synced_at).sort().pop())}. ${pendingSync()?"Some changes you made here are waiting for the next click.":"Everything is up to date."}</p>` : ""}
+    <p style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0">${SYNCBTN(true)}</p>
   </section>
   <p class="foot">Students install LOCKqz once from <a href="${INSTALL}">${INSTALL.replace("https://","")}</a>. You never see or type an exam password.</p>`;
 }

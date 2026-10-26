@@ -14,11 +14,29 @@
   // auto=1: the open Sync panel re-checks Brightspace by itself (every AUTO_MS). It talks to LOCKqz only
   // when something in Brightspace changed, or once FORCE_MS has passed (so changes made on the dashboard
   // reach Brightspace within the hour); otherwise it costs LOCKqz nothing.
-  var AUTO = SRC ? new URL(SRC).searchParams.get("auto") === "1" : false;
+  // force=1: the professor pressed "Sync now" on the LOCKqz dashboard: same as auto, but always syncs.
+  var Q = SRC ? new URL(SRC).searchParams : null;
+  var FORCE = !!Q && Q.get("force") === "1";
+  var AUTO = (!!Q && Q.get("auto") === "1") || FORCE;
   var AUTO_MS = 15 * 60000, FORCE_MS = 60 * 60000;
+  var W = typeof window !== "undefined" ? window : null;
+  var DASH_ORIGIN = SRC ? new URL(SRC).origin : "";
+  // Messages to the LOCKqz dashboard tab (the one that opened this tab, or the one that asked last): no
+  // data, only "connected" / "synced" / "failed", and only to the dashboard's own origin.
+  var tell = function (m) {
+    if (!W || !DASH_ORIGIN) return;
+    [[W.__lqzDash, W.__lqzDashOrigin], [W.opener, DASH_ORIGIN]].forEach(function (t, i, all) {
+      if (!t[0] || !t[1] || (i && t[0] === all[0][0])) return;
+      try { if (!t[0].closed) t[0].postMessage(m, t[1]); } catch (e) {}
+    });
+  };
   var open = document.getElementById("lqz-sync");
   if (open && !AUTO) { open.style.display = ""; return; }      // already running here: show it again (never a 2nd copy)
-  if (AUTO && (!open || (open.dataset && open.dataset.gates === "1"))) return;   // panel closed, or a gate owns this tab
+  if (AUTO && open && open.dataset && open.dataset.gates === "1") {   // a gate owns this tab: never replace it
+    if (FORCE) tell({ lqz: "busy", why: "A quiz gate is running in Brightspace. Sync after the quiz." });
+    return;
+  }
+  if (AUTO && !open) { if (!FORCE) return; AUTO = false; FORCE = false; }   // asked from the dashboard, no panel: a normal Sync
   var KEY = SRC ? new URL(SRC).searchParams.get("k") : "";
   var API = SRC ? (/\.pages\.dev$/.test(new URL(SRC).hostname) ? "https://lockqz.pages.dev/api" : new URL(SRC).origin + "/api") : "";   // one API (main site secrets)
   var DASH = SRC ? new URL(SRC).origin + "/dashboard" : "";
@@ -197,8 +215,11 @@
     try { prev = JSON.parse(localStorage.getItem(FPK) || "null"); } catch (e) { prev = null; }
     var autoLine = function () { return "Re-syncs by itself every 15 min while this tab is open · checked " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); };
     if (AUTO) {
-      if (prev && prev.fp === FP && Date.now() - Number(prev.at || 0) < FORCE_MS) { var al = open.querySelector("#lqz-auto"); if (al) al.textContent = autoLine(); return; }
-      if (!document.body.contains(open) || (open.dataset && open.dataset.gates === "1")) return;
+      if (!FORCE && prev && prev.fp === FP && Date.now() - Number(prev.at || 0) < FORCE_MS) { var al = open.querySelector("#lqz-auto"); if (al) al.textContent = autoLine(); return; }
+      if (!document.body.contains(open) || (open.dataset && open.dataset.gates === "1")) {
+        if (FORCE) tell({ lqz: "busy", why: "A quiz gate is running in Brightspace. Sync after the quiz." });
+        return;
+      }
       if (open.style.display === "none") box.style.display = "none";
       open.remove(); document.body.appendChild(box);   // the old panel's own re-check timer stops with it
     }
@@ -285,6 +306,7 @@
     }
     if (results.length) await lq("/sync-result", { results: results });
     try { localStorage.setItem(FPK, JSON.stringify({ fp: FP, at: Date.now() })); } catch (e) {}
+    tell({ lqz: "synced", ok: !errors.length, courses: courses.length, errors: errors.length });
 
     // ---- 4. panel: choose protected quizzes ----
     var prot = {}; (state.protect || []).forEach(function (p) { prot[String(p.qi)] = true; });
@@ -312,7 +334,7 @@
       (unread ? '<div style="color:#990000;margin-top:8px">' + unread + " course" + (unread === 1 ? "" : "s") + " not read: LOCKqz kept the quizzes it had.</div>" : "") +
       (errors.length ? '<div style="color:#990000;margin-top:8px">Could not update: ' + esc(errors.join("; ")) + "</div>" : "") +
       '<div style="margin-top:10px;font-weight:700">Protect with LOCKqz (blocks AI during the quiz):</div>' + html +
-      '<div style="margin-top:12px"><a href="' + DASH + '" target="_blank" style="color:#990000;font-weight:700">Open LOCKqz dashboard</a></div>' +
+      '<div style="margin-top:12px"><a id="lqz-dash" href="' + DASH + '" target="_blank" style="color:#990000;font-weight:700">Open LOCKqz dashboard</a></div>' +
       '<div id="lqz-auto" style="color:#888;font-size:12px;margin-top:6px">' + esc(autoLine()) + "</div>");
 
     // ---- live access gate: only students LOCKqz is actively locking can see the quiz ----
@@ -524,6 +546,26 @@
         .catch(function (e) { st.textContent = "resume failed: " + e.message.slice(0, 60); st.style.color = "#990000"; });
     });
 
+    // ---- the dashboard's "Sync now" button ----
+    // The dashboard link opens the dashboard as this tab's child (so it can talk to this tab); a dashboard
+    // tab that opened this one can too. It may only ask "are you there?" and "sync now" -- nothing else.
+    var dl = B.querySelector && B.querySelector("#lqz-dash");
+    if (dl && W) dl.onclick = function (ev) { if (ev && ev.preventDefault) ev.preventDefault(); W.open(DASH, "lqzdash"); };
+    if (W && W.addEventListener && !W.__lqzListen) {
+      W.__lqzListen = true; W.__lqzSrc = SRC;
+      var DASHES = [DASH_ORIGIN, "https://prof.lockqz.pages.dev", "https://lockqz.pages.dev"];
+      W.addEventListener("message", function (e) {
+        if (DASHES.indexOf(e.origin) < 0 || !e.data || typeof e.data !== "object" || !e.source) return;
+        W.__lqzDash = e.source; W.__lqzDashOrigin = e.origin;
+        if (e.data.lqz === "ping") { try { e.source.postMessage({ lqz: "hello" }, e.origin); } catch (x) {} return; }
+        if (e.data.lqz !== "sync") return;
+        var u = new URL(W.__lqzSrc); u.searchParams.delete("auto"); u.searchParams.set("force", "1"); u.searchParams.set("v", String(Date.now()));
+        var sc = document.createElement("script"); sc.src = u.href; document.body.appendChild(sc);
+      });
+      setInterval(function () { tell({ lqz: "hello" }); }, 30000);   // in-browser only: costs nothing
+    }
+    tell({ lqz: "hello" });
+
     // ---- automatic re-sync while this panel stays open (hidden counts as open) ----
     // Every 15 min: a fresh copy of this script re-reads Brightspace (new quizzes, added/dropped students,
     // changed dates) and syncs only if something changed. Never while a gate runs, and never while the
@@ -538,6 +580,7 @@
       var s = document.createElement("script"); s.src = u.href; document.body.appendChild(s);
     }, AUTO_MS);
   } catch (e) {
+    tell({ lqz: "failed", error: String(e && e.message || e).slice(0, 200) });
     say('<b style="color:#990000">' + esc(e.message) + "</b>");
   }
 })();
