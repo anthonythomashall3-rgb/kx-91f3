@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- (none)
+- 2026-10-26 04:50 PT — 01KwFxq1: remove the final-sale text (pay.html, dashboard.html, checkout in [[route]].js, test_stripe.mjs, HANDOFF.md)
 
 ## Recently finished
 - 2026-10-26 04:50 PT — 01KwFxq1: payments final (no cancel path; Stripe ACH off by default, STRIPE_BANK=0; final-sale text on checkout/pay page/dashboard); refunds/disputes/failed payments void + turn professors off (admin void too); CI step app/payments/stripe-setup.sh stores the Stripe key + creates the webhook from GitHub secret STRIPE_SECRET_KEY; /api/version shows stripe; Sync now shows the 3 bookmark steps inline. HANDOFF.md written (new account starts there).
