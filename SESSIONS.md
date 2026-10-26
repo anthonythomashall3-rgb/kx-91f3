@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-10-26 06:10 PT — 01359vfr: whole-number prices ($240 students Zelle/bank, $270 other ways; professors $6,500, card $6,700; tax & fees 25% of the total), Gmail script install. Files: [[route]].js, pay.html, dashboard.html, wrangler.toml, test_tax.mjs, LOCKqz-payments.gs.
+- 2026-10-26 09:55 PT — 01RRBPT: student pay = card-only ($280, STUDENT_OTHER_TOTAL + STUDENT_CARD_ONLY, gated on Stripe being on) + NO student PO; remove the sub-text under each pay option; show the processing lock only while a payment is actually pending; thank-you / keep-installed page after pay; install-page warning + lock; "incorrect password" copy; Sync panel redesign (on/off per class + per quiz, name + dates only). Files: pay.html, [[route]].js, wrangler.toml, index.html, dashboard.html, sync.js. (took over 01359vfr's stale 06:10 claim)
 
 ## Recently finished
 - 2026-10-26 06:30 PT — 01359vfr: income tax 25% on top (Zelle/bank $240, Venmo/card/PO $266.67 students; $6,666.67 professors), Venmo on, Zelle first, tax line on tap, /pay/bank auto-email + Gmail script answers bank emails + bank deposits auto-matched, professor dashboard tour. See HANDOFF.md top.
