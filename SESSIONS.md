@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- (none)
+- 2026-10-26 05:40 PT — 01359vfr: income tax 25% on top of every price, students: Zelle/bank $180 base, Venmo/card/PO $200 base; Zelle first; bank-details auto-email; bank deposits auto-match; professor dashboard tour. Files: [[route]].js, pay.html, dashboard.html, lq.js, LOCKqz-payments.gs, wrangler.toml, migrate_028, test_pay*/test_stripe*, new test_tax.mjs.
 
 ## Recently finished
 - 2026-10-26 05:15 PT — 01KwFxq1: Zelle back to one price ($180) + memo: tapping Zelle opens 6 steps (Copy memo button, bank app → Zelle → Send, To + Copy, amount, paste memo in Memo/Note, send) + warning; unique amounts OFF (ZELLE_UNIQUE=1 turns on). Note: test_dashboard_sync_now 'Brightspace opened in a new tab' failed once in run_all (timing), passes alone.
