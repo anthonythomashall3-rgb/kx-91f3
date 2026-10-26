@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- (none)
+- 2026-10-26 06:00 PT — 01359vfr: "Tax & fees" 23% (label + rate), Gmail script install. Files: [[route]].js, pay.html, dashboard.html, wrangler.toml, test_tax.mjs, LOCKqz-payments.gs.
 
 ## Recently finished
 - 2026-10-26 06:30 PT — 01359vfr: income tax 25% on top (Zelle/bank $240, Venmo/card/PO $266.67 students; $6,666.67 professors), Venmo on, Zelle first, tax line on tap, /pay/bank auto-email + Gmail script answers bank emails + bank deposits auto-matched, professor dashboard tour. See HANDOFF.md top.
