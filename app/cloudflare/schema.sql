@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_dev_quiz ON events(device_id, quiz_id, event);   -- /password (migrate_022)
 CREATE INDEX IF NOT EXISTS idx_events_quiz_ev ON events(quiz_id, event);              -- /live, /sessions (migrate_022)
 CREATE INDEX IF NOT EXISTS idx_events_event_ts ON events(event, ts);   -- rate limits (login_fail, code_sent ...) (migrate_021)
+CREATE INDEX IF NOT EXISTS idx_events_released ON events(student, ts) WHERE event='password_released';   -- /password sharing check (migrate_028)
 
 -- Current live lock per device+quiz. last_lock is refreshed by lock + quiz-time
 -- heartbeats; the password is released only while it is fresh, and the live monitor
