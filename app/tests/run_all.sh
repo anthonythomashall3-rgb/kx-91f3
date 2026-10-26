@@ -37,6 +37,7 @@ run "Stripe one-time setup script (fake Stripe + wrangler)" bash test_stripe_set
 run "Gmail payment script parser (forged alerts refused)" node test_pay_script.mjs
 run "API audit regressions (query/row budgets, auth, identity)" node --no-warnings test_api_audit.mjs
 run "Round-2 API regressions (verify, FERPA, capacity, submissions, payments, deploy contracts)" node --no-warnings test_round2_api.mjs
+run "Round-3 API regressions (email-code brute force, Sync-key scope, FERPA scope, big class lists, sign-up + mail caps)" node --no-warnings test_round3_api.mjs
 run "Round-2 front-end regressions (Sync gate safety, saved settings, polling)" node --no-warnings test_round2_frontend.mjs
 run "Deploy secrets check (Production + Preview, both projects)" bash test_deploy_secrets.sh
 run "Front-end audit regressions (dashboard + Sync panel)" node --no-warnings test_frontend_fixes.mjs

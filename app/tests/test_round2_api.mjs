@@ -283,9 +283,9 @@ console.log("R10 (I-M2, I-M6) password change during a gate keeps the Sync key u
   await call("/gate", { ou: "500", qi: "1", on: true, keep: [] }, { teacher: P });
   r = await call("/changepw", { old_password: "profpass12", password: "profpass34" }, { teacher: P });
   const P2 = r.data?.token;
-  check("/changepw during a gate keeps the Sync key working", r.status === 200 && (await call("/bs", null, { sync: K, get: true })).status === 200, JSON.stringify(r.data));
+  check("/changepw during a gate keeps the Sync key working", r.status === 200 && (await call("/me", null, { sync: K, get: true })).status === 200, JSON.stringify(r.data));
   await call("/gate", { ou: "500", qi: "1", on: false }, { sync: K });
-  check("the kept key dies when the last gate stops", (await call("/bs", null, { sync: K, get: true })).status === 401 && one("SELECT sync_key FROM teachers WHERE email='p@usc.edu'").sync_key === null);
+  check("the kept key dies when the last gate stops", (await call("/me", null, { sync: K, get: true })).status === 401 && one("SELECT sync_key FROM teachers WHERE email='p@usc.edu'").sync_key === null);
   globalThis.P2 = P2;
 }
 const PT = globalThis.P2;

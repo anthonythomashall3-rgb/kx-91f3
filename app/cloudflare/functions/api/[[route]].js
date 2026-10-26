@@ -292,7 +292,10 @@ export async function onRequest(context) {
   // The sync key (in the bookmarklet URL, readable by any script on the Brightspace page) authorizes
   // ONLY the Brightspace-connector endpoints. Account management needs the real session token.
   const viaSyncKey = !!(request.headers.get("X-LOCKqz-Sync") || "").trim() && !(hdr && adminKey && sameHex(hdr, adminKey)) && !(hdr);
-  const SYNC_OK = new Set(["/sync","/sync-result","/protect","/gate","/rotating","/rotated","/submitted","/live","/synckey","/me","/bs"]);
+  // Not /bs (every class list with student emails: FERPA) and not /synckey (would let a leaked key rotate
+  // itself and lock the professor's real bookmark out): the Sync tab never calls either; the dashboard
+  // uses the session token.
+  const SYNC_OK = new Set(["/sync","/sync-result","/protect","/gate","/rotating","/rotated","/submitted","/live","/me"]);
   const teacher = () => !!me;
   const mine = (col="teacher_id") => me.admin ? { sql:"1=1", args:[] } : { sql:`${col}=?`, args:[me.id] };
   // Only the INSTRUCTOR of a course (named Instructor on a roster an admin or verified professor synced)
@@ -355,7 +358,7 @@ export async function onRequest(context) {
   const purgeStmts = () => {
     const ago = d => new Date(Date.now() - d * 86400000).toISOString();
     return [db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id LIMIT 300) AND ts<?").bind(ago(EVENT_DAYS)),
-      db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE event IN ('login_fail','pay_code_new','pay_start','pay_stripe','code_sent','code_send_failed') AND ts<? LIMIT 300)").bind(ago(2)),
+      db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE event IN ('login_fail','pay_code_new','pay_start','pay_stripe','pay_bank','signup','code_sent','code_send_failed') AND ts<? LIMIT 300)").bind(ago(2)),
       db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE event='reset_request' AND ts<? LIMIT 100)").bind(ago(30)),
       db.prepare("DELETE FROM email_codes WHERE expires<?").bind(Date.now() - 86400000)];
   };
@@ -920,7 +923,7 @@ export async function onRequest(context) {
       const regN = (await db.prepare("SELECT COUNT(*) AS n FROM devices WHERE reg_ip=? AND registered_at>?").bind(regIp, new Date(Date.now()-3600000).toISOString()).first()).n;
       if (regN > 30) return json({ error: "too many registrations" }, 429);
       await db.prepare("INSERT INTO devices (device_id,student,platform,version,installed_at,last_seen,device_key,registered_at,reg_ip) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET device_key=excluded.device_key, registered_at=excluded.registered_at, reg_ip=excluded.reg_ip, platform=COALESCE(excluded.platform,devices.platform), version=COALESCE(excluded.version,devices.version), last_seen=excluded.last_seen WHERE devices.device_key IS NULL")
-        .bind(id, body.student || null, body.platform || null, body.version || null, now(), now(), key, now(), request.headers.get("CF-Connecting-IP") || null).run();
+        .bind(id, lowMail(str(body.student)), str(body.platform, 60), str(body.version, 60), now(), now(), key, now(), request.headers.get("CF-Connecting-IP") || null).run();
       const d = await db.prepare("SELECT device_key, revoked FROM devices WHERE device_id=?").bind(id).first();
       if (d && d.revoked) return json({ error: "device revoked" }, 403);
       return d && sameHex(d.device_key, key) ? json({ ok: true, registered: true }) : json({ error: "device already registered" }, 409);
@@ -995,7 +998,9 @@ export async function onRequest(context) {
         if (Date.now() > Number(row.expires)) return (await issue()) || json({ error: "expired", resent: true });
         const given = String(body.code || "").replace(/\D/g, "");
         if (!sameHex(await sha256hex(enc.encode(dev + ":" + given)), row.code_hash)) {
-          if (Number(row.tries) + 1 >= CODE_TRIES) return (await issue()) || json({ error: "too_many_tries", resent: true });
+          // The 5th wrong try kills this code BEFORE a new one is asked for: if the new email is rate-limited
+          // (429), the old code must not stay guessable without limit until it expires.
+          if (Number(row.tries) + 1 >= CODE_TRIES) { await db.prepare("DELETE FROM email_codes WHERE device_id=?").bind(dev).run(); return (await issue()) || json({ error: "too_many_tries", resent: true }); }
           await db.prepare("UPDATE email_codes SET tries=tries+1 WHERE device_id=?").bind(dev).run();
           return json({ error: "wrong_code", tries_left: CODE_TRIES - Number(row.tries) - 1 });
         }
@@ -1247,6 +1252,14 @@ export async function onRequest(context) {
       // Only an INVITED (vouched) account can verify -- by syncing a course whose trusted roster lists
       // its email as Instructor. Without that, anyone could sign up as bristow@usc.edu before his roster
       // is seeded and later "verify" as him. The invite also sets the paid window.
+      // Self-signup (no valid invite): 10 per IP per hour, checked before any password hashing or row is
+      // written (else one script fills the D1 free plan's 100k rows/day and burns CPU on PBKDF2).
+      if (!invPre) {
+        const hr = new Date(Date.now() - 3600000).toISOString();
+        if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='signup' AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 10)
+          return json({ error:"too many sign-ups from here — try again in an hour" }, 429);
+        await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + clientIp, null, null, "signup", null, now()).run();
+      }
       const n = (await db.prepare("SELECT COUNT(*) AS n FROM teachers").first()).n;
       let inv = null;
       {
@@ -1511,6 +1524,10 @@ export async function onRequest(context) {
         return json({ error: "too many requests — try again in an hour" }, 429);
       if (await db.prepare("SELECT 1 FROM events WHERE event='pay_bank' AND student=? AND ts>?").bind(email, ten).first())
         return json({ ok: true, sent: true, to: email, again: true });   // one email per address per 10 minutes
+      // Global cap per day: these emails share Gmail's ~500/day sending limit with the students' email codes,
+      // so many IPs asking for bank details to random addresses must never stop students verifying before a quiz.
+      if (!script && Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_bank' AND ts>?").bind(new Date(Date.now() - 86400000).toISOString()).first()).n) >= Number(env.BANK_MAIL_DAILY_MAX || 60))
+        return json({ error: "Too many requests today. Email " + (stuBank() || "lockqz.app@gmail.com") + " for the bank details." }, 429);
       const prof = await db.prepare("SELECT id FROM teachers WHERE lower(email)=?").bind(email).first();
       let kind = "student", code, left;
       if (prof) {
@@ -1550,7 +1567,7 @@ export async function onRequest(context) {
     // Called by the Gmail script about once an hour: sends due renewal emails, a few per call.
     if (p === "/pay/tick" && request.method === "POST") {
       const secret = await paySecret();
-      if (secret.length < 16 || String(request.headers.get("X-LOCKqz-Pay") || "") !== secret) return json({ error:"unauthorized" }, 401);
+      if (secret.length < 16 || !sameHex(String(request.headers.get("X-LOCKqz-Pay") || ""), secret)) return json({ error:"unauthorized" }, 401);   // constant-time
       return json(await renewalTick());
     }
     if (p === "/pay/notify" && request.method === "POST") {
@@ -1683,7 +1700,10 @@ export async function onRequest(context) {
     if (p === "/quizzes") {
       const m = mine();
       const r = await db.prepare(`SELECT quiz_id,title,url,password,created_at,qi,lock_id,teacher_id,ou FROM quizzes WHERE ${m.sql} ORDER BY created_at DESC`).bind(...m.args).all();
-      return json({ quizzes: r.results });
+      // A quiz's live password only for courses the caller instructs NOW (a removed co-instructor keeps the
+      // row, so they can still remove it, but not the password students type).
+      const okQ = await trustedOus(r.results.map(x => String(x.ou || "")));
+      return json({ quizzes: r.results.map(x => okQ.has(String(x.ou || "")) ? x : { ...x, password: null }) });
     }
     if (p === "/course" && request.method === "POST") {
       const u = String(body.url || "");
@@ -1694,13 +1714,14 @@ export async function onRequest(context) {
       if (ex && ex.teacher_id && ex.teacher_id !== me.id && !me.admin) return json({ error:"that course is already protected by another professor" }, 409);
       const password = "LQ-" + rid(8);
       await db.prepare("INSERT INTO courses (ou,title,password,created_at,teacher_id) VALUES (?,?,?,?,?) ON CONFLICT(ou) DO UPDATE SET password=excluded.password,title=excluded.title,teacher_id=excluded.teacher_id")
-        .bind(ou, body.title||null, password, now(), me.id).run();
+        .bind(ou, str(body.title), password, now(), me.id).run();
       return json({ ou, password });
     }
     if (p === "/courses") {
       const m = mine();
       const r = await db.prepare(`SELECT ou,title,password,created_at,teacher_id FROM courses WHERE ${m.sql} ORDER BY created_at DESC`).bind(...m.args).all();
-      return json({ courses: r.results });
+      const okC = await trustedOus(r.results.map(x => String(x.ou || "")));
+      return json({ courses: r.results.map(x => okC.has(String(x.ou || "")) ? x : { ...x, password: null }) });
     }
     if (p === "/delete" && request.method === "POST") {
       const m = mine();
@@ -1816,7 +1837,10 @@ export async function onRequest(context) {
           const o = oldR.get(k);
           if (!o || !same(o.name, v[0]) || !same(o.email, v[1]) || !same(o.username, v[2]) || !same(o.org_id, v[3]) || !same(o.role, v[4])) rUp.push([ou, uid, ...v, t]);
         }
-        const drop = oldRoster.filter(r => String(r.ou) === ou && !keep.has(String(r.user_id))).map(r => String(r.user_id));
+        // A class list longer than the 3,000 read here is cut short: dropping "missing" students would then
+        // remove real ones (and the gate could no longer admit them), so nobody is dropped for that course.
+        const cut = byOu.get(ou).classlist.length > 3000;
+        const drop = cut ? [] : oldRoster.filter(r => String(r.ou) === ou && !keep.has(String(r.user_id))).map(r => String(r.user_id));
         for (const part of chunk(drop, 98)) st.push(db.prepare(`DELETE FROM roster WHERE ou=? AND user_id IN (${placeholders(part.length)})`).bind(ou, ...part));
       }
       st.push(...multiInsert(db, "INSERT INTO roster (ou,user_id,name,email,username,org_id,role,synced_at)", 8, rUp,
@@ -1837,7 +1861,7 @@ export async function onRequest(context) {
           if (v[5] === 1 && v[6] === 0) ownPw.add(`${ou}-${qi}`);
           if (!o || !same(o.name, v[0]) || Number(o.active) !== v[1] || !same(o.start_date, v[2]) || !same(o.end_date, v[3]) || !same(o.due_date, v[4]) || Number(o.bs_has_password) !== v[5] || Number(o.bs_password_is_ours) !== v[6]) bUp.push([ou, qi, ...v, t]);
         }
-        const drop = oldBq.filter(r => String(r.ou) === ou && !keep.has(String(r.qi))).map(r => String(r.qi));
+        const drop = byOu.get(ou).quizzes.length > 1000 ? [] : oldBq.filter(r => String(r.ou) === ou && !keep.has(String(r.qi))).map(r => String(r.qi));
         for (const part of chunk(drop, 98)) st.push(db.prepare(`DELETE FROM bs_quizzes WHERE ou=? AND qi IN (${placeholders(part.length)})`).bind(ou, ...part));
       }
       st.push(...multiInsert(db, "INSERT INTO bs_quizzes (ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours,synced_at)", 10, bUp,
@@ -2065,9 +2089,11 @@ export async function onRequest(context) {
     // INSTRUCT on a trusted roster (a seed row grants nothing), protect as a whole course, or hold
     // quizzes in. Read as quiz_id RANGES per course through the events(quiz_id, event) index, over the
     // last 30 days (H11: no scan of the whole events table).
+    // FERPA: only courses the caller instructs NOW (trusted roster). A quiz or course row the caller made
+    // earlier (e.g. a co-instructor since removed from the class list, or a TA re-roled) grants nothing.
     async function scopeOus() {
       const mo = myOusSql();
-      return (await db.prepare(`SELECT ou FROM (${mo.sql}) UNION SELECT ou FROM courses WHERE teacher_id=? UNION SELECT substr(lock_id,1,instr(lock_id||'-','-')-1) AS ou FROM quizzes WHERE teacher_id=? AND lock_id IS NOT NULL`).bind(...mo.args, me.id, me.id).all()).results.map(r => String(r.ou)).filter(o => /^\d+$/.test(o));
+      return (await db.prepare(`SELECT DISTINCT ou FROM (${mo.sql})`).bind(...mo.args).all()).results.map(r => String(r.ou)).filter(o => /^\d+$/.test(o));
     }
     const rangeSql = (n, col = "quiz_id") => "(" + Array(n).fill(`(${col}>=? AND ${col}<?)`).join(" OR ") + ")";
     const rangeArgs = list => list.flatMap(o => [o + "-", o + "."]);
