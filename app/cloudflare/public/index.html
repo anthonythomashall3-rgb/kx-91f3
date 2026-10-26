@@ -41,6 +41,10 @@
 
       <div class="or">
         <a class="btn" id="dl" href="#">Or download the installer</a>
+        <div id="dlsteps" hidden style="text-align:left;margin:16px 0 0">
+          <p style="font-weight:700;font-size:13px;margin:0 0 6px" id="dlhead">After it downloads:</p>
+          <ol id="dlol" style="margin:0;padding-left:20px;font-size:13px;color:#555;line-height:1.55"></ol>
+        </div>
         <p class="warn" id="warn"></p>
       </div>
     </div>
@@ -66,14 +70,20 @@
       $("cmd").textContent = "curl -fsSL " + site + "/install.sh | sudo bash";
       $("pw").textContent = "It asks for your Mac password once (typing stays hidden) — that is macOS, not us. A first install may download Apple's Command Line Tools (one time).";
       $("dl").href = "/download/lockqz-mac.pkg";
-      $("warn").textContent = "If macOS blocks it: System Settings → Privacy & Security → Open Anyway.";
+      $("warn").textContent = "";
+      $("dlhead").textContent = "After lockqz-mac.pkg downloads:";
+      $("dlol").innerHTML = ["Open your Downloads folder and double-click <b>lockqz-mac.pkg</b>.", "If macOS says it can\u2019t be opened: <b>System Settings \u2192 Privacy &amp; Security \u2192 Open Anyway</b>, then open it again.", "Follow the installer and enter your Mac password when it asks.", "When it finishes you can close the installer \u2014 LOCKqz is set up."].map(function (x) { return "<li>" + x + "</li>"; }).join("");
+      $("dlsteps").hidden = false;
     } else {
       $("os").textContent = "for Windows";
       $("how").textContent = "Open PowerShell as administrator (press Start, type PowerShell, right-click it → Run as administrator), paste this, press Enter:";
       $("cmd").textContent = "irm " + site + "/install.ps1 | iex";
       $("pw").textContent = "";
       $("dl").href = "/download/lockqz-win.exe";
-      $("warn").textContent = "If Windows blocks it: More info → Run anyway.";
+      $("warn").textContent = "";
+      $("dlhead").textContent = "After lockqz-win.exe downloads:";
+      $("dlol").innerHTML = ["Open your Downloads folder and double-click <b>lockqz-win.exe</b>.", "If Windows SmartScreen appears: click <b>More info \u2192 Run anyway</b>.", "Click <b>Yes</b> on the Windows permission (UAC) prompt.", "Follow the installer \u2014 when it finishes, LOCKqz is set up."].map(function (x) { return "<li>" + x + "</li>"; }).join("");
+      $("dlsteps").hidden = false;
       if (STORE_ID) {
         $("store").hidden = false; $("storebtn").href = "https://apps.microsoft.com/detail/" + STORE_ID;
         $("lead").textContent = "Or install with one command:";
@@ -85,7 +95,7 @@
     };
     var one = mac ? "install.sh" : "install.ps1", rel = "/download/" + (mac ? "mac/" : "windows/") + one;
     served("/" + one, function (ok) { if (!ok) served(rel, function (ok2) { if (ok2) $("cmd").textContent = $("cmd").textContent.replace(site + "/" + one, site + rel); }); });
-    served($("dl").getAttribute("href"), function (ok) { if (!ok) { $("dl").hidden = true; $("warn").hidden = true; } });
+    served($("dl").getAttribute("href"), function (ok) { if (!ok) { $("dl").hidden = true; $("warn").hidden = true; $("dlsteps").hidden = true; } });
   } else {
     $("nope").hidden = false;
   }
