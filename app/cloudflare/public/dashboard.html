@@ -541,23 +541,23 @@ function renderPay(){ const d=PAY, el=$("pay"); if(!el||!d) return;
   const ways = [d.zelle&&["zelle","Zelle","Lowest price · arrives in minutes"], d.invoice&&["bank","Bank transfer (ACH / wire)","Bank details emailed to you"], d.venmo&&["venmo","Venmo","Memo filled in"], d.stripe&&["card","Card","Instant"], d.po&&["po","Purchase order (PO)","Your department pays"]].filter(Boolean);
   el.innerHTML = `<section class="card" style="display:flex;flex-direction:column;gap:16px">
     <div class="hrow"><h2>Activate LOCKqz</h2><span>${d.term?termName(d.term):""}</span></div>
-    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b id="pprice" style="font-size:44px">${money(PW.zelle.base)}</b><span class="muted">per semester · all your sections</span><b id="pincl" style="color:var(--usc)"></b>${got>0?`<b style="color:var(--warn)">${PT ? `Received ${money(d.money??got)} · ${money(PW.zelle.total)} left` : `Received ${money(got)} of ${money(base)}`}</b>`:""}</div>
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b id="pprice" style="font-size:44px">${money(PW.zelle.total)}</b><span class="muted">per semester · all your sections</span><b id="pincl" style="color:var(--usc)"></b>${got>0?`<b style="color:var(--warn)">${PT ? `Received ${money(d.money??got)} · ${money(PW.zelle.total)} left` : `Received ${money(got)} of ${money(base)}`}</b>`:""}</div>
     ${d.sections.length ? `<ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px">${d.sections.map(s=>`<li style="display:flex;gap:12px;align-items:center;min-height:40px;padding:0 12px;border:1px solid #e3e0d8;border-radius:10px"><b>${esc(s.course)}</b><span class="muted">Section ${esc(s.section)}</span></li>`).join("")}</ul>` : `${!usc?"":!d.term?`<p class="muted" style="margin:0">Enter your first and last name.</p>`:d.name?`<p class="muted" style="margin:0">No sections found for ${esc(d.name)}.</p>`:""}${nameBox}`}
     <div style="display:flex;flex-direction:column;gap:8px" id="pways">
-      ${ways.map(([k,l,sub])=>`<button class="btn payway" data-k="${k}" aria-expanded="false" onclick="payPick('${k}')" style="justify-content:space-between;min-height:58px;text-align:left"><span style="display:flex;flex-direction:column"><span>${esc(l)}</span><small class="muted" style="font-weight:400${k==="zelle"?";color:var(--ok);font-weight:600":""}">${esc(sub)}</small></span><b>${money(PW[k].base)}</b></button><div class="paypanel hide" id="pp_${k}" style="border:2px solid var(--usc);border-radius:10px;padding:14px 16px"></div>`).join("")}
+      ${ways.map(([k,l,sub])=>`<button class="btn payway" data-k="${k}" aria-expanded="false" onclick="payPick('${k}')" style="justify-content:space-between;min-height:58px;text-align:left"><span style="display:flex;flex-direction:column"><span>${esc(l)}</span><small class="muted" style="font-weight:400${k==="zelle"?";color:var(--ok);font-weight:600":""}">${esc(sub)}</small></span><b>${money(PW[k].total)}</b></button><div class="paypanel hide" id="pp_${k}" style="border:2px solid var(--usc);border-radius:10px;padding:14px 16px"></div>`).join("")}
       ${!ways.length ? `<p style="margin:0">Pay ${money(base)} to the LOCKqz admin.</p>` : ""}
     </div><p class="muted" style="margin:0">Memo: <b>${esc(note)}</b></p>
     ${lqL("Processing your payment", "This should take no longer than a minute")}
     ${d.sections.length && usc ? `<details><summary class="muted">Not your sections?</summary>${nameBox}</details>` : ""}
   </section>`; }
 let PW=null, PT=null;
-// "LOCKqz $5,000 / Tax & fees (23%) + $1,493.51 / Total $6,493.51"
+// "LOCKqz $4,875 / Tax & fees (25%) + $1,625 / Total $6,500"
 function payTax(w){ return !PT || !(w.tax>0) ? `<div class="hrow" style="font-weight:700"><span>Total</span><span>${money(w.total)}</span></div>`
   : `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #eee"><div class="hrow"><span>LOCKqz</span><span>${money(w.base)}</span></div><div class="hrow" style="color:var(--usc);font-weight:700"><span>${esc(PT.label)} (${Math.round(PT.rate*100)}%)</span><span>+ ${money(w.tax)}</span></div><div class="hrow" style="font-weight:800;font-size:17px;border-top:1px solid #eee;padding-top:4px"><span>Total</span><span>${money(w.total)}</span></div></div>`; }
 // Picking a way opens its steps; the price up top jumps to that way's total, the tax shown as its own line.
 function payPick(k){ const d=PAY, w=PW[k], box=$("pp_"+k), open=box.classList.contains("hide");
   document.querySelectorAll(".paypanel").forEach(x=>x.classList.add("hide")); document.querySelectorAll(".payway").forEach(x=>x.setAttribute("aria-expanded","false"));
-  $("pprice").textContent = money(open ? w.total : PW.zelle.base); $("pincl").textContent = open && PT && w.tax>0 ? `includes ${PT.label.toLowerCase()} ${money(w.tax)}` : "";
+  $("pprice").textContent = money(open ? w.total : PW.zelle.total); $("pincl").textContent = open && PT && w.tax>0 ? `includes ${PT.label.toLowerCase()} ${money(w.tax)}` : "";
   if(!open) return;
   box.classList.remove("hide"); document.querySelector(`.payway[data-k="${k}"]`).setAttribute("aria-expanded","true");
   const memo = esc(d.memo), amt = w.total.toFixed(2);

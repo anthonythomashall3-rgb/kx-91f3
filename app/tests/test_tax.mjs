@@ -82,7 +82,7 @@ const mails = [];
 const ON = { DB: d1real(sqlite), TEACHER_KEY: ADMIN, REQUIRE_SIGNED: "1", ZELLE_TO: "(858) 900-4347", INVOICE_EMAIL: "lockqz.app@gmail.com", ADMIN_EMAIL: "admin@usc.edu",
   STUDENT_FEE: "180", STUDENT_FEE_FROM: "2000-01-01", PAY_SECRET: SECRET, STUDENT_VENMO: "1", VENMO_HANDLE: "LOCKqz",
   STUDENT_CARD_PRICE: "200", STUDENT_BANK_PRICE: "181.45", PROF_CARD_PRICE: "5150", PROF_BANK_PRICE: "5005", STRIPE_BANK: "0",
-  STRIPE_SECRET_KEY: "sk_test_x", STRIPE_WEBHOOK_SECRET: WH, TAX_RATE: "0.23", TAX_FROM: "2000-01-02T00:00:00Z", STUDENT_OTHER_PRICE: "200", PROF_OTHER_PRICE: "5000",
+  STRIPE_SECRET_KEY: "sk_test_x", STRIPE_WEBHOOK_SECRET: WH, TAX_RATE: "0.25", STUDENT_TOTAL: "240", STUDENT_OTHER_TOTAL: "270", PROF_TOTAL: "6500", PROF_CARD_TOTAL: "6700", TAX_FROM: "2000-01-02T00:00:00Z", STUDENT_OTHER_PRICE: "200", PROF_OTHER_PRICE: "5000",
   BANK_DETAILS: "Bank: Test Bank\nRouting: 000000000\nAccount: 1234", MAIL_SINK: m => { mails.push(m); return true; } };
 const sessions = []; const realFetch = globalThis.fetch;
 globalThis.fetch = async (u, init) => {
@@ -100,21 +100,21 @@ await call(ON, "/signup", { email: "admin@usc.edu", password: "adminpass1" });
 console.log("T1 student prices: Zelle/bank $180 + 25% income tax = $240; Venmo/card/PO $200 + tax = $266.67");
 let d = await start("al@usc.edu");
 check("base shown first is $180", d.amount === 180, d.amount);
-check("tax block: Tax & fees 23%", d.tax?.rate === 0.23 && d.tax.label === "Tax & fees", JSON.stringify(d.tax));
-check("Zelle 180 + 60 = 240", d.ways.zelle.base === 180 && d.ways.zelle.tax === 53.77 && d.ways.zelle.total === 233.77, JSON.stringify(d.ways.zelle));
-check("bank transfer = Zelle price", d.ways.bank.total === 233.77, JSON.stringify(d.ways.bank));
-check("Venmo 200 + 66.67 = 266.67", d.ways.venmo.base === 200 && d.ways.venmo.tax === 59.74 && d.ways.venmo.total === 259.74, JSON.stringify(d.ways.venmo));
-check("PO and card = 266.67", d.ways.po.total === 259.74 && d.ways.card.total === 259.74 && d.stripe.card === 259.74, JSON.stringify([d.ways.po, d.ways.card, d.stripe]));
+check("tax block: Tax & fees 25%", d.tax?.rate === 0.25 && d.tax.label === "Tax & fees", JSON.stringify(d.tax));
+check("Zelle $240 = 180 + 60 tax & fees", d.ways.zelle.base === 180 && d.ways.zelle.tax === 60 && d.ways.zelle.total === 240, JSON.stringify(d.ways.zelle));
+check("bank transfer = Zelle price", d.ways.bank.total === 240, JSON.stringify(d.ways.bank));
+check("Venmo $270", d.ways.venmo.base === 202.5 && d.ways.venmo.tax === 67.5 && d.ways.venmo.total === 270, JSON.stringify(d.ways.venmo));
+check("PO and card $270", d.ways.po.total === 270 && d.ways.card.total === 270 && d.stripe.card === 270, JSON.stringify([d.ways.po, d.ways.card, d.stripe]));
 check("Venmo on for students", d.venmo === "LOCKqz");
-check("you keep the base after 25%: 240*0.75=180, 266.67*0.75>=200", Math.abs(233.77 * 0.77 - 180) < 0.01 && 259.74 * 0.77 >= 200 - 0.01);
+check("you keep the base after 25%: 240*0.75=180, 266.67*0.75>=200", 240 * 0.75 === 180 && 270 * 0.75 >= 200);
 
 console.log("T2 a Zelle of $180 (old price) is not enough any more; $240 is");
 let r = await notify([{ txn: "zelle:al1", amount: 180, note: d.code, via: "zelle" }]);
 check("$180 Zelle -> not paid yet", r.results[0].matched === "student" && r.results[0].paid === false, JSON.stringify(r));
 d = await start("al@usc.edu");
-check("$53.77 left by Zelle, $59.75 by Venmo", d.paid === false && d.ways.zelle.total === 53.77 && d.ways.venmo.total === 59.75, JSON.stringify(d.ways));
+check("$60 left by Zelle, $67.50 by Venmo", d.paid === false && d.ways.zelle.total === 60 && d.ways.venmo.total === 67.5, JSON.stringify(d.ways));
 check("money received shown as $180", d.money === 180, d.money);
-r = await notify([{ txn: "zelle:al2", amount: 53.77, note: d.code, via: "zelle" }]);
+r = await notify([{ txn: "zelle:al2", amount: 60, note: d.code, via: "zelle" }]);
 check("+$60 -> paid", r.results[0].paid === true && (await start("al@usc.edu")).paid === true, JSON.stringify(r));
 
 console.log("T3 Venmo $266.67 pays; Venmo $240 does not");
@@ -122,19 +122,19 @@ let b = await start("bo@usc.edu");
 r = await notify([{ txn: "venmo:bo1", amount: 240, note: b.code, via: "venmo" }]);
 check("Venmo $240 -> not paid", r.results[0].paid === false, JSON.stringify(r));
 let c = await start("cy@usc.edu");
-r = await notify([{ txn: "venmo:cy1", amount: 259.74, note: c.code, via: "venmo" }]);
+r = await notify([{ txn: "venmo:cy1", amount: 270, note: c.code, via: "venmo" }]);
 check("Venmo $266.67 -> paid", r.results[0].paid === true && (await start("cy@usc.edu")).paid === true, JSON.stringify(r));
 
 console.log("T4 bank transfer deposit with memo counts like Zelle ($240)");
 let e = await start("ed@usc.edu");
-r = await notify([{ txn: "gmail:ed1", amount: 233.77, note: e.code, via: "bank" }]);
+r = await notify([{ txn: "gmail:ed1", amount: 240, note: e.code, via: "bank" }]);
 check("bank $240 -> paid", r.results[0].paid === true, JSON.stringify(r));
 
 console.log("T5 card: Stripe charges $266.67; the webhook's $266.67 pays");
 let f = await start("fi@usc.edu");
 r = await call(ON, "/pay/stripe", { email: "fi@usc.edu", method: "card" });
-check("Checkout amount 26667 cents", sessions.at(-1).get("line_items[0][price_data][unit_amount]") === "25974", sessions.at(-1).toString());
-r = await hook({ type: "checkout.session.completed", data: { object: { id: "cs_fi", mode: "payment", currency: "usd", payment_status: "paid", amount_total: 25974, payment_intent: "pi_fi", payment_method_types: ["card"], metadata: { code: f.code } } } });
+check("Checkout amount 26667 cents", sessions.at(-1).get("line_items[0][price_data][unit_amount]") === "27000", sessions.at(-1).toString());
+r = await hook({ type: "checkout.session.completed", data: { object: { id: "cs_fi", mode: "payment", currency: "usd", payment_status: "paid", amount_total: 27000, payment_intent: "pi_fi", payment_method_types: ["card"], metadata: { code: f.code } } } });
 check("card paid", r.result?.paid === true && (await start("fi@usc.edu")).paid === true, JSON.stringify(r));
 
 console.log("T6 payments made before TAX_FROM keep counting 1:1");
@@ -145,9 +145,9 @@ check("old $180 Zelle still = paid", (await start("gu@usc.edu")).paid === true);
 console.log("T7 bank details emailed automatically (pay page button / Gmail script)");
 mails.length = 0;
 r = await call(ON, "/pay/bank", { email: "hu@usc.edu" });
-check("sent", r.status === 200 && r.data.sent === true && r.data.amount === 233.77, JSON.stringify(r.data));
+check("sent", r.status === 200 && r.data.sent === true && r.data.amount === 240, JSON.stringify(r.data));
 const m0 = mails.find(m => m.to === "hu@usc.edu");
-check("email: amount with tax line, memo, bank details", m0 && /Amount: \$233\.77/.test(m0.text) && /tax & fees 23% \$53\.77/.test(m0.text) && /Memo \/ reference: LQS/.test(m0.text) && /Routing: 000000000/.test(m0.text), m0 && m0.text);
+check("email: amount with tax line, memo, bank details", m0 && /Amount: \$240\.00/.test(m0.text) && /tax & fees 25% \$60\.00/.test(m0.text) && /Memo \/ reference: LQS/.test(m0.text) && /Routing: 000000000/.test(m0.text), m0 && m0.text);
 r = await call(ON, "/pay/bank", { email: "hu@usc.edu" });
 check("second ask within 10 min: no second email", r.data.again === true && mails.filter(m => m.to === "hu@usc.edu").length === 1);
 r = await onRequest({ request: new Request(BASE + "/api/pay/bank", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Pay": SECRET }, body: JSON.stringify({ email: "iv@gmail.com" }) }), env: ON }).then(x => x.json());
@@ -162,12 +162,12 @@ console.log("T8 professors: $5,000 + tax = $6,666.67 by Zelle/bank");
 r = await call(ON, "/signup", { email: "prof@usc.edu", password: "profpass1", name: "Pat Doe" });
 const PT = r.data.token;
 let ms = (await getc(ON, "/my-sections", { teacher: PT })).data;
-check("professor Zelle 6666.67 (5000 + 1666.67)", ms.ways?.zelle.total === 6493.51 && ms.ways.zelle.base === 5000 && ms.ways.zelle.tax === 1493.51, JSON.stringify(ms.ways?.zelle));
-check("professor card = (5150)/0.75", ms.ways.card.total === 6688.31 && ms.stripe.card === 6688.31, JSON.stringify([ms.ways.card, ms.stripe]));
+check("professor $6,500", ms.ways?.zelle.total === 6500 && ms.ways.zelle.base === 4875 && ms.ways.zelle.tax === 1625, JSON.stringify(ms.ways?.zelle));
+check("professor card $6,700", ms.ways.card.total === 6700 && ms.stripe.card === 6700, JSON.stringify([ms.ways.card, ms.stripe]));
 r = await notify([{ txn: "zelle:p1", amount: 5000, note: ms.memo, via: "zelle" }]);
 check("$5,000 Zelle -> not active yet", r.results[0].paid === false && (await getc(ON, "/me", { teacher: PT })).data.active === false, JSON.stringify(r));
-r = await notify([{ txn: "zelle:p2", amount: 1493.51, note: ms.memo, via: "zelle" }]);
-check("+$1,666.67 -> active", r.results[0].paid === true && (await getc(ON, "/me", { teacher: PT })).data.active === true, JSON.stringify(r));
+r = await notify([{ txn: "zelle:p2", amount: 1500, note: ms.memo, via: "zelle" }]);
+check("+$1,500 -> active", r.results[0].paid === true && (await getc(ON, "/me", { teacher: PT })).data.active === true, JSON.stringify(r));
 
 console.log("T9 pages");
 const ph = readFileSync(join(CF, "public", "pay.html"), "utf8"), dh = readFileSync(join(CF, "public", "dashboard.html"), "utf8");

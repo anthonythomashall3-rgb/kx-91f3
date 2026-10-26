@@ -530,7 +530,11 @@ export async function onRequest(context) {
     return way === "card" ? n(env.PROF_CARD_PRICE, 5150) : way === "sbank" ? n(env.PROF_BANK_PRICE, 5005) : other && taxOn() ? n(env.PROF_OTHER_PRICE, PRICE) : PRICE;
   };
   const feeOf = kind => kind === "student" ? STUDENT_FEE : PRICE;
-  const totalOf = (kind, way) => grossUp(baseOf(kind, way === "bank" ? "zelle" : way));
+  // Whole-number totals (Anthony, 26 Oct 06:05): students $240 Zelle / bank, $270 Venmo / card / PO; professors
+  // $6,500, card $6,700. Tax & fees = TAX_RATE of the total. A way without a set total = base / (1 - TAX_RATE).
+  const setTotal = (kind, way) => { const v = Number(kind === "student" ? (way === "zelle" ? env.STUDENT_TOTAL : way === "sbank" ? 0 : env.STUDENT_OTHER_TOTAL)
+                                                                       : (way === "card" ? env.PROF_CARD_TOTAL : way === "sbank" ? 0 : env.PROF_TOTAL)); return v > 0 ? v : 0; };
+  const totalOf = (kind, way) => { way = way === "bank" ? "zelle" : way; return setTotal(kind, way) || grossUp(baseOf(kind, way)); };
   const factorOf = (kind, way) => taxOn() ? feeOf(kind) / totalOf(kind, way) : 1;
   const creditOf = (code, via, amount) => Number(amount) * factorOf(isStu(code) ? "student" : "professor", wayOf(via));
   // The same credit in SQL, for every SUM over payments.
@@ -540,7 +544,7 @@ export async function onRequest(context) {
   const FULL = (sum, fee) => Number(sum) >= fee - 0.005;   // credits are fractions of cents
   // What each way costs for what is still owed (credit left): { total, base, tax }.
   const waysFor = (kind, left) => Object.fromEntries(WAYS.map(w => {
-    const total = Math.max(0, Math.ceil(Number(left) / factorOf(kind, w) * 100 - 1e-6) / 100), base = Math.round(total * (1 - TAX_RATE) * 100) / 100;
+    const total = Math.max(0, Math.ceil(Number(left) / factorOf(kind, w) * 100 - 1e-6) / 100), base = Math.round(total * (1 - TAX_RATE) * 100) / 100;   // tax & fees = TAX_RATE of the total
     return [w, { total, base, tax: Math.round((total - base) * 100) / 100 }]; }));
   const taxInfo = () => taxOn() ? { rate: TAX_RATE, label: String(env.TAX_LABEL || "Tax & fees").slice(0, 40) } : null;
   // ---- Stripe: card + US bank account (ACH). Off until STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET are set.
@@ -1577,7 +1581,7 @@ export async function onRequest(context) {
     if ((p === "/quiz" || p === "/course" || (p === "/protect" && body.on) || (p === "/gate" && body.on) || p === "/rotating") && request.method === "POST") {
       const u = String(body.url||"");
       const payOu = p === "/quiz" ? ids(u).ou : p === "/course" ? (u.match(/ou=(\d+)/) || u.match(/\/home\/(\d+)/) || u.match(/\/(\d+)(?:\/|$)/) || [])[1] : String(body.ou||"");
-      if (!(await paidOu(payOu))) return json({ error: "Not active. LOCKqz turns on after payment ($5,000 per semester)." }, 402);
+      if (!(await paidOu(payOu))) return json({ error: `Not active. LOCKqz turns on after payment ($${totalOf("professor", "zelle").toLocaleString("en-US")} per semester).` }, 402);
     }
 
     // The professor's own USC sections this semester (public Schedule of Classes), what is paid, and

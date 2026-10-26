@@ -38,12 +38,17 @@ STUDENT_BANK_PRICE = "181.45"
 PROF_CARD_PRICE = "5150"
 PROF_BANK_PRICE = "5005"
 # Income tax on top of every price from TAX_FROM on: price = base / (1 - TAX_RATE); the payer sees it as its own
-# "Tax & fees (23%)" line when they pick how to pay. Zelle / bank transfer base = STUDENT_FEE ($180) and $5,000;
+# "Tax & fees (25%)" line when they pick how to pay. Zelle / bank transfer base = STUDENT_FEE ($180) and $5,000;
 # Venmo / PO / card base = STUDENT_OTHER_PRICE / STUDENT_CARD_PRICE ($200) for students. TAX_FROM empty = off.
-TAX_RATE = "0.23"
+TAX_RATE = "0.25"
 TAX_LABEL = "Tax & fees"
 TAX_FROM = "2026-10-26T13:00:00Z"
 STUDENT_OTHER_PRICE = "200"
+# Whole-number totals people see (tax & fees = TAX_RATE of these).
+STUDENT_TOTAL = "240"
+STUDENT_OTHER_TOTAL = "270"
+PROF_TOTAL = "6500"
+PROF_CARD_TOTAL = "6700"
 PROF_OTHER_PRICE = "5000"
 # Bank transfer details emailed automatically: Pages SECRET BANK_DETAILS (bank, account holder, routing, account).
 # Stripe bank account (ACH) off: consumers can return ACH debits for 60 days. "1" turns it on.
