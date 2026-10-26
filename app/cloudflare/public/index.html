@@ -20,7 +20,8 @@
   footer{margin-top:24px;font-size:13px}
   footer a{color:#777}
   .none{color:#777}
-</style></head>
+</style><script src="/lq.js"></script>
+</head>
 <body>
   <div class="card">
     <h1>LOCKqz</h1>
@@ -37,7 +38,6 @@
       <div class="or">
         <a class="btn" id="dl" href="#">Or download the installer</a>
         <p class="warn" id="warn"></p>
-        <p class="warn" id="rm" hidden>To remove LOCKqz: <code id="rmcmd" style="user-select:all"></code></p>
       </div>
     </div>
 
@@ -82,10 +82,6 @@
     var one = mac ? "install.sh" : "install.ps1", rel = "/download/" + (mac ? "mac/" : "windows/") + one;
     served("/" + one, function (ok) { if (!ok) served(rel, function (ok2) { if (ok2) $("cmd").textContent = $("cmd").textContent.replace(site + "/" + one, site + rel); }); });
     served($("dl").getAttribute("href"), function (ok) { if (!ok) { $("dl").hidden = true; $("warn").hidden = true; } });
-    // Uninstall: the one-line remover, wherever it is published.
-    var un = mac ? "uninstall.sh" : "uninstall.ps1", unRel = "/download/" + (mac ? "mac/" : "windows/") + un;
-    var showRm = function (path) { $("rmcmd").textContent = mac ? "curl -fsSL " + site + path + " | sudo bash" : "irm " + site + path + " | iex"; $("rm").hidden = false; };
-    served("/" + un, function (ok) { if (ok) showRm("/" + un); else served(unRel, function (ok2) { if (ok2) showRm(unRel); else if (win) { $("rm").textContent = "To remove LOCKqz: Settings → Apps → LOCKqz → Uninstall."; $("rm").hidden = false; } }); });
   } else {
     $("nope").hidden = false;
   }

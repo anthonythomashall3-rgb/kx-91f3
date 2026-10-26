@@ -181,6 +181,11 @@ const isRegistered = async (db, id) => !!(id && await db.prepare("SELECT 1 AS r 
 // Without those secrets codes are off and an email is accepted after the roster check (old behaviour).
 const CODE_MS = 15 * 60000, CODE_TRIES = 5;
 const EMAIL_OK = e => /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(e);
+// Trial testers (FEE_EXEMPT in wrangler.toml, comma-separated): never pay (student fee or professor fee)
+// and get the test-run welcome. Everyone else pays.
+const exemptSet = env => new Set(String(env.FEE_EXEMPT || "").split(",").map(x => x.trim().toLowerCase()).filter(Boolean));
+const isExempt = (env, e) => !!e && exemptSet(env).has(String(e).trim().toLowerCase());
+const WELCOME = "Welcome to the LOCKqz test run! You are exempt from paying during this trial period. Have fun testing!\n\nThank you for joining me on the USC students\u2019 edification journey.\n\nLocks keep honest people honest.";
 const b64 = s => btoa(String.fromCharCode(...enc.encode(s)));
 // Minimal SMTP client over a TLS socket. `open` returns { readable, writable } (cloudflare:sockets).
 async function smtpSend(open, { user, pass, to, subject, text, fromName = "LOCKqz" }) {
@@ -221,7 +226,7 @@ async function smtpSend(open, { user, pass, to, subject, text, fromName = "LOCKq
 }
 async function sendCode(env, to, code) {
   const subject = `Your LOCKqz code: ${code}`;
-  const text = `Your LOCKqz code is ${code}\n\nType it into the LOCKqz window on your computer. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
+  const text = (isExempt(env, to) ? WELCOME + "\n\n" : "") + `Your LOCKqz code is ${code}\n\nType it into the LOCKqz window on your computer. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
   if (typeof env.MAIL_SINK === "function") return env.MAIL_SINK({ to, subject, text, code });   // tests
   const open = typeof env.MAIL_OPEN === "function" ? env.MAIL_OPEN   // tests: fake SMTP server
     : async () => (await import("cloudflare:sockets")).connect({ hostname: env.MAIL_HOST || "smtp.gmail.com", port: Number(env.MAIL_PORT || 465) },
@@ -274,7 +279,8 @@ export async function onRequest(context) {
     const syncKey = (request.headers.get("X-LOCKqz-Sync") || "").trim();
     const t = hdr ? await db.prepare("SELECT id,email,name,role,active_until,verified,bs_user_id,vouched FROM teachers WHERE token=?").bind(hdr).first().catch(()=>null)
           : syncKey ? await db.prepare("SELECT id,email,name,role,active_until,verified,bs_user_id,vouched FROM teachers WHERE sync_key=?").bind(syncKey).first().catch(()=>null) : null;
-    if (t) me = { id:t.id, email:t.email, name:t.name, admin: t.role === "admin", verified: t.role === "admin" || t.verified === 1, active: t.role === "admin" || (!!t.active_until && t.active_until >= laToday()), active_until: t.active_until||null, bs_user_id: t.bs_user_id||null, vouched: t.role === "admin" || Number(t.vouched) === 1 || t.verified === 1 };
+    const trial = !!t && isExempt(env, t.email) && (Number(t.vouched) === 1 || t.verified === 1);
+    if (t) me = { id:t.id, email:t.email, name:t.name, admin: t.role === "admin", trial, verified: t.role === "admin" || t.verified === 1, active: t.role === "admin" || trial || (!!t.active_until && t.active_until >= laToday()), active_until: t.active_until||null, bs_user_id: t.bs_user_id||null, vouched: t.role === "admin" || Number(t.vouched) === 1 || t.verified === 1 };
   }
   const clientIp = request.headers.get("CF-Connecting-IP") || "?";
   // The sync key (in the bookmarklet URL, readable by any script on the Brightspace page) authorizes
@@ -285,7 +291,7 @@ export async function onRequest(context) {
   const mine = (col="teacher_id") => me.admin ? { sql:"1=1", args:[] } : { sql:`${col}=?`, args:[me.id] };
   // Only the INSTRUCTOR of a course (named Instructor on a roster an admin or verified professor synced)
   // may act on it. TAs NEVER qualify -- a TA could otherwise reach the other classes they are in.
-  // Anthony (admin) is the sole exception, handled by me.admin at each call site.
+  // The admin is the sole exception, handled by me.admin at each call site.
   const EMAIL = String(me && me.email || "").toLowerCase();
   // C4: instructor role names (schools name them differently); TAs (Teaching Assistant) never match.
   const INSTR_SQL = "(r.role LIKE '%nstructor%' OR r.role LIKE '%rofessor%' OR r.role LIKE '%aculty%' OR r.role LIKE '%eacher%' OR r.role LIKE '%ecturer%' OR r.role LIKE '%utor%' OR r.role LIKE '%ourse Leader%')";
@@ -552,7 +558,7 @@ export async function onRequest(context) {
     if (!feeOn()) return true;
     email = String(email||"").trim().toLowerCase(); if (!email) return false;
     const staff = await db.prepare("SELECT 1 FROM teachers WHERE email=? AND (role='admin' OR verified=1)").bind(email).first();
-    if (staff) return true;                                     // professors and the admin never pay the student fee
+    if (staff || isExempt(env, email)) return true;             // professors, the admin and trial testers never pay the student fee
     return (await studentStatus(email)).paid;
   }
   // Many students at once (the gate's /live): the set of emails that may take the quiz (paid this term,
@@ -562,6 +568,7 @@ export async function onRequest(context) {
     const ok = new Set(); if (!ems.length) return ok;
     if (!feeOn()) { ems.forEach(e => ok.add(e)); return ok; }
     const j = JSON.stringify(ems), [cur, nxt] = curTerms(), early = ahead() || inGap();
+    ems.forEach(e => { if (isExempt(env, e)) ok.add(e); });
     (await db.prepare("SELECT lower(email) AS e FROM teachers WHERE lower(email) IN (SELECT value FROM json_each(?)) AND (role='admin' OR verified=1)").bind(j).all()).results.forEach(r => ok.add(r.e));
     const codes = new Map((await db.prepare("SELECT email, code FROM pay_codes_students WHERE email IN (SELECT value FROM json_each(?))").bind(j).all()).results.map(r => [r.code, r.email]));
     if (!codes.size) return ok;
@@ -961,13 +968,13 @@ export async function onRequest(context) {
         // at the same time; (2) at most 2 computers per email (seen in the last 30 days, not revoked).
         // Staff (professors / admin) are exempt.
         const wl = String(who).toLowerCase();
-        if (!(await db.prepare("SELECT 1 FROM teachers WHERE email=? AND (role='admin' OR verified=1)").bind(wl).first())) {
+        if (!isExempt(env, wl) && !(await db.prepare("SELECT 1 FROM teachers WHERE email=? AND (role='admin' OR verified=1)").bind(wl).first())) {
           const sh = await db.prepare(`SELECT
               (SELECT COUNT(DISTINCT l.device_id) FROM locks l JOIN devices d ON d.device_id=l.device_id WHERE d.student=? AND d.student_verified=1 AND COALESCE(d.revoked,0)=0 AND l.device_id<>? AND l.last_lock>?) AS live,
               (SELECT COUNT(*) FROM devices WHERE student=? AND student_verified=1 AND COALESCE(revoked,0)=0 AND device_id<>? AND last_seen>?) AS other`)
             .bind(wl, device_id, new Date(Date.now() - 120000).toISOString(), wl, device_id, new Date(Date.now() - 30 * 864e5).toISOString()).first();
           if (Number(sh?.live) > 0) return json({ password: null, reason: "in_use", error: "This email is in a quiz on another computer." }, 402);
-          if (Number(sh?.other) >= 2) return json({ password: null, reason: "too_many_devices", error: "This email is already used on 2 computers. Email athall@usc.edu to remove one." }, 402);
+          if (Number(sh?.other) >= 2) return json({ password: null, reason: "too_many_devices", error: "This email is already used on 2 computers. Email lockqz.app@gmail.com to remove one." }, 402);
         }
       }
       // Everything about this quiz in ONE read: LOCKqz password + gate state, Brightspace dates, a
@@ -1114,7 +1121,12 @@ export async function onRequest(context) {
       const inv = code ? await db.prepare("SELECT email,used_at FROM invites WHERE code=?").bind(code).first().catch(()=>null) : null;
       return json(inv && !inv.used_at ? { ok:true, email: inv.email||null } : { ok:false });
     }
-    if (p === "/me") return me ? json({ email: me.email, name: me.name, admin: me.admin, verified: !!me.verified, active: me.active, active_until: me.active_until }) : json({ error:"unauthorized" }, 401);
+    if (p === "/me") {
+      if (!me) return json({ error:"unauthorized" }, 401);
+      if (me.trial && me.id !== "admin") { const end = termEndOf(curTerms()[0]);
+        if (!me.active_until || me.active_until < end) { await db.prepare("UPDATE teachers SET active_until=? WHERE id=?").bind(end, me.id).run(); me.active_until = end; } }
+      return json({ email: me.email, name: me.name, admin: me.admin, verified: !!me.verified, active: me.active, active_until: me.active_until, ...(me.trial ? { trial: true } : {}) });
+    }
     if (p === "/logout" && request.method === "POST") {
       // Every real account (admins included) loses its session token; only the master key has no row.
       if (me && me.id !== "admin" && !viaSyncKey) await db.prepare("UPDATE teachers SET token=NULL WHERE id=?").bind(me.id).run();

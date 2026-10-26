@@ -25,7 +25,7 @@
 </style></head>
 <body>
 <main class="card">
-  <h1>LOCK<span style="color:var(--usc)">qz</span></h1>
+  <h1><span class="lq-l">LOCK</span><span class="lq-q">qz</span></h1>
   <p class="price" id="price" hidden><span id="amt"></span> <span>per semester</span></p>
 
   <form id="f" style="display:flex;flex-direction:column;gap:10px">
@@ -33,6 +33,7 @@
     <input id="em" type="email" autocomplete="email" placeholder="you@usc.edu" required>
     <button class="btn prime" type="submit">Continue</button>
   </form>
+  <div id="ld"></div>
 
   <section id="pay" hidden style="display:flex;flex-direction:column;gap:12px">
     <a class="btn prime" id="venmo" href="#" target="_blank" rel="noopener" hidden>Venmo</a>
@@ -43,7 +44,7 @@
     <p class="memo">Memo: <b id="code"></b></p>
     <p class="muted">Put the memo on the payment. It only pays for this email.</p>
     <p class="muted" id="got" hidden></p>
-    <p class="muted"><span class="spin" aria-hidden="true"></span><span id="wait">Processing payment…</span></p>
+    <div id="wait"></div>
     <button class="btn" id="again" type="button" style="background:#fff;border:1px solid #ccc">Check again</button>
   </section>
 
@@ -53,7 +54,10 @@
   <p class="ok" id="free" hidden>No payment needed yet</p>
   <p class="muted" id="err" hidden></p>
 </main>
+<script src="/lq.js"></script>
 <script>
+// The red lock loader from /lq.js (plain text if it did not load).
+const lqL = (m, e, o) => typeof lqLoading === "function" ? lqLoading(m, e, o) : m + "…";
 const API = /\.pages\.dev$/.test(location.hostname) ? "https://lockqz.pages.dev/api" : "/api", $ = id => document.getElementById(id);
 const money = n => "$" + Number(n).toLocaleString("en-US");
 // Polling: 10 s, slowing to 60 s; stops after 15 min or while the tab is hidden ("Check again" restarts it).
@@ -62,8 +66,10 @@ function stopPoll(){ clearTimeout(poll); poll = null; }
 function schedule(){ stopPoll();
   if (document.visibilityState === "hidden") return;
   if (Date.now() - since > 15 * 60000) { $("wait").textContent = "Paid already? Check again."; return; }
+  if (!/lqload/.test($("wait").innerHTML || "")) $("wait").innerHTML = WAITING();
   poll = setTimeout(check, Math.min(60000, 10000 * Math.pow(1.5, polls++))); }
-function startPoll(){ polls = 0; since = Date.now(); $("wait").textContent = "Processing payment…"; schedule(); }
+const WAITING = () => lqL("Processing your payment", "This should take no longer than a minute");
+function startPoll(){ polls = 0; since = Date.now(); $("wait").innerHTML = WAITING(); schedule(); }
 function showGot(got, due){ got = Number(got) || 0; $("got").hidden = !(got > 0); if (got > 0) $("got").textContent = "Received " + money(got) + " of " + money(due); }
 async function check(){
   if (!who) return;
@@ -74,8 +80,9 @@ async function check(){
   schedule();
 }
 async function start(email){
-  $("err").hidden = true;
+  $("err").hidden = true; $("ld").innerHTML = lqL("Finding your account", "This takes about 2 seconds");
   let d; try { d = await (await fetch(API + "/pay/start", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ email }) })).json(); } catch { d = { error:"No connection. Try again." }; }
+  $("ld").innerHTML = "";
   if (d.error) { $("err").textContent = d.error; $("err").hidden = false; return; }
   history.replaceState(null, "", "?email=" + encodeURIComponent(email));
   if (!d.required) { stopPoll(); $("f").hidden = true; $("pay").hidden = true; $("free").hidden = false; return; }   // fee not on yet

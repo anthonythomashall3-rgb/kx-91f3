@@ -236,5 +236,19 @@ console.log("P12 one payment = one student: a paid email cannot be shared betwee
   check("3rd computer on one paid email -> refused", r.status === 402 && r.data?.reason === "too_many_devices", JSON.stringify(r.data));
   r = await notify([{ txn: "gmail:other-code", amount: 5, note: CODE, payer: "Bo" }]);
   check("someone paying with al's code pays for al only (bo still unpaid)", r.data?.results?.[0]?.email === "al@usc.edu" && (await call(ON, "/pay/start", { email: "zed@usc.edu" })).data?.paid === false, JSON.stringify(r.data)); }
+console.log("P13 trial testers (FEE_EXEMPT) never pay; only a vouched/verified tester account gets the welcome");
+{ const T = { ...ON, STUDENT_FEE: "180", FEE_EXEMPT: "tester@usc.edu, huu@usc.edu" };
+  let s = (await call(T, "/pay/start", { email: "huu@usc.edu" })).data;
+  check("tester student: paid without paying", s.paid === true, JSON.stringify(s));
+  s = (await call(T, "/pay/start", { email: "nottester@usc.edu" })).data;
+  check("everyone else still pays $180", s.paid === false && s.amount === 180, JSON.stringify(s));
+  const tt = (await call(T, "/signup", { email: "tester@usc.edu", password: "testerpw1", name: "T" })).data.token;
+  let me = (await getc(T, "/me", { teacher: tt })).data;
+  check("unvouched account with a tester's email: no trial, not active", !me.trial && me.active === false, JSON.stringify(me));
+  sqlite.prepare("UPDATE teachers SET vouched=1 WHERE email='tester@usc.edu'").run();
+  me = (await getc(T, "/me", { teacher: tt })).data;
+  check("vouched tester professor: active + trial welcome, no payment", me.trial === true && me.active === true && !!me.active_until, JSON.stringify(me));
+  me = (await getc(ON, "/me", { teacher: PT })).data;
+  check("a normal professor never gets the trial flag", !me.trial, JSON.stringify(me)); }
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

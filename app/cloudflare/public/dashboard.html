@@ -137,7 +137,10 @@
 <!-- ============ APP ============ -->
 <main id="app" class="hide"></main>
 
+<script src="/lq.js"></script>
 <script>
+// The red lock loader from /lq.js (plain text if it did not load).
+const lqL = (m, e, o) => typeof lqLoading === "function" ? lqLoading(m, e, o) : m + "…";
 const API = /\.pages\.dev$/.test(location.hostname) ? "https://lockqz.pages.dev/api" : "/api", INSTALL = "https://lockqz.pages.dev";   // one API (main site secrets)
 let token = localStorage.getItem("lockqz_token") || "";
 let signup = false, ME = null, BS = { courses: [] }, LEGACY = [], SYNCKEY = "", liveTimer = null, INVITE = "", LOADERR = "", AUTO = null;
@@ -166,8 +169,9 @@ function toggle(){ signup=!signup; $("name").classList.toggle("hide",!signup); $
   $("lbtn").textContent=signup?"Create account":"Sign in"; $("lswitch").textContent=signup?"Already have an account? Sign in":"New here? Create an account"; $("lerr").textContent="";
   $("forgotrow").classList.toggle("hide", signup); $("forgot").classList.add("hide"); }
 async function go(){
-  $("lerr").textContent="";
+  $("lerr").innerHTML = lqL(signup ? "Creating your account" : "Signing you in", "This takes about 2 seconds", {small:true});
   const d = await post(signup?"/signup":"/login",{email:$("email").value,password:$("pw").value,name:$("name").value,invite:INVITE});
+  $("lerr").textContent = "";
   if(d.error){ $("lerr").textContent = !signup && d._status===401 ? "Incorrect email or password." : d.error; return; }
   token=d.token; localStorage.setItem("lockqz_token",token);
   if(INVITE){ INVITE=""; history.replaceState(null,"",location.pathname); }
@@ -189,13 +193,15 @@ async function logout(){ await post("/logout"); token=""; localStorage.removeIte
 // ---- boot ----
 async function boot(){
   if(!token) return;
+  $("login").classList.add("hide"); $("app").classList.remove("hide"); $("app").innerHTML = lqL("Opening LOCKqz", "This takes about 2 seconds");
   const m = await get("/me");
-  if(m.error){ $("lerr").textContent = m._status===401 ? "" : m.error; if(m._status===401){ token=""; localStorage.removeItem("lockqz_token"); } return; }
+  if(m.error){ $("app").classList.add("hide"); $("login").classList.remove("hide"); $("lerr").textContent = m._status===401 ? "" : m.error; if(m._status===401){ token=""; localStorage.removeItem("lockqz_token"); } return; }
   ME = m;
   $("login").classList.add("hide"); $("app").classList.remove("hide"); $("menu").classList.remove("hide");
   $("who").insertAdjacentHTML("afterbegin", esc(m.name||m.email));
   if(m.admin) $("m-admin").classList.remove("hide");
   await refresh(); route();
+  if(m.trial && typeof lqWelcome === "function") lqWelcome(m.email);
   if(!AUTO) AUTO = setInterval(autoRefresh, 300000);
 }
 async function refresh(){
@@ -231,8 +237,10 @@ window.addEventListener("hashchange", route);
 const BS_ORIGINS = ["https://brightspace.usc.edu", "https://usc.brightspace.com"];
 const BS_HOME = "https://brightspace.usc.edu/d2l/home";
 let BSWIN = null, SYNCWAIT = null, SYNCMSG = "";
-const SYNCBTN = prime => `<button class="btn${prime?" prime":""}" onclick="syncNow()">Sync now</button><span class="syncst muted">${esc(SYNCMSG)}</span>`;
-function syncMsg(t){ SYNCMSG = t; document.querySelectorAll(".syncst").forEach(e => e.textContent = t); }
+const SYNCBTN = prime => `<button class="btn${prime?" prime":""}" onclick="syncNow()">Sync now</button><span class="syncst muted">${syncHtml(SYNCMSG)}</span>`;
+// While a sync runs, the status shows the red lock loader (time + a fun fact); otherwise plain text.
+const syncHtml = t => t === "Syncing…" ? lqL("Syncing with Brightspace", "This usually takes under a minute", {small:true}) : esc(t);
+function syncMsg(t){ SYNCMSG = t; document.querySelectorAll(".syncst").forEach(e => e.innerHTML = syncHtml(t)); }
 function askSync(w){ BS_ORIGINS.forEach(o => { try { w.postMessage({ lqz: "sync" }, o); } catch {} }); }
 function syncNow(){
   if (SYNCWAIT) return;
@@ -291,7 +299,7 @@ function route(){
   const h = location.hash.replace(/^#/,""), [v,a] = h.split("/");
   const app = $("app");
   // Not paid: the payment screen is the only screen. It waits for the payment and opens LOCKqz by itself.
-  if(!ME.active && !ME.admin){ app.innerHTML = `<div id="pay"></div>`; loadPay(); waitPaid(); return; }
+  if(!ME.active && !ME.admin){ app.innerHTML = `<div id="pay">${lqL("Loading payment details", "This takes about 2 seconds")}</div>`; loadPay(); waitPaid(); return; }
   if(v==="class" && a) return app.innerHTML = viewClass(a);
   if(v==="live" && a) { app.innerHTML = viewLive(a); loadLive(a); liveTimer = setInterval(()=>{ if(shown()) loadLive(a); }, 10000); return; }
   if(v==="connect") return app.innerHTML = viewConnect();
@@ -401,7 +409,7 @@ function viewLive(id){
   <div class="band"><div><div style="display:flex;align-items:center;gap:10px"><span class="pulse"></span><span style="font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ok)">Live</span></div>
     <h1 style="margin:4px 0 0;font-size:28px;font-weight:700;letter-spacing:-.015em">${esc(title)}</h1><p class="sub">${q&&q.start_date?"Started "+when(q.start_date)+" · ":""}<span id="livesub">updates every 10 seconds</span></p></div></div>
   <div class="counts" id="lcounts"></div>
-  <section class="card" style="padding:8px 24px 12px"><ul class="list" id="lrows"><li class="d">Loading…</li></ul></section>
+  <section class="card" style="padding:8px 24px 12px"><ul class="list" id="lrows"><li class="d">${lqL("Loading live status", "This takes about 2 seconds")}</li></ul></section>
   <p class="foot">Students without a fresh LOCKqz lock cannot open this exam while the gate is on. Everything here is kept in the activity log.</p>`;
 }
 async function loadLive(id){
@@ -445,7 +453,7 @@ function viewConnect(first){
 
 // ---- ACTIVITY ----
 function viewActivity(){ return `${BACK('', 'Home')}<section class="card"><div class="hrow"><h2>Activity log</h2><span><button class="btn" style="min-height:36px;padding:6px 12px" onclick="loadSessions()">Refresh</button></span></div>
-  <div style="overflow-x:auto;margin-top:12px"><table id="events"><thead><tr><th>Time</th><th>Student</th><th>Device</th><th>Exam</th><th>Event</th><th>Detail</th></tr></thead><tbody></tbody></table></div></section>`; }
+  <div style="overflow-x:auto;margin-top:12px"><table id="events"><thead><tr><th>Time</th><th>Student</th><th>Device</th><th>Exam</th><th>Event</th><th>Detail</th></tr></thead><tbody><tr><td colspan="6">${lqL("Loading activity", "This takes about 3 seconds")}</td></tr></tbody></table></div></section>`; }
 const qname = lid => { for(const c of BS.courses){ const q=c.quizzes.find(x=>`${c.ou}-${x.qi}`===lid); if(q) return q.name; } return lid||""; };
 async function loadSessions(){ const d = await get("/sessions"); const tb=document.querySelector("#events tbody"); if(!tb) return; tb.innerHTML="";
   if(d.error){ tb.innerHTML=`<tr><td colspan="6" class="err">${esc(d.error)}</td></tr>`; return; }
@@ -511,10 +519,10 @@ function renderPay(){ const d=PAY, el=$("pay"); if(!el||!d) return;
       ${d.invoice ? `<a class="btn" style="text-align:center;display:flex;align-items:center;justify-content:center" href="mailto:${esc(d.invoice)}?subject=${encodeURIComponent("LOCKqz invoice "+d.memo)}&body=${encodeURIComponent("Please send an invoice for LOCKqz, "+termName(d.term)+", "+money(total)+".")}">Bank transfer (invoice)</a>` : ""}
       ${!d.zelle && !link && !d.invoice ? `<p style="margin:0">Pay ${money(total)} to the LOCKqz admin.</p>` : ""}
     </div><p class="muted" style="margin:0">Memo: <b>${esc(note)}</b></p>
-    <p class="muted" style="margin:0"><span style="width:14px;height:14px;border:2px solid #ddd;border-top-color:#990000;border-radius:50%;display:inline-block;vertical-align:-2px;margin-right:8px;animation:lqspin 1s linear infinite"></span>Processing payment…</p><style>@keyframes lqspin{to{transform:rotate(360deg)}}</style>
+    ${lqL("Processing your payment", "This should take no longer than a minute")}
     ${d.sections.length && usc ? `<details><summary class="muted">Not your sections?</summary>${nameBox}</details>` : ""}
   </section>`; }
-async function secAdmin(email){ const el=$("secpanel"); el.innerHTML="Loading…";
+async function secAdmin(email){ const el=$("secpanel"); el.innerHTML=lqL("Loading sections", "This takes about 2 seconds", {small:true});
   const d = await get("/teacher-sections?email="+encodeURIComponent(email)); if(d.error){ el.innerHTML=esc(d.error); return; }
   el.innerHTML = `<div class="card" style="margin-top:12px;display:flex;flex-direction:column;gap:10px"><b>${esc(d.email)} · ${esc(d.name||"no name")} · ${termName(d.term)} · Venmo code ${esc(d.memo)}</b>
     ${d.sections.length ? d.sections.map(s=>`<label style="display:flex;gap:10px;align-items:center"><input type="checkbox" class="secck" value="${esc(s.section)}" ${s.paid?"checked":""}> ${esc(s.course)} · ${esc(s.section)} ${s.paid?"<b style='color:var(--ok)'>paid to "+esc(s.paid_until)+"</b>":""}</label>`).join("") : "<span class='muted'>No sections found for this name.</span>"}
@@ -539,7 +547,7 @@ function inviteMail(email, link){
   const b = "Hi,\n\nYou're invited to LOCKqz. It blocks AI on students' computers during your Brightspace exams, then turns AI back on when the exam ends.\n\n"
     + "1. Create your account (this link works once):\n   " + link + "\n\n"
     + "2. Drag the LOCKqz Sync button to your bookmarks bar and click it once in Brightspace. Your classes and exams fill in; every exam is protected automatically.\n\n"
-    + "3. Students install LOCKqz once from " + INSTALL + " (the dashboard emails the ones who haven't).\n\nAnthony Hall\nLOCKqz";
+    + "3. Students install LOCKqz once from " + INSTALL + " (the dashboard emails the ones who haven't).\n\nLOCKqz";
   return "mailto:" + (email||"") + "?subject=" + encodeURIComponent(s) + "&body=" + encodeURIComponent(b);
 }
 async function makeInvite(){ const d = await post("/invite",{email:$("iemail").value,until:$("iuntil").value||semEnd()}); if(d.error){ alert(d.error); return; }

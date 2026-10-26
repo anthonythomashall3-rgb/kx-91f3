@@ -467,7 +467,7 @@ console.log("pay.html: back-off 10 s -> 60 s, stops after 15 min / when hidden, 
 }
 
 // ================= index.html / privacy.html =================
-console.log("index.html: OK/Allow line, Command Line Tools note, uninstall command");
+console.log("index.html: OK/Allow line, Command Line Tools note, no uninstall option");
 {
   const els = {}, el = id => (els[id] = els[id] || { textContent: "", hidden: false, href: "", getAttribute() { return this.href; }, parentNode: {} });
   const body = page("index.html");
@@ -477,7 +477,7 @@ console.log("index.html: OK/Allow line, Command Line Tools note, uninstall comma
       fetch: (p) => Promise.resolve(new Response("x", { status: /uninstall|install|download/.test(p) && !/download\/(mac|windows)\//.test(p) ? 200 : 404, headers: { "Content-Type": "application/octet-stream" } })), setTimeout };
     vm.createContext(ctx); vm.runInContext(script("index.html"), ctx); await sleep(10);
     check(`${os}: tells students to click OK/Allow`, /OK or Allow/.test(body));
-    check(`${os}: uninstall command shown`, els.rm && els.rm.hidden === false && (os === "mac" ? els.rmcmd.textContent === `curl -fsSL ${ORIGIN}/uninstall.sh | sudo bash` : els.rmcmd.textContent === `irm ${ORIGIN}/uninstall.ps1 | iex`), els.rmcmd && els.rmcmd.textContent);
+    check(`${os}: no remove/uninstall option on the page`, !els.rm || els.rm.hidden !== false, "");
     if (os === "mac") check("mac: Command Line Tools note", /Command Line Tools/.test(els.pw.textContent), els.pw.textContent);
   }
   const pv = page("privacy.html");

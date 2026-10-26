@@ -45,8 +45,11 @@
   box.id = "lqz-sync";
   box.style.cssText = "position:fixed;top:16px;right:16px;z-index:2147483647;width:440px;max-height:85vh;overflow:auto;background:#fff;" +
     "border:2px solid #990000;border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,.3);font:14px -apple-system,Segoe UI,sans-serif;color:#111;text-align:left";
-  box.innerHTML = '<div style="position:sticky;top:0;background:#990000;color:#fff;padding:10px 14px;font-weight:700;display:flex;justify-content:space-between">' +
-    'LOCKqz Sync<span id="lqz-x" style="cursor:pointer;padding:0 4px">&#10005;</span></div><div id="lqz-b" style="padding:12px 14px">Starting...</div>';
+  box.innerHTML = '<div style="position:sticky;top:0;background:#fff;color:#111;border-bottom:2px solid #990000;padding:10px 14px;font-weight:700;display:flex;justify-content:space-between">' +
+    '<span><span style="color:#000">LOCK</span><span style="color:#990000">qz</span> Sync</span><span id="lqz-x" style="cursor:pointer;padding:0 4px">&#10005;</span></div><div id="lqz-b" style="padding:12px 14px">Starting...</div>';
+  // The shared LOCKqz look (red lock loader + fun facts, LOCK black / qz red), from the LOCKqz site.
+  var LW = typeof window !== "undefined" ? window : {};
+  try { if (SRC && !LW.lqLoading && document.head) { var lqs = document.createElement("script"); lqs.src = new URL(SRC).origin + "/lq.js"; document.head.appendChild(lqs); } } catch (e) {}
   if (!AUTO) document.body.appendChild(box);   // an auto re-check shows its panel only if something changed
   var B = box.querySelector("#lqz-b");
   var GATES = {};   // qi -> { ou, timer, tick, busy, keep:{uid:true}, qs:[every quiz-date version seen], endMs, note, written }
@@ -59,7 +62,9 @@
     if (!Object.keys(GATES).length) { box.remove(); return; }
     if (confirm("A gate is on. Hide this panel? The gate keeps running while this tab is open.")) box.style.display = "none";
   };
-  var say = function (h) { B.innerHTML = h; };
+  var say = function (h) { B.innerHTML = h; if (LW.lqBrand) LW.lqBrand(B); };
+  // A waiting step: the red lock loader with how long it should take and a fun fact (plain text until lq.js loads).
+  var wait = function (msg, eta) { if (LW.lqLoading) say(LW.lqLoading(msg, eta)); else say(msg + "... " + eta); };
   var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
   var day = function (t) { return t ? new Date(t).toLocaleDateString([], { month: "short", day: "numeric" }) : ""; };
   var dt = function (s) { var t = s ? Date.parse(s) : NaN; return isNaN(t) ? null : t; };
@@ -162,7 +167,7 @@
     };
 
     // ---- 1. read Brightspace ----
-    say("Reading your Brightspace courses...");
+    wait("Reading your Brightspace courses", "This usually takes under a minute");
     var vers = await get("/d2l/api/versions/");
     var ver = function (c) { var v = vers.filter(function (x) { return x.ProductCode === c; })[0]; return v ? v.LatestVersion : null; };
     var LE = ver("le"), LP = ver("lp");
@@ -225,7 +230,7 @@
     }
 
     // ---- 2. save to LOCKqz ----
-    say("Saving to LOCKqz...");
+    wait("Saving to LOCKqz", "This takes a few seconds");
     var state = await lq("/sync", { host: location.host, whoami: { id: me.Identifier, name: ((me.FirstName || "") + " " + (me.LastName || "")).trim() }, courses: courses });
     // What the SERVER confirms it saved (C3): orig_password_saved / orig_hidden_saved. A row with neither
     // saved -> null (nothing known yet), so saveOrig still saves the professor's settings first.
