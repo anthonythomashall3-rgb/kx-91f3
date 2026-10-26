@@ -7,9 +7,10 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-10-26 09:55 PT — 01RRBPT: student pay = card-only ($280, STUDENT_OTHER_TOTAL + STUDENT_CARD_ONLY, gated on Stripe being on) + NO student PO; remove the sub-text under each pay option; show the processing lock only while a payment is actually pending; thank-you / keep-installed page after pay; install-page warning + lock; "incorrect password" copy; Sync panel redesign (on/off per class + per quiz, name + dates only). Files: pay.html, [[route]].js, wrangler.toml, index.html, dashboard.html, sync.js. (took over 01359vfr's stale 06:10 claim)
+- (none)
 
 ## Recently finished
+- 2026-10-26 11:25 PT — 01RRBPT: student pay card-only ($280) + no student PO (STUDENT_CARD_ONLY, gated on Stripe being on); pay page removed the option sub-text, shows the processing lock only while paying, ends on a thank-you / keep-installed page ("your Brightspace exams won't open"); install page warning + lock and step-by-step for the downloaded .pkg/.exe per OS; professor wrong-password copy; Sync panel redesign (one toggle per class + per quiz, name + start–end dates only; gate machinery unchanged, all gate tests green). Stripe fully wired — only needs the GitHub secret STRIPE_SECRET_KEY. Files: pay.html, [[route]].js, wrangler.toml, index.html, dashboard.html, sync.js, test_stripe.mjs, test_frontend_fixes.mjs.
 - 2026-10-26 06:30 PT — 01359vfr: income tax 25% on top (Zelle/bank $240, Venmo/card/PO $266.67 students; $6,666.67 professors), Venmo on, Zelle first, tax line on tap, /pay/bank auto-email + Gmail script answers bank emails + bank deposits auto-matched, professor dashboard tour. See HANDOFF.md top.
 - 2026-10-26 05:15 PT — 01KwFxq1: Zelle back to one price ($180) + memo: tapping Zelle opens 6 steps (Copy memo button, bank app → Zelle → Send, To + Copy, amount, paste memo in Memo/Note, send) + warning; unique amounts OFF (ZELLE_UNIQUE=1 turns on). Note: test_dashboard_sync_now 'Brightspace opened in a new tab' failed once in run_all (timing), passes alone.
 - 2026-10-26 05:00 PT — 01KwFxq1: final-sale text removed from pay page, dashboard and Stripe checkout (Anthony's call).
