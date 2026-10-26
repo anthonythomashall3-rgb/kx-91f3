@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- (none)
+- 2026-10-26 04:40 PT — 01KwFxq1: unique Zelle amount per student (no memo needed); files: [[route]].js (payments only), public/pay.html, migrate_027_pay_slots.sql, schema.sql, tests/test_stripe.mjs
 
 ## Recently finished
 - 2026-10-26 04:30 PT — 01KwFxq1: Stripe card + bank (ACH) on the student pay page and professor dashboard (student $200 card / $181.45 bank; professor $5,150 card / $5,005 bank; prices carry Stripe's fee; partial payments grossed up), signed webhook /api/pay/stripe/webhook records payments (refund/dispute = void), PO + ACH/wire options for both. Inert until Pages secrets STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET are set. test_stripe.mjs.
