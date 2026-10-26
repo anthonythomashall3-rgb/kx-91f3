@@ -679,10 +679,10 @@ export async function onRequest(context) {
     const j = JSON.stringify(ems), [cur, nxt] = curTerms(), early = ahead() || inGap();
     ems.forEach(e => { if (isExempt(env, e)) ok.add(e); });
     (await db.prepare("SELECT lower(email) AS e FROM teachers WHERE lower(email) IN (SELECT value FROM json_each(?)) AND (role='admin' OR verified=1)").bind(j).all()).results.forEach(r => ok.add(r.e));
-    const codes = new Map((await db.prepare("SELECT email, code FROM pay_codes_students WHERE email IN (SELECT value FROM json_each(?))").bind(j).all()).results.map(r => [r.code, r.email]));
+    const codes = new Map((await db.prepare("SELECT p.email AS email, p.code AS code FROM json_each(?) j JOIN pay_codes_students p ON p.email=j.value").bind(j).all()).results.map(r => [r.code, r.email]));
     if (!codes.size) return ok;
     const sums = {};
-    for (const r of (await db.prepare(`SELECT code, term, COALESCE(SUM(${CREDIT()}),0) AS s FROM payments WHERE code IN (SELECT value FROM json_each(?)) AND term IN (?,?) AND ${COUNTS} GROUP BY code, term`).bind(JSON.stringify([...codes.keys()]), cur, nxt).all()).results) sums[r.code + "|" + r.term] = Number(r.s);
+    for (const r of (await db.prepare(`SELECT code, term, COALESCE(SUM(${CREDIT()}),0) AS s FROM json_each(?) j CROSS JOIN payments ON payments.code=j.value WHERE term IN (?,?) AND ${COUNTS} GROUP BY code, term`).bind(JSON.stringify([...codes.keys()]), cur, nxt).all()).results) sums[r.code + "|" + r.term] = Number(r.s);
     for (const [c, e] of codes) if ((!inGap() && FULL(sums[c + "|" + cur] || 0, STUDENT_FEE)) || (early && FULL(sums[c + "|" + nxt] || 0, STUDENT_FEE))) ok.add(e);
     return ok;
   }
