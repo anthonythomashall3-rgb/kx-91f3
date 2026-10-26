@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- (none)
+- 2026-10-26 03:50 PT — 01S7QxVq: auto-gate every protected quiz (sync.js), no password for an ungated protected quiz (REQUIRE_GATE) + professor email, agent text gate_off. Claims sync.js, functions/api, agents, tests.
 
 ## Recently finished
 - 2026-10-25 23:59 PT — 01S7QxVq: v0.4.8. Trial testers (FEE_EXEMPT: Bristow x2, Huu) never pay + test-run welcome (dashboard, once; code email); public/lq.js = LOCK black/qz red everywhere + red lock loaders (ETA + fun fact) on dashboard, pay page, Sync panel; no uninstall option on the download page; privacy contact lockqz.app@gmail.com; owner's name removed from every page; gate never admits unpaid students.
