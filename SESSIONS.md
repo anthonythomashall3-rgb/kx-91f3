@@ -7,9 +7,10 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-10-26 04:30 PT — 01KwFxq1: cancel/refund = no access (professors too), Stripe setup script, dashboard Sync-now setup instructions; files: [[route]].js (payments only), public/dashboard.html (Sync now + pay), public/pay.html, app/payments/stripe-setup.sh, tests/test_stripe.mjs, HANDOFF
+- (none)
 
 ## Recently finished
+- 2026-10-26 04:50 PT — 01KwFxq1: payments final (no cancel path; Stripe ACH off by default, STRIPE_BANK=0; final-sale text on checkout/pay page/dashboard); refunds/disputes/failed payments void + turn professors off (admin void too); CI step app/payments/stripe-setup.sh stores the Stripe key + creates the webhook from GitHub secret STRIPE_SECRET_KEY; /api/version shows stripe; Sync now shows the 3 bookmark steps inline. HANDOFF.md written (new account starts there).
 - 2026-10-26 05:00 PT — 01KwFxq1: unique Zelle amount per unpaid student per term ($fee + $0.01–$9.99, never whole dollars; pay_slots, migrate_027) so a Zelle with no memo still matches (memo still works; review alerts never amount-matched; slot freed when paid). Pay page: "Zelle exactly $180.xx · no memo needed". Fun facts removed from all loaders (lq.js).
 - 2026-10-26 04:30 PT — 01KwFxq1: Stripe card + bank (ACH) on the student pay page and professor dashboard (student $200 card / $181.45 bank; professor $5,150 card / $5,005 bank; prices carry Stripe's fee; partial payments grossed up), signed webhook /api/pay/stripe/webhook records payments (refund/dispute = void), PO + ACH/wire options for both. Inert until Pages secrets STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET are set. test_stripe.mjs.
 - 2026-10-26 04:20 PT — 01S7QxVq: v0.4.9. REQUIRE_GATE=1: the Sync tab gates every protected quiz by itself (from 1 h before start; no LOCKqz requests until 2 min before; 30 s rounds while nobody is locked in); /password gives no password for an ungated protected quiz until it ends (reason gate_off, agents explain) and emails the professor once an hour to open Sync. test_sync_gate S7.
