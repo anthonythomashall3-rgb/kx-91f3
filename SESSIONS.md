@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- (none)
+- 2026-10-25 23:40 PT — 01S7QxVq: trial testers (Bristow, Huu) fee-exempt + welcome; LOCK black/qz red everywhere; red lock loaders with ETA + fun fact (public/lq.js, dashboard.html, pay.html, index.html, privacy.html, sync.js, functions/api). 
 
 ## Recently finished
 - 2026-10-25 22:30 PT — 01S7QxVq: students pay $180 (STUDENT_FEE), Zelle + bank transfer only (Venmo off unless STUDENT_VENMO=1; ZELLE_BUSINESS_TO replaces personal Zelle when the business account opens); fee on = confirmed email always; a paid email cannot be in a quiz on 2 computers at once or on >2 computers (402 in_use / too_many_devices, agents explain); Gmail script every 1 min, amount never read from the memo, bank deposits with a memo -> admin review. Mac/Windows agent text needs the next release. Known pre-existing fail: test_daemon_reporting 'no signed developer lock'.
