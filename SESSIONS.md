@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- (none)
+- 2026-10-25 17:05 PT — 01DfSvcn: post-D1-reset ops only (mark typed-email devices verified in D1, run Release workflow, restart Anthony's agent). No file edits.
 
 ## Recently finished
 - 2026-10-25 16:45 PT — 01CsgBZK: quizzes opened from Content/Lessons are moved out of the frame to their own page (Mac AppleScript / Windows address bar), so submission shows and AI returns at once; Firefox reads the frame's URL from the session store; v0.4.5.
