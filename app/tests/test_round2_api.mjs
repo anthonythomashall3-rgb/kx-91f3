@@ -177,7 +177,7 @@ console.log("R5 (C2, F4) start check only while gated; accommodations pass; end 
   await call("/gate", { ou: "500", qi: "2", on: true, keep: [], start: iso(-60000), end: iso(3600e3) }, { teacher: P });
   r = await pw(D[1], "500", "2");
   check("F4: the gate takes Brightspace's current dates from the Sync tab (moved earlier -> started)", r.status === 200 && !!r.data?.password, JSON.stringify(r.data));
-  check("gated + not accommodated -> end = the quiz's Brightspace end (cap = end + 15 min)", typeof r.data?.end === "string" && Math.abs(Date.parse(r.data.end) - Date.parse(one("SELECT end_date FROM bs_quizzes WHERE ou='500' AND qi='2'").end_date)) < 1000, JSON.stringify(r.data));
+  check("gated + not accommodated, timing unknown -> end = Brightspace end + 6 h (an attempt may run past the end; cap = that + 15 min)", typeof r.data?.end === "string" && Math.abs(Date.parse(r.data.end) - Date.parse(one("SELECT end_date FROM bs_quizzes WHERE ou='500' AND qi='2'").end_date) - 360 * 60000) < 1000, JSON.stringify(r.data));
   // round-2 #6: the gate pushes changed Brightspace dates mid-gate; the kept accommodation list survives
   await call("/gate", { ou: "500", qi: "2", on: true, start: iso(3600e3), end: iso(7200e3) }, { teacher: P });
   r = await pw(D[1], "500", "2");
@@ -200,7 +200,7 @@ console.log("R6 (C9) the server tells the helper to unlock: submitted (after thi
   // round-2 #1: "quiz_ended" only for a GATED quiz, a student not in the gate's kept list, and a lock that
   // began before the end. Non-gated quizzes (special access the server cannot see) never get it.
   await lock(D[4], "500-1");
-  sqlite.prepare("UPDATE bs_quizzes SET end_date=? WHERE ou='500' AND qi='1'").run(iso(-20 * 60000));
+  sqlite.prepare("UPDATE bs_quizzes SET end_date=?, over_min=0 WHERE ou='500' AND qi='1'").run(iso(-20 * 60000));   // over_min 0: no attempt can run past the end
   sqlite.prepare("UPDATE locks SET locked_at=? WHERE device_id=? AND quiz_id='500-1'").run(iso(-60 * 60000), D[4].id);
   r = await beat(D[4], "500-1");
   check("#1 NOT gated, end passed 20 min ago -> no unlock (makeup / extended end possible)", !r.data?.unlock, JSON.stringify(r.data));

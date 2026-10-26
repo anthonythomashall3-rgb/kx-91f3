@@ -26,7 +26,7 @@ trap cleanup EXIT
 
 # --- mock backend: verifies device signatures exactly like the real API, logs every POST ---
 cat > "$TMP/mock.py" <<'PY'
-import sys, json, time, hmac, hashlib, re
+import os, sys, json, time, hmac, hashlib, re
 from http.server import BaseHTTPRequestHandler, HTTPServer
 PORT, LOG, SKEW = int(sys.argv[1]), sys.argv[2], float(sys.argv[3])
 KEYS, LOCKS = {}, {}
@@ -79,6 +79,10 @@ class H(BaseHTTPRequestHandler):
                 if qi and qi.group(1) == "33333": return self.reply(403, {"reason": "not started", "start": iso(now() + 600)})
                 LOCKS[(dev, lid)] = now()   # C1: a signed /password refreshes the lock row itself
                 end = iso(now() - 7200) if qi and qi.group(1) == "22222" else iso(now() + 3600)
+                if qi and qi.group(1) == "66666":   # an accommodation is added mid-quiz: the server stops naming an end
+                    return self.reply(200, {"password": "LQ-TESTPASS", "lockId": lid, "end": None if os.path.exists(LOG + ".noend") else iso(now() + 600)})
+                if qi and qi.group(1) == "55555":   # the professor allowed this student assistive tools
+                    return self.reply(200, {"password": "LQ-TESTPASS", "lockId": lid, "end": end, "assist": ["readwrite", "equatio", "../evil", "abcdefghijklmnopabcdefghijklmnop"]})
                 return self.reply(200, {"password": "LQ-TESTPASS", "lockId": lid, "end": end})
             return self.reply(403, {"password": None, "reason": "not locked"})
         if path.endswith("/verify"):
@@ -183,6 +187,29 @@ c=$(hcode /event '{"event":"unlock"}')
 hpost /unlock '{"quiz_id":"98765-12345"}' >/dev/null
 c=$(hcode /password "{\"url\":\"$QURL\"}")
 [ "$c" = "409" ] && ok "after unlock -> 409" || bad "after unlock answered $c"
+
+echo "T5b OSAS: the professor's assistive-tool allowance reaches the browser policy, keys only, cleared at unlock"
+AQ='https://usc.brightspace.com/d2l/lms/quizzing/user/quiz_summary.d2l?ou=98765&qi=55555'
+hpost /lock '{"quiz_id":"98765-55555","student":"Test Student"}' >/dev/null
+r=$(hpost /password "{\"url\":\"$AQ\"}")
+echo "$r" | grep -q 'LQ-TESTPASS' && ok "password with an allowance" || bad "no password: $r"
+AF="$TMP/a/assist.json"
+if [ -f "$AF" ] && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d=={"quiz_id":"98765-55555","tools":["equatio","readwrite"]} else 1)' "$AF"; then
+  ok "assist record = this quiz + the known keys only (unknown keys / ids dropped)"; else bad "assist record wrong: $(cat "$AF" 2>/dev/null)"; fi
+amode=$(stat -c '%a' "$AF" 2>/dev/null || stat -f '%Lp' "$AF" 2>/dev/null)
+[ "$amode" = "600" ] && ok "assist record is root-only (600)" || bad "assist record mode $amode"
+LOCKQZ_ASSIST_FILE="$AF" LOCKQZ_POLICY_DIR="$TMP/a/pol" LOCKQZ_POLICY_BACKUP="$TMP/a/polbk" python3 - "$APP/mac/browser-policy.py" <<'PYA' && ok "browser policy lets Read&Write + Equatio run, nothing else extra" || bad "browser policy allowance wrong"
+import importlib.util, sys
+s = importlib.util.spec_from_file_location("bp", sys.argv[1]); P = importlib.util.module_from_spec(s); s.loader.exec_module(P)
+al = P.chromium_policy("com.google.Chrome")["ExtensionInstallAllowlist"]
+sys.exit(0 if al[:len(P.SAFE_EXTENSIONS)] == P.SAFE_EXTENSIONS and sorted(al[len(P.SAFE_EXTENSIONS):]) == ["hjngolefdpdnooamgdldlkjgmdcmcjnc", "inoeonmfapjbbkmdafoankkfajkcphgd"] else 1)
+PYA
+hpost /unlock '{"quiz_id":"98765-55555"}' >/dev/null
+[ ! -f "$AF" ] && ok "unlock removes the allowance (never carries to another quiz)" || bad "assist record left after unlock"
+hpost /lock '{"quiz_id":"98765-12345","student":"Test Student"}' >/dev/null
+hpost /password "{\"url\":\"$QURL\"}" >/dev/null
+[ ! -f "$AF" ] && ok "a quiz with no allowance writes none" || bad "assist record for a quiz without one"
+hpost /unlock '{"quiz_id":"98765-12345"}' >/dev/null
 
 echo "T6 a blocklist refresh can only ADD domains (a short server list never shrinks the Mac's list)"
 orig=$(grep -cvE '^\s*(#|$)' "$APP/mac/blocklist.txt"); now=$(grep -cvE '^\s*(#|$)' "$TMP/a/blocklist.txt")
@@ -296,6 +323,16 @@ hpost /lock '{"quiz_id":"98765-22222","student":"T"}' >/dev/null; hpost /passwor
 v=$(stj '(not s["end_known"]) and abs(s["cap_at"]-(s["locked_since"]+6*3600))<5')
 [ "$v" = "True" ] && ok "an end already over is ignored: unknown-end cap 6 h stays" || bad "past end changed the cap: $(stj 's.get("cap_at"),s.get("locked_since")')"
 hpost /unlock '{"quiz_id":"98765-22222","reason":"quiz_submitted"}' >/dev/null
+
+echo "T11b OSAS: an accommodation added mid-quiz (server stops naming an end) never leaves the short end-based cap"
+Q6='https://usc.brightspace.com/d2l/lms/quizzing/user/quiz_summary.d2l?ou=98765&qi=66666'
+hpost /lock '{"quiz_id":"98765-66666","student":"T"}' >/dev/null; hpost /password "{\"url\":\"$Q6\"}" >/dev/null
+v=$(stj 's["end_known"] and abs(s["cap_at"]-(time.time()+600+900))<90')
+[ "$v" = "True" ] && ok "first: cap = end + 15 min" || bad "cap not from the end: $(stj 's.get("cap_at"),s.get("end_known")')"
+touch "$LOG5.noend"; hpost /password "{\"url\":\"$Q6\"}" >/dev/null; rm -f "$LOG5.noend"
+v=$(stj '(not s["end_known"]) and abs(s["cap_at"]-(s["locked_since"]+6*3600))<5')
+[ "$v" = "True" ] && ok "then end null: cap back to the 6 h unknown-end failsafe (never cut short)" || bad "cap stayed short: $(stj 's.get("cap_at"),s.get("locked_since"),s.get("end_known")')"
+hpost /unlock '{"quiz_id":"98765-66666","reason":"quiz_submitted"}' >/dev/null
 
 echo "T12 C2: 'not started' is passed to the agent with the seconds until the quiz opens"
 Q3='https://usc.brightspace.com/d2l/lms/quizzing/user/quiz_summary.d2l?ou=98765&qi=33333'

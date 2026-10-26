@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.5.0"
+$Version = "0.5.1"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = if ($env:LOCKQZ_CONFIG) { $env:LOCKQZ_CONFIG } else { "$env:ProgramData\LOCKqz\config.json" }
@@ -271,6 +271,13 @@ function Engine([string]$c) {
   try { return ((& powershell -NoProfile -ExecutionPolicy Bypass -File $Engine $c) -join "`n") }
   finally { if ($got) { try { $EngineMutex.ReleaseMutex() } catch { } } }
 }
+function Policy-Relock {
+  # Browser policy only (the allowance changed while locked), under the engine's lock.
+  $got = $false
+  try { $got = $EngineMutex.WaitOne(120000) } catch [System.Threading.AbandonedMutexException] { $got = $true }
+  try { & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Here "browser-policy.ps1") lock | Out-Null }
+  finally { if ($got) { try { $EngineMutex.ReleaseMutex() } catch { } } }
+}
 function EngineLocked { (& powershell -NoProfile -ExecutionPolicy Bypass -File $Engine status) -cmatch "LOCKqz: LOCKED" }
 # Cheap in-process check of the hosts block (same marker as the engine), for /status.
 $HostsFile = "$env:WINDIR\System32\drivers\etc\hosts"
@@ -324,6 +331,20 @@ function Report($event, $detail, $source, $quiz) {
   return (LQ-Call $Api "/report" $b $Device $Key $State $true)
 }
 $InstFile = "$env:ProgramData\LOCKqz\install_report.json"
+# Assistive tools the professor allows this student in the locked quiz (server's /password answer):
+# keys only, read by browser-policy.ps1 (same admin-only folder), removed at every unlock / new quiz.
+$AssistFile = if ($env:LOCKQZ_ASSIST_FILE) { $env:LOCKQZ_ASSIST_FILE } else { "$env:ProgramData\LOCKqz\assist.json" }
+$AssistKeys = @("readwrite","equatio","cowriter","snapread","readaloud")
+function LQ-AssistKeys($list) { return @(@($list) | ForEach-Object { [string]$_ } | Where-Object { $AssistKeys -contains $_ } | Sort-Object -Unique) }
+function Set-Assist($q, $tools) {
+  # Write (or remove, no tools) this quiz's allowance. -> $true when it changed.
+  $t = @(LQ-AssistKeys $tools)
+  if ($t.Count -eq 0) { if (Test-Path -LiteralPath $AssistFile) { Remove-Item -LiteralPath $AssistFile -Force -ErrorAction SilentlyContinue; return $true }; return $false }
+  $new = (@{ quiz_id = [string]$q; tools = $t } | ConvertTo-Json -Compress)
+  $cur = $null; try { $cur = Get-Content -LiteralPath $AssistFile -Raw -ErrorAction Stop } catch { }
+  if ($cur -and ($cur.Trim() -eq $new)) { return $false }
+  try { [IO.File]::WriteAllText($AssistFile, $new, (New-Object Text.UTF8Encoding($false))); return $true } catch { return $false }
+}
 function Report-Install {
   # C6: only when the version or the student changed, or 24 h passed (persisted across restarts).
   $rec = $null; try { $rec = Get-Content $InstFile -Raw -ErrorAction Stop | ConvertFrom-Json } catch { }
@@ -534,6 +555,7 @@ while ($listener.IsListening) {
         $State.locked_since=[int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); $State.applied=$false
         $State.cap_at = [int64]$State.locked_since + 60 * [int64]$State.max_minutes; $State.end_known = $false
         $State.mono_since = [int64]([Diagnostics.Stopwatch]::GetTimestamp() / [Diagnostics.Stopwatch]::Frequency)
+        Set-Assist $null @() | Out-Null   # another quiz's allowance never carries over
       }
       if ($State.capped_quiz -eq $body.quiz_id) { $State.capped_quiz = $null; $State.capped_at = 0; $State.capped_reason = $null }
       $ok = (Engine "lock") -cmatch "LOCKqz: LOCKED"
@@ -598,6 +620,13 @@ while ($listener.IsListening) {
             # C2: the server names the quiz end -> safety cap = end + 15 min (never > 24 h)
             $c = LQ-CapForEnd ([int64]$State.locked_since) (LQ-ParseIso $r.data.end) $nowS ([int64]$State.skew)
             if (($c -gt 0) -and ($State.state -eq "locked")) { $State.cap_at = $c; $State.end_known = $true; $State.max_minutes = [int](($c - [int64]$State.locked_since) / 60); Save-Lock }
+            elseif (($null -eq $r.data.end) -and $State.end_known -and ($State.state -eq "locked")) {
+              # No end any more (accommodation added mid-quiz / gate stopped): never shorter than the 6 h failsafe.
+              $c = [Math]::Min([int64]$State.locked_since + 60 * $CapCeilMin, [Math]::Max([int64]$State.cap_at, [int64]$State.locked_since + 60 * $CapMin))
+              $State.cap_at = $c; $State.end_known = $false; $State.max_minutes = [int](($c - [int64]$State.locked_since) / 60); Save-Lock
+            }
+            # The professor's assistive-tool allowance: only those extensions may run (browser policy now).
+            if ((Set-Assist $State.quiz_id $r.data.assist) -and ($State.state -eq "locked")) { Policy-Relock }
           } elseif (($r.code -eq 403) -and ($why -eq "not started")) {
             $st = LQ-ParseIso $r.data.start
             $out.reason = $why; $out.start = $r.data.start

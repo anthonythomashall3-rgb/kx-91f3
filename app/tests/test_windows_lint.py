@@ -139,6 +139,17 @@ ok("policies.json written without BOM") if "UTF8Encoding $false" in pol_src and 
 ok("engine checks its hosts write") if "LOCK FAILED" in eng_src and "UNLOCK FAILED" in eng_src else bad("engine reports LOCKED without checking")
 ok("agent never sends an unsigned quiz_left report") if 'event = "quiz_left"; quiz_id = $Quiz; student' not in agt_src else bad("agent still posts unsigned quiz_left (401)")
 ok("agent retries unconfirmed unlocks") if "$Pending" in agt_src and "Send-Unlock" in agt_src else bad("agent drops a failed unlock")
+# DST: local time jumps back an hour on 1 Nov 2026; every agent timer must run on UTC.
+_gd = [l.strip() for l in agt_src.splitlines() if "Get-Date" in l and not l.lstrip().startswith("#")
+       and not re.search(r"Get-Date -Format|Get-Date \"2000-01-01\"", l)]
+ok("agent timers on UTC (no local Get-Date: a DST change never freezes password checks or unlocks)") if not _gd else bad("local Get-Date timers left: %r" % _gd[:3])
+ok("agent shows the quiz opening time in the student's own zone") if "$opens.ToLocalTime()" in agt_src else bad("opens-at shown in UTC")
+# OSAS: assistive tools a professor allowed one student keep working (fixed key -> id map, cleared at unlock)
+ok("browser policy: allowed assistive extensions join the fixed safe list (key -> fixed id)") if "$AssistExtensions" in pol_src and "Get-AssistExtensions" in pol_src and '(@($SafeExtensions) + @(Get-AssistExtensions))' in pol_src and "inoeonmfapjbbkmdafoankkfajkcphgd" in pol_src else bad("assistive allowance missing from browser policy")
+ok("browser policy: Dark Reader / High Contrast / OpenDyslexic always allowed") if all(i in pol_src for i in ["eimadpbcbfnmbkopoojfekhnkhdbieeh", "djcfdncoelnlbldjfhinnjlhdjlikmph", "cdnapgfjopgaggbmfgbiinmmbdcglnam"]) else bad("display aids not in the safe list")
+ok("helper writes only known keys from /password, re-applies the policy, clears on a new quiz") if "Set-Assist $State.quiz_id $r.data.assist" in dmn and "Policy-Relock" in dmn and "Set-Assist $null @()" in dmn and '$AssistKeys = @("readwrite","equatio","cowriter","snapread","readaloud")' in dmn else bad("helper assist handling missing")
+ok("helper: no end from the server any more (accommodation added) -> cap never below the 6 h failsafe") if "elseif (($null -eq $r.data.end) -and $State.end_known" in dmn and "[Math]::Max([int64]$State.cap_at" in dmn else bad("end-null cap reset missing")
+ok("engine unlock removes the allowance") if 'Remove-Item -LiteralPath "$StateDir\\assist.json"' in eng_src else bad("allowance survives unlock")
 for f in sorted(os.listdir(WIN)):
     if f.endswith(".ps1"):
         b = open(os.path.join(WIN, f), "rb").read()

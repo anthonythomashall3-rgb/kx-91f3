@@ -147,6 +147,8 @@ function Do-Lock {
 
 function Do-Unlock {
   $wrote = $true
+  # The professor's per-quiz assistive-tool allowance ends with the lock (every unlock path runs here).
+  Remove-Item -LiteralPath "$StateDir\assist.json" -Force -ErrorAction SilentlyContinue
   if (Is-Locked) {
     $wrote = Write-Hosts (Remove-Block (Read-Hosts)) $false
     ipconfig /flushdns | Out-Null

@@ -331,13 +331,14 @@ $script:Msgs = @(); $script:Clip = $null; $script:Setups = 0
 function Show-Message($t) { $script:Msgs += $t }
 function Set-Clipboard($Value) { $script:Clip = $Value }
 function Show-Pay($r) { return $false }
-function Start-Setup { $script:Setups++; $script:SetupAt = Get-Date }
+function Start-Setup { $script:Setups++; $script:SetupAt = [DateTime]::UtcNow }
 $n0 = Get-Date "2026-10-25T12:00:00"
 Check "not started: every 5 min until 90 s before it opens" (((Next-PwCheck $n0 $n0.AddSeconds(3600)) -eq $n0.AddSeconds(300)) -and ((Next-PwCheck $n0 $n0.AddSeconds(200)) -eq $n0.AddSeconds(110)))
 Check "... then every 15 s; unknown start -> 5 min" (((Next-PwCheck $n0 $n0.AddSeconds(60)) -eq $n0.AddSeconds(15)) -and ((Next-PwCheck $n0 $null) -eq $n0.AddSeconds(300)))
-$Quiz = "123-456"; $LastPw = $null; $StartTold = $null; $Capped = @{}; $CapLeft = @{}; $PwNext = Get-Date; $SetupAt = Get-Date "2000-01-01"
+$Quiz = "123-456"; $LastPw = $null; $StartTold = $null; $Capped = @{}; $CapLeft = @{}; $PwNext = [DateTime]::UtcNow; $SetupAt = Get-Date "2000-01-01"
 $r = Handle-Pw ([pscustomobject]@{ password = $null; status = 403; reason = "not started"; start_in = 1200 }) $true ""
-Check "not started -> wait, next ask ~5 min later, told once" (($r -eq "wait") -and (($PwNext - (Get-Date)).TotalSeconds -gt 250) -and (@($Msgs | Where-Object { $_ -match "opens at" }).Count -eq 1))
+Check "not started -> wait, next ask ~5 min later, told once" (($r -eq "wait") -and (($PwNext - [DateTime]::UtcNow).TotalSeconds -gt 250) -and (@($Msgs | Where-Object { $_ -match "opens at" }).Count -eq 1))
+Check "DST (1 Nov 2026): the password timer is on UTC, so the clock going back an hour never freezes it" ($PwNext.Kind -eq [DateTimeKind]::Utc)
 Handle-Pw ([pscustomobject]@{ reason = "not started"; start_in = 1000 }) $false "" | Out-Null
 Check "... the 'opens at' message is not repeated" (@($Msgs | Where-Object { $_ -match "opens at" }).Count -eq 1)
 $r = Handle-Pw ([pscustomobject]@{ password = "PW9"; status = 200 }) $false ""
@@ -389,7 +390,7 @@ Note-Cap ([pscustomobject]@{ capped_quiz = "1-2"; capped_at = $nowU - 5 })
 Check "the helper's older release is not re-added" (-not $Capped.ContainsKey("1-2"))
 Note-Cap ([pscustomobject]@{ capped_quiz = "1-2"; capped_at = $nowU + 5 })
 Check "a later release of the same quiz is honored" ($Capped.ContainsKey("1-2"))
-$Capped["1-2"] = (Get-Date).AddSeconds(-40)
+$Capped["1-2"] = [DateTime]::UtcNow.AddSeconds(-40)
 Step-Caps $null ""
 Check "page gone for the grace period -> forgotten" (-not $Capped.ContainsKey("1-2"))
 $dmnSrc = Get-Content (Join-Path $Win "lockqzd.ps1") -Raw

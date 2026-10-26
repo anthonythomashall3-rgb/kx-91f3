@@ -190,6 +190,15 @@
     staff = staff.slice(0, 80);   // LOCKqz reads at most 80 courses per Sync
     if (!staff.length) throw new Error("You are not an instructor or TA in any active Brightspace course.");
 
+    // The quiz's own timing (QuizReadData.SubmissionTimeLimit / LateSubmissionInfo / SubmissionGracePeriod):
+    // LOCKqz works out how long an attempt begun before the end may run past it (extended time).
+    var timing = function (x) {
+      var t = x && x.SubmissionTimeLimit, l = x && x.LateSubmissionInfo;
+      return { tl: t && t.IsEnforced && Number(t.TimeLimitValue) > 0 ? Number(t.TimeLimitValue) : null,
+               late: l && l.LateSubmissionOption != null ? Number(l.LateSubmissionOption) : null,
+               late_min: l && l.LateLimitMinutes != null ? Number(l.LateLimitMinutes) : null,
+               grace: x && x.SubmissionGracePeriod != null ? Number(x.SubmissionGracePeriod) : null };
+    };
     var courses = [], OWNPW = {};
     var LQFMT = /^LQ-([0-9A-F]{10}|[A-HJ-NP-Z2-9]{8})$/;   // passwords LOCKqz makes (fixed / gate code): never the professor's own
     for (var n = 0; n < staff.length; n++) {
@@ -207,7 +216,7 @@
         lis_roles: (staff[n].Access.LISRoles || []).map(String),
         classlist: cl ? cl.map(function (s) { return { id: s.Identifier, name: s.DisplayName || ((s.FirstName || "") + " " + (s.LastName || "")).trim(),
           email: s.Email, username: s.Username, org_id: s.OrgDefinedId, role: s.ClasslistRoleDisplayName, role_id: s.RoleId == null ? undefined : s.RoleId }; }) : null,
-        quizzes: qs ? qs.map(function (x) { return { qi: x.QuizId, name: x.Name, active: x.IsActive, start: x.StartDate, end: x.EndDate, due: x.DueDate, has_password: !!x.Password, lq_password: !!x.Password && LQFMT.test(x.Password) }; }) : null
+        quizzes: qs ? qs.map(function (x) { return Object.assign({ qi: x.QuizId, name: x.Name, active: x.IsActive, start: x.StartDate, end: x.EndDate, due: x.DueDate, has_password: !!x.Password, lq_password: !!x.Password && LQFMT.test(x.Password) }, timing(x)); }) : null
       });
     }
 
@@ -411,6 +420,14 @@
         if (r.eligible || (begun && r.verified === true && r.status === "locked")) want[u] = true; else if (REVOKE[r.status]) revoke[u] = true; });
       var have = await saList(ou, qi), haveMap = {};
       have.forEach(function (x) { if (x && x.UserId != null) haveMap[String(x.UserId)] = x.SpecialAccess || {}; });
+      // Special access the professor / OSAS added WHILE the gate runs (extra time, another day, a makeup):
+      // an accommodation like the ones kept at start. Told to LOCKqz once (one write), so the student's
+      // own window counts there too (no start check, no end-based release). Never changed or removed.
+      var acc = Object.keys(haveMap).filter(function (u) { return !g.keep[u] && !ourGrant(haveMap[u], g.qs); });
+      if (acc.length && !(g.accNext && Date.now() < g.accNext)) {
+        if ((await lqres("/gate", { ou: ou, qi: qi, on: true, add_keep: acc })).ok) acc.forEach(function (u) { g.keep[u] = true; });
+        else g.accNext = Date.now() + 60000;   // retried once a minute, not every round
+      }
       var res = { n: 0, bad: 0, stuck: 0, tried: 0, del: 0, rows: live.rows.length };   // admitted, could not admit, could not remove
       var add = Object.keys(want).filter(function (u) { if (g.keep[u] || haveMap[u]) { res.n++; return false; } return true; });
       await pool(add, 8, async function (u) {
@@ -516,9 +533,11 @@
         var keep = (g && g.keep) || {};
         var have = await saList(ou, qi), cur = await get(quizUrl(ou, qi)), qs = ((g && g.qs) || []).concat([qd(cur)]);
         var del = have.filter(function (x) { var u = String(x.UserId); return !keep[u] && ourGrant(x.SpecialAccess, qs); });
-        await pool(del, 8, async function (x) { var dr = await saDel(ou, qi, String(x.UserId)).catch(function () { return null; }); if (!dr || !dr.ok) stuck++; });
+        // Quiz open again FIRST, then LOCKqz's grants removed: a student still inside an attempt (extra
+        // time past the end) is never, even for a second, on a hidden quiz without special access.
         var o = ORIG[String(qi)];   // quiz open again as the professor had it (LOCKqz password still applies)
         await writePw(ou, qi, pw_of(qi) || (o && o.password) || null, { AllowOnlyUsersWithSpecialAccess: o ? !!o.hidden : false, RestrictIPAddressRange: null });
+        await pool(del, 8, async function (x) { var dr = await saDel(ou, qi, String(x.UserId)).catch(function () { return null; }); if (!dr || !dr.ok) stuck++; });
         delete GPW[qi];
         await lq("/gate", { ou: ou, qi: qi, on: false });
       } catch (e) {

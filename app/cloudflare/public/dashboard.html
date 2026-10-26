@@ -420,9 +420,23 @@ function viewClass(ou){
     </section>
     <section class="card"><div class="hrow"><h2>Students</h2><span><b style="color:var(--ok)">${s.ready} ready</b>${s.missing.length?` · <b style="color:var(--warn)">${s.missing.length} not yet</b>`:""}</span></div>
       ${s.missing.length ? `<div class="note warn"><span>${s.missing.length} student${s.missing.length===1?" has":"s have"} not installed LOCKqz. They cannot open a protected exam until they do.</span>${mailBtns(c,s)}</div>` : `<div class="note ok"><span>Every student has LOCKqz installed.</span></div>`}
-      <ul class="list">${[...s.missing, ...c.students.filter(x=>x.installed)].map(x=>`<li><span class="dot ${x.installed?'ok':'warn'}"></span><span class="grow"><span style="font-size:15px">${esc(x.name)}</span>${x.ta?' <span class="sm" style="color:var(--muted,#777)">· TA</span>':""}</span><span class="st ${x.installed?'ok':'warn'}">${x.installed?"Ready"+(x.platform?" · "+esc(x.platform):""):"Needs LOCKqz"}</span></li>`).join("") || `<li class="d">No students on the Brightspace roster.</li>`}</ul>
+      <ul class="list">${[...s.missing, ...c.students.filter(x=>x.installed)].map(x=>`<li><span class="dot ${x.installed?'ok':'warn'}"></span><span class="grow"><span style="font-size:15px">${esc(x.name)}</span>${x.ta?' <span class="sm" style="color:var(--muted,#777)">· TA</span>':""}${assistBox(ou,x)}</span><span class="st ${x.installed?'ok':'warn'}">${x.installed?"Ready"+(x.platform?" · "+esc(x.platform):""):"Needs LOCKqz"}</span></li>`).join("") || `<li class="d">No students on the Brightspace roster.</li>`}</ul>
     </section>
   </div>`;
+}
+
+// Assistive tools one student may keep during locked exams (OSAS accommodation). Browser extensions are
+// otherwise off while locked; screen readers, dictation, zoom and text-to-speech apps always keep working.
+const ASSIST = {readwrite:"Read&Write", equatio:"Equatio", cowriter:"Co:Writer", snapread:"Snap&Read", readaloud:"Read Aloud"};
+const assistBox = (ou, x) => !x.email ? "" : `<details class="as" style="font-size:12px;color:var(--muted,#777)"><summary>Assistive tools${(x.assist||[]).length?": "+esc((x.assist||[]).map(k=>ASSIST[k]||k).join(", ")):""}</summary>${Object.keys(ASSIST).map(k=>`<label style="margin-right:10px;white-space:nowrap"><input type="checkbox" data-ou="${esc(ou)}" data-em="${esc(x.email)}" data-tool="${k}"${(x.assist||[]).includes(k)?" checked":""} onchange="setAssist(this)"> ${esc(ASSIST[k])}</label>`).join("")}</details>`;
+async function setAssist(cb){
+  const box = cb.closest("details"), all = [...box.querySelectorAll("input[data-tool]")];
+  all.forEach(i=>i.disabled=true);
+  const d = await post("/assist",{ou:cb.dataset.ou, email:cb.dataset.em, tools: all.filter(i=>i.checked).map(i=>i.dataset.tool)});
+  if (d.error) { cb.checked = !cb.checked; alert(d.error); }
+  else { const c = (BS.courses||[]).find(c=>String(c.ou)===String(cb.dataset.ou)), st = c && c.students.find(s=>s.email===cb.dataset.em); if (st) st.assist = d.tools;
+    box.querySelector("summary").textContent = "Assistive tools" + (d.tools.length ? ": " + d.tools.map(k=>ASSIST[k]||k).join(", ") : ""); }
+  all.forEach(i=>i.disabled=false);
 }
 
 // ---- LIVE ----

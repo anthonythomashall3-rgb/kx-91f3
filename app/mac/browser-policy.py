@@ -28,7 +28,7 @@ Exit status: lock/unlock exit 1 if they could not complete (the engine then retr
 
 Usage: browser-policy.py {lock|unlock|status}   (root; LOCKQZ_POLICY_DIR / LOCKQZ_POLICY_BACKUP for tests)
 """
-import os, plistlib, re, subprocess, sys
+import json, os, plistlib, re, subprocess, sys
 
 DIR = os.environ.get("LOCKQZ_POLICY_DIR", "/Library/Managed Preferences")
 BACKUP = os.environ.get("LOCKQZ_POLICY_BACKUP", "/Library/Application Support/LOCKqz/policy-backup")
@@ -63,7 +63,33 @@ SAFE_EXTENSIONS = ["nngceckbapebfimnlniiiahkandclblb", "aeblfdkhhhdcdjpifhhbdioj
                    "ghmbeldphafepmbegfdlkpapadhbakde", "pejdijmoenmkgeppbflobdenhhabjlaj",
                    "ghbmnnjooekpmoecnnnilnnbdlolhkhi", "ekhagklcjbdpajgpjgmbionohlpdbjgc",
                    "jbkfoedolllekgbhcbcoahefnbanhhlh", "dppgmdbiimibapkepcbdbmkaabgiofem",
-                   "bbcinlkgjjkejfdpemiealijmmooekmp", "gehmmocbbkpblljhkekmfhjpfbkclbph"]
+                   "bbcinlkgjjkejfdpemiealijmmooekmp", "gehmmocbbkpblljhkekmfhjpfbkclbph",
+                   # Low-vision / dyslexia display aids (no AI, no text generation): Dark Reader,
+                   # Google's High Contrast, OpenDyslexic. Always on, so no student needs to ask.
+                   "eimadpbcbfnmbkopoojfekhnkhdbieeh", "djcfdncoelnlbldjfhinnjlhdjlikmph", "cdnapgfjopgaggbmfgbiinmmbdcglnam"]
+# Assistive extensions a professor may allow ONE student (OSAS accommodation; the server sends only
+# these keys, see ASSIST_TOOLS in [[route]].js). Fixed key -> Chrome Web Store id map: an id never comes
+# from the network or a user-writable file. Desktop screen readers (VoiceOver), Dictation, Zoom and
+# Spoken Content are never touched by LOCKqz, so they need no entry.
+ASSIST_EXTENSIONS = {"readwrite": ["inoeonmfapjbbkmdafoankkfajkcphgd"], "equatio": ["hjngolefdpdnooamgdldlkjgmdcmcjnc"],
+                     "cowriter": ["ifajfiofeifbbhbionejdliodenmecna"], "snapread": ["mloajfnmjckfjbeeofcdaecbelnblden"],
+                     "readaloud": ["hdhinadidafjejdhmfkjgnolgimiaplp"]}
+# Written by the helper (root, root-only folder) from the server's /password answer for the locked quiz;
+# removed at unlock. Owned by root or ignored.
+ASSIST_FILE = os.environ.get("LOCKQZ_ASSIST_FILE") or os.path.join(os.path.dirname(BACKUP), "assist.json")
+
+def assist_extensions():
+    """Extra extension ids allowed for this student's locked quiz (professor's allowance), [] if none."""
+    try:
+        st = os.stat(ASSIST_FILE)
+        if os.geteuid() == 0 and (st.st_uid != 0 or st.st_mode & 0o022): return []
+        with open(ASSIST_FILE) as f: tools = json.load(f).get("tools") or []
+    except Exception: return []
+    out = []
+    for k in tools if isinstance(tools, list) else []:
+        for i in ASSIST_EXTENSIONS.get(k if isinstance(k, str) else "", []):
+            if i not in out: out.append(i)
+    return out
 
 # Google's country sites carry the same AI Overviews / AI Mode (google.co.uk/search?udm=50): blocked too
 # (the udm=14 allowlist is google.com only, so plain web search keeps working through the default engine).
@@ -111,7 +137,7 @@ def chromium_policy(domain):
          "DefaultSearchProviderEnabled": True, "DefaultSearchProviderName": "Google (Web)",
          "DefaultSearchProviderSearchURL": WEB_SEARCH,
          "DefaultSearchProviderSuggestURL": "https://www.google.com/complete/search?output=chrome&q={searchTerms}",
-         "ExtensionInstallBlocklist": ["*"], "ExtensionInstallAllowlist": list(SAFE_EXTENSIONS)}
+         "ExtensionInstallBlocklist": ["*"], "ExtensionInstallAllowlist": list(SAFE_EXTENSIONS) + [i for i in assist_extensions() if i not in SAFE_EXTENSIONS]}
     p.update(CHROMIUM_AI_OFF)
     if keep_proxy(): p.pop("ProxyMode")
     if domain.startswith("com.microsoft.Edge"):

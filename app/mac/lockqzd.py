@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -125,6 +125,26 @@ CAPFILE = os.path.join(os.path.dirname(LOCKFILE), "capped.json")
 CAP_FORGET = max(60, _int(os.environ.get("LOCKQZ_CAP_FORGET", "1800"), 1800))
 # Last "install" report (C6): sent again only when the version or student changed, or after 24 h.
 INSTFILE = os.path.join(os.path.dirname(LOCKFILE), "install_report.json")
+# Assistive tools the professor allows this student in the locked quiz (server's /password answer):
+# keys only, read by browser-policy.py (same root-only folder), removed at every unlock / new quiz.
+ASSIST_FILE = os.path.join(os.path.dirname(LOCKFILE), "assist.json")
+ASSIST_KEYS = {"readwrite", "equatio", "cowriter", "snapread", "readaloud"}
+
+def set_assist(qid, tools):
+    """Write (or remove, tools=[]) this quiz's assistive-tool allowance. True when it changed."""
+    tools = sorted({t for t in (tools if isinstance(tools, list) else []) if isinstance(t, str) and t in ASSIST_KEYS})
+    try:
+        with open(ASSIST_FILE) as f: cur = json.load(f)
+    except Exception: cur = None
+    if not tools:
+        if cur is None and not os.path.exists(ASSIST_FILE): return False
+        try: os.remove(ASSIST_FILE)
+        except FileNotFoundError: pass
+        except Exception as e: log("could not remove assist record: %s" % e)
+        return True
+    if isinstance(cur, dict) and cur.get("quiz_id") == qid and cur.get("tools") == tools: return False
+    try: _write_private(ASSIST_FILE, json.dumps({"quiz_id": qid, "tools": tools})); return True
+    except Exception as e: log("could not save assist record: %s" % e); return False
 
 # Loopback control token: random per install, never baked into the package. The master copy is
 # root-only (0600). Each console user gets a read-only copy in a root-owned folder (see
@@ -356,6 +376,7 @@ def unlock_now(qid):
     otherwise the record is marked unlock_pending (a restart finishes the unlock, never re-locks) and
     the watcher retries every cycle. Caller holds LOCK."""
     STATE.update(state="unlocked", quiz_id=None, locked_at=None, locked_since=0.0, owner_uid=None)
+    set_assist(None, [])
     ok = engine("unlock")
     if ok:
         STATE["unlock_pending"] = False; clear_lock()
@@ -898,6 +919,7 @@ class H(BaseHTTPRequestHandler):
                     now = time.time()
                     STATE.update(max_minutes=mx, locked_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                                  locked_since=now, cap_at=now + mx * 60, end_known=False, mono_since=time.monotonic())
+                    set_assist(None, [])   # another quiz's allowance never carries over
                 if STATE["capped_quiz"] == qid: forget_capped()
                 save_lock(); engine("lock")
             report_lock_async(qid)
@@ -983,6 +1005,16 @@ class H(BaseHTTPRequestHandler):
                         if c:
                             STATE.update(cap_at=c, end_known=True, max_minutes=int((c - STATE["locked_since"]) // 60))
                             save_lock()
+                        elif j.get("end") is None and STATE["end_known"]:
+                            # The server no longer names an end (an accommodation was added mid-quiz, or
+                            # the gate stopped): the student's own window is unknown -> never shorter
+                            # than the unknown-end failsafe (6 h from the lock).
+                            c = min(STATE["locked_since"] + CEIL_MIN * 60, max(STATE["cap_at"], STATE["locked_since"] + CAP_MIN * 60))
+                            STATE.update(cap_at=c, end_known=False, max_minutes=int((c - STATE["locked_since"]) // 60))
+                            save_lock()
+                        # The professor's assistive-tool allowance for this student: the browser policy
+                        # lets just those extensions run (applied now, not at the next watcher cycle).
+                        if set_assist(qid, j.get("assist")) and STATE["state"] == "locked": engine("lock")
             elif code == 403 and reason == "not started":
                 st = parse_iso(j.get("start"))
                 out.update(reason=reason, start=j.get("start"),

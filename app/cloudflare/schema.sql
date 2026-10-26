@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS teacher_courses (teacher_id TEXT, ou TEXT, name TEXT,
 CREATE TABLE IF NOT EXISTS roster (ou TEXT, user_id TEXT, name TEXT, email TEXT, username TEXT, org_id TEXT, role TEXT, synced_at TEXT, PRIMARY KEY (ou, user_id));
 CREATE INDEX IF NOT EXISTS idx_roster_email ON roster(email);
 -- orig = the professor's own settings before LOCKqz changed the quiz: JSON {"pw":..., "hidden":...} (migrate_024)
-CREATE TABLE IF NOT EXISTS bs_quizzes (ou TEXT, qi TEXT, name TEXT, active INTEGER, start_date TEXT, end_date TEXT, due_date TEXT, bs_has_password INTEGER, bs_password_is_ours INTEGER, synced_at TEXT, orig TEXT, PRIMARY KEY (ou, qi));
+CREATE TABLE IF NOT EXISTS bs_quizzes (ou TEXT, qi TEXT, name TEXT, active INTEGER, start_date TEXT, end_date TEXT, due_date TEXT, bs_has_password INTEGER, bs_password_is_ours INTEGER, synced_at TEXT, orig TEXT, over_min INTEGER, PRIMARY KEY (ou, qi));
 CREATE TABLE IF NOT EXISTS pending_clear (ou TEXT, qi TEXT, password TEXT, PRIMARY KEY (ou, qi));
 
 -- One pending email code per device (hash only; 15 min; 5 tries). See migrate_014.
@@ -151,3 +151,7 @@ CREATE TABLE IF NOT EXISTS renew_sent (email TEXT NOT NULL, term TEXT NOT NULL, 
 CREATE TABLE IF NOT EXISTS sync_nudges (ou TEXT, qi TEXT, at TEXT, PRIMARY KEY (ou, qi));
 -- unique Zelle amount per unpaid student per term (no memo needed)
 CREATE TABLE IF NOT EXISTS pay_slots (term TEXT NOT NULL, cents INTEGER NOT NULL, code TEXT NOT NULL, at TEXT, PRIMARY KEY (term, cents), UNIQUE (term, code));
+
+-- Assistive tools a professor allows one student during locked quizzes (OSAS accommodation), per
+-- course. tools = JSON list of keys from ASSIST_TOOLS ([[route]].js); a missing row = none.
+CREATE TABLE IF NOT EXISTS assist (ou TEXT NOT NULL, email TEXT NOT NULL, tools TEXT NOT NULL, by_teacher TEXT, at TEXT, PRIMARY KEY (ou, email));

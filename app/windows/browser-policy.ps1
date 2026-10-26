@@ -56,7 +56,23 @@ $FfPrefs = [ordered]@{ "browser.ml.chat.enabled" = $false; "browser.ml.enable" =
 $SafeExtensions = @("nngceckbapebfimnlniiiahkandclblb","aeblfdkhhhdcdjpifhhbdiojplfjncoa","hdokiejnpimakedhajhdlcegeplioahd",
                     "fdjamakpfbbddfjaooikfcpapjohcfmg","ghmbeldphafepmbegfdlkpapadhbakde","pejdijmoenmkgeppbflobdenhhabjlaj",
                     "ghbmnnjooekpmoecnnnilnnbdlolhkhi","ekhagklcjbdpajgpjgmbionohlpdbjgc","jbkfoedolllekgbhcbcoahefnbanhhlh",
-                    "dppgmdbiimibapkepcbdbmkaabgiofem","bbcinlkgjjkejfdpemiealijmmooekmp","gehmmocbbkpblljhkekmfhjpfbkclbph")
+                    "dppgmdbiimibapkepcbdbmkaabgiofem","bbcinlkgjjkejfdpemiealijmmooekmp","gehmmocbbkpblljhkekmfhjpfbkclbph",
+                    # Low-vision / dyslexia display aids (no AI): Dark Reader, Google High Contrast, OpenDyslexic.
+                    "eimadpbcbfnmbkopoojfekhnkhdbieeh","djcfdncoelnlbldjfhinnjlhdjlikmph","cdnapgfjopgaggbmfgbiinmmbdcglnam")
+# Assistive extensions a professor may allow ONE student (OSAS accommodation). Fixed key -> Chrome Web
+# Store id map (same as mac/browser-policy.py and ASSIST_TOOLS in [[route]].js); an id never comes from
+# the network or a file. Narrator, NVDA, JAWS, Magnifier, Voice Access and dictation are never touched.
+$AssistExtensions = @{ readwrite = @("inoeonmfapjbbkmdafoankkfajkcphgd"); equatio = @("hjngolefdpdnooamgdldlkjgmdcmcjnc")
+                       cowriter = @("ifajfiofeifbbhbionejdliodenmecna"); snapread = @("mloajfnmjckfjbeeofcdaecbelnblden")
+                       readaloud = @("hdhinadidafjejdhmfkjgnolgimiaplp") }
+# Written by the helper (SYSTEM, admin-only folder) from the server's /password answer; removed at unlock.
+$AssistFile = if ($env:LOCKQZ_ASSIST_FILE) { $env:LOCKQZ_ASSIST_FILE } else { "$env:ProgramData\LOCKqz\assist.json" }
+function Get-AssistExtensions {
+  $tools = @(); try { $tools = @((Get-Content -LiteralPath $AssistFile -Raw -ErrorAction Stop | ConvertFrom-Json).tools) } catch { return @() }
+  $out = New-Object System.Collections.ArrayList
+  foreach ($k in $tools) { $ks = [string]$k; if ($ks -and $AssistExtensions.ContainsKey($ks)) { foreach ($i in $AssistExtensions[$ks]) { if (-not $out.Contains($i) -and ($SafeExtensions -notcontains $i)) { [void]$out.Add($i) } } } }
+  return @($out)
+}
 
 # ---------------- registry layer (the only code that touches the registry) ----------------
 function RG-KeyExists($path) { Test-Path -LiteralPath $path }
@@ -154,7 +170,7 @@ function Get-PolicyPlan([bool]$KeepProxy = $false) {
     L "$root\ExtensionInstallBlocklist" @("*")
     # Only the fixed safe list is exempt during the quiz (an existing allowlist could exempt an AI
     # extension): replaced for the quiz, put back exactly at unlock.
-    RL "$root\ExtensionInstallAllowlist" $SafeExtensions
+    RL "$root\ExtensionInstallAllowlist" (@($SafeExtensions) + @(Get-AssistExtensions))
     if ($Chromium[$root] -eq "edge") {
       V $root "HubsSidebarEnabled" 0; V $root "CopilotCDPPageContext" 0
       V $root "EdgeEntraCopilotPageContext" 0; V $root "ComposeInlineEnabled" 0

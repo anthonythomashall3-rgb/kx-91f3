@@ -141,6 +141,32 @@ const SIG_WINDOW_S = 300;
 // Rotation period for the gated quiz password: 5 minutes (the hide-gate already keeps unlocked
 // students out; a longer period means a student who pastes a little late is not rejected).
 const ROT_MS = 300000;
+// OSAS / Brightspace accommodations (26 Oct 2026). Brightspace lets an attempt that STARTED before the
+// quiz's end date keep running past it (time limit x a student's Classlist time multiplier / extra
+// time, plus the late limit and grace period). The latest moment anyone may still be inside a gated
+// quiz = end + over_min (computed at Sync from the quiz's own timing settings, worst-case multiplier
+// ACCOM_MULT, default 3x); unknown or unbounded timing (untimed, "allow normal submission" after the
+// limit, an old row) = end + UNTIMED_OVER_MIN (the helper's own unknown-end cap, 6 h). The helper's
+// failsafe cap and the server's quiz_ended release both use this, never the bare end date.
+const UNTIMED_OVER_MIN = 360;
+const overMinOf = (q, mult) => {
+  const tl = Number(q && q.tl), late = q && q.late != null && q.late !== "" ? Number(q.late) : NaN;
+  if (!(tl > 0) || !Number.isFinite(tl) || ![1, 2].includes(late)) return null;   // untimed / unbounded / unknown
+  const lateMin = late === 1 ? Math.max(0, Number(q.late_min) || 0) : 0, grace = Math.max(0, Number(q.grace) || 0);
+  return Math.min(7 * 1440, Math.ceil(tl * mult + lateMin + grace));
+};
+const latestEndMs = (end, over) => { const e = end ? Date.parse(end) : NaN; if (isNaN(e)) return NaN;
+  const o = over == null || over === "" || isNaN(Number(over)) ? UNTIMED_OVER_MIN : Math.max(0, Number(over)); return e + o * 60000; };
+// REQUIRE_GATE: the Sync tab gates a protected quiz from this long before its start (sync.js AG_MS).
+// Earlier than that no gate CAN be running, and Brightspace itself keeps everyone without special access
+// (an OSAS early sitting / makeup) out before the start, so the password is not held then.
+const GATE_LEAD_MS = 60 * 60000;
+// Assistive tools a professor (or OSAS through the professor) may allow ONE student during a locked
+// quiz. Browser extensions are otherwise all off while locked; desktop screen readers, dictation, zoom
+// and text-to-speech are never touched. Keys only: each helper maps a key to fixed extension ids in
+// its own code (never ids from the network). Keep in sync with mac/browser-policy.py + windows/browser-policy.ps1.
+const ASSIST_TOOLS = { readwrite: "Read&Write", equatio: "Equatio", cowriter: "Co:Writer", snapread: "Snap&Read", readaloud: "Read Aloud" };
+const assistList = v => { let a = []; try { a = Array.isArray(v) ? v : JSON.parse(v || "[]"); } catch {} return [...new Set((Array.isArray(a) ? a : []).map(String).filter(k => Object.prototype.hasOwnProperty.call(ASSIST_TOOLS, k)))]; };
 const minuteBucket = () => Math.floor(Date.now() / ROT_MS);
 async function rotatingPw(secret, ou, qi, bucket) {
   const h = await hmacHex(String(secret||"lqz-fallback"), `lqz-rot:${ou}:${qi}:${bucket}`);
@@ -327,12 +353,13 @@ export async function onRequest(context) {
   async function serverUnlock(dev, device_id, qid, anyEnd = false) {
     const [ou, qi] = qid.split("-");
     const em = dev && dev.student && (!codesOn || Number(dev.student_verified) === 1) ? String(dev.student).toLowerCase() : null;
-    const r = await db.prepare("SELECT b.end_date AS end_date, q.gated AS gated, q.sa_keep AS sa_keep, (SELECT locked_at FROM locks WHERE device_id=? AND quiz_id=?) AS locked_at, r.user_id AS uid, (SELECT s.at FROM submissions s WHERE s.ou=? AND s.qi=? AND s.user_id=r.user_id) AS sub_at FROM (SELECT 1) one LEFT JOIN bs_quizzes b ON b.ou=? AND b.qi=? LEFT JOIN quizzes q ON q.ou=? AND q.qi=? LEFT JOIN roster r ON r.ou=? AND r.email=?")
+    const r = await db.prepare("SELECT b.end_date AS end_date, b.over_min AS over_min, q.gated AS gated, q.sa_keep AS sa_keep, (SELECT locked_at FROM locks WHERE device_id=? AND quiz_id=?) AS locked_at, r.user_id AS uid, (SELECT s.at FROM submissions s WHERE s.ou=? AND s.qi=? AND s.user_id=r.user_id) AS sub_at FROM (SELECT 1) one LEFT JOIN bs_quizzes b ON b.ou=? AND b.qi=? LEFT JOIN quizzes q ON q.ou=? AND q.qi=? LEFT JOIN roster r ON r.ou=? AND r.email=?")
       .bind(device_id, qid, ou, qi, ou, qi, ou, qi, ou, em).first();
     if (!r) return null;
     if (r.sub_at && r.locked_at && Date.parse(r.sub_at) >= Date.parse(r.locked_at)) return "quiz_submitted";
     const end = r.end_date ? Date.parse(r.end_date) : NaN, began = r.locked_at ? Date.parse(r.locked_at) : NaN;
-    if (Number(r.gated) === 1 && !isNaN(end) && !isNaN(began) && began <= end && Date.now() > end + 15 * 60000) {
+    // An attempt begun before the end may run on (time limit x accommodation): only after the latest end.
+    if (Number(r.gated) === 1 && !isNaN(end) && !isNaN(began) && began <= end && Date.now() > latestEndMs(r.end_date, r.over_min) + 15 * 60000) {
       let kept = true;   // unreadable list = assume accommodated (never release on doubt)
       try { kept = !r.uid || JSON.parse(r.sa_keep || "[]").map(String).includes(String(r.uid)); } catch {}
       if (!kept) return "quiz_ended";
@@ -1213,12 +1240,14 @@ export async function onRequest(context) {
           if (Number(sh?.other) >= 2) return json({ password: null, reason: "too_many_devices", error: "This email is already used on 2 computers. Email lockqz.app@gmail.com to remove one." }, 402);
         }
       }
+      // The professor's assistive-tool allowance for this student (only a CONFIRMED email counts while codes are on).
+      const assistWho = stu && stu.student && (!codesOn || Number(stu.student_verified) === 1) ? String(stu.student).toLowerCase() : null;
       // Everything about this quiz in ONE read: LOCKqz password + gate state, Brightspace dates, a
       // password still waiting to be removed from Brightspace (I-M9). The old course-wide static password
       // (courses.password, set by the retired /course page) is never released: it skipped the gate and
       // rotation rules. Every quiz is protected one by one (Sync's protect-by-default).
-      const q = await db.prepare("SELECT q.password AS password, q.gated AS gated, q.bs_code AS bs_code, q.sa_keep AS sa_keep, b.start_date AS start_date, b.end_date AS end_date, (SELECT password FROM pending_clear WHERE ou=? AND qi=?) AS pc, b.qi AS bq FROM (SELECT 1) one LEFT JOIN quizzes q ON q.ou=? AND q.qi=? LEFT JOIN bs_quizzes b ON b.ou=? AND b.qi=?")
-        .bind(ou, qi, ou, qi, ou, qi).first();
+      const q = await db.prepare("SELECT q.password AS password, q.gated AS gated, q.bs_code AS bs_code, q.sa_keep AS sa_keep, b.start_date AS start_date, b.end_date AS end_date, b.over_min AS over_min, (SELECT password FROM pending_clear WHERE ou=? AND qi=?) AS pc, (SELECT tools FROM assist WHERE ou=? AND email=?) AS assist, b.qi AS bq FROM (SELECT 1) one LEFT JOIN quizzes q ON q.ou=? AND q.qi=? LEFT JOIN bs_quizzes b ON b.ou=? AND b.qi=?")
+        .bind(ou, qi, ou, assistWho, ou, qi, ou, qi).first();
       const gated = Number(q?.gated) === 1;
       // C2: the start check applies only while the quiz is GATED (the gate hides the quiz, so LOCKqz
       // decides who may enter and when). Otherwise Brightspace enforces its own start date and every
@@ -1242,7 +1271,8 @@ export async function onRequest(context) {
       // password keeps being released until then (pending_clear).
       // REQUIRE_GATE: a protected quiz that can still be taken is only opened through the gate. Its
       // professor is emailed (at most once an hour per quiz) to open the Sync tab; the app keeps asking.
-      if (gateRequired() && q?.password && !gated && !(q.end_date && Date.now() > Date.parse(q.end_date))) {
+      const preGate = !!q?.start_date && !isNaN(Date.parse(q.start_date)) && Date.now() < Date.parse(q.start_date) - GATE_LEAD_MS;
+      if (gateRequired() && q?.password && !gated && !preGate && !(q.end_date && Date.now() > Date.parse(q.end_date))) {
         await nudgeGate(ou, qi);
         return json({ password: null, reason: "gate_off" }, 402);
       }
@@ -1264,14 +1294,17 @@ export async function onRequest(context) {
       // Otherwise null -> the helper's 6 h failsafe: special access the server cannot see (makeup exams,
       // a later personal end date) or an end changed in Brightspace since the last Sync must never cut
       // a student's lock short.
-      const end = gated && q?.end_date && !accommodated && !isNaN(Date.parse(q.end_date)) ? new Date(Date.parse(q.end_date)).toISOString() : null;
+      // The end sent is the LATEST moment an attempt may still run (end + time limit x accommodation, see
+      // latestEndMs), so a student who starts late or has extra time is never released mid-attempt.
+      const end = gated && q?.end_date && !accommodated && !isNaN(latestEndMs(q.end_date, q.over_min)) ? new Date(latestEndMs(q.end_date, q.over_min)).toISOString() : null;
       // Gated: the code changes only at the next 5-min bucket (+ the Sync tab's round), so the agent may
       // wait until then; older agents ignore it and keep their 15 s schedule.
       // Only when Brightspace already holds this bucket's code (else the Sync tab is about to change it).
       let recheck = null;
       if (rot) { const b = minuteBucket();
         if (rot === await rotatingPw(env.ROT_SECRET || env.TEACHER_KEY || "lqz-fallback", ou, qi, b)) recheck = Math.max(15, Math.ceil(((b + 1) * ROT_MS + 40000 - Date.now()) / 1000)); }
-      return json({ password: given, lockId, end, ...(recheck ? { recheck } : {}) });
+      const assist = given ? assistList(q?.assist) : [];
+      return json({ password: given, lockId, end, ...(recheck ? { recheck } : {}), ...(assist.length ? { assist } : {}) });
     }
 
     if (p === "/match" && request.method === "POST") {
@@ -1858,10 +1891,11 @@ export async function onRequest(context) {
       };
       const oldTc = new Map((A.length ? await sel("SELECT ou,name,code,role,synced_at FROM teacher_courses WHERE teacher_id=? AND ou IN (%IN%)", A, [me.id]) : []).map(r => [String(r.ou), r]));
       const oldRoster = withRoster.length ? await sel("SELECT ou,user_id,name,email,username,org_id,role FROM roster WHERE ou IN (%IN%)", withRoster) : [];
-      const oldBq = withQuiz.length ? await sel("SELECT ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours FROM bs_quizzes WHERE ou IN (%IN%)", withQuiz) : [];
+      const oldBq = withQuiz.length ? await sel("SELECT ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours,over_min FROM bs_quizzes WHERE ou IN (%IN%)", withQuiz) : [];
       // H15: students deleted on request are never imported again (until they confirm their email again).
       const forgotten = withRoster.length ? new Set((await db.prepare("SELECT email FROM forgotten").all().catch(() => ({ results: [] }))).results.map(r => r.email)) : new Set();
       const same = (a, b) => (a == null ? null : String(a)) === (b == null ? null : String(b));
+      const ACCOM = Math.max(1, Math.min(10, Number(env.ACCOM_MULT) || 3));   // worst-case accommodation time multiplier
       const st = [], tcRows = [], touch = [], rUp = [], bUp = [];
       const touchBefore = new Date(Date.now() - 600000).toISOString();   // "last synced" kept fresh to 10 min
       for (const ou of A) {
@@ -1909,15 +1943,15 @@ export async function onRequest(context) {
           // A password in LOCKqz's own format (lq_password: "LQ-" + 8 of rid()'s letters, or a gate code
           // "LQ-" + 10 hex) is ours, never the professor's: e.g. a course copied from a term LOCKqz
           // protected keeps the old code, which nobody can hand out any more -> auto-protect replaces it.
-          const v = [str(q.name), q.active ? 1 : 0, str(q.start, 40), str(q.end, 40), str(q.due, 40), q.has_password ? 1 : 0, (q.has_password && ((o && Number(o.bs_password_is_ours) === 1) || q.lq_password === true)) ? 1 : 0];
+          const v = [str(q.name), q.active ? 1 : 0, str(q.start, 40), str(q.end, 40), str(q.due, 40), q.has_password ? 1 : 0, (q.has_password && ((o && Number(o.bs_password_is_ours) === 1) || q.lq_password === true)) ? 1 : 0, overMinOf(q, ACCOM)];
           if (v[5] === 1 && v[6] === 0) ownPw.add(`${ou}-${qi}`);
-          if (!o || !same(o.name, v[0]) || Number(o.active) !== v[1] || !same(o.start_date, v[2]) || !same(o.end_date, v[3]) || !same(o.due_date, v[4]) || Number(o.bs_has_password) !== v[5] || Number(o.bs_password_is_ours) !== v[6]) bUp.push([ou, qi, ...v, t]);
+          if (!o || !same(o.name, v[0]) || Number(o.active) !== v[1] || !same(o.start_date, v[2]) || !same(o.end_date, v[3]) || !same(o.due_date, v[4]) || Number(o.bs_has_password) !== v[5] || Number(o.bs_password_is_ours) !== v[6] || !same(o.over_min, v[7])) bUp.push([ou, qi, ...v, t]);
         }
         const drop = byOu.get(ou).quizzes.length > 1000 ? [] : oldBq.filter(r => String(r.ou) === ou && !keep.has(String(r.qi))).map(r => String(r.qi));
         for (const part of chunk(drop, 98)) st.push(db.prepare(`DELETE FROM bs_quizzes WHERE ou=? AND qi IN (${placeholders(part.length)})`).bind(ou, ...part));
       }
-      st.push(...multiInsert(db, "INSERT INTO bs_quizzes (ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours,synced_at)", 10, bUp,
-        "ON CONFLICT(ou,qi) DO UPDATE SET name=excluded.name,active=excluded.active,start_date=excluded.start_date,end_date=excluded.end_date,due_date=excluded.due_date,bs_has_password=excluded.bs_has_password,bs_password_is_ours=excluded.bs_password_is_ours,synced_at=excluded.synced_at"));
+      st.push(...multiInsert(db, "INSERT INTO bs_quizzes (ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours,over_min,synced_at)", 11, bUp,
+        "ON CONFLICT(ou,qi) DO UPDATE SET name=excluded.name,active=excluded.active,start_date=excluded.start_date,end_date=excluded.end_date,due_date=excluded.due_date,bs_has_password=excluded.bs_has_password,bs_password_is_ours=excluded.bs_password_is_ours,over_min=excluded.over_min,synced_at=excluded.synced_at"));
       await runBatches(db, st);
       if (bUp.length) for (const ou of new Set(bUp.map(r => r[0]))) await liveBust(url.origin, ou);
       // VERIFY ONLY FROM A TRUSTED ROSTER -- a student can never become a professor. Verified iff the
@@ -2040,6 +2074,18 @@ export async function onRequest(context) {
       if (!cur) return json({ error:"Protect this quiz first." }, 400);
       // Accommodation list: recorded once when the gate first starts; kept across Sync-tab reloads.
       let keep = cur.sa_keep;
+      // add_keep: special access the professor/OSAS added WHILE the gate runs (the Sync tab sends each
+      // one once, never LOCKqz's own grants). Joins the accommodation list; only for a running gate.
+      if ("add_keep" in body) {
+        if (!body.on || Number(cur.gated) !== 1) return json({ error: "gate is not running" }, 409);
+        let k0 = []; try { k0 = JSON.parse(keep || "[]").map(String); } catch {}
+        const add = (Array.isArray(body.add_keep) ? body.add_keep : []).map(String).filter(x => /^\d+$/.test(x) && !k0.includes(x));
+        if (!add.length) return json({ ou, qi, gated: true, keep: k0 });
+        keep = JSON.stringify([...k0, ...add].slice(0, 3000));
+        await db.prepare("UPDATE quizzes SET sa_keep=? WHERE qi=? AND ou=? AND gated=1").bind(keep, qi, ou).run();
+        await liveBust(url.origin, `${ou}-${qi}`);
+        return json({ ou, qi, gated: true, keep: JSON.parse(keep) });
+      }
       if (body.on && !(Number(cur.gated) === 1 && keep)) keep = JSON.stringify((Array.isArray(body.keep) ? body.keep : []).map(String).filter(x => /^\d+$/.test(x)).slice(0, 3000));
       if (!body.on) keep = null;
       const st = [db.prepare("UPDATE quizzes SET gated=?, sa_keep=?, bs_code=CASE WHEN ?=1 THEN bs_code ELSE NULL END WHERE qi=? AND ou=?").bind(body.on?1:0, keep, body.on?1:0, qi, ou)];
@@ -2105,6 +2151,20 @@ export async function onRequest(context) {
       for (const r of rows) codes[String(r.qi)] = { cur: await rotatingPw(secret, ou, r.qi, b), next: await rotatingPw(secret, ou, r.qi, b + 1), bucket: b };
       return json({ codes });
     }
+    // Assistive tools allowed for one student in one course (OSAS accommodation): GET ?ou= lists them,
+    // POST {ou, email, tools:[keys]} sets them ([] removes). Only the course's trusted instructor.
+    if (p === "/assist") {
+      const ou = String((request.method === "POST" ? body.ou : url.searchParams.get("ou")) || "");
+      if (!/^\d+$/.test(ou)) return json({ error: "bad course" }, 400);
+      if (!me.admin && !(await trustedInstructor(ou))) return json({ error: "Only the professor of this course." }, 403);
+      if (request.method !== "POST") return json({ tools: ASSIST_TOOLS, students: (await db.prepare("SELECT email, tools FROM assist WHERE ou=? LIMIT 3000").bind(ou).all()).results.map(r => ({ email: r.email, tools: assistList(r.tools) })) });
+      const email = String(body.email || "").trim().toLowerCase();
+      if (!email.includes("@") || !(await db.prepare("SELECT 1 FROM roster WHERE ou=? AND email=? LIMIT 1").bind(ou, email).first())) return json({ error: "not a student on this class list" }, 404);
+      const tools = assistList(body.tools);
+      if (tools.length) await db.prepare("INSERT INTO assist (ou,email,tools,by_teacher,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,email) DO UPDATE SET tools=excluded.tools,by_teacher=excluded.by_teacher,at=excluded.at").bind(ou, email, JSON.stringify(tools), me.id || "admin", now()).run();
+      else await db.prepare("DELETE FROM assist WHERE ou=? AND email=?").bind(ou, email).run();
+      return json({ ok: true, ou, email, tools });
+    }
     if (p === "/bs") {
       const cs = (await db.prepare("SELECT ou,name,code,role,synced_at FROM teacher_courses WHERE teacher_id=? ORDER BY name LIMIT 200").bind(me.id).all()).results;
       if (!cs.length) return json({ courses: [] });
@@ -2114,9 +2174,10 @@ export async function onRequest(context) {
       const own = await trustedOus(cs.map(c => String(c.ou)));
       const ownList = cs.map(c => String(c.ou)).filter(o => own.has(o));
       const sub = "SELECT ou FROM teacher_courses WHERE teacher_id=?";
-      const roster = [], devs = [];
+      const roster = [], devs = [], assist = new Map();
       for (const part of chunk(ownList, 98)) {
         const ph = placeholders(part.length);
+        (await db.prepare(`SELECT ou,email,tools FROM assist WHERE ou IN (${ph})`).bind(...part).all().catch(() => ({ results: [] }))).results.forEach(a => assist.set(String(a.ou) + "|" + a.email, assistList(a.tools)));
         roster.push(...(await db.prepare(`SELECT ou,user_id,name,email,username,role FROM roster WHERE ou IN (${ph}) ORDER BY name`).bind(...part).all()).results);
         // Installed devices by email through devices(student) -- no scan of every device (I-B3).
         devs.push(...(await db.prepare(`SELECT DISTINCT d.device_id, d.student AS who, d.platform, d.version, d.last_seen FROM roster r JOIN devices d ON d.student=r.email WHERE r.ou IN (${ph}) AND (d.student_verified=1 OR ?=0)`).bind(...part, codesOn ? 1 : 0).all()).results);
@@ -2132,7 +2193,7 @@ export async function onRequest(context) {
         // exempt person (developer mode), so he is never listed as someone who must install.
         students: roster.filter(r => r.ou === c.ou && takesQuizzes(r.role) && !adminEmails.has((r.email||"").toLowerCase())).map(r => {
           const d = by[(r.email||"").toLowerCase()] || by[(r.name||"").toLowerCase()] || [];
-          return { name:r.name, email:r.email, ta: !/learner|student/i.test(r.role||""), installed: d.length > 0, platform: d[0]?.platform||null, last_seen: d[0]?.last_seen||null }; }),
+          return { name:r.name, email:r.email, assist: assist.get(String(r.ou) + "|" + String(r.email||"").toLowerCase()) || [], ta: !/learner|student/i.test(r.role||""), installed: d.length > 0, platform: d[0]?.platform||null, last_seen: d[0]?.last_seen||null }; }),
         // has_own_password: the professor's own Brightspace password is on it (auto-protect skips it).
         quizzes: qz.filter(q => q.ou === c.ou).map(q => ({ ...q, has_own_password: Number(q.bs_has_password) === 1 && Number(q.bs_password_is_ours) !== 1 && !q.lock_id })) })) });
     }
