@@ -238,7 +238,7 @@ const BS_ORIGINS = ["https://brightspace.usc.edu", "https://usc.brightspace.com"
 const BS_HOME = "https://brightspace.usc.edu/d2l/home";
 let BSWIN = null, SYNCWAIT = null, SYNCMSG = "";
 const SYNCBTN = prime => `<button class="btn${prime?" prime":""}" onclick="syncNow()">Sync now</button><span class="syncst muted">${syncHtml(SYNCMSG)}</span>`;
-// While a sync runs, the status shows the red lock loader (time + a fun fact); otherwise plain text.
+// While a sync runs, the status shows the red lock loader (with how long it should take); otherwise plain text.
 const syncHtml = t => t === "Syncing…" ? lqL("Syncing with Brightspace", "This usually takes under a minute", {small:true}) : esc(t);
 function syncMsg(t){ SYNCMSG = t; document.querySelectorAll(".syncst").forEach(e => e.innerHTML = syncHtml(t)); }
 function askSync(w){ BS_ORIGINS.forEach(o => { try { w.postMessage({ lqz: "sync" }, o); } catch {} }); }

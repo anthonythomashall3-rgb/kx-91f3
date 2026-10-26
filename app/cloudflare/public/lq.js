@@ -1,40 +1,12 @@
 /* LOCKqz shared look: "LOCK" black + "qz" red everywhere, the red lock loader (locks and unlocks while
-   a page waits, with how long it should take and a random "Did you know?"), and the test-run welcome. */
+   a page waits, with how long it should take), and the test-run welcome. */
 (function () {
   if (window.lqLoading) return;
   var RED = "#990000";
-  var FACTS = [
-    "Octopuses have three hearts.",
-    "Honey never spoils. Archaeologists have found edible honey in ancient Egyptian tombs.",
-    "A day on Venus is longer than its year.",
-    "Bananas are berries, but strawberries are not.",
-    "Sharks have been around longer than trees.",
-    "Wombat poop is cube-shaped.",
-    "USC was founded in 1880, when Los Angeles had about 11,000 people.",
-    "The Tommy Trojan statue was unveiled at USC in 1930.",
-    "Oxford University is older than the Aztec Empire.",
-    "Cleopatra lived closer in time to the Moon landing than to the building of the Great Pyramid.",
-    "The first computer \"bug\" was a real moth, found in a Harvard computer in 1947.",
-    "Linus Yale Jr. patented the modern pin-tumbler lock in the 1860s. The idea goes back to ancient Egypt.",
-    "Your brain uses about 20% of your body's energy.",
-    "A group of flamingos is called a flamboyance.",
-    "Sunlight takes about 8 minutes and 20 seconds to reach Earth.",
-    "Scotland's national animal is the unicorn.",
-    "The dot over a lowercase i or j is called a tittle.",
-    "There are more possible games of chess than atoms in the observable universe.",
-    "Reviewing notes a little at a time, spread over days, beats cramming the night before.",
-    "Saturn is less dense than water.",
-    "Koala fingerprints look almost exactly like human ones.",
-    "The Hollywood sign first read \"Hollywoodland.\"",
-    "Venus is the hottest planet, even though Mercury is closer to the Sun.",
-    "Nobody knows for sure where the word \"quiz\" comes from."
-  ];
-  var last = -1;
-  function fact() { var i; do { i = Math.floor(Math.random() * FACTS.length); } while (i === last && FACTS.length > 1); last = i; return FACTS[i]; }
   var css = ".lq-l{color:#000!important}.lq-q{color:" + RED + "!important}" +
     ".lqload{display:flex;flex-direction:column;align-items:center;gap:8px;padding:20px 8px;text-align:center;font-family:inherit}" +
-    ".lqload .lqmsg{font-weight:600;color:#111;font-size:15px;margin:0}.lqload .lqfact{color:#666;font-size:13px;max-width:380px;margin:4px 0 0}" +
-    ".lqload .lqfact b{color:" + RED + "}.lqload.small{padding:8px 4px;gap:4px}.lqload.small .lqmsg{font-size:14px}" +
+    ".lqload .lqmsg{font-weight:600;color:#111;font-size:15px;margin:0}" +
+    ".lqload.small{padding:8px 4px;gap:4px}.lqload.small .lqmsg{font-size:14px}" +
     ".lqsh{animation:lqsh 1.8s ease-in-out infinite}" +
     "@keyframes lqsh{0%,20%{transform:translateY(0)}45%,70%{transform:translateY(-5px)}95%,100%{transform:translateY(0)}}" +
     "@media (prefers-reduced-motion:reduce){.lqsh{animation:none}}" +
@@ -53,10 +25,8 @@
   window.lqLoading = function (msg, eta, o) {
     o = o || {};
     return '<div class="lqload' + (o.small ? " small" : "") + '" role="status" aria-live="polite">' + lockSvg(o.small ? 28 : 44) +
-      '<p class="lqmsg">' + esc(msg) + (eta ? ". " + esc(eta) : "") + '</p>' +
-      '<p class="lqfact"><b>Did you know?</b> ' + esc(fact()) + '</p></div>';
+      '<p class="lqmsg">' + esc(msg) + (eta ? ". " + esc(eta) : "") + '</p></div>';
   };
-  window.lqFact = fact;
   // "LOCKqz" anywhere in text -> LOCK (black) + qz (red). Skips inputs, scripts, titles, and text already done.
   var SKIP = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1, INPUT: 1, TITLE: 1, OPTION: 1, NOSCRIPT: 1 };
   function brand(root) {

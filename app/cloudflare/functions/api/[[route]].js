@@ -637,11 +637,29 @@ export async function onRequest(context) {
     for (const [c, e] of codes) if ((!inGap() && (sums[c + "|" + cur] || 0) >= STUDENT_FEE) || (early && (sums[c + "|" + nxt] || 0) >= STUDENT_FEE)) ok.add(e);
     return ok;
   }
-  async function payInfo(email, limitIp = null) {
+  // Unique Zelle amount: each unpaid student gets $fee + $0.01..$9.99 (never a whole dollar) for the term,
+  // so a Zelle sent with no memo still says who paid. Reserved while unpaid; freed once paid.
+  const slotAmt = c => Math.round(STUDENT_FEE * 100 + c) / 100;
+  async function zelleAmount(code, term) {
+    const has = await db.prepare("SELECT cents FROM pay_slots WHERE term=? AND code=?").bind(term, code).first();
+    if (has) return slotAmt(has.cents);
+    const used = new Set((await db.prepare("SELECT cents FROM pay_slots WHERE term=?").bind(term).all()).results.map(r => Number(r.cents)));
+    for (let c = 1, tries = 0; c < 1000 && tries < 3; c++) {
+      if (c % 100 === 0 || used.has(c)) continue;
+      tries++;
+      await db.prepare("INSERT OR IGNORE INTO pay_slots (term,cents,code,at) VALUES (?,?,?,?)").bind(term, c, code, now()).run();
+      const mine = await db.prepare("SELECT cents FROM pay_slots WHERE term=? AND code=?").bind(term, code).first();
+      if (mine) return slotAmt(mine.cents);
+    }
+    return null;   // all taken: the memo is needed
+  }
+  async function payInfo(email, limitIp = null, slot = false) {
     const code = await studentCode(email, limitIp);
     if (code && typeof code === "object") return code;   // { limited: true }
+    let zelle_amount = null;
+    if (slot && feeOn() && stuZelle() && email) { const st = await studentStatus(email); if (!st.paid && !(st.received > 0)) zelle_amount = await zelleAmount(code, st.term); }
     const due = stripeOn() && email ? Math.round(STUDENT_FEE * 100) - Math.round((await studentStatus(email)).received * 100) : Math.round(STUDENT_FEE * 100);
-    return { amount: STUDENT_FEE, code, venmo: stuVenmo(), zelle: stuZelle(), bank: stuBank(), po: stuBank(), stripe: stripeInfo("student", due),
+    return { amount: STUDENT_FEE, code, venmo: stuVenmo(), zelle: stuZelle(), bank: stuBank(), po: stuBank(), zelle_amount, stripe: stripeInfo("student", due),
              url: PAY_URL + (email ? "?email=" + encodeURIComponent(String(email).toLowerCase()) : "") };
   }
   // Memo codes typed by people: "lqs-ab12c", "LQS AB12C", "LQ AB12C". Student (LQS+5) first, then
@@ -677,6 +695,16 @@ export async function onRequest(context) {
     let made = 0;
     for (const e of needEm) if (!emCode.has(e) && made++ < 10) { const c = await studentCode(e); if (typeof c === "string") emCode.set(e, c); }
     fresh.forEach(x => { if (!x.code && x.email) x.code = emCode.get(x.email.toLowerCase()) || null; });
+    // No memo: a unique Zelle amount ($fee + 0.01..9.99) names the student who was given it.
+    const [cur0, nxt0] = curTerms();
+    const slotC = x => { const c = Math.round(x.amount * 100) - Math.round(STUDENT_FEE * 100); return !x.code && !x.review && c > 0 && c < 1000 && c % 100 ? c : null; };
+    const want = [...new Set(fresh.map(slotC).filter(Boolean))];
+    if (want.length) {
+      const byC = new Map();
+      for (const r of (await db.prepare(`SELECT cents, code FROM pay_slots WHERE term IN (?,?) AND cents IN (${placeholders(want.length)})`).bind(cur0, nxt0, ...want).all()).results)
+        byC.set(Number(r.cents), byC.has(Number(r.cents)) && byC.get(Number(r.cents)) !== r.code ? null : r.code);   // same cents in both terms = ambiguous
+      fresh.forEach(x => { const c = slotC(x); if (c && byC.get(c)) { x.code = byC.get(c); x.note = `${x.note} [amount match]`.trim().slice(0, 300); } });
+    }
     // What each code already paid this term and next (for the term each new payment counts for).
     const [cur, nxt] = curTerms(), codes = [...new Set(fresh.map(x => x.code).filter(Boolean))], sums = new Map();
     for (const part of chunk(codes, 97)) (await db.prepare(`SELECT code, term, COALESCE(SUM(amount),0) AS s FROM payments WHERE code IN (${placeholders(part.length)}) AND term IN (?,?) AND ${COUNTS} GROUP BY code, term`).bind(...part, cur, nxt).all()).results.forEach(r => sums.set(r.code + "|" + r.term, Number(r.s)));
@@ -698,7 +726,8 @@ export async function onRequest(context) {
       const total = x.code ? (sums.get(x.code + "|" + x.term) || 0) : 0;
       let res = { matched: null };
       if (x.review) res = { matched: null, review: true };
-      else if (x.code && stuEmail.has(x.code)) res = { matched: "student", email: stuEmail.get(x.code), paid: total >= STUDENT_FEE, total, term: x.term };
+      else if (x.code && stuEmail.has(x.code)) { res = { matched: "student", email: stuEmail.get(x.code), paid: total >= STUDENT_FEE, total, term: x.term };
+        if (res.paid) acts.push(db.prepare("DELETE FROM pay_slots WHERE code=?").bind(x.code)); }
       else if (x.code && profId.has(x.code)) {
         const done = total >= PRICE; res = { matched: "professor", paid: done, total, term: x.term };
         if (done) acts.push(db.prepare("UPDATE teachers SET active_until=? WHERE id=? AND (active_until IS NULL OR active_until<?)").bind(termEndOf(x.term), profId.get(x.code), termEndOf(x.term)));
@@ -1307,7 +1336,7 @@ export async function onRequest(context) {
       if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_start' AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 30)
         return json({ error:"too many requests — try again in an hour" }, 429);
       await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + clientIp, null, null, "pay_start", null, now()).run();
-      const info = await payInfo(email, clientIp);
+      const info = await payInfo(email, clientIp, !(await studentPaid(email)));
       if (info.limited) return json({ error:"too many requests — try again in an hour" }, 429);
       const stt = await studentStatus(email);
       const ro = await db.prepare("SELECT 1 FROM renew_optout WHERE email=?").bind(email).first().catch(() => null);

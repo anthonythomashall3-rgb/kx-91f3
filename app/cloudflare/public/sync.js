@@ -47,7 +47,7 @@
     "border:2px solid #990000;border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,.3);font:14px -apple-system,Segoe UI,sans-serif;color:#111;text-align:left";
   box.innerHTML = '<div style="position:sticky;top:0;background:#fff;color:#111;border-bottom:2px solid #990000;padding:10px 14px;font-weight:700;display:flex;justify-content:space-between">' +
     '<span><span style="color:#000">LOCK</span><span style="color:#990000">qz</span> Sync</span><span id="lqz-x" style="cursor:pointer;padding:0 4px">&#10005;</span></div><div id="lqz-b" style="padding:12px 14px">Starting...</div>';
-  // The shared LOCKqz look (red lock loader + fun facts, LOCK black / qz red), from the LOCKqz site.
+  // The shared LOCKqz look (red lock loader, LOCK black / qz red), from the LOCKqz site.
   var LW = typeof window !== "undefined" ? window : {};
   try { if (SRC && !LW.lqLoading && document.head) { var lqs = document.createElement("script"); lqs.src = new URL(SRC).origin + "/lq.js"; document.head.appendChild(lqs); } } catch (e) {}
   if (!AUTO) document.body.appendChild(box);   // an auto re-check shows its panel only if something changed
@@ -64,7 +64,7 @@
     if (confirm("A gate is on. Hide this panel? The gate keeps running while this tab is open.")) box.style.display = "none";
   };
   var say = function (h) { B.innerHTML = h; if (LW.lqBrand) LW.lqBrand(B); };
-  // A waiting step: the red lock loader with how long it should take and a fun fact (plain text until lq.js loads).
+  // A waiting step: the red lock loader with how long it should take (plain text until lq.js loads).
   var wait = function (msg, eta) { if (LW.lqLoading) say(LW.lqLoading(msg, eta)); else say(msg + "... " + eta); };
   var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
   var day = function (t) { return t ? new Date(t).toLocaleDateString([], { month: "short", day: "numeric" }) : ""; };

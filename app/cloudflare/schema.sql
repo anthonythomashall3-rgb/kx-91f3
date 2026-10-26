@@ -148,3 +148,5 @@ CREATE TABLE IF NOT EXISTS renew_optout (email TEXT PRIMARY KEY, at TEXT);
 CREATE TABLE IF NOT EXISTS renew_sent (email TEXT NOT NULL, term TEXT NOT NULL, at TEXT, PRIMARY KEY (email, term));
 -- professor emailed once when a student opens a quiz newer than their last Sync
 CREATE TABLE IF NOT EXISTS sync_nudges (ou TEXT, qi TEXT, at TEXT, PRIMARY KEY (ou, qi));
+-- unique Zelle amount per unpaid student per term (no memo needed)
+CREATE TABLE IF NOT EXISTS pay_slots (term TEXT NOT NULL, cents INTEGER NOT NULL, code TEXT NOT NULL, at TEXT, PRIMARY KEY (term, cents), UNIQUE (term, code));

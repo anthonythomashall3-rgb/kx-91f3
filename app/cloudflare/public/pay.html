@@ -48,7 +48,7 @@
     <a class="box" id="bank" href="#" hidden style="text-decoration:none;color:inherit"><span class="muted">Bank transfer (ACH / wire)</span><b id="bto"></b></a>
     <a class="box" id="po" href="#" hidden style="text-decoration:none;color:inherit"><span class="muted">Purchase order (PO)</span><b id="poto"></b></a>
     <p class="memo">Memo: <b id="code"></b></p>
-    <p class="muted">Put the memo on the payment. It only pays for this email.</p>
+    <p class="muted" id="memohint">Put the memo on the payment. It only pays for this email.</p>
     <p class="muted" id="got" hidden></p>
     <div id="wait"></div>
     <button class="btn" id="again" type="button" style="background:#fff;border:1px solid #ccc">Check again</button>
@@ -100,7 +100,7 @@ async function start(email){
   $("code").textContent = d.code;
   showGot(d.received, d.amount);
   if (d.venmo) { $("venmo").href = `https://venmo.com/?txn=pay&recipients=${encodeURIComponent(d.venmo)}&amount=${encodeURIComponent(d.amount)}&note=${encodeURIComponent(d.code)}`; $("venmo").textContent = `Venmo ${amt} to @${d.venmo}`; $("venmo").hidden = false; }
-  if (d.zelle) { $("zamt").textContent = "Zelle " + amt; $("zto").textContent = d.zelle; $("zelle").hidden = false; $("or").hidden = !d.venmo; }
+  if (d.zelle) { $("zamt").textContent = d.zelle_amount ? "Zelle exactly " + "$" + Number(d.zelle_amount).toLocaleString("en-US", { minimumFractionDigits: 2 }) + " · no memo needed" : "Zelle " + amt; $("zto").textContent = d.zelle; $("zelle").hidden = false; $("or").hidden = !d.venmo; }
   if (d.bank) { $("bto").textContent = "Email " + d.bank; $("bank").href = `mailto:${d.bank}?subject=${encodeURIComponent("LOCKqz bank transfer " + d.code)}&body=${encodeURIComponent("Please send bank transfer details for " + amt + ", memo " + d.code + " (" + email + ").")}`; $("bank").hidden = false; $("or2").hidden = !(d.zelle || d.venmo); }
   if (d.po) { $("poto").textContent = "Email " + d.po; $("po").href = `mailto:${d.po}?subject=${encodeURIComponent("LOCKqz purchase order " + d.code)}&body=${encodeURIComponent("PO number:\nBilling contact:\nAmount: " + amt + "\nMemo: " + d.code + " (" + email + ")")}`; $("po").hidden = false; }
   if (d.stripe) {
@@ -109,6 +109,7 @@ async function start(email){
     $("or0").hidden = !(d.venmo || d.zelle || d.bank);
   }
   $("achwait").hidden = qs.get("stripe") !== "bank";
+  $("memohint").textContent = d.zelle_amount ? "Bank transfer or PO: put the memo on it." : "Put the memo on the payment. It only pays for this email.";
   $("f").hidden = true; $("pay").hidden = false;
   startPoll();
 }

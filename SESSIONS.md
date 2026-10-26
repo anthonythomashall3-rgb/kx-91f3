@@ -7,9 +7,10 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-10-26 04:40 PT — 01KwFxq1: unique Zelle amount per student (no memo needed); files: [[route]].js (payments only), public/pay.html, migrate_027_pay_slots.sql, schema.sql, tests/test_stripe.mjs
+- (none)
 
 ## Recently finished
+- 2026-10-26 05:00 PT — 01KwFxq1: unique Zelle amount per unpaid student per term ($fee + $0.01–$9.99, never whole dollars; pay_slots, migrate_027) so a Zelle with no memo still matches (memo still works; review alerts never amount-matched; slot freed when paid). Pay page: "Zelle exactly $180.xx · no memo needed". Fun facts removed from all loaders (lq.js).
 - 2026-10-26 04:30 PT — 01KwFxq1: Stripe card + bank (ACH) on the student pay page and professor dashboard (student $200 card / $181.45 bank; professor $5,150 card / $5,005 bank; prices carry Stripe's fee; partial payments grossed up), signed webhook /api/pay/stripe/webhook records payments (refund/dispute = void), PO + ACH/wire options for both. Inert until Pages secrets STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET are set. test_stripe.mjs.
 - 2026-10-26 04:20 PT — 01S7QxVq: v0.4.9. REQUIRE_GATE=1: the Sync tab gates every protected quiz by itself (from 1 h before start; no LOCKqz requests until 2 min before; 30 s rounds while nobody is locked in); /password gives no password for an ungated protected quiz until it ends (reason gate_off, agents explain) and emails the professor once an hour to open Sync. test_sync_gate S7.
 - 2026-10-25 23:59 PT — 01S7QxVq: v0.4.8. Trial testers (FEE_EXEMPT: Bristow x2, Huu) never pay + test-run welcome (dashboard, once; code email); public/lq.js = LOCK black/qz red everywhere + red lock loaders (ETA + fun fact) on dashboard, pay page, Sync panel; no uninstall option on the download page; privacy contact lockqz.app@gmail.com; owner's name removed from every page; gate never admits unpaid students.

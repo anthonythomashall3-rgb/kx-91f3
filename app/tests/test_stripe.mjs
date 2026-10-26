@@ -77,7 +77,7 @@ async function getc(env, path, { teacher=null, sync=null } = {}) {
 
 const SECRET = "test-pay-secret-0123456789", WH = "whsec_test_0123456789abcdef";
 const sqlite = makeDb(false);
-for (const m of ["migrate_017_sections.sql", "migrate_018_submissions.sql", "migrate_019_student_pay.sql", "migrate_022_renewals.sql"]) { try { sqlite.exec(readFileSync(join(CF, m), "utf8")); } catch (e) { if (!/duplicate column|already exists/.test(e.message)) throw e; } }
+for (const m of ["migrate_017_sections.sql", "migrate_018_submissions.sql", "migrate_019_student_pay.sql", "migrate_022_renewals.sql", "migrate_027_pay_slots.sql"]) { try { sqlite.exec(readFileSync(join(CF, m), "utf8")); } catch (e) { if (!/duplicate column|already exists/.test(e.message)) throw e; } }
 const base = { DB: d1real(sqlite), TEACHER_KEY: ADMIN, REQUIRE_SIGNED: "1", ZELLE_TO: "(858) 900-4347", INVOICE_EMAIL: "pay@usc.edu", STUDENT_FEE: "180", STUDENT_FEE_FROM: "2000-01-01", PAY_SECRET: SECRET,
   STUDENT_CARD_PRICE: "200", STUDENT_BANK_PRICE: "181.45", PROF_CARD_PRICE: "5150", PROF_BANK_PRICE: "5005" };
 const OFF = base, ON = { ...base, STRIPE_SECRET_KEY: "sk_test_x", STRIPE_WEBHOOK_SECRET: WH };
@@ -184,6 +184,26 @@ console.log("S10 pay page + dashboard show the options");
 const html = readFileSync(join(CF, "public", "pay.html"), "utf8"), dash = readFileSync(join(CF, "public", "dashboard.html"), "utf8");
 check("pay.html: card, bank account, ACH/wire, PO", /id="card"/.test(html) && /id="ach"/.test(html) && /ACH \/ wire/.test(html) && /Purchase order \(PO\)/.test(html) && /\/pay\/stripe"/.test(html));
 check("dashboard: card, bank, ACH/wire, PO", /stripePay\('card'/.test(dash) && /stripePay\('bank'/.test(dash) && /ACH \/ wire/.test(dash) && /Purchase order \(PO\)/.test(dash));
+
+console.log("S11 unique Zelle amount: no memo needed");
+const notify2 = payments => onRequest({ request: new Request(BASE + "/api/pay/notify", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Pay": SECRET }, body: JSON.stringify({ payments }) }), env: ON }).then(r => r.json());
+const z1 = (await call(ON, "/pay/start", { email: "dee@usc.edu" })).data, z2 = (await call(ON, "/pay/start", { email: "eve@usc.edu" })).data;
+check("each unpaid student gets a different $180.xx", z1.zelle_amount > 180 && z1.zelle_amount < 190 && z2.zelle_amount > 180 && z1.zelle_amount !== z2.zelle_amount && Math.round(z1.zelle_amount * 100) % 100 !== 0, `${z1.zelle_amount} ${z2.zelle_amount}`);
+check("same student, same amount on reload", (await call(ON, "/pay/start", { email: "dee@usc.edu" })).data.zelle_amount === z1.zelle_amount);
+let n = await notify2([{ txn: "zelle:nomemo1", amount: z2.zelle_amount, note: "for lockqz", via: "zelle", payer: "Eve" }]);
+check("Zelle with no memo, exact amount -> eve paid", n.results?.[0]?.matched === "student" && n.results[0].email === "eve@usc.edu" && n.results[0].paid === true, JSON.stringify(n));
+check("eve's amount freed after paying", !sqlite.prepare("SELECT 1 FROM pay_slots WHERE code=?").get(z2.code));
+check("dee still unpaid", !(await paidNow("dee@usc.edu")));
+n = await notify2([{ txn: "zelle:nomemo2", amount: 180, note: "", via: "zelle" }]);
+check("plain $180 with no memo is not guessed", n.results?.[0]?.matched === null, JSON.stringify(n));
+n = await notify2([{ txn: "zelle:nomemo3", amount: z1.zelle_amount, note: "", via: "zelle", needs_review: true, review_reason: "forwarded" }]);
+check("suspicious alert never amount-matched", n.results?.[0]?.review === true && !(await paidNow("dee@usc.edu")), JSON.stringify(n));
+n = await notify2([{ txn: "zelle:memo4", amount: z1.zelle_amount, note: z1.code, via: "zelle" }]);
+check("memo still works too", n.results?.[0]?.paid === true && n.results[0].email === "dee@usc.edu", JSON.stringify(n));
+check("paid student gets no Zelle amount", (await call(ON, "/pay/start", { email: "dee@usc.edu" })).data.zelle_amount === null);
+const ph = readFileSync(join(CF, "public", "pay.html"), "utf8"), lq = readFileSync(join(CF, "public", "lq.js"), "utf8");
+check("pay page shows the exact Zelle amount", /Zelle exactly/.test(ph) && /zelle_amount/.test(ph));
+check("no fun facts in loaders", !/Did you know|FACTS/.test(lq));
 
 console.log(`\nStripe: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
