@@ -277,7 +277,7 @@ function viewHome(){
     </div>
     ${exams ? `<button class="sw big" aria-pressed="${!allOff}" aria-label="LOCKqz on for all exams" onclick="setAll(${allOff})"><b>${allOff?"Off":"On"}</b><i></i></button>` : ""}
   </section>`;
-  if(pendingSync()) h += `<div class="note warn"><span>One more click: open Brightspace and press your <b>LOCKqz Sync</b> bookmark so Brightspace matches these settings.</span><button class="btn warn" onclick="nav('connect')">How</button></div>`;
+  if(pendingSync()) h += `<div class="note warn"><span>One more click: press your <b>LOCKqz Sync</b> bookmark in Brightspace (a Sync tab left open does it within the hour).</span><button class="btn warn" onclick="nav('connect')">How</button></div>`;
   inprog.forEach(({q,c}) => h += `<div class="note ok"><span style="display:flex;align-items:center;gap:10px"><span class="pulse"></span><b>${esc(q.name)}</b> is in progress · ${esc(cname(c))}</span><a class="btn ok" href="#live/${esc(c.ou)}-${esc(q.qi)}">Watch live</a></div>`);
   h += `<section aria-label="Your classes" style="display:flex;flex-direction:column;gap:16px"><h2 class="eyebrow">Your classes</h2>`;
   BS.courses.forEach((c,i) => {
@@ -386,11 +386,12 @@ function viewConnect(first){
   return `${first?"":BACK('', 'Home')}
   <section class="card" style="display:flex;flex-direction:column;gap:18px">
     <div><h1 style="margin:0;font-size:24px;font-weight:700;letter-spacing:-.015em">${first?"One step, once.":"Brightspace connection"}</h1>
-    <p class="sub">LOCKqz reads your classes, rosters and exams from Brightspace and protects every exam. It needs your Brightspace login once per semester to do that.</p></div>
+    <p class="sub">LOCKqz reads your classes, rosters and exams from Brightspace and protects every exam.</p></div>
     <ol class="steps">
       <li>Drag this button to your bookmarks bar: &nbsp;<a class="bmk" href="${esc(bmk)}" onclick="alert('Drag this button to your bookmarks bar, then click it while you are in Brightspace.');return false">${SHIELD('#fff',18)} LOCKqz Sync</a></li>
-      <li>Open <a href="https://brightspace.usc.edu" target="_blank" rel="noopener">brightspace.usc.edu</a> and click the bookmark. Keep that tab open during exams.</li>
+      <li>Open <a href="https://brightspace.usc.edu" target="_blank" rel="noopener">brightspace.usc.edu</a> and click the bookmark. Leave that tab open: it re-syncs by itself every 15 minutes (new quizzes, added students). Keep it open during exams.</li>
       <li>Come back here. Your classes are filled in and every exam is on.</li>
+      <li>New quiz later? Click the bookmark again. If a student opens a quiz LOCKqz hasn't seen, LOCKqz emails you.</li>
     </ol>
     ${BS.courses.length ? `<p class="muted">Last synced ${ago(BS.courses.map(c=>c.synced_at).sort().pop())}. ${pendingSync()?"Some changes you made here are waiting for the next click.":"Everything is up to date."}</p>` : ""}
   </section>

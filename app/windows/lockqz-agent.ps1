@@ -133,13 +133,20 @@ function Move-ToQuiz($edit, [string]$url) {
 function Get-BrowserWindows {
   # -> objects { Title, Url (active tab), Tabs (all tab titles) } for every browser window.
   $out = @(); $names = @{}
+  # The address bar: Chromium's is the window's first Edit; Firefox's is the ComboBox "urlbar-input" (no
+  # Edit comes before it), so one tree walk finds either.
+  if (-not $script:AddressBar) {
+    $script:AddressBar = New-Object System.Windows.Automation.OrCondition(
+      (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Edit)),
+      (New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, "urlbar-input")))
+  }
   $wins = $Root.FindAll($TS::Children, [System.Windows.Automation.Condition]::TrueCondition)
   foreach ($w in $wins) {
     if ($BrowserClasses -notcontains $w.Current.ClassName) { continue }
     $wpid = $w.Current.ProcessId
     if (-not $names.ContainsKey($wpid)) { $names[$wpid] = [string](Get-Process -Id $wpid -ErrorAction SilentlyContinue).ProcessName }
     $url = ""
-    $edit = $w.FindFirst($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Edit)))
+    $edit = $w.FindFirst($TS::Descendants, $script:AddressBar)
     if ($edit) { $vp = $null; if ($edit.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { $url = $vp.Current.Value } }
     # A quiz opened from Brightspace Content/Lessons runs in a frame, so its submission never shows in
     # the address bar: move it to its own page (same quiz, same attempt), then every quiz page shows.

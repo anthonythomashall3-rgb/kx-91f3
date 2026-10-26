@@ -229,6 +229,14 @@ async function sendCode(env, to, code) {
   return smtpSend(open, { user: env.MAIL_USER, pass: String(env.MAIL_APP_PASSWORD).replace(/\s+/g, ""), to, subject, text });
 }
 
+async function sendMail(env, to, subject, text) {
+  if (typeof env.MAIL_SINK === "function") return env.MAIL_SINK({ to, subject, text });   // tests
+  const open = typeof env.MAIL_OPEN === "function" ? env.MAIL_OPEN
+    : async () => (await import("cloudflare:sockets")).connect({ hostname: env.MAIL_HOST || "smtp.gmail.com", port: Number(env.MAIL_PORT || 465) },
+                                { secureTransport: "on", allowHalfOpen: false });
+  return smtpSend(open, { user: env.MAIL_USER, pass: String(env.MAIL_APP_PASSWORD).replace(/\s+/g, ""), to, subject, text });
+}
+
 export async function onRequest(context) {
   const { request, env } = context;
   const url = new URL(request.url);
@@ -340,6 +348,25 @@ export async function onRequest(context) {
       db.prepare("DELETE FROM email_codes WHERE expires<?").bind(Date.now() - 86400000)];
   };
   const purgeDue = () => Math.random() * Math.max(1, Number(env.PURGE_EVERY || 200)) < 1;
+  // A student opened a quiz LOCKqz has never seen (made after the professor's last Sync, so it carries no
+  // LOCKqz password): email that course's professor once per quiz, at most once per 6 h per course.
+  // Costs one read, and one row written only when an email goes out.
+  const nudgeUnsynced = async (ou, qi) => {
+    try {
+      if (!codesOn) return false;
+      const since = new Date(Date.now() - 6 * 3600000).toISOString();
+      const t = await db.prepare("SELECT t.email AS email, tc.name AS course FROM teacher_courses tc JOIN teachers t ON t.id=tc.teacher_id WHERE tc.ou=? AND (t.verified=1 OR t.role='admin') AND NOT EXISTS (SELECT 1 FROM sync_nudges n WHERE n.ou=? AND (n.qi=? OR n.at>?)) ORDER BY t.role='admin' LIMIT 1")
+        .bind(ou, ou, qi, since).first();
+      if (!t || !t.email) return false;
+      const ins = await db.prepare("INSERT OR IGNORE INTO sync_nudges (ou,qi,at) VALUES (?,?,?)").bind(ou, qi, now()).run();
+      if (!ins.meta.changes) return false;
+      const course = String(t.course || "your class").replace(/^\d+_\d+\s*/, "").slice(0, 120);
+      const text = `A student just opened a quiz in ${course} that LOCKqz has not seen yet, so it has no LOCKqz password.\n\nOpen Brightspace and click your LOCKqz Sync bookmark. (A Sync tab left open re-syncs by itself every 15 minutes.)\n\nLOCKqz`;
+      const go = sendMail(env, t.email, "LOCKqz: click Sync for your new quiz", text).catch(() => {});
+      if (typeof context.waitUntil === "function") context.waitUntil(go); else await go;
+      return true;
+    } catch { return false; }
+  };
   // ---- per-section billing ($1,000 per section per semester) ----
   // A Brightspace course (ou) is paid when the professor paid for the USC section(s) it holds.
   // Admin and an account-wide activation (active_until) count as paid for everything.
@@ -911,7 +938,7 @@ export async function onRequest(context) {
       }
       // Everything about this quiz in ONE read: LOCKqz password + gate state, Brightspace dates, a
       // password still waiting to be removed from Brightspace (I-M9), and the course-wide password.
-      const q = await db.prepare("SELECT q.password AS password, q.gated AS gated, q.bs_code AS bs_code, q.sa_keep AS sa_keep, b.start_date AS start_date, b.end_date AS end_date, (SELECT password FROM pending_clear WHERE ou=? AND qi=?) AS pc, (SELECT password FROM courses WHERE ou=?) AS cpw FROM (SELECT 1) one LEFT JOIN quizzes q ON q.ou=? AND q.qi=? LEFT JOIN bs_quizzes b ON b.ou=? AND b.qi=?")
+      const q = await db.prepare("SELECT q.password AS password, q.gated AS gated, q.bs_code AS bs_code, q.sa_keep AS sa_keep, b.start_date AS start_date, b.end_date AS end_date, (SELECT password FROM pending_clear WHERE ou=? AND qi=?) AS pc, (SELECT password FROM courses WHERE ou=?) AS cpw, b.qi AS bq FROM (SELECT 1) one LEFT JOIN quizzes q ON q.ou=? AND q.qi=? LEFT JOIN bs_quizzes b ON b.ou=? AND b.qi=?")
         .bind(ou, qi, ou, ou, qi, ou, qi).first();
       const gated = Number(q?.gated) === 1;
       // C2: the start check applies only while the quiz is GATED (the gate hides the quiz, so LOCKqz
@@ -936,6 +963,7 @@ export async function onRequest(context) {
       // password keeps being released until then (pending_clear).
       const rot = gated && q.bs_code ? q.bs_code : null;
       const given = rot || q?.password || q?.pc || q?.cpw || null;
+      if (!given && !q?.bq) await nudgeUnsynced(ou, qi);   // a quiz newer than the professor's last Sync
       // Logged once per device + quiz + released code (+ IP): agents re-ask often, and every repeat
       // would be a row written (D1 Free: 100k/day). A new code or a new IP is logged again.
       if (given) {

@@ -358,6 +358,25 @@ def set_tab_url(app, wi, ti, url):
     try: osa('Application(%s).windows()[%d].tabs()[%d].url = %s' % (json.dumps(app), wi, ti, json.dumps(url)))
     except Exception: pass
 
+_moved = {}
+def move_content_quizzes(tabs, now=None, setter=None):
+    """A quiz opened from Brightspace Content/Lessons runs in a frame, so its submission never shows in the
+    address bar: move that tab to the quiz's own page (same quiz, same attempt). At most once every 10 s
+    per quiz URL, so a page still loading is never sent there again (no reload loop). -> URLs moved."""
+    now = time.time() if now is None else now
+    setter = setter or set_tab_url
+    done = []
+    for k in [k for k, v in _moved.items() if now - v > 600]: del _moved[k]
+    for (a, w, t, u) in tabs:
+        inner = inner_url(u)
+        if w < 0 or inner == u or not is_quiz(inner): continue
+        if now - _moved.get(inner, 0) < 10: continue
+        _moved[inner] = now
+        log("quiz opened from Content: moved to its own page (%s)" % lock_id(inner))
+        setter(a, w, t, inner)
+        done.append(inner)
+    return done
+
 # ---------- browsers that cannot switch their AI off mid-session (G3/G4) ----------
 OPERA_APPS = ("Opera", "Opera GX", "Opera Air", "Opera Neon")   # no policy layer (Aria AI, built-in VPN)
 GECKO_BINS = tuple(GECKO_DIRS)                                   # read policies only when they start
@@ -861,11 +880,7 @@ class Agent:
         # A quiz opened from Brightspace Content/Lessons runs in a frame, so its submission never shows
         # in the address bar. Move it to its own page (same quiz, same attempt): from then on the address
         # bar shows every quiz page, including "submitted", and AI comes back the moment it is turned in.
-        for (a, w, t, u) in tabs:
-            inner = inner_url(u)
-            if w >= 0 and inner != u and is_quiz(inner):
-                log("quiz opened from Content: moved to its own page (%s)" % lock_id(inner))
-                set_tab_url(a, w, t, inner)
+        move_content_quizzes(tabs)
         tabs = [(a, w, t, inner_url(u)) for (a, w, t, u) in tabs]   # quizzes opened from Content/Lessons
         now = time.time()
         urls = [u for (_, _, _, u) in tabs]

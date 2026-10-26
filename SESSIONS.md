@@ -7,9 +7,10 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-10-25 17:55 PT — 01CsgBZK: real tests of the Content-quiz move (Windows CI + Safari on Mac); automatic Brightspace resync for professors. Files: windows/lockqz-agent.ps1, mac/lockqz-agent.py, tests/, .github/workflows/, cloudflare/public/sync.js, dashboard.html, functions/api/[[route]].js, VERSION.
+- (none)
 
 ## Recently finished
+- 2026-10-25 18:45 PT — 01CsgBZK: v0.4.6. Content-quiz move tested in REAL browsers (Windows CI: Chrome, Edge, Firefox via test_windows_content_move.ps1 in release.yml; Mac: Safari + Chrome via test_safari_content_move.py, real Mac only). Fixed: Windows agent never read Firefox's address bar (ComboBox urlbar-input); Mac move throttled 10 s. Sync panel auto re-syncs every 15 min while open (0 LOCKqz requests when Brightspace is unchanged; forced hourly); professor emailed once when a student opens a quiz newer than the last Sync (migrate_026 sync_nudges).
 - 2026-10-25 17:15 PT — 01DfSvcn: D1 reset done: typed-email devices verified (Anthony's 2 Macs), full Release 40247705357 green, v0.4.5 live; Anthony's agent back on, verified, no dialog.
 - 2026-10-25 16:45 PT — 01CsgBZK: quizzes opened from Content/Lessons are moved out of the frame to their own page (Mac AppleScript / Windows address bar), so submission shows and AI returns at once; Firefox reads the frame's URL from the session store; v0.4.5.
 - 2026-10-25 15:45 PT — 01CsgBZK: quizzes opened from Content/Lessons now lock (fullscreen ViewLocation ?location= decoded by Mac/Windows agents + server ids()); Brightspace's own AI chat widget chat.learnwise.ai blocked; v0.4.4. ONE deploy at 5 pm: 01CsgBZK has scheduled sessions at 17:10/17:12 PT that run release-local.sh + deploy.sh and SKIP if /api/version already shows HEAD's version (e.g. a Release workflow_dispatch ran first).

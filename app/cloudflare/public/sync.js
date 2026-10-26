@@ -10,9 +10,15 @@
    SubmissionTimeLimit, AttemptsAllowed} (res/quiz.html). XSRF: D2L's own frau-xsrf-token reads
    localStorage "XSRF.Token", else GET /d2l/lp/auth/xsrf-tokens -> {referrerToken}. */
 (async function () {
-  var open = document.getElementById("lqz-sync");
-  if (open) { open.style.display = ""; return; }      // already running here: show it again (never a 2nd copy)
   var SRC = (document.currentScript && document.currentScript.src) || "";
+  // auto=1: the open Sync panel re-checks Brightspace by itself (every AUTO_MS). It talks to LOCKqz only
+  // when something in Brightspace changed, or once FORCE_MS has passed (so changes made on the dashboard
+  // reach Brightspace within the hour); otherwise it costs LOCKqz nothing.
+  var AUTO = SRC ? new URL(SRC).searchParams.get("auto") === "1" : false;
+  var AUTO_MS = 15 * 60000, FORCE_MS = 60 * 60000;
+  var open = document.getElementById("lqz-sync");
+  if (open && !AUTO) { open.style.display = ""; return; }      // already running here: show it again (never a 2nd copy)
+  if (AUTO && (!open || (open.dataset && open.dataset.gates === "1"))) return;   // panel closed, or a gate owns this tab
   var KEY = SRC ? new URL(SRC).searchParams.get("k") : "";
   var API = SRC ? (/\.pages\.dev$/.test(new URL(SRC).hostname) ? "https://lockqz.pages.dev/api" : new URL(SRC).origin + "/api") : "";   // one API (main site secrets)
   var DASH = SRC ? new URL(SRC).origin + "/dashboard" : "";
@@ -23,9 +29,11 @@
     "border:2px solid #990000;border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,.3);font:14px -apple-system,Segoe UI,sans-serif;color:#111;text-align:left";
   box.innerHTML = '<div style="position:sticky;top:0;background:#990000;color:#fff;padding:10px 14px;font-weight:700;display:flex;justify-content:space-between">' +
     'LOCKqz Sync<span id="lqz-x" style="cursor:pointer;padding:0 4px">&#10005;</span></div><div id="lqz-b" style="padding:12px 14px">Starting...</div>';
-  document.body.appendChild(box);
+  if (!AUTO) document.body.appendChild(box);   // an auto re-check shows its panel only if something changed
   var B = box.querySelector("#lqz-b");
   var GATES = {};   // qi -> { ou, timer, tick, busy, keep:{uid:true}, qs:[every quiz-date version seen], endMs, note, written }
+  // box.dataset.gates = "1" while any gate runs: an automatic re-sync never replaces a panel that owns a gate.
+  var markGates = function () { if (box.dataset) box.dataset.gates = Object.keys(GATES).length ? "1" : ""; };
   var GPW = {};     // qi -> last gate code Brightspace holds AND LOCKqz confirmed
   var ORIG = {};    // qi -> {password, hidden}: the professor's own quiz settings before LOCKqz changed them
   // X: with a gate on, only hide (the gate must keep running; clicking the bookmark shows it again).
@@ -179,6 +187,22 @@
       });
     }
 
+    // Nothing changed in Brightspace since the last sync (and it was under an hour ago): an auto re-check
+    // stops here, without a single LOCKqz request. Only a fingerprint is kept (no class data, no key).
+    var hashStr = function (s) { var a = 0x811c9dc5, b = 0x1b873593; for (var i = 0; i < s.length; i++) { var c = s.charCodeAt(i); a = Math.imul(a ^ c, 16777619) >>> 0; b = Math.imul(b ^ c, 2246822519) >>> 0; } return a.toString(16) + "." + b.toString(16); };
+    // The fingerprint leaves out the password flags: LOCKqz itself sets them during the sync, and a
+    // password changed by hand in Brightspace is put right by the hourly sync.
+    var FPK = "lqz.sync." + hashStr(KEY), prev = null;
+    var FP = hashStr(JSON.stringify(courses, function (k, v) { return k === "has_password" || k === "lq_password" ? undefined : v; }));
+    try { prev = JSON.parse(localStorage.getItem(FPK) || "null"); } catch (e) { prev = null; }
+    var autoLine = function () { return "Re-syncs by itself every 15 min while this tab is open · checked " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); };
+    if (AUTO) {
+      if (prev && prev.fp === FP && Date.now() - Number(prev.at || 0) < FORCE_MS) { var al = open.querySelector("#lqz-auto"); if (al) al.textContent = autoLine(); return; }
+      if (!document.body.contains(open) || (open.dataset && open.dataset.gates === "1")) return;
+      if (open.style.display === "none") box.style.display = "none";
+      open.remove(); document.body.appendChild(box);   // the old panel's own re-check timer stops with it
+    }
+
     // ---- 2. save to LOCKqz ----
     say("Saving to LOCKqz...");
     var state = await lq("/sync", { host: location.host, whoami: { id: me.Identifier, name: ((me.FirstName || "") + " " + (me.LastName || "")).trim() }, courses: courses });
@@ -260,6 +284,7 @@
       catch (e) { if (e.expired) throw e; results.push({ ou: y.ou, qi: y.qi, status: "error", msg: e.message }); errors.push(y.qi + ": " + e.message); }
     }
     if (results.length) await lq("/sync-result", { results: results });
+    try { localStorage.setItem(FPK, JSON.stringify({ fp: FP, at: Date.now() })); } catch (e) {}
 
     // ---- 4. panel: choose protected quizzes ----
     var prot = {}; (state.protect || []).forEach(function (p) { prot[String(p.qi)] = true; });
@@ -287,7 +312,8 @@
       (unread ? '<div style="color:#990000;margin-top:8px">' + unread + " course" + (unread === 1 ? "" : "s") + " not read: LOCKqz kept the quizzes it had.</div>" : "") +
       (errors.length ? '<div style="color:#990000;margin-top:8px">Could not update: ' + esc(errors.join("; ")) + "</div>" : "") +
       '<div style="margin-top:10px;font-weight:700">Protect with LOCKqz (blocks AI during the quiz):</div>' + html +
-      '<div style="margin-top:12px"><a href="' + DASH + '" target="_blank" style="color:#990000;font-weight:700">Open LOCKqz dashboard</a></div>');
+      '<div style="margin-top:12px"><a href="' + DASH + '" target="_blank" style="color:#990000;font-weight:700">Open LOCKqz dashboard</a></div>' +
+      '<div id="lqz-auto" style="color:#888;font-size:12px;margin-top:6px">' + esc(autoLine()) + "</div>");
 
     // ---- live access gate: only students LOCKqz is actively locking can see the quiz ----
     // Professor clicks Start and leaves this tab open. Every 10s we read who is locked (device-signed,
@@ -416,13 +442,13 @@
         catch (e) { st.textContent = (e.expired ? e.message : "gate error: " + e.message.slice(0, 50)) + " (retrying)"; st.style.color = "#990000"; }
         G.busy = false;
       };
-      GATES[qi] = { ou: ou, busy: false, keep: keep, qs: [], endMs: null, tick: tick, timer: setInterval(tick, 10000) };
+      GATES[qi] = { ou: ou, busy: false, keep: keep, qs: [], endMs: null, tick: tick, timer: setInterval(tick, 10000) }; markGates();
       addDates(GATES[qi], cur);
       tick();
     }
     // Errors are thrown (not hidden). On failure the gate is put back on, so Brightspace and LOCKqz agree.
     async function stopGate(ou, qi, st, why) {
-      var g = GATES[qi]; if (g) { clearInterval(g.timer); delete GATES[qi]; }
+      var g = GATES[qi]; if (g) { clearInterval(g.timer); delete GATES[qi]; markGates(); }
       st.textContent = "stopping..."; st.style.color = "#666";
       var stuck = 0;
       try {
@@ -436,7 +462,7 @@
         await lq("/gate", { ou: ou, qi: qi, on: false });
       } catch (e) {
         delete GPW[qi];
-        if (g) { g.busy = false; g.nextRot = 0; g.written = null; g.note = "stop failed: " + e.message.slice(0, 60); g.timer = setInterval(g.tick, 10000); GATES[qi] = g; if (!why) g.tick(); }
+        if (g) { g.busy = false; g.nextRot = 0; g.written = null; g.note = "stop failed: " + e.message.slice(0, 60); g.timer = setInterval(g.tick, 10000); GATES[qi] = g; markGates(); if (!why) g.tick(); }
         throw e;
       }
       st.textContent = (why ? why + " · " : "") + (stuck ? "off · " + stuck + " LOCKqz access not removed (Brightspace error)" : "off");
@@ -497,6 +523,20 @@
       startGate(String(p.ou), String(p.qi), pw_of(p.qi), st, true).then(function () { showGateBtn(String(p.ou), String(p.qi)); })
         .catch(function (e) { st.textContent = "resume failed: " + e.message.slice(0, 60); st.style.color = "#990000"; });
     });
+
+    // ---- automatic re-sync while this panel stays open (hidden counts as open) ----
+    // Every 15 min: a fresh copy of this script re-reads Brightspace (new quizzes, added/dropped students,
+    // changed dates) and syncs only if something changed. Never while a gate runs, and never while the
+    // professor is using the panel (2 min after their last click or key).
+    var touched = Date.now();
+    if (box.addEventListener) ["pointerdown", "keydown"].forEach(function (ev) { box.addEventListener(ev, function () { touched = Date.now(); }, true); });
+    var again = setInterval(function () {
+      if (!(document.body.contains && document.body.contains(box))) { clearInterval(again); return; }
+      markGates();
+      if (box.dataset.gates || Date.now() - touched < 120000) return;
+      var u = new URL(SRC); u.searchParams.set("auto", "1"); u.searchParams.set("v", String(Date.now()));
+      var s = document.createElement("script"); s.src = u.href; document.body.appendChild(s);
+    }, AUTO_MS);
   } catch (e) {
     say('<b style="color:#990000">' + esc(e.message) + "</b>");
   }

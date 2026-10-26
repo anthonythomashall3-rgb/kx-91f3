@@ -90,6 +90,11 @@ jobs:
         run: |
           & .\app\tests\test_windows_email_setup.ps1
           if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Quiz opened from Brightspace Content - moved to its own page in real Chrome, Edge, Firefox (PowerShell 5.1)
+        shell: powershell
+        run: |
+          & .\app\tests\test_windows_content_move.ps1 -Out "$env:RUNNER_TEMP\lqz-move"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: Fresh local token for this build
         shell: pwsh
         run: |

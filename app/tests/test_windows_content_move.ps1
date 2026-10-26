@@ -29,9 +29,15 @@ $script:Moved = @{}
 $openssl = @("C:\Program Files\Git\usr\bin\openssl.exe", "C:\Program Files\Git\mingw64\bin\openssl.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $openssl) { throw "openssl not found" }
 $ErrorActionPreference = "Continue"   # openssl writes progress to stderr
-& $openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=127.0.0.1" -keyout "$Out\key.pem" -out "$Out\cert.pem" 2>&1 | Out-Null
+# A test CA (trusted by this machine, so Firefox - which has no ignore-certificate switch - opens the
+# page too) and a 127.0.0.1 certificate signed by it.
+Set-Content -Path "$Out\leaf.ext" -Encoding ASCII -Value "subjectAltName=IP:127.0.0.1`nbasicConstraints=CA:FALSE`nextendedKeyUsage=serverAuth"
+& $openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=LOCKqz Test CA" -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign" -keyout "$Out\ca.key" -out "$Out\ca.pem" 2>&1 | Out-Null
+& $openssl req -newkey rsa:2048 -nodes -subj "/CN=127.0.0.1" -keyout "$Out\key.pem" -out "$Out\leaf.csr" 2>&1 | Out-Null
+& $openssl x509 -req -in "$Out\leaf.csr" -CA "$Out\ca.pem" -CAkey "$Out\ca.key" -CAcreateserial -days 1 -extfile "$Out\leaf.ext" -out "$Out\cert.pem" 2>&1 | Out-Null
 $ErrorActionPreference = "Stop"
 if (-not (Test-Path "$Out\cert.pem")) { throw "could not make a test certificate" }
+Import-Certificate -FilePath "$Out\ca.pem" -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
 $port = 8443; $hits = "$Out\hits.log"; Set-Content -Path $hits -Value ""
 $py = (Get-Command python -ErrorAction Stop).Source
 $srv = Start-Process -FilePath $py -ArgumentList @("`"$PSScriptRoot\fake_content_server.py`"", $port, "`"$hits`"", "`"$Out\cert.pem`"", "`"$Out\key.pem`"") -PassThru -WindowStyle Hidden
@@ -56,27 +62,55 @@ function Bar-Values {
   $vals = @()
   foreach ($w in $Root.FindAll($TS::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
     if ($BrowserClasses -notcontains $w.Current.ClassName) { continue }
-    $e = $w.FindFirst($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Edit)))
+    $e = $w.FindFirst($TS::Descendants, $script:AddressBar)   # set by the agent's Get-BrowserWindows
     $vp = $null; if ($e -and $e.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { $vals += [string]$vp.Current.Value }
   }
   $vals
 }
 
+function Dump-Tree($proc) {
+  # Diagnostics when a check fails: what UI Automation shows for that browser's windows.
+  foreach ($w in $Root.FindAll($TS::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+    $pn = [string](Get-Process -Id $w.Current.ProcessId -ErrorAction SilentlyContinue).ProcessName
+    if ($pn -ne $proc) { continue }
+    Write-Host ("  [window] class={0} name={1}" -f $w.Current.ClassName, $w.Current.Name)
+    $n = 0
+    foreach ($e in $w.FindAll($TS::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
+      $ct = $e.Current.ControlType.ProgrammaticName
+      if ($ct -notmatch 'Edit|ComboBox|Document|ToolBar|Pane|Group') { continue }
+      $vp = $null; $val = ""
+      if ($e.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { $val = "value=" + [string]$vp.Current.Value }
+      Write-Host ("    {0} name='{1}' id='{2}' class='{3}' {4}" -f $ct, $e.Current.Name, $e.Current.AutomationId, $e.Current.ClassName, $val)
+      if (++$n -ge 40) { break }
+    }
+  }
+}
+
 $browsers = @(
   @{ Name = "Chrome"; Exe = "C:\Program Files\Google\Chrome\Application\chrome.exe"; Proc = "chrome" },
-  @{ Name = "Edge";   Exe = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"; Proc = "msedge" }
+  @{ Name = "Edge";   Exe = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"; Proc = "msedge" },
+  @{ Name = "Firefox"; Exe = "C:\Program Files\Mozilla Firefox\firefox.exe"; Proc = "firefox"; Gecko = $true }
 )
 foreach ($b in $browsers) {
   if (-not (Test-Path $b.Exe)) { Write-Host "  FAIL $($b.Name) not installed"; $fail++; continue }
   Write-Host "== $($b.Name)"
   Get-Process $b.Proc -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Seconds 1
   $prof = "$Out\profile-$($b.Name)"; Remove-Item -Recurse -Force $prof -ErrorAction SilentlyContinue
-  $common = @("--user-data-dir=`"$prof`"", "--no-first-run", "--no-default-browser-check", "--ignore-certificate-errors",
-              "--disable-features=msEdgeFRE,msImplicitSignin,msEdgeSidebarV2", "--hide-crash-restore-bubble", "--start-maximized")
+  if ($b.Gecko) {
+    New-Item -ItemType Directory -Force -Path $prof | Out-Null
+    Set-Content -Path "$prof\user.js" -Encoding ASCII -Value @(
+      'user_pref("security.enterprise_roots.enabled", true);', 'user_pref("browser.aboutwelcome.enabled", false);',
+      'user_pref("datareporting.policy.firstRunURL", "");', 'user_pref("browser.startup.homepage_override.mstone", "ignore");',
+      'user_pref("trailhead.firstrun.didSeeAboutWelcome", true);', 'user_pref("browser.shell.checkDefaultBrowser", false);',
+      'user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);', 'user_pref("browser.tabs.warnOnClose", false);', 'user_pref("browser.sessionstore.resume_from_crash", false);')
+  }
+  $common = if ($b.Gecko) { @("-profile", "`"$prof`"", "-no-remote") } else { @("--user-data-dir=`"$prof`"", "--no-first-run", "--no-default-browser-check", "--ignore-certificate-errors",
+              "--disable-features=msEdgeFRE,msImplicitSignin,msEdgeSidebarV2", "--hide-crash-restore-bubble", "--start-maximized") }
+  $nw = if ($b.Gecko) { "-new-window" } else { "--new-window" }
 
   # 1) A Content page that is NOT a quiz: never moved.
   Set-Content -Path $hits -Value ""; Remove-Item "$Out\agent.log" -ErrorAction SilentlyContinue; $script:Moved = @{}
-  Start-Process -FilePath $b.Exe -ArgumentList ($common + @("--new-window", "`"$contentFile`""))
+  Start-Process -FilePath $b.Exe -ArgumentList ($common + @($nw, "`"$contentFile`""))
   for ($i = 0; $i -lt 12; $i++) { Start-Sleep -Seconds 1; [void](Get-BrowserWindows) }
   $h = Get-Content $hits -Raw
   Check ($h -match 'document /d2l/le/content/123/fullscreen/457/') "$($b.Name): the Content page loaded"
@@ -86,19 +120,19 @@ foreach ($b in $browsers) {
 
   # 2) A quiz opened from Content: moved to its own page, once.
   Set-Content -Path $hits -Value ""; Remove-Item "$Out\agent.log" -ErrorAction SilentlyContinue; $script:Moved = @{}
-  Start-Process -FilePath $b.Exe -ArgumentList ($common + @("--new-window", "`"$contentQuiz`""))
-  $moved = $false; $seen = @()
-  for ($i = 0; $i -lt 40 -and -not $moved; $i++) {
+  Start-Process -FilePath $b.Exe -ArgumentList ($common + @($nw, "`"$contentQuiz`""))
+  $wasMoved = $false; $seen = @()
+  for ($i = 0; $i -lt 40 -and -not $wasMoved; $i++) {
     Start-Sleep -Seconds 1
     $wins = @(Get-BrowserWindows)
     $seen = @($wins | ForEach-Object { $_.Url })
-    if ((Get-Content $hits -Raw) -match ('document ' + [regex]::Escape($quizPath))) { $moved = $true }
+    if ((Get-Content $hits -Raw) -match ('document ' + [regex]::Escape($quizPath))) { $wasMoved = $true }
   }
   for ($i = 0; $i -lt 12; $i++) { Start-Sleep -Seconds 1; [void](Get-BrowserWindows) }   # keep watching: no second move
   Shot "$($b.Name)-after"
   $h = Get-Content $hits -Raw
   Check ($h -match 'iframe /d2l/lms/quizzing/user/quiz_summary') "$($b.Name): the quiz first ran inside the Content frame"
-  Check $moved "$($b.Name): the tab now shows the quiz as its own page"
+  Check $wasMoved "$($b.Name): the tab now shows the quiz as its own page"
   $bars = @(Bar-Values)
   Check (@($bars | Where-Object { $_ -match 'quizzing/user/quiz_summary\.d2l\?qi=77' }).Count -ge 1) "$($b.Name): the address bar shows the quiz URL ($($bars -join ' | '))"
   $log = if (Test-Path "$Out\agent.log") { Get-Content "$Out\agent.log" -Raw } else { "" }
@@ -106,6 +140,7 @@ foreach ($b in $browsers) {
   Check (([regex]::Matches($h, 'document /d2l/lms/quizzing/user/quiz_summary')).Count -eq 1) "$($b.Name): the quiz page loaded once (no reload loop)"
   $wins = @(Get-BrowserWindows)
   Check (@($wins | Where-Object { Is-Quiz $_.Url }).Count -ge 1) "$($b.Name): the agent still sees the quiz (lock stays on)"
+  if ($fail) { Dump-Tree $b.Proc }
   Get-Process $b.Proc -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Seconds 2
 }
 Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue

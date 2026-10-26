@@ -528,6 +528,15 @@ try: g, h = agent(); T(g, [tab(B + "/d2l/le/content/123/fullscreen/77/ViewLocati
 finally: A.set_tab_url = _st
 ok("a Content view of a file is left alone") if not moved and not g.locked else bad("moved/locked a file view: %r" % moved)
 fx = {"windows": [{"tabs": [{"index": 1, "entries": [{"url": CV, "children": [{"url": SUBM}]}]}]}]}
+A._moved.clear(); got = []; tb = [("Safari", 0, 0, CV)]
+A.move_content_quizzes(tb, now=1000.0, setter=lambda a, w, t, u: got.append(u))
+A.move_content_quizzes(tb, now=1005.0, setter=lambda a, w, t, u: got.append(u))
+ok("a page still loading is not sent there again within 10 s (no reload loop)") if got == [SUMM] else bad("moves: %r" % got)
+A.move_content_quizzes(tb, now=1011.0, setter=lambda a, w, t, u: got.append(u))
+ok("... but is retried after 10 s if the move did not take") if got == [SUMM, SUMM] else bad("moves: %r" % got)
+A.move_content_quizzes([("Firefox", -1, -1, CV)], now=2000.0, setter=lambda a, w, t, u: got.append(u))
+ok("a tab read from Firefox's session file is never moved (no address to set)") if len(got) == 2 else bad("moves: %r" % got)
+A._moved.clear()
 ok("Firefox: the frame's current page (submitted) is read from the session store") if A.firefox_urls(fx) == [SUBM] else bad("firefox: %r" % A.firefox_urls(fx))
 """)
 
