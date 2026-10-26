@@ -112,7 +112,7 @@ const money = n => "$" + Number(n).toLocaleString("en-US");
 const money2 = n => "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: Number(n) % 1 ? 2 : 0, maximumFractionDigits: 2 });
 let WAYS = null, TAX = null, PICKED = null, VENMO = null, PO = null;
 const PANEL = { zelle: "zsteps", bank: "bpanel", venmo: "vpanel", card: "cpanel", po: "ppanel" }, TAXBOX = { zelle: "ztax", bank: "btax", venmo: "vtax", card: "ctax", po: "ptax" };
-// "LOCKqz $180 / Income tax (25%) $60 / Total $240" for one way.
+// "LOCKqz $180 / Tax & fees (23%) $53.77 / Total $233.77" for one way.
 function taxLine(w){ if (!w) return "";
   if (!TAX || !(w.tax > 0)) return `<div class="taxline"><div class="tot"><span>Total</span><span>${money2(w.total)}</span></div></div>`;
   return `<div class="taxline"><div><span>LOCKqz</span><span>${money2(w.base)}</span></div><div class="tx"><span>${TAX.label} (${Math.round(TAX.rate * 100)}%)</span><span>+ ${money2(w.tax)}</span></div><div class="tot"><span>Total</span><span>${money2(w.total)}</span></div></div>`; }

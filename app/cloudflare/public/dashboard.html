@@ -551,7 +551,7 @@ function renderPay(){ const d=PAY, el=$("pay"); if(!el||!d) return;
     ${d.sections.length && usc ? `<details><summary class="muted">Not your sections?</summary>${nameBox}</details>` : ""}
   </section>`; }
 let PW=null, PT=null;
-// "LOCKqz $5,000 / Income tax (25%) + $1,666.67 / Total $6,666.67"
+// "LOCKqz $5,000 / Tax & fees (23%) + $1,493.51 / Total $6,493.51"
 function payTax(w){ return !PT || !(w.tax>0) ? `<div class="hrow" style="font-weight:700"><span>Total</span><span>${money(w.total)}</span></div>`
   : `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #eee"><div class="hrow"><span>LOCKqz</span><span>${money(w.base)}</span></div><div class="hrow" style="color:var(--usc);font-weight:700"><span>${esc(PT.label)} (${Math.round(PT.rate*100)}%)</span><span>+ ${money(w.tax)}</span></div><div class="hrow" style="font-weight:800;font-size:17px;border-top:1px solid #eee;padding-top:4px"><span>Total</span><span>${money(w.total)}</span></div></div>`; }
 // Picking a way opens its steps; the price up top jumps to that way's total, the tax shown as its own line.
@@ -566,7 +566,7 @@ function payPick(k){ const d=PAY, w=PW[k], box=$("pp_"+k), open=box.classList.co
     bank: `<button class="btn prime" style="width:100%" onclick="profBank(this)">Email me the bank details</button><p class="muted" id="pbmsg" style="margin:8px 0 0">Account, amount and memo, sent to ${esc(ME.email)} right away. LOCKqz turns on by itself when the money arrives.</p>`,
     venmo: `<a class="btn prime" style="width:100%" href="https://venmo.com/?txn=pay&recipients=${encodeURIComponent(d.venmo||"")}&amount=${amt}&note=${encodeURIComponent(d.memo)}" target="_blank" rel="noopener">Open Venmo · ${money(w.total)}</a>`,
     card: `<button class="btn prime" style="width:100%" onclick="stripePay('card',this)">Pay ${money(w.total)} by card</button>${d.stripe&&d.stripe.bank ? `<button class="btn" style="width:100%;margin-top:8px" onclick="stripePay('bank',this)">Bank account ${money(d.stripe.bank)}</button>` : ""}`,
-    po: `<a class="btn prime" style="width:100%" href="mailto:${esc(d.po)}?subject=${encodeURIComponent("LOCKqz purchase order "+d.memo)}&body=${encodeURIComponent("PO number:\nBilling contact:\nAmount: "+money(w.total)+(PT&&w.tax>0?" (LOCKqz "+money(w.base)+" + income tax "+money(w.tax)+")":"")+"\nTerm: "+termName(d.term)+"\nMemo: "+d.memo)}">Email the PO to ${esc(d.po)}</a>`
+    po: `<a class="btn prime" style="width:100%" href="mailto:${esc(d.po)}?subject=${encodeURIComponent("LOCKqz purchase order "+d.memo)}&body=${encodeURIComponent("PO number:\nBilling contact:\nAmount: "+money(w.total)+(PT&&w.tax>0?" (LOCKqz "+money(w.base)+" + "+(PT?PT.label.toLowerCase():"tax")+" "+money(w.tax)+")":"")+"\nTerm: "+termName(d.term)+"\nMemo: "+d.memo)}">Email the PO to ${esc(d.po)}</a>`
   })[k]; }
 async function profBank(b){ b.disabled=true; b.textContent="Sending…"; const r = await post("/pay/bank",{email:ME.email}); b.disabled=false;
   b.textContent = r.sent ? "Sent ✓" : "Email me the bank details"; $("pbmsg").textContent = r.error || (r.paid ? "Already paid." : "Sent to "+ME.email+". Send the amount with memo "+PAY.memo+"."); }

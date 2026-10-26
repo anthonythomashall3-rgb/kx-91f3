@@ -6,16 +6,16 @@ commit as `Claude <noreply@anthropic.com>`). The claude.ai Project "LOCKqz" has 
 (`claude/LOCKqz-HANDOFF.md`) plus topic docs (`claude/LOCKqz-payments.md` and others).
 
 ## 26 Oct 2026 06:30 PT — income tax on top, Venmo, bank auto-email, professor tour (session 01359vfr)
-- **Income tax 25% on top of every price** (Anthony's call; wording "Income tax (25%)", NOT "sales tax"):
-  price = base ÷ 0.75 so Anthony keeps the base after setting aside income tax. Vars: TAX_RATE="0.25",
+- **"Tax & fees" 23% on top of every price** (Anthony's call, 26 Oct 06:00; was "Income tax" 25%; TAX_LABEL):
+  price = base ÷ 0.77 so Anthony keeps the base after setting aside income tax. Vars: TAX_RATE="0.23",
   TAX_FROM="2026-10-26T13:00:00Z" (empty = off). Payments before TAX_FROM count 1:1.
   | Student | base | total |  | Professor | base | total |
   |---|---|---|---|---|---|---|
-  | Zelle / bank transfer | $180 | $240 | | Zelle / bank / Venmo / PO | $5,000 | $6,666.67 |
-  | Venmo / card / PO | $200 | $266.67 | | Card | $5,150 | $6,866.67 |
+  | Zelle / bank transfer | $180 | $233.77 | | Zelle / bank / Venmo / PO | $5,000 | $6,493.51 |
+  | Venmo / card / PO | $200 | $259.74 | | Card | $5,150 | $6,688.31 |
   A payment counts by how it came: credit = amount × fee ÷ that way's total (SQL `CREDIT()` in [[route]].js).
   Pay page + dashboard: Zelle first; each way shows its base; tapping one opens its steps, the big price jumps
-  to the total and a "LOCKqz $180 / Income tax (25%) + $60 / Total $240" box shows.
+  to the total and a "LOCKqz $180 / Tax & fees (23%) + $53.77 / Total $233.77" box shows.
 - **Venmo on for students** (STUDENT_VENMO="1"). Note: personal Venmo's terms forbid business use; a Venmo
   business profile is the safe version.
 - **Bank transfer is automatic now:** "Email me the bank details" (pay page + dashboard) → POST /api/pay/bank →

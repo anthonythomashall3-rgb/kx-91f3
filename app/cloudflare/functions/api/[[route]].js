@@ -512,7 +512,7 @@ export async function onRequest(context) {
   const stuVenmo = () => env.STUDENT_VENMO === "1" ? ((env.VENMO_HANDLE || "").replace(/^@/, "") || null) : null;
   const stuBank = () => String(env.INVOICE_EMAIL || env.ADMIN_EMAIL || "") || null;
   // ---- income tax on top (Anthony, 26 Oct 2026). From TAX_FROM on, every price = base / (1 - TAX_RATE), so
-  // LOCKqz keeps the base after setting aside income tax; the payer sees "Income tax (25%)" as its own line.
+  // LOCKqz keeps the base after setting aside income tax; the payer sees "Tax & fees (23%)" as its own line.
   // Bases: Zelle and bank transfer = the fee ($180 student, $5,000 professor); Venmo and PO =
   // STUDENT_OTHER_PRICE ($200) / PROF_OTHER_PRICE; card = STUDENT_CARD_PRICE / PROF_CARD_PRICE.
   // A payment counts by how it came: credit = amount x fee / that way's total (a $240 Zelle = $180 of a
@@ -542,7 +542,7 @@ export async function onRequest(context) {
   const waysFor = (kind, left) => Object.fromEntries(WAYS.map(w => {
     const total = Math.max(0, Math.ceil(Number(left) / factorOf(kind, w) * 100 - 1e-6) / 100), base = Math.round(total * (1 - TAX_RATE) * 100) / 100;
     return [w, { total, base, tax: Math.round((total - base) * 100) / 100 }]; }));
-  const taxInfo = () => taxOn() ? { rate: TAX_RATE, label: "Income tax" } : null;
+  const taxInfo = () => taxOn() ? { rate: TAX_RATE, label: String(env.TAX_LABEL || "Tax & fees").slice(0, 40) } : null;
   // ---- Stripe: card + US bank account (ACH). Off until STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET are set.
   // Prices carry Stripe's fee so LOCKqz nets at least the base price: card 2.9% + 30c (student $200
   // nets $193.90; professor $5,150 nets $5,000.05), bank 0.8% capped at $5 (student $181.45 nets $180;
@@ -792,7 +792,7 @@ export async function onRequest(context) {
     for (const r of due) {
       const email = String(r.email).toLowerCase(), amt = totalOf(r.kind === "student" ? "student" : "professor", "zelle");
       const link = r.kind === "student" ? `${PAY_URL}?email=${encodeURIComponent(email)}` : "https://prof.lockqz.pages.dev/";
-      const text = `LOCKqz renews for the new semester.\n\n${r.kind === "student" ? `Pay $${amt.toLocaleString("en-US")}${taxOn() ? " (includes income tax)" : ""} with memo ${r.code}:\n${link}\n\nZelle ${stuZelle()||""} (paste ${r.code} in the Zelle memo/note)${stripeOn() ? "  ·  Card" : ""}${stuVenmo() ? `  ·  Venmo @${stuVenmo()}` : ""}  ·  Bank transfer: email ${stuBank()||""}` : `Pay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nVenmo @${(env.VENMO_HANDLE||"").replace(/^@/,"")}  ·  Zelle ${env.ZELLE_TO||""}`}\n\nAccess turns on as soon as the payment arrives and lasts until ${termEndOf(cur)}.\n\nStop these emails: ${PAY_URL}?email=${encodeURIComponent(email)}&renew=off`;
+      const text = `LOCKqz renews for the new semester.\n\n${r.kind === "student" ? `Pay $${amt.toLocaleString("en-US")}${taxOn() ? ` (includes ${taxInfo().label.toLowerCase()})` : ""} with memo ${r.code}:\n${link}\n\nZelle ${stuZelle()||""} (paste ${r.code} in the Zelle memo/note)${stripeOn() ? "  ·  Card" : ""}${stuVenmo() ? `  ·  Venmo @${stuVenmo()}` : ""}  ·  Bank transfer: email ${stuBank()||""}` : `Pay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nVenmo @${(env.VENMO_HANDLE||"").replace(/^@/,"")}  ·  Zelle ${env.ZELLE_TO||""}`}\n\nAccess turns on as soon as the payment arrives and lasts until ${termEndOf(cur)}.\n\nStop these emails: ${PAY_URL}?email=${encodeURIComponent(email)}&renew=off`;
       try {
         if (typeof env.MAIL_SINK === "function") await env.MAIL_SINK({ to: email, subject: "Renew LOCKqz", text });
         else await smtpSend(async () => (await import("cloudflare:sockets")).connect({ hostname: env.MAIL_HOST || "smtp.gmail.com", port: Number(env.MAIL_PORT || 465) }, { secureTransport: "on", allowHalfOpen: false }),
@@ -1474,7 +1474,7 @@ export async function onRequest(context) {
       const m = n => "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       const details = String(env.BANK_DETAILS || "").trim();
       const text = `LOCKqz — bank transfer (ACH or wire)\n\n`
-        + `Amount: ${m(w.total)}` + (w.tax > 0 ? `  (LOCKqz ${m(w.base)} + income tax ${Math.round(TAX_RATE * 100)}% ${m(w.tax)})` : "") + `\n`
+        + `Amount: ${m(w.total)}` + (w.tax > 0 ? `  (LOCKqz ${m(w.base)} + ${taxInfo().label.toLowerCase()} ${Math.round(TAX_RATE * 100)}% ${m(w.tax)})` : "") + `\n`
         + `Memo / reference: ${code}\nPut ${code} in the memo, or LOCKqz can't tell the payment is yours.\n\n`
         + (details ? details + "\n\n" : "LOCKqz's bank account details follow in a separate email.\n\n")
         + `Access turns on by itself within a minute of the money arriving (ACH usually 1–3 business days, wire same day).\n`
