@@ -640,8 +640,9 @@ export async function onRequest(context) {
     for (const [c, e] of codes) if ((!inGap() && (sums[c + "|" + cur] || 0) >= STUDENT_FEE) || (early && (sums[c + "|" + nxt] || 0) >= STUDENT_FEE)) ok.add(e);
     return ok;
   }
-  // Unique Zelle amount: each unpaid student gets $fee + $0.01..$9.99 (never a whole dollar) for the term,
-  // so a Zelle sent with no memo still says who paid. Reserved while unpaid; freed once paid.
+  // Unique Zelle amount (OFF unless ZELLE_UNIQUE="1"; Anthony chose one price + memo): each unpaid student
+  // gets $fee + $0.01..$9.99 for the term, so a Zelle with no memo still says who paid. Freed once paid.
+  const zelleUnique = () => String(env.ZELLE_UNIQUE || "0") === "1";
   const slotAmt = c => Math.round(STUDENT_FEE * 100 + c) / 100;
   async function zelleAmount(code, term) {
     const has = await db.prepare("SELECT cents FROM pay_slots WHERE term=? AND code=?").bind(term, code).first();
@@ -660,7 +661,7 @@ export async function onRequest(context) {
     const code = await studentCode(email, limitIp);
     if (code && typeof code === "object") return code;   // { limited: true }
     let zelle_amount = null;
-    if (slot && feeOn() && stuZelle() && email) { const st = await studentStatus(email); if (!st.paid && !(st.received > 0)) zelle_amount = await zelleAmount(code, st.term); }
+    if (slot && zelleUnique() && feeOn() && stuZelle() && email) { const st = await studentStatus(email); if (!st.paid && !(st.received > 0)) zelle_amount = await zelleAmount(code, st.term); }
     const due = stripeOn() && email ? Math.round(STUDENT_FEE * 100) - Math.round((await studentStatus(email)).received * 100) : Math.round(STUDENT_FEE * 100);
     return { amount: STUDENT_FEE, code, venmo: stuVenmo(), zelle: stuZelle(), bank: stuBank(), po: stuBank(), zelle_amount, stripe: stripeInfo("student", due),
              url: PAY_URL + (email ? "?email=" + encodeURIComponent(String(email).toLowerCase()) : "") };
@@ -702,7 +703,7 @@ export async function onRequest(context) {
     const [cur0, nxt0] = curTerms();
     const slotC = x => { const c = Math.round(x.amount * 100) - Math.round(STUDENT_FEE * 100); return !x.code && !x.review && c > 0 && c < 1000 && c % 100 ? c : null; };
     const want = [...new Set(fresh.map(slotC).filter(Boolean))];
-    if (want.length) {
+    if (want.length && zelleUnique()) {
       const byC = new Map();
       for (const r of (await db.prepare(`SELECT cents, code FROM pay_slots WHERE term IN (?,?) AND cents IN (${placeholders(want.length)})`).bind(cur0, nxt0, ...want).all()).results)
         byC.set(Number(r.cents), byC.has(Number(r.cents)) && byC.get(Number(r.cents)) !== r.code ? null : r.code);   // same cents in both terms = ambiguous
@@ -756,7 +757,7 @@ export async function onRequest(context) {
     for (const r of due) {
       const email = String(r.email).toLowerCase(), amt = r.kind === "student" ? STUDENT_FEE : PRICE;
       const link = r.kind === "student" ? `${PAY_URL}?email=${encodeURIComponent(email)}` : "https://prof.lockqz.pages.dev/";
-      const text = `LOCKqz renews for the new semester.\n\n${r.kind === "student" ? `Pay $${amt.toLocaleString("en-US")} here:\n${link}\n\nZelle ${stuZelle()||""} (the exact amount on that page; no memo needed)${stripeOn() ? "  ·  Card" : ""}${stuVenmo() ? `  ·  Venmo @${stuVenmo()}` : ""}  ·  Bank transfer: email ${stuBank()||""}, memo ${r.code}` : `Pay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nVenmo @${(env.VENMO_HANDLE||"").replace(/^@/,"")}  ·  Zelle ${env.ZELLE_TO||""}`}\n\nAccess turns on as soon as the payment arrives and lasts until ${termEndOf(cur)}.\n\nStop these emails: ${PAY_URL}?email=${encodeURIComponent(email)}&renew=off`;
+      const text = `LOCKqz renews for the new semester.\n\n${r.kind === "student" ? `Pay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nZelle ${stuZelle()||""} (paste ${r.code} in the Zelle memo/note)${stripeOn() ? "  ·  Card" : ""}${stuVenmo() ? `  ·  Venmo @${stuVenmo()}` : ""}  ·  Bank transfer: email ${stuBank()||""}` : `Pay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nVenmo @${(env.VENMO_HANDLE||"").replace(/^@/,"")}  ·  Zelle ${env.ZELLE_TO||""}`}\n\nAccess turns on as soon as the payment arrives and lasts until ${termEndOf(cur)}.\n\nStop these emails: ${PAY_URL}?email=${encodeURIComponent(email)}&renew=off`;
       try {
         if (typeof env.MAIL_SINK === "function") await env.MAIL_SINK({ to: email, subject: "Renew LOCKqz", text });
         else await smtpSend(async () => (await import("cloudflare:sockets")).connect({ hostname: env.MAIL_HOST || "smtp.gmail.com", port: Number(env.MAIL_PORT || 465) }, { secureTransport: "on", allowHalfOpen: false }),

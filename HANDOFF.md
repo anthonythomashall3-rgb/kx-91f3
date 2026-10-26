@@ -27,20 +27,21 @@ Prices: students $180/semester, professors $5,000/semester.
 
 | Way | Student | Professor | Who it is matched to | Can the payer pull it back? |
 |---|---|---|---|---|
-| Zelle | exact amount shown, $180.01–$189.99 | $5,000 + memo | the unique amount (or memo) | No (Zelle is final) |
+| Zelle | $180 + memo (copy/paste steps) | $5,000 + memo | the memo | No (Zelle is final) |
 | Bank transfer (ACH/wire the payer sends) | $180 + memo (invoice by email) | $5,000 + memo | admin one-click Assign | No (pushed money is final) |
 | Purchase order (PO) | email link | email link | admin | — |
 | Card (Stripe) | $200 (nets $193.90) | $5,150 (nets $5,000.05) | automatic (code in Stripe metadata) | Only by a bank chargeback (law; cannot be blocked) |
 | Bank account (Stripe ACH) | OFF (`STRIPE_BANK="0"`) | OFF | automatic | Yes, up to 60 days, so it stays off |
 | Venmo | off for students (`STUDENT_VENMO`) | on | memo prefilled | — |
 
-- **No memos needed for students:** Zelle has no link that pre-fills a memo, so each unpaid student is
-  shown a unique exact amount ("Zelle exactly $180.37 · no memo needed"), reserved for the term
-  (table `pay_slots`, migrate_027). A Zelle alert with no memo matches by that amount. A plain $180 with
-  no memo is never guessed: it lands in Admin → Payments for one-click Assign (payer name shown).
+- **Zelle = $180 + memo (Anthony's choice, 26 Oct):** clicking Zelle on the pay page opens 6 steps:
+  Copy memo (one tap, copies the student's LQS code) → open bank app → Zelle → Send → To (with Copy) →
+  Amount $180 → paste the memo into the Memo/Note box → Send; warning "No memo = LOCKqz can't tell the
+  payment is yours." A Zelle with no memo lands in Admin → Payments for one-click Assign (payer name shown).
+  The unique-amount scheme ($180.01–$189.99, no memo) is built but OFF (`ZELLE_UNIQUE="1"` turns it on).
   Stripe card payments carry the code by themselves.
 - **Who paid / who didn't:** Admin → Payments lists every payment with the student/professor it went to
-  ("[amount match]" in the note for no-memo Zelles). Unpaid students get no quiz password; the app opens
+  (no-memo payments wait there for Assign). Unpaid students get no quiz password; the app opens
   the pay page.
 - **Stripe = automatic access:** card → webhook in seconds → access (the app re-checks every 15 s).
   Professors' accounts turn on by themselves at $5,000.
@@ -50,7 +51,6 @@ Prices: students $180/semester, professors $5,000/semester.
   payment: students lose access at once, a professor's payment-given activation is turned off.
   Same when the admin voids a Zelle/bank payment by hand.
 - Partial payments add up; Stripe charges only what is still owed (plus its fee).
-- Live test leftover: lockqz.test.zelle@usc.edu holds the $180.01 Zelle amount for Fall 2026 (harmless).
 
 ### Stripe — the one thing left to turn on (Anthony gives the key; Claude does the rest)
 Code is deployed and inert until the key exists. Anthony makes the Stripe account himself (identity, bank
@@ -77,11 +77,9 @@ access to Checkout Sessions, Webhook Endpoints, Payment Method Configurations) t
 ### Other payment to-dos (Anthony)
 1. Bank of America: Zelle "money received" email alert on, sent to anthonythomashall3@gmail.com (the
    Gmail script "LOCKqz payments" there runs every minute). No BofA alert has ever arrived yet.
-2. One test Zelle with NO memo at the exact amount the pay page shows → should show paid within a minute.
+2. One $180 test Zelle with the memo pasted in the note → should show paid within a minute.
 3. Business checking (free) with Zelle for business → set `ZELLE_BUSINESS_TO` in wrangler.toml.
-4. The Mac/Windows unpaid dialog still prints "Memo: LQS…" (harmless; memo still works). Change it in
-   `app/mac/lockqz-agent.py` (~line 687) and `app/windows/lockqz-agent.ps1` (~line 180) with the next
-   agent release (bump `app/VERSION`).
+4. The Mac/Windows unpaid dialog shows "Memo: LQS…" and opens the pay page (matches the memo flow).
 
 ## Brightspace Sync — state and answers
 - Brightspace has no LTI for LOCKqz yet, so the professor's own Brightspace tab does the syncing: the
@@ -112,4 +110,4 @@ access to Checkout Sessions, Webhook Endpoints, Payment Method Configurations) t
 ## Tests
 `bash app/tests/run_all.sh` (all green at 0b668ca). Payment suites: `test_pay.mjs`, `test_stripe.mjs`
 (card/ACH, webhook signature, refunds/disputes/failed = void, professors deactivated, unique Zelle
-amounts, final-sale text, ACH default off), `test_stripe_setup.sh`, `test_pay_script.mjs`.
+amounts behind ZELLE_UNIQUE, Zelle memo steps, ACH default off), `test_stripe_setup.sh`, `test_pay_script.mjs`.

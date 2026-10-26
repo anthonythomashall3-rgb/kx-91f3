@@ -80,7 +80,7 @@ const sqlite = makeDb(false);
 for (const m of ["migrate_017_sections.sql", "migrate_018_submissions.sql", "migrate_019_student_pay.sql", "migrate_022_renewals.sql", "migrate_027_pay_slots.sql"]) { try { sqlite.exec(readFileSync(join(CF, m), "utf8")); } catch (e) { if (!/duplicate column|already exists/.test(e.message)) throw e; } }
 const base = { DB: d1real(sqlite), TEACHER_KEY: ADMIN, REQUIRE_SIGNED: "1", ZELLE_TO: "(858) 900-4347", INVOICE_EMAIL: "pay@usc.edu", STUDENT_FEE: "180", STUDENT_FEE_FROM: "2000-01-01", PAY_SECRET: SECRET,
   STUDENT_CARD_PRICE: "200", STUDENT_BANK_PRICE: "181.45", PROF_CARD_PRICE: "5150", PROF_BANK_PRICE: "5005" };
-const OFF = base, ON = { ...base, STRIPE_SECRET_KEY: "sk_test_x", STRIPE_WEBHOOK_SECRET: WH, STRIPE_BANK: "1" };
+const OFF = base, ON = { ...base, STRIPE_SECRET_KEY: "sk_test_x", STRIPE_WEBHOOK_SECRET: WH, STRIPE_BANK: "1", ZELLE_UNIQUE: "1" };
 // Stripe API mock: records each Checkout Session request.
 const sessions = []; const realFetch = globalThis.fetch;
 globalThis.fetch = async (u, init) => {
@@ -185,7 +185,15 @@ const html = readFileSync(join(CF, "public", "pay.html"), "utf8"), dash = readFi
 check("pay.html: card, bank account, ACH/wire, PO", /id="card"/.test(html) && /id="ach"/.test(html) && /ACH \/ wire/.test(html) && /Purchase order \(PO\)/.test(html) && /\/pay\/stripe"/.test(html));
 check("dashboard: card, bank, ACH/wire, PO", /stripePay\('card'/.test(dash) && /stripePay\('bank'/.test(dash) && /ACH \/ wire/.test(dash) && /Purchase order \(PO\)/.test(dash));
 
-console.log("S11 unique Zelle amount: no memo needed");
+console.log("S11a default: one Zelle price ($180) + memo; no unique amounts, no amount guessing");
+{ const DEF = { ...ON }; delete DEF.ZELLE_UNIQUE;
+  const a = (await call(DEF, "/pay/start", { email: "ivy@usc.edu" })).data;
+  check("default: zelle_amount null (everyone pays $180)", a.zelle_amount === null && a.amount === 180, JSON.stringify(a));
+  const n0 = await onRequest({ request: new Request(BASE + "/api/pay/notify", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Pay": SECRET }, body: JSON.stringify({ payments: [{ txn: "zelle:ivy0", amount: 180.01, note: "", via: "zelle" }] }) }), env: DEF }).then(r => r.json());
+  check("default: no-memo Zelle is not amount-matched", n0.results?.[0]?.matched === null, JSON.stringify(n0)); }
+const pz = readFileSync(join(CF, "public", "pay.html"), "utf8");
+check("pay page: Zelle steps with Copy memo, paste-into-note step and warning", /id="zcopy"/.test(pz) && /Paste the memo<\/b> into the Memo \/ Note box/.test(pz) && /No memo = LOCKqz can't tell the payment is yours/.test(pz));
+console.log("S11 ZELLE_UNIQUE=1: unique Zelle amount, no memo needed");
 const notify2 = payments => onRequest({ request: new Request(BASE + "/api/pay/notify", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Pay": SECRET }, body: JSON.stringify({ payments }) }), env: ON }).then(r => r.json());
 const z1 = (await call(ON, "/pay/start", { email: "dee@usc.edu" })).data, z2 = (await call(ON, "/pay/start", { email: "eve@usc.edu" })).data;
 check("each unpaid student gets a different $180.xx", z1.zelle_amount > 180 && z1.zelle_amount < 190 && z2.zelle_amount > 180 && z1.zelle_amount !== z2.zelle_amount && Math.round(z1.zelle_amount * 100) % 100 !== 0, `${z1.zelle_amount} ${z2.zelle_amount}`);
@@ -202,7 +210,7 @@ n = await notify2([{ txn: "zelle:memo4", amount: z1.zelle_amount, note: z1.code,
 check("memo still works too", n.results?.[0]?.paid === true && n.results[0].email === "dee@usc.edu", JSON.stringify(n));
 check("paid student gets no Zelle amount", (await call(ON, "/pay/start", { email: "dee@usc.edu" })).data.zelle_amount === null);
 const ph = readFileSync(join(CF, "public", "pay.html"), "utf8"), lq = readFileSync(join(CF, "public", "lq.js"), "utf8");
-check("pay page shows the exact Zelle amount", /Zelle exactly/.test(ph) && /zelle_amount/.test(ph));
+check("pay page can show an exact Zelle amount", /zelle_amount/.test(ph));
 check("no fun facts in loaders", !/Did you know|FACTS/.test(lq));
 
 console.log("S12 cancelled payments = no access (professors too)");

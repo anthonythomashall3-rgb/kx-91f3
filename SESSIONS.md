@@ -7,9 +7,10 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-10-26 04:55 PT — 01KwFxq1: Zelle = $180 + memo (copy/paste steps), unique amounts off; files: public/pay.html, [[route]].js (payments), tests (test_stripe, test_frontend_fixes), HANDOFF.md
+- (none)
 
 ## Recently finished
+- 2026-10-26 05:15 PT — 01KwFxq1: Zelle back to one price ($180) + memo: tapping Zelle opens 6 steps (Copy memo button, bank app → Zelle → Send, To + Copy, amount, paste memo in Memo/Note, send) + warning; unique amounts OFF (ZELLE_UNIQUE=1 turns on). Note: test_dashboard_sync_now 'Brightspace opened in a new tab' failed once in run_all (timing), passes alone.
 - 2026-10-26 05:00 PT — 01KwFxq1: final-sale text removed from pay page, dashboard and Stripe checkout (Anthony's call).
 - 2026-10-26 04:50 PT — 01KwFxq1: payments final (no cancel path; Stripe ACH off by default, STRIPE_BANK=0; final-sale text on checkout/pay page/dashboard); refunds/disputes/failed payments void + turn professors off (admin void too); CI step app/payments/stripe-setup.sh stores the Stripe key + creates the webhook from GitHub secret STRIPE_SECRET_KEY; /api/version shows stripe; Sync now shows the 3 bookmark steps inline. HANDOFF.md written (new account starts there).
 - 2026-10-26 05:00 PT — 01KwFxq1: unique Zelle amount per unpaid student per term ($fee + $0.01–$9.99, never whole dollars; pay_slots, migrate_027) so a Zelle with no memo still matches (memo still works; review alerts never amount-matched; slot freed when paid). Pay page: "Zelle exactly $180.xx · no memo needed". Fun facts removed from all loaders (lq.js).
