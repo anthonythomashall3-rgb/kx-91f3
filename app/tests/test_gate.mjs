@@ -181,6 +181,19 @@ async function suite(label, oldSchema) {
   let row = (r.data?.rows||[]).find(x => x.user_id === "4001");
   check("locked student is eligible, resolved to Brightspace user_id 4001", !!row && row.eligible === true, JSON.stringify(r.data?.rows));
   check("eligible row carries the student name from the roster", row?.student === "Al Student", JSON.stringify(row));
+  { // Student fee on: an unpaid student is never admitted (no user_id -> no special access), paid -> admitted.
+    const fee = { ...env, STUDENT_FEE_FROM: "2000-01-01", STUDENT_FEE: "180" };
+    sqlite.prepare("UPDATE devices SET student_verified=1 WHERE device_id=?").run(DEV);
+    let rf = await getc(fee, "/live?quiz=" + LOCK_ID, { teacher: TOK });
+    let rw = (rf.data?.rows||[]).find(x => x.device_id === DEV);
+    check("fee on, unpaid: locked student NOT admitted by the gate", !!rw && rw.eligible === false && !rw.user_id && rw.unpaid === true, JSON.stringify(rw));
+    const term = (await call(fee, "/pay/start", { email: "al@usc.edu" })).data?.term;
+    const code = sqlite.prepare("SELECT code FROM pay_codes_students WHERE email='al@usc.edu'").get()?.code;
+    sqlite.prepare("INSERT INTO payments (txn,code,amount,via,term,received_at) VALUES ('t-gate',?,180,'zelle',?,datetime('now'))").run(code, term);
+    rf = await getc(fee, "/live?quiz=" + LOCK_ID, { teacher: TOK });
+    rw = (rf.data?.rows||[]).find(x => x.device_id === DEV);
+    check("fee on, paid $180: admitted", !!rw && rw.eligible === true && rw.user_id === "4001", JSON.stringify(rw));
+    sqlite.prepare("DELETE FROM payments WHERE txn='t-gate'").run(); }
   // age the lock past STALE (660s; helper beats every ~300s) -> no longer eligible
   sqlite.prepare("UPDATE locks SET last_lock=?, helper_seen=? WHERE device_id=?").run(new Date(Date.now()-900000).toISOString(), new Date(Date.now()-900000).toISOString(), DEV);
   r = await getc(env, "/live?quiz=" + LOCK_ID, { teacher: TOK });

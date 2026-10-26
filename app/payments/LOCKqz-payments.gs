@@ -37,7 +37,16 @@ function setup() {
   GmailApp.getUserLabelByName(DONE) || GmailApp.createLabel(DONE);
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger("run").timeBased().everyMinutes(1).create();
+  check();
   run();
+}
+
+// Proves PAY_SECRET matches LOCKqz (Admin -> Payments). Throws if not, so a wrong key is never silent.
+function check() {
+  const secret = PropertiesService.getScriptProperties().getProperty("PAY_SECRET") || "";
+  const r = UrlFetchApp.fetch(API.replace("/notify", "/tick"), { method: "post", contentType: "application/json", muteHttpExceptions: true, headers: { "X-LOCKqz-Pay": secret }, payload: "{}" });
+  if (r.getResponseCode() !== 200) throw new Error("PAY_SECRET is wrong: LOCKqz said " + r.getResponseCode());
+  Logger.log("LOCKqz key OK");
 }
 
 function owners_(props) {
@@ -55,7 +64,7 @@ function run() {
   // Only mail since the last successful run (10 minutes of overlap), never the same alert twice.
   const last = Number(props.getProperty("LAST_RUN") || 0) || (started - 3 * 86400);
   const since = last - 600;
-  const query = "after:" + since + " -label:" + DONE.replace(/\//g, "-") + " (from:venmo.com OR zelle) " + WORDS;
+  const query = "after:" + since + " -label:" + DONE.replace(/\//g, "-") + " (zelle OR " + Object.keys(SENDERS).map(d => "from:" + d).join(" OR ") + ") " + WORDS;
   const threads = GmailApp.search(query, 0, 50);
   const own = owners_(props), opts = { owners: own, zellepayOk: props.getProperty("ZELLEPAY_OK") === "1" };
   const out = [];

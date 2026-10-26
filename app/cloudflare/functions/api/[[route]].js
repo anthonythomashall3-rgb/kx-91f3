@@ -555,6 +555,21 @@ export async function onRequest(context) {
     if (staff) return true;                                     // professors and the admin never pay the student fee
     return (await studentStatus(email)).paid;
   }
+  // Many students at once (the gate's /live): the set of emails that may take the quiz (paid this term,
+  // or staff). 3 reads total, any number of emails.
+  async function paidEmails(list) {
+    const ems = [...new Set(list.map(e => String(e||"").trim().toLowerCase()).filter(e => e.includes("@")))];
+    const ok = new Set(); if (!ems.length) return ok;
+    if (!feeOn()) { ems.forEach(e => ok.add(e)); return ok; }
+    const j = JSON.stringify(ems), [cur, nxt] = curTerms(), early = ahead() || inGap();
+    (await db.prepare("SELECT lower(email) AS e FROM teachers WHERE lower(email) IN (SELECT value FROM json_each(?)) AND (role='admin' OR verified=1)").bind(j).all()).results.forEach(r => ok.add(r.e));
+    const codes = new Map((await db.prepare("SELECT email, code FROM pay_codes_students WHERE email IN (SELECT value FROM json_each(?))").bind(j).all()).results.map(r => [r.code, r.email]));
+    if (!codes.size) return ok;
+    const sums = {};
+    for (const r of (await db.prepare(`SELECT code, term, COALESCE(SUM(amount),0) AS s FROM payments WHERE code IN (SELECT value FROM json_each(?)) AND term IN (?,?) AND ${COUNTS} GROUP BY code, term`).bind(JSON.stringify([...codes.keys()]), cur, nxt).all()).results) sums[r.code + "|" + r.term] = Number(r.s);
+    for (const [c, e] of codes) if ((!inGap() && (sums[c + "|" + cur] || 0) >= STUDENT_FEE) || (early && (sums[c + "|" + nxt] || 0) >= STUDENT_FEE)) ok.add(e);
+    return ok;
+  }
   async function payInfo(email, limitIp = null) {
     const code = await studentCode(email, limitIp);
     if (code && typeof code === "object") return code;   // { limited: true }
@@ -1861,6 +1876,10 @@ export async function onRequest(context) {
         if (hit) { r.user_id = hit.user_id || null; if (hit.display) r.student = hit.display; }
         r.email = who.includes("@") ? who : (hit && hit.e) || null;
       });
+      // Student fee: the gate never admits an unpaid student (no Brightspace user -> no special access),
+      // so a quiz password passed on by a paid classmate is useless to them.
+      if (feeOn()) { const okPaid = await paidEmails(rows.map(r => r.email));
+        rows.forEach(r => { if (r.user_id && !okPaid.has(String(r.email||"").toLowerCase())) { r.user_id = null; r.eligible = false; r.unpaid = true; } }); }
       // Server-confirmed submissions (reported by the professor's trusted Sync session), with the time
       // Brightspace says each student completed (C5). Any unlock -- or a period the helper went dark --
       // inside the quiz window and BEFORE that completion is "left_early" (red: AI may have been open),
