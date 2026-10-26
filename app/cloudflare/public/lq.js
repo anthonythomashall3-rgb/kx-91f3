@@ -69,14 +69,16 @@
   }
   function one(t) {
     var p = t.parentNode; if (!p || SKIP[p.nodeName] || t.nodeValue.indexOf("LOCKqz") < 0) return;
-    if (p.closest && p.closest("script,style,textarea,title,option,.lq-l,.lq-q,[contenteditable]")) return;
+    if (p.closest && p.closest("script,style,textarea,title,option,.lq,.lq-l,.lq-q,[contenteditable]")) return;
     var parts = t.nodeValue.split("LOCKqz"), f = document.createDocumentFragment();
     parts.forEach(function (s, i) {
       if (s) f.appendChild(document.createTextNode(s));
       if (i < parts.length - 1) {
+        // One wrapper, so a flex/gap parent (header logos) never pulls LOCK and qz apart.
+        var w = document.createElement("span"); w.className = "lq"; w.style.whiteSpace = "nowrap";
         var a = document.createElement("span"); a.className = "lq-l"; a.textContent = "LOCK";
         var b = document.createElement("span"); b.className = "lq-q"; b.textContent = "qz";
-        f.appendChild(a); f.appendChild(b);
+        w.appendChild(a); w.appendChild(b); f.appendChild(w);
       }
     });
     p.replaceChild(f, t);
