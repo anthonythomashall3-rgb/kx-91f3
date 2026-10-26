@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- (none)
+- 2026-10-25 17:55 PT — 01CsgBZK: real tests of the Content-quiz move (Windows CI + Safari on Mac); automatic Brightspace resync for professors. Files: windows/lockqz-agent.ps1, mac/lockqz-agent.py, tests/, .github/workflows/, cloudflare/public/sync.js, dashboard.html, functions/api/[[route]].js, VERSION.
 
 ## Recently finished
 - 2026-10-25 17:15 PT — 01DfSvcn: D1 reset done: typed-email devices verified (Anthony's 2 Macs), full Release 40247705357 green, v0.4.5 live; Anthony's agent back on, verified, no dialog.
