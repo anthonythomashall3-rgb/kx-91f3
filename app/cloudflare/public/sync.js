@@ -322,21 +322,25 @@
     courses.forEach(function (c) {
       var learners = (c.classlist || []).filter(function (s) { return !INSTR.test(s.role || "") && !!(s.role || "").trim(); }).length;
       students += learners; nq += (c.quizzes || []).length;
-      html += '<div style="margin:12px 0 4px;font-weight:700">' + esc(c.name.replace(/^\d+_\d+\s*/, "")) + '</div>' +
-        '<div style="color:#666;font-size:12px;margin-bottom:4px">' + (c.classlist ? learners + " students" : "class list not read") + " &middot; " + esc(c.role) + "</div>";
+      html += '<div style="display:flex;align-items:center;gap:12px;margin:16px 0 6px">' +
+        '<span style="flex:1;min-width:0;font-weight:700">' + esc(c.name.replace(/^\d+_\d+\s*/, "")) + '</span>' +
+        '<label class="lqsw" title="LOCKqz for the whole class"><input type="checkbox" class="lqcls-all" data-cls="' + c.ou + '"><span class="lqsl"></span></label>' +
+        '</div>';
       if (!c.quizzes) { unread++; html += '<div style="color:#990000;font-size:13px">Could not read quizzes from Brightspace. Click Sync again.</div>'; return; }
       if (!c.quizzes.length) html += '<div style="color:#888;font-size:13px">No quizzes.</div>';
       c.quizzes.forEach(function (q) {
         var on = !!prot[String(q.qi)], own = !on && OWNPW[String(q.qi)];
-        html += '<div style="padding:4px 0;border-bottom:1px solid #eee">' +
-          '<label style="display:flex;gap:8px;align-items:center;cursor:pointer">' +
-          '<input type="checkbox" data-ou="' + c.ou + '" data-qi="' + q.qi + '"' + (on ? " checked" : "") + '>' +
-          '<span style="flex:1">' + esc(q.name) + (q.start ? ' <span style="color:#888;font-size:12px">' + day(q.start) + "</span>" : "") + "</span>" +
-          '<span data-st="' + q.qi + '" style="font-size:12px;color:' + (on ? "#1a7f37" : "#888") + '">' + (on ? "protected" : own ? "has its own password" : "") + "</span></label>" +
-          '<div style="margin:4px 0 0 26px;font-size:12px"><button data-gate="' + c.ou + ":" + q.qi + '" ' + (on ? "" : "disabled ") + 'style="font:12px -apple-system;padding:2px 10px;border:1px solid #990000;border-radius:6px;background:#fff;color:#990000;cursor:pointer">Start gate</button> <span data-gst="' + q.qi + '" style="color:#888">off</span> <span style="color:#aaa">— while on, only students LOCKqz is locking can open the quiz</span></div></div>';
+        var sd = q.start ? day(q.start) : "", ed = q.end ? day(q.end) : "";
+        var dates = (sd || ed) ? '<span style="color:#888;font-size:12px;display:block;margin-top:2px">' + esc(sd && ed ? sd + " – " + ed : (sd || ed)) + "</span>" : "";
+        html += '<div style="padding:9px 0;border-bottom:1px solid #eee;display:flex;align-items:center;gap:12px">' +
+          '<span style="flex:1;min-width:0"><span style="font-weight:600">' + esc(q.name) + "</span>" + dates + "</span>" +
+          '<label class="lqsw"><input type="checkbox" data-ou="' + c.ou + '" data-qi="' + q.qi + '"' + (on ? " checked" : "") + '><span class="lqsl"></span></label>' +
+          '<span data-st="' + q.qi + '" style="display:none">' + (on ? "protected" : own ? "has its own password" : "") + "</span>" +
+          '<span style="display:none"><button data-gate="' + c.ou + ":" + q.qi + '"' + (on ? "" : " disabled") + '>Start gate</button> <span data-gst="' + q.qi + '">off</span></span>' +
+          "</div>";
       });
     });
-    say('<div style="background:#eafbea;padding:8px 10px;border-radius:8px">Synced ' + courses.length + " course" + (courses.length === 1 ? "" : "s") +
+    say('<style>.lqsw{position:relative;display:inline-block;width:40px;height:24px;flex:none}.lqsw input{position:absolute;opacity:0;width:0;height:0;margin:0}.lqsl{position:absolute;inset:0;background:#ccc;border-radius:24px;transition:.15s;cursor:pointer}.lqsl:before{content:"";position:absolute;height:18px;width:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.15s}.lqsw input:checked+.lqsl{background:#990000}.lqsw input:checked+.lqsl:before{transform:translateX(16px)}.lqsw input:disabled+.lqsl{opacity:.55;cursor:default}</style><div style="background:#eafbea;padding:8px 10px;border-radius:8px">Synced ' + courses.length + " course" + (courses.length === 1 ? "" : "s") +
       ", " + students + " students, " + nq + " quizzes.</div>" +
       (unread ? '<div style="color:#990000;margin-top:8px">' + unread + " course" + (unread === 1 ? "" : "s") + " not read: LOCKqz kept the quizzes it had.</div>" : "") +
       (errors.length ? '<div style="color:#990000;margin-top:8px">Could not update: ' + esc(errors.join("; ")) + "</div>" : "") +
@@ -514,7 +518,7 @@
       gb.textContent = GATES[qi] ? "Stop gate" : "Start gate";
       gb.disabled = !GATES[qi] && !(cb && cb.checked);
     };
-    B.querySelectorAll("input[type=checkbox]").forEach(function (cb) {
+    B.querySelectorAll("input[data-qi]").forEach(function (cb) {
       CBS[cb.dataset.qi] = cb;
       cb.onchange = async function () {
         var ou = cb.dataset.ou, qi = cb.dataset.qi, st = B.querySelector('[data-st="' + qi + '"]'), gst = B.querySelector('[data-gst="' + qi + '"]');
@@ -533,6 +537,19 @@
         }
         cb.disabled = false;
         showGateBtn(ou, qi);
+      };
+    });
+    B.querySelectorAll("input[data-cls]").forEach(function (ca) {
+      if (!ca.dataset || !ca.dataset.cls) return;   // real class toggles only (tests have none)
+      var ou = ca.dataset.cls;
+      var kids = function () { return [].slice.call(B.querySelectorAll('input[data-ou="' + ou + '"][data-qi]')); };
+      var refl = function () { var k = kids(); ca.checked = k.length > 0 && k.every(function (c) { return c.checked; }); };
+      refl();
+      ca.onchange = async function () {
+        var want = ca.checked; ca.disabled = true;
+        var k = kids();
+        for (var i = 0; i < k.length; i++) { if (k[i].checked !== want) { k[i].checked = want; if (k[i].onchange) await k[i].onchange(); } }
+        ca.disabled = false; refl();
       };
     });
     B.querySelectorAll("button[data-gate]").forEach(function (gb) {
