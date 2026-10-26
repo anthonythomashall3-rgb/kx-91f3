@@ -63,6 +63,17 @@ function multiInsert(db, head, cols, rows, tail = "") {
 }
 // db.batch counts as ONE D1 query on the Free plan (50 per request); keep each batch modest.
 async function runBatches(db, sts) { for (const part of chunk(sts, 100)) if (part.length) await db.batch(part); }
+// SQLite's BINARY order for TEXT (UTF-8 bytes = code points), NULL first: JS sorts that match ORDER BY.
+const binCmp = (a, b) => {
+  if (a == null || b == null) return a == null ? (b == null ? 0 : -1) : 1;
+  a = String(a); b = String(b); if (a === b) return 0;
+  for (let i = 0, n = Math.min(a.length, b.length); i < n;) { const x = a.codePointAt(i), y = b.codePointAt(i); if (x !== y) return x < y ? -1 : 1; i += x > 0xffff ? 2 : 1; }
+  return a.length < b.length ? -1 : 1;
+};
+// Rate-limit / account events: the only ones read by (event, ts). idx_events_event_ts is PARTIAL on exactly
+// this list (migrate_029), so the high-volume lock/unlock/install/password events write one index row less.
+// A query can use it only when it repeats this exact term: every (event, ts) query adds " AND " + RL_EV.
+const RL_EV = "event IN ('login_fail','pay_code_new','pay_start','pay_stripe','pay_bank','signup','stripe_sess','code_sent','code_send_failed','reset_request','email_verified')";
 const STALE_MS = 660000;   // live monitor: helpers ping every ~300 s, so a lock not refreshed for 11 minutes "went dark"
 const EVENT_DAYS = 120;    // retention: activity events are deleted after 120 days (privacy.html)
 const rid = (n=6) => Array.from(crypto.getRandomValues(new Uint8Array(n))).map(b=>"ABCDEFGHJKMNPQRSTUVWXYZ23456789"[b%30]).join("");
@@ -338,6 +349,20 @@ export async function onRequest(context) {
   const takesQuizzes = role => !INSTR_RE.test(String(role||"")) && !!String(role||"").trim();
   // Emails are stored lowercase (devices.student is indexed and joined to roster.email).
   const lowMail = s => (s && String(s).includes("@")) ? String(s).toLowerCase() : s;
+  // SQLite lower(): ASCII letters only (JS toLowerCase also folds non-ASCII letters).
+  const sqlLower = v => v == null ? null : String(v).replace(/[A-Z]+/g, m => m.toLowerCase());
+  // roster_snap (migrate_029): a course's class list as the last Sync wrote it, 1 row per course.
+  // Per request: ou -> [{ou,user_id,name,email,username,role}] in roster key order, or no entry (none
+  // saved: callers read the roster table as before).
+  const snapCache = new Map();
+  async function rosterSnaps(ous) {
+    const todo = [...new Set(ous.map(String))].filter(o => !snapCache.has(o));
+    if (todo.length) {
+      const got = new Map((await db.prepare("SELECT ou, rows FROM roster_snap WHERE ou IN (SELECT value FROM json_each(?))").bind(JSON.stringify(todo)).all()).results.map(r => [String(r.ou), r.rows]));
+      for (const o of todo) { let v = null; try { const a = got.has(o) ? JSON.parse(got.get(o)) : null; if (Array.isArray(a)) v = a.map(x => ({ ou: o, user_id: x[0], name: x[1], email: x[2], username: x[3], role: x[4] })); } catch {} snapCache.set(o, v); }
+    }
+    const out = new Map(); for (const o of ous.map(String)) if (snapCache.get(o)) out.set(o, snapCache.get(o)); return out;
+  }
   const vt = v => String(v||"0").split(".").map(n => parseInt(n,10)||0);
   const newerOrSame = (a, b) => { const x = vt(a), y = vt(b); for (let i = 0; i < 3; i++) if ((x[i]||0) !== (y[i]||0)) return (x[i]||0) > (y[i]||0); return true; };
   // The helper was silent longer than the live window and is back: record the gap (writes nothing
@@ -386,9 +411,12 @@ export async function onRequest(context) {
   // (default 200) device /report batches -- no extra D1 query (same batch).
   const purgeStmts = () => {
     const ago = d => new Date(Date.now() - d * 86400000).toISOString();
-    return [db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id LIMIT 300) AND ts<?").bind(ago(EVENT_DAYS)),
-      db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE event IN ('login_fail','pay_code_new','pay_start','pay_stripe','pay_bank','signup','stripe_sess','code_sent','code_send_failed') AND ts<? LIMIT 300)").bind(ago(2)),
-      db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE event='reset_request' AND ts<? LIMIT 100)").bind(ago(30)),
+    // The short-lived rows go first. Then the oldest 300 rows, only when the very oldest left is past
+    // retention (events are written in time order): 2 rows read when there is nothing to delete, instead
+    // of 900 on every Sync.
+    return [db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE event IN ('login_fail','pay_code_new','pay_start','pay_stripe','pay_bank','signup','stripe_sess','code_sent','code_send_failed') AND " + RL_EV + " AND ts<? LIMIT 300)").bind(ago(2)),
+      db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE event='reset_request' AND " + RL_EV + " AND ts<? LIMIT 100)").bind(ago(30)),
+      db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id LIMIT (CASE WHEN (SELECT ts FROM events ORDER BY id LIMIT 1) < ? THEN 300 ELSE 0 END)) AND ts<?").bind(ago(EVENT_DAYS), ago(EVENT_DAYS)),
       db.prepare("DELETE FROM email_codes WHERE expires<?").bind(Date.now() - 86400000)];
   };
   // REQUIRE_GATE=1: every LOCKqz-protected quiz is gated (the Sync tab hides it and admits only students
@@ -491,9 +519,9 @@ export async function onRequest(context) {
   // Release every quiz this professor protects in a course that is not paid (next Sync removes the
   // password from Brightspace, so no student is locked out).
   async function releaseUnpaid(t) {
-    if (!t || t.admin || t.active) return;          // fully active: nothing to release (no query)
+    if (!t || t.admin || t.active) return false;    // fully active: nothing to release (no query)
     const qs = (await db.prepare("SELECT qi,ou,password FROM quizzes WHERE teacher_id=? AND ou IS NOT NULL").bind(t.id).all()).results;
-    if (!qs.length) return;
+    if (!qs.length) return false;
     const paidSet = await paidOusFor(t, qs.map(q => String(q.ou)));
     // Co-taught course: another trusted instructor of it who is active (or has paid sections) keeps
     // its quizzes protected (I-M8). One query for all unpaid courses.
@@ -510,6 +538,7 @@ export async function onRequest(context) {
       st.push(db.prepare("DELETE FROM quizzes WHERE qi=? AND ou=? AND teacher_id=?").bind(q.qi, ou, t.id));
     }
     await runBatches(db, st);
+    return st.length > 0;    // true = quizzes / pending_clear changed
   }
   // [current term, next term] by USC's calendar (TERMS below): the term in session, or between terms
   // the one that just ended (so a payment then counts for the next one).
@@ -703,7 +732,7 @@ export async function onRequest(context) {
     const ex = await db.prepare("SELECT code FROM pay_codes_students WHERE email=?").bind(email).first();
     if (ex) return ex.code;
     if (limitIp) {
-      const n = (await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_code_new' AND ts>? AND device_id=?").bind(new Date(Date.now() - 3600000).toISOString(), "ip:" + limitIp).first()).n;
+      const n = (await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_code_new' AND " + RL_EV + " AND ts>? AND device_id=?").bind(new Date(Date.now() - 3600000).toISOString(), "ip:" + limitIp).first()).n;
       if (n >= 20) return { limited: true };
       await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + limitIp, null, null, "pay_code_new", null, now()).run();
     }
@@ -747,12 +776,17 @@ export async function onRequest(context) {
     if (!feeOn()) { ems.forEach(e => ok.add(e)); return ok; }
     const j = JSON.stringify(ems), [cur, nxt] = curTerms(), early = ahead() || inGap();
     ems.forEach(e => { if (isExempt(env, e)) ok.add(e); });
-    (await db.prepare("SELECT lower(email) AS e FROM teachers WHERE lower(email) IN (SELECT value FROM json_each(?)) AND (role='admin' OR verified=1)").bind(j).all()).results.forEach(r => ok.add(r.e));
-    const codes = new Map((await db.prepare("SELECT p.email AS email, p.code AS code FROM json_each(?) j JOIN pay_codes_students p ON p.email=j.value").bind(j).all()).results.map(r => [r.code, r.email]));
-    if (!codes.size) return ok;
-    const sums = {};
-    for (const r of (await db.prepare(`SELECT code, term, COALESCE(SUM(${CREDIT()}),0) AS s FROM json_each(?) j CROSS JOIN payments ON payments.code=j.value WHERE term IN (?,?) AND ${COUNTS} GROUP BY code, term`).bind(JSON.stringify([...codes.keys()]), cur, nxt).all()).results) sums[r.code + "|" + r.term] = Number(r.s);
-    for (const [c, e] of codes) if ((!inGap() && FULL(sums[c + "|" + cur] || 0, STUDENT_FEE)) || (early && FULL(sums[c + "|" + nxt] || 0, STUDENT_FEE))) ok.add(e);
+    // Staff (professors, the admin): one pass over the small teachers table, matched here (the old
+    // lower(email) IN json_each(...) read that same table plus one row per student).
+    const want = new Set(ems);
+    (await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin' OR verified=1").all()).results.forEach(r => { if (want.has(r.e)) ok.add(r.e); });
+    // One pass: email -> pay code -> this term's (and, only when it can count, next term's) credit.
+    const useCur = !inGap(), useNxt = early;
+    if (!useCur && !useNxt) return ok;
+    const sumOf = () => `(SELECT COALESCE(SUM(${CREDIT()}),0) FROM payments x WHERE x.code=p.code AND x.term=? AND ${COUNTS})`;
+    const r = (await db.prepare(`SELECT p.email AS email, ${useCur ? sumOf() : "0"} AS sc, ${useNxt ? sumOf() : "0"} AS sn FROM json_each(?) j CROSS JOIN pay_codes_students p ON p.email=j.value`)
+      .bind(...(useCur ? [cur] : []), ...(useNxt ? [nxt] : []), j).all()).results;
+    for (const x of r) if ((useCur && FULL(Number(x.sc) || 0, STUDENT_FEE)) || (useNxt && FULL(Number(x.sn) || 0, STUDENT_FEE))) ok.add(x.email);
     return ok;
   }
   async function paidEmailsCached(list, quiz) {
@@ -975,9 +1009,13 @@ export async function onRequest(context) {
     ous = ous.map(String).filter(o => /^\d+$/.test(o));
     if (!ous.length) return { protect: [], clear: [] };
     const ph = ous.map(()=>"?").join(",");
-    // Each row carries the professor's own settings saved before LOCKqz changed them (C3).
-    const protect = (await db.prepare(`SELECT q.ou,q.qi,q.password,q.title,q.gated,b.orig FROM quizzes q LEFT JOIN bs_quizzes b ON b.ou=q.ou AND b.qi=q.qi WHERE q.ou IN (${ph}) AND q.qi IS NOT NULL`).bind(...ous).all()).results.map(withOrig);
-    const clear = (await db.prepare(`SELECT c.ou,c.qi,c.password,b.orig FROM pending_clear c LEFT JOIN bs_quizzes b ON b.ou=c.ou AND b.qi=c.qi WHERE c.ou IN (${ph})`).bind(...ous).all()).results.map(withOrig);
+    // Each row carries the professor's own settings saved before LOCKqz changed them (C3). The few
+    // bs_quizzes rows that hold saved settings come through the partial index idx_bsq_orig and are
+    // matched here (a LEFT JOIN read 2 bs_quizzes index rows per quiz).
+    const og = new Map((await db.prepare(`SELECT ou,qi,orig FROM bs_quizzes WHERE ou IN (${ph}) AND orig IS NOT NULL`).bind(...ous).all()).results.map(b => [String(b.ou) + "\u0000" + String(b.qi), b.orig]));
+    const ogOf = r => og.get(String(r.ou) + "\u0000" + String(r.qi)) ?? null;
+    const protect = (await db.prepare(`SELECT q.ou,q.qi,q.password,q.title,q.gated FROM quizzes q WHERE q.ou IN (${ph}) AND q.qi IS NOT NULL`).bind(...ous).all()).results.map(r => withOrig({ ...r, orig: ogOf(r) }));
+    const clear = (await db.prepare(`SELECT c.ou,c.qi,c.password FROM pending_clear c WHERE c.ou IN (${ph})`).bind(...ous).all()).results.map(r => withOrig({ ...r, orig: ogOf(r) }));
     return { protect, clear };
   }
 
@@ -1029,7 +1067,7 @@ export async function onRequest(context) {
       // synced class list. One indexed read covers them all (events(event, ts)).
       const issue = async () => {             // email a fresh code (rate-limited) -> response
         const hr = since(3600000);
-        const c = await db.prepare("SELECT COALESCE(SUM(ts>=? AND device_id=?),0) AS dh, COALESCE(SUM(device_id=?),0) AS dd, COALESCE(SUM(ts>=? AND student=?),0) AS eh, COALESCE(SUM(student=?),0) AS ed, COALESCE(SUM(ts>=? AND detail=?),0) AS ih, COUNT(*) AS total FROM events WHERE event='code_sent' AND ts>=?")
+        const c = await db.prepare("SELECT COALESCE(SUM(ts>=? AND device_id=?),0) AS dh, COALESCE(SUM(device_id=?),0) AS dd, COALESCE(SUM(ts>=? AND student=?),0) AS eh, COALESCE(SUM(student=?),0) AS ed, COALESCE(SUM(ts>=? AND detail=?),0) AS ih, COUNT(*) AS total FROM events WHERE event='code_sent' AND " + RL_EV + " AND ts>=?")
           .bind(hr, dev, dev, hr, email, email, hr, "ip:" + clientIp, since(86400000)).first();
         if (Number(c.dh) >= 5 || Number(c.dd) >= 15 || Number(c.eh) >= 3 || Number(c.ed) >= 5 || Number(c.ih) >= 10) return json({ error: "too_many_codes", retry_minutes: 60 }, 429);
         const max = Number(env.MAIL_DAILY_MAX || 480);
@@ -1165,7 +1203,9 @@ export async function onRequest(context) {
       const gapRule = (ev === "lock" || (ev === "heartbeat" && !agentBeat)) && qidOk && newerOrSame(verNow, "0.4.0");
       if (gapRule) st.push(gapStmt(db, device_id, qidOk));
       if (ev === "lock" && qidOk)
-        st.push(db.prepare("INSERT INTO locks (device_id,quiz_id,last_lock,helper_seen,signed,ip,locked_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(device_id,quiz_id) DO UPDATE SET last_lock=excluded.last_lock,helper_seen=excluded.helper_seen,signed=excluded.signed,ip=excluded.ip,locked_at=COALESCE(locks.locked_at,excluded.locked_at)").bind(device_id, qidOk, now(), now(), signed, clientIp, now()));
+        // The lock row carries a copy of the device's student/platform/student_verified (migrate_029), so
+        // /live reads lock rows only; the devices triggers keep it in step. Same row: no extra write.
+        st.push(db.prepare("INSERT INTO locks (device_id,quiz_id,last_lock,helper_seen,signed,ip,locked_at,student,platform,sv) SELECT ?,?,?,?,?,?,?,d.student,d.platform,COALESCE(d.student_verified,0) FROM (SELECT 1) one LEFT JOIN devices d ON d.device_id=? WHERE 1 ON CONFLICT(device_id,quiz_id) DO UPDATE SET last_lock=excluded.last_lock,helper_seen=excluded.helper_seen,signed=excluded.signed,ip=excluded.ip,locked_at=COALESCE(locks.locked_at,excluded.locked_at),student=excluded.student,platform=excluded.platform,sv=excluded.sv").bind(device_id, qidOk, now(), now(), signed, clientIp, now(), device_id));
       if (ev === "unlock" && qidOk)
         st.push(db.prepare("DELETE FROM locks WHERE device_id=? AND quiz_id=?").bind(device_id, qidOk));
       if (ev === "heartbeat" && qidOk) {
@@ -1349,7 +1389,7 @@ export async function onRequest(context) {
       // written (else one script fills the D1 free plan's 100k rows/day and burns CPU on PBKDF2).
       if (!invPre) {
         const hr = new Date(Date.now() - 3600000).toISOString();
-        if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='signup' AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 10)
+        if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='signup' AND " + RL_EV + " AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 10)
           return json({ error:"too many sign-ups from here — try again in an hour" }, 429);
         await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + clientIp, null, null, "signup", null, now()).run();
       }
@@ -1386,7 +1426,7 @@ export async function onRequest(context) {
       const lkey = `login:${email}:${ip}`, since = new Date(Date.now()-900000).toISOString();
       // Per email+IP (5 / 15 min) AND per IP (30 / 15 min, any emails) -- checked BEFORE anything is
       // written, so random emails from one IP cannot write unlimited rows. Index: events(event, ts).
-      const lf = await db.prepare("SELECT COALESCE(SUM(detail=?),0) AS mine, COALESCE(SUM(device_id=?),0) AS ipn FROM events WHERE event='login_fail' AND ts>?").bind(lkey, "ip:" + ip, since).first();
+      const lf = await db.prepare("SELECT COALESCE(SUM(detail=?),0) AS mine, COALESCE(SUM(device_id=?),0) AS ipn FROM events WHERE event='login_fail' AND " + RL_EV + " AND ts>?").bind(lkey, "ip:" + ip, since).first();
       if (Number(lf.mine) >= 5 || Number(lf.ipn) >= 30) return json({ error:"too many attempts — wait 15 minutes" }, 429);
       const t = await db.prepare("SELECT id,email,name,pw_hash,salt,token FROM teachers WHERE email=?").bind(email).first();
       const chk = t ? await checkPw(pw, t.salt, t.pw_hash, PEPPER) : { ok: false };
@@ -1405,7 +1445,7 @@ export async function onRequest(context) {
       const t = await db.prepare("SELECT id FROM teachers WHERE email=?").bind(email).first().catch(()=>null);
       // At most one request per email per hour and 10 per IP per hour (else nothing is written).
       const hr = new Date(Date.now() - 3600000).toISOString();
-      if (t) await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) SELECT ?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM events WHERE event='reset_request' AND ts>? AND detail=?) AND (SELECT COUNT(*) FROM events WHERE event='reset_request' AND ts>? AND device_id=?) < 10")
+      if (t) await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) SELECT ?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM events WHERE event='reset_request' AND " + RL_EV + " AND ts>? AND detail=?) AND (SELECT COUNT(*) FROM events WHERE event='reset_request' AND " + RL_EV + " AND ts>? AND device_id=?) < 10")
         .bind("ip:" + clientIp,null,null,"reset_request",email,now(), hr, email, hr, "ip:" + clientIp).run();
       return json({ ok:true });   // always ok — never reveal whether the email exists
     }
@@ -1531,7 +1571,7 @@ export async function onRequest(context) {
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"enter your school email" }, 400);
       // Per IP: 30 lookups an hour (each lookup hands out that email's memo code).
       const hr = new Date(Date.now() - 3600000).toISOString();
-      if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_start' AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 30)
+      if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_start' AND " + RL_EV + " AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 30)
         return json({ error:"too many requests — try again in an hour" }, 429);
       await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + clientIp, null, null, "pay_start", null, now()).run();
       const info = await payInfo(email, clientIp, !(await studentPaid(email)));
@@ -1554,7 +1594,7 @@ export async function onRequest(context) {
       const email = String(body.email||"").trim().toLowerCase(), method = body.method === "bank" && stripeBank() ? "bank" : "card";
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"enter your school email" }, 400);
       const hr = new Date(Date.now() - 3600000).toISOString();
-      if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_stripe' AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 20)
+      if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_stripe' AND " + RL_EV + " AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 20)
         return json({ error:"too many requests — try again in an hour" }, 429);
       await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + clientIp, null, null, "pay_stripe", null, now()).run();
       const code = await studentCode(email, clientIp);
@@ -1613,13 +1653,13 @@ export async function onRequest(context) {
       const email = String(body.email || "").trim().toLowerCase();
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: "enter your school email" }, 400);
       const hr = new Date(Date.now() - 3600000).toISOString(), ten = new Date(Date.now() - 600000).toISOString();
-      if (!script && Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_bank' AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 10)
+      if (!script && Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_bank' AND " + RL_EV + " AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 10)
         return json({ error: "too many requests — try again in an hour" }, 429);
-      if (await db.prepare("SELECT 1 FROM events WHERE event='pay_bank' AND student=? AND ts>?").bind(email, ten).first())
+      if (await db.prepare("SELECT 1 FROM events WHERE event='pay_bank' AND " + RL_EV + " AND student=? AND ts>?").bind(email, ten).first())
         return json({ ok: true, sent: true, to: email, again: true });   // one email per address per 10 minutes
       // Global cap per day: these emails share Gmail's ~500/day sending limit with the students' email codes,
       // so many IPs asking for bank details to random addresses must never stop students verifying before a quiz.
-      if (!script && Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_bank' AND ts>?").bind(new Date(Date.now() - 86400000).toISOString()).first()).n) >= Number(env.BANK_MAIL_DAILY_MAX || 60))
+      if (!script && Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_bank' AND " + RL_EV + " AND ts>?").bind(new Date(Date.now() - 86400000).toISOString()).first()).n) >= Number(env.BANK_MAIL_DAILY_MAX || 60))
         return json({ error: "Too many requests today. Email " + (stuBank() || "lockqz.app@gmail.com") + " for the bank details." }, 429);
       const prof = await db.prepare("SELECT id FROM teachers WHERE lower(email)=?").bind(email).first();
       let kind = "student", code, left;
@@ -1706,7 +1746,7 @@ export async function onRequest(context) {
     // Admin: professor password-reset requests (made on the sign-in page), newest first.
     if (p === "/reset-requests") {
       if (!me?.admin) return json({ error:"admin only" }, 403);
-      const r = await db.prepare("SELECT e.detail AS email, MAX(e.ts) AS at, COUNT(*) AS n, t.name AS name FROM events e LEFT JOIN teachers t ON t.email=e.detail WHERE e.event='reset_request' AND e.ts>? GROUP BY e.detail ORDER BY at DESC LIMIT 100")
+      const r = await db.prepare("SELECT e.detail AS email, MAX(e.ts) AS at, COUNT(*) AS n, t.name AS name FROM events e LEFT JOIN teachers t ON t.email=e.detail WHERE e.event='reset_request' AND e." + RL_EV + " AND e.ts>? GROUP BY e.detail ORDER BY at DESC LIMIT 100")
         .bind(new Date(Date.now() - 30 * 86400000).toISOString()).all();
       return json({ requests: r.results });
     }
@@ -1726,9 +1766,12 @@ export async function onRequest(context) {
         st.push(db.prepare(`DELETE FROM events WHERE device_id IN (${ph})`).bind(...part), db.prepare(`DELETE FROM locks WHERE device_id IN (${ph})`).bind(...part),
                 db.prepare(`DELETE FROM email_codes WHERE device_id IN (${ph})`).bind(...part), db.prepare(`DELETE FROM devices WHERE device_id IN (${ph})`).bind(...part));
       }
-      st.push(db.prepare("DELETE FROM events WHERE student=? AND event IN ('code_sent','code_send_failed','email_verified')").bind(email));
+      st.push(db.prepare("DELETE FROM events WHERE student=? AND event IN ('code_sent','code_send_failed','email_verified') AND " + RL_EV + "").bind(email));
       for (const r of ros) st.push(db.prepare("DELETE FROM submissions WHERE ou=? AND user_id=?").bind(r.ou, r.user_id));
       st.push(db.prepare("DELETE FROM roster WHERE email=?").bind(email), db.prepare("DELETE FROM email_codes WHERE email=?").bind(email));
+      // Their courses' class-list snapshots (roster_snap) no longer match: the next Sync rebuilds them.
+      const fOus = [...new Set(ros.map(r => String(r.ou)))];
+      if (fOus.length) st.push(db.prepare("DELETE FROM roster_snap WHERE ou IN (SELECT value FROM json_each(?))").bind(JSON.stringify(fOus)));
       if (pc) st.push(db.prepare("UPDATE payments SET payer=NULL, note=NULL WHERE code=?").bind(pc.code), db.prepare("DELETE FROM pay_codes_students WHERE email=?").bind(email));
       st.push(db.prepare("INSERT OR REPLACE INTO forgotten (email, at) VALUES (?,?)").bind(email, now()));
       await runBatches(db, st);
@@ -1890,12 +1933,52 @@ export async function onRequest(context) {
         return out;
       };
       const oldTc = new Map((A.length ? await sel("SELECT ou,name,code,role,synced_at FROM teacher_courses WHERE teacher_id=? AND ou IN (%IN%)", A, [me.id]) : []).map(r => [String(r.ou), r]));
-      const oldRoster = withRoster.length ? await sel("SELECT ou,user_id,name,email,username,org_id,role FROM roster WHERE ou IN (%IN%)", withRoster) : [];
-      const oldBq = withQuiz.length ? await sel("SELECT ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours,over_min FROM bs_quizzes WHERE ou IN (%IN%)", withQuiz) : [];
       // H15: students deleted on request are never imported again (until they confirm their email again).
       const forgotten = withRoster.length ? new Set((await db.prepare("SELECT email FROM forgotten").all().catch(() => ({ results: [] }))).results.map(r => r.email)) : new Set();
-      const same = (a, b) => (a == null ? null : String(a)) === (b == null ? null : String(b));
+      // Each class list as it would be stored (deduped, forgotten students left out), and its hash. A
+      // course whose hash equals the one saved with its roster_snap row is stored exactly like that
+      // already (every other roster writer deletes that row), so its class list is not read again.
+      let selfInstr = false;     // I-B1: this sync's class lists name the caller (email + own id) Instructor
+      const norm = new Map();
+      for (const ou of withRoster) {
+        const keep = new Set(), list = [];
+        for (const s of byOu.get(ou).classlist.slice(0, 3000)) {
+          if (!s || typeof s !== "object") continue;
+          const uid = String(s.id ?? "");
+          if (keep.has(uid)) continue;
+          const v = [str(s.name), (str(s.email) || "").toLowerCase() || null, str(s.username), str(s.org_id), str(s.role, 80)];
+          if (v[1] && forgotten.has(v[1])) continue;
+          keep.add(uid);
+          if (whoId && uid === whoId && v[1] === myEmail && INSTR_RE.test(v[4] || "")) selfInstr = true;
+          list.push([uid, ...v]);
+        }
+        list.sort((a, b) => binCmp(a[0], b[0]));
+        // A class list longer than the 3,000 read here is cut short (see below): never snapshotted.
+        const cut = byOu.get(ou).classlist.length > 3000;
+        norm.set(ou, { keep, list, cut, hash: cut ? null : await sha256hex(enc.encode(JSON.stringify(list))) });
+      }
+      const oldSnap = new Map(withRoster.length ? (await db.prepare("SELECT ou, hash FROM roster_snap WHERE ou IN (SELECT value FROM json_each(?))").bind(JSON.stringify(withRoster)).all()).results.map(r => [String(r.ou), r.hash]) : []);
+      const rosterDiff = withRoster.filter(ou => !norm.get(ou).hash || oldSnap.get(ou) !== norm.get(ou).hash);
+      const oldRoster = rosterDiff.length ? await sel("SELECT ou,user_id,name,email,username,org_id,role FROM roster WHERE ou IN (%IN%)", rosterDiff) : [];
+      // Quiz lists the same way (bsq_hash): a course whose Brightspace quiz list hashes to the value saved
+      // by the last full compare is stored exactly like that (triggers delete the hash on any other change
+      // to those bs_quizzes columns), so its bs_quizzes rows are not read; "own" = its ownPw quizzes then.
       const ACCOM = Math.max(1, Math.min(10, Number(env.ACCOM_MULT) || 3));   // worst-case accommodation time multiplier
+      const qNorm = new Map();
+      for (const ou of withQuiz) {
+        const qs = byOu.get(ou).quizzes, keep = new Set(), list = [];
+        for (const q of qs.slice(0, 1000)) {
+          if (!q || typeof q !== "object" || q.qi == null) continue;
+          const qi = String(q.qi); if (keep.has(qi)) continue; keep.add(qi);
+          list.push([qi, str(q.name), q.active ? 1 : 0, str(q.start, 40), str(q.end, 40), str(q.due, 40), q.has_password ? 1 : 0, q.lq_password === true ? 1 : 0, overMinOf(q, ACCOM)]);
+        }
+        list.sort((a, b) => binCmp(a[0], b[0]));
+        qNorm.set(ou, qs.length > 1000 ? null : await sha256hex(enc.encode(JSON.stringify(list))));
+      }
+      const oldQh = new Map(withQuiz.length ? (await db.prepare("SELECT ou, hash, own FROM bsq_hash WHERE ou IN (SELECT value FROM json_each(?))").bind(JSON.stringify(withQuiz)).all()).results.map(r => [String(r.ou), r]) : []);
+      const quizDiff = withQuiz.filter(ou => !qNorm.get(ou) || !oldQh.has(ou) || oldQh.get(ou).hash !== qNorm.get(ou));
+      const oldBq = quizDiff.length ? await sel("SELECT ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours,over_min FROM bs_quizzes WHERE ou IN (%IN%)", quizDiff) : [];
+      const same = (a, b) => (a == null ? null : String(a)) === (b == null ? null : String(b));
       const st = [], tcRows = [], touch = [], rUp = [], bUp = [];
       const touchBefore = new Date(Date.now() - 600000).toISOString();   // "last synced" kept fresh to 10 min
       for (const ou of A) {
@@ -1908,34 +1991,39 @@ export async function onRequest(context) {
         "ON CONFLICT(teacher_id,ou) DO UPDATE SET name=excluded.name,code=excluded.code,role=excluded.role,synced_at=excluded.synced_at"));
       for (const part of chunk(touch, 98)) st.push(db.prepare(`UPDATE teacher_courses SET synced_at=? WHERE teacher_id=? AND ou IN (${placeholders(part.length)})`).bind(t, me.id, ...part));
       // Class lists: upsert changed/new students, delete the ones Brightspace no longer lists.
+      // Each course's writes and its new roster_snap row go out as ONE group (one db.batch = one
+      // transaction), so the snapshot can never describe a half-written class list. A group too big for
+      // one batch first deletes the old snapshot in its own batch (a failure then leaves none).
+      const groups = st.map(x => [x]);
+      const group = (list, gone) => { if (list.length > 100 && gone) groups.push([gone]); groups.push(list); };
       const oldR = new Map(oldRoster.map(r => [String(r.ou) + "\u0000" + String(r.user_id), r]));
-      let selfInstr = false;     // I-B1: this sync's class lists name the caller (email + own id) Instructor
-      for (const ou of withRoster) {
-        const keep = new Set();
-        for (const s of byOu.get(ou).classlist.slice(0, 3000)) {
-          if (!s || typeof s !== "object") continue;
-          const uid = String(s.id ?? ""), k = ou + "\u0000" + uid;
-          if (keep.has(uid)) continue;
-          const v = [str(s.name), (str(s.email) || "").toLowerCase() || null, str(s.username), str(s.org_id), str(s.role, 80)];
-          if (v[1] && forgotten.has(v[1])) continue;
-          keep.add(uid);
-          if (whoId && uid === whoId && v[1] === myEmail && INSTR_RE.test(v[4] || "")) selfInstr = true;
-          const o = oldR.get(k);
-          if (!o || !same(o.name, v[0]) || !same(o.email, v[1]) || !same(o.username, v[2]) || !same(o.org_id, v[3]) || !same(o.role, v[4])) rUp.push([ou, uid, ...v, t]);
+      let rosterDropped = false;
+      for (const ou of rosterDiff) {
+        const { keep, list, cut, hash } = norm.get(ou), g = [], up = [];
+        for (const [uid, ...v] of list) {
+          const o = oldR.get(ou + "\u0000" + uid);
+          if (!o || !same(o.name, v[0]) || !same(o.email, v[1]) || !same(o.username, v[2]) || !same(o.org_id, v[3]) || !same(o.role, v[4])) up.push([ou, uid, ...v, t]);
         }
+        rUp.push(...up);
         // A class list longer than the 3,000 read here is cut short: dropping "missing" students would then
         // remove real ones (and the gate could no longer admit them), so nobody is dropped for that course.
-        const cut = byOu.get(ou).classlist.length > 3000;
         const drop = cut ? [] : oldRoster.filter(r => String(r.ou) === ou && !keep.has(String(r.user_id))).map(r => String(r.user_id));
-        for (const part of chunk(drop, 98)) st.push(db.prepare(`DELETE FROM roster WHERE ou=? AND user_id IN (${placeholders(part.length)})`).bind(ou, ...part));
+        if (drop.length) rosterDropped = true;
+        for (const part of chunk(drop, 98)) g.push(db.prepare(`DELETE FROM roster WHERE ou=? AND user_id IN (${placeholders(part.length)})`).bind(ou, ...part));
+        g.push(...multiInsert(db, "INSERT INTO roster (ou,user_id,name,email,username,org_id,role,synced_at)", 8, up,
+          "ON CONFLICT(ou,user_id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,org_id=excluded.org_id,role=excluded.role,synced_at=excluded.synced_at"));
+        const gone = oldSnap.has(ou) ? db.prepare("DELETE FROM roster_snap WHERE ou=?").bind(ou) : null;
+        if (hash) g.push(db.prepare("INSERT INTO roster_snap (ou,hash,rows,at) VALUES (?,?,?,?) ON CONFLICT(ou) DO UPDATE SET hash=excluded.hash,rows=excluded.rows,at=excluded.at").bind(ou, hash, JSON.stringify(list.map(x => [x[0], x[1], x[2], x[3], x[5]])), t));
+        else if (gone) g.push(gone);    // cut list: no snapshot
+        if (g.length) group(g, gone);
       }
-      st.push(...multiInsert(db, "INSERT INTO roster (ou,user_id,name,email,username,org_id,role,synced_at)", 8, rUp,
-        "ON CONFLICT(ou,user_id) DO UPDATE SET name=excluded.name,email=excluded.email,username=excluded.username,org_id=excluded.org_id,role=excluded.role,synced_at=excluded.synced_at"));
       // Brightspace quizzes: same diff. bs_password_is_ours survives only while the quiz still has a password.
+      // Same grouping with the course's bsq_hash row.
       const oldQ = new Map(oldBq.map(r => [String(r.ou) + "\u0000" + String(r.qi), r]));
       const ownPw = new Set();   // quizzes that carry the professor's OWN Brightspace password (not ours)
-      for (const ou of withQuiz) {
-        const keep = new Set();
+      for (const ou of withQuiz) if (!quizDiff.includes(ou)) { let own = []; try { own = JSON.parse(oldQh.get(ou).own || "[]"); } catch {} for (const qi of own) ownPw.add(`${ou}-${qi}`); }
+      for (const ou of quizDiff) {
+        const keep = new Set(), g = [], up = [], own = [];
         for (const q of byOu.get(ou).quizzes.slice(0, 1000)) {
           if (!q || typeof q !== "object" || q.qi == null) continue;
           const qi = String(q.qi); if (keep.has(qi)) continue; keep.add(qi);
@@ -1944,15 +2032,29 @@ export async function onRequest(context) {
           // "LQ-" + 10 hex) is ours, never the professor's: e.g. a course copied from a term LOCKqz
           // protected keeps the old code, which nobody can hand out any more -> auto-protect replaces it.
           const v = [str(q.name), q.active ? 1 : 0, str(q.start, 40), str(q.end, 40), str(q.due, 40), q.has_password ? 1 : 0, (q.has_password && ((o && Number(o.bs_password_is_ours) === 1) || q.lq_password === true)) ? 1 : 0, overMinOf(q, ACCOM)];
-          if (v[5] === 1 && v[6] === 0) ownPw.add(`${ou}-${qi}`);
-          if (!o || !same(o.name, v[0]) || Number(o.active) !== v[1] || !same(o.start_date, v[2]) || !same(o.end_date, v[3]) || !same(o.due_date, v[4]) || Number(o.bs_has_password) !== v[5] || Number(o.bs_password_is_ours) !== v[6] || !same(o.over_min, v[7])) bUp.push([ou, qi, ...v, t]);
+          if (v[5] === 1 && v[6] === 0) { ownPw.add(`${ou}-${qi}`); own.push(qi); }
+          if (!o || !same(o.name, v[0]) || Number(o.active) !== v[1] || !same(o.start_date, v[2]) || !same(o.end_date, v[3]) || !same(o.due_date, v[4]) || Number(o.bs_has_password) !== v[5] || Number(o.bs_password_is_ours) !== v[6] || !same(o.over_min, v[7])) up.push([ou, qi, ...v, t]);
         }
+        bUp.push(...up);
         const drop = byOu.get(ou).quizzes.length > 1000 ? [] : oldBq.filter(r => String(r.ou) === ou && !keep.has(String(r.qi))).map(r => String(r.qi));
-        for (const part of chunk(drop, 98)) st.push(db.prepare(`DELETE FROM bs_quizzes WHERE ou=? AND qi IN (${placeholders(part.length)})`).bind(ou, ...part));
+        for (const part of chunk(drop, 98)) g.push(db.prepare(`DELETE FROM bs_quizzes WHERE ou=? AND qi IN (${placeholders(part.length)})`).bind(ou, ...part));
+        g.push(...multiInsert(db, "INSERT INTO bs_quizzes (ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours,over_min,synced_at)", 11, up,
+          "ON CONFLICT(ou,qi) DO UPDATE SET name=excluded.name,active=excluded.active,start_date=excluded.start_date,end_date=excluded.end_date,due_date=excluded.due_date,bs_has_password=excluded.bs_has_password,bs_password_is_ours=excluded.bs_password_is_ours,over_min=excluded.over_min,synced_at=excluded.synced_at"));
+        const gone = oldQh.has(ou) ? db.prepare("DELETE FROM bsq_hash WHERE ou=?").bind(ou) : null;
+        if (qNorm.get(ou)) g.push(db.prepare("INSERT INTO bsq_hash (ou,hash,own) VALUES (?,?,?) ON CONFLICT(ou) DO UPDATE SET hash=excluded.hash,own=excluded.own").bind(ou, qNorm.get(ou), JSON.stringify(own)));
+        else if (gone) g.push(gone);
+        if (g.length) group(g, gone);
       }
-      st.push(...multiInsert(db, "INSERT INTO bs_quizzes (ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours,over_min,synced_at)", 11, bUp,
-        "ON CONFLICT(ou,qi) DO UPDATE SET name=excluded.name,active=excluded.active,start_date=excluded.start_date,end_date=excluded.end_date,due_date=excluded.due_date,bs_has_password=excluded.bs_has_password,bs_password_is_ours=excluded.bs_password_is_ours,over_min=excluded.over_min,synced_at=excluded.synced_at"));
-      await runBatches(db, st);
+      const trustSame = rUp.length === 0 && !rosterDropped && tcRows.length === 0, idBefore = [!!me.verified, me.bs_user_id];
+      // Pack the groups into batches of <= 100 statements without splitting a group (a bigger one is split).
+      const batches = []; let cur = [];
+      for (const g of groups) {
+        if (cur.length && cur.length + g.length > 100) { batches.push(cur); cur = []; }
+        if (g.length > 100) { batches.push(...chunk(g, 100)); continue; }
+        cur.push(...g);
+      }
+      if (cur.length) batches.push(cur);
+      for (const b of batches) await db.batch(b);
       if (bUp.length) for (const ou of new Set(bUp.map(r => r[0]))) await liveBust(url.origin, ou);
       // VERIFY ONLY FROM A TRUSTED ROSTER -- a student can never become a professor. Verified iff the
       // account is VOUCHED (admin invite) AND a trusted roster lists this email as Instructor with the
@@ -1973,8 +2075,9 @@ export async function onRequest(context) {
       }
       // Re-check AFTER the writes: a professor syncing a course for the first time becomes its trusted
       // instructor only now (their course row + roster are in), so seed eviction must come after.
-      tiCache.clear();
-      const trusted = await trustedOus(A);
+      // Nothing this sync wrote can change who instructs what (no class-list or course row, same account
+      // state): the answer from before the writes stands (saves the second roster read).
+      const trusted = trustSame && idBefore[0] === !!me.verified && idBefore[1] === me.bs_user_id ? new Set(A.filter(o => trusted0.has(o))) : (tiCache.clear(), await trustedOus(A));
       const mineA = A.filter(o => trusted.has(o)), st2 = [];
       // A trusted owner syncing a course evicts any seed rows a non-trusted account left on it.
       for (const part of chunk(mineA, 98)) st2.push(db.prepare(`DELETE FROM teacher_courses WHERE ou IN (${placeholders(part.length)}) AND teacher_id<>? AND teacher_id<>'admin' AND teacher_id NOT IN (SELECT id FROM teachers WHERE role='admin' OR verified=1)`).bind(...part, me.id));
@@ -1985,14 +2088,16 @@ export async function onRequest(context) {
       const quizOus = mineA.filter(ou => Array.isArray(byOu.get(ou).quizzes));
       const paidSet = quizOus.length ? await paidOusFor(me, quizOus) : new Set();
       const autoOus = quizOus.filter(ou => paidSet.has(ou));
+      // The answer's protect/clear lists, read once: they also tell auto-protect which quizzes LOCKqz
+      // already holds, and are re-read at the end only if this request changed quizzes.
+      const pre = await bsState(mineA);
+      let add = [];
       if (autoOus.length) {
-        const seen = new Set();
-        for (const part of chunk(autoOus, 33)) {
-          const ph = placeholders(part.length);
-          (await db.prepare(`SELECT ou,qi FROM quizzes WHERE ou IN (${ph}) AND qi IS NOT NULL UNION SELECT ou,qi FROM pending_clear WHERE ou IN (${ph}) UNION SELECT ou,qi FROM lockqz_off WHERE ou IN (${ph})`).bind(...part, ...part, ...part).all())
+        const seen = new Set(), autoSet = new Set(autoOus);
+        for (const r of [...pre.protect, ...pre.clear]) if (autoSet.has(String(r.ou))) seen.add(String(r.ou) + "-" + String(r.qi));
+        for (const part of chunk(autoOus, 98))
+          (await db.prepare(`SELECT ou,qi FROM lockqz_off WHERE ou IN (${placeholders(part.length)})`).bind(...part).all())
             .results.forEach(r => seen.add(String(r.ou) + "-" + String(r.qi)));
-        }
-        const add = [];
         for (const ou of autoOus) for (const q of byOu.get(ou).quizzes.slice(0, 1000)) {
           const qi = String(q && q.qi || ""); if (!/^\d+$/.test(qi) || seen.has(`${ou}-${qi}`)) continue;
           if (ownPw.has(`${ou}-${qi}`)) continue;
@@ -2005,9 +2110,9 @@ export async function onRequest(context) {
       // Retention (H15) + D1 storage: bounded clean-up of old rows, at most ~1,000 rows per sync.
       st2.push(...purgeStmts());
       await runBatches(db, st2);
-      await releaseUnpaid(me);
+      const released = await releaseUnpaid(me);
       // Only hand back passwords for courses this caller instructs (never leak another course's).
-      return json({ ...(await bsState(mineA)), auto_gate: gateRequired() });
+      return json({ ...(add.length || released ? await bsState(mineA) : pre), auto_gate: gateRequired() });
     }
     if (p === "/sync-result" && request.method === "POST") {
       const list = (Array.isArray(body.results) ? body.results : []).slice(0, 1000).filter(r => r && typeof r === "object");
@@ -2178,13 +2283,26 @@ export async function onRequest(context) {
       for (const part of chunk(ownList, 98)) {
         const ph = placeholders(part.length);
         (await db.prepare(`SELECT ou,email,tools FROM assist WHERE ou IN (${ph})`).bind(...part).all().catch(() => ({ results: [] }))).results.forEach(a => assist.set(String(a.ou) + "|" + a.email, assistList(a.tools)));
-        roster.push(...(await db.prepare(`SELECT ou,user_id,name,email,username,role FROM roster WHERE ou IN (${ph}) ORDER BY name`).bind(...part).all()).results);
-        // Installed devices by email through devices(student) -- no scan of every device (I-B3).
-        devs.push(...(await db.prepare(`SELECT DISTINCT d.device_id, d.student AS who, d.platform, d.version, d.last_seen FROM roster r JOIN devices d ON d.student=r.email WHERE r.ou IN (${ph}) AND (d.student_verified=1 OR ?=0)`).bind(...part, codesOn ? 1 : 0).all()).results);
+        // Class lists from their snapshots (1 row per course, roster_snap); the roster table only for a
+        // course without one. Sorted by name here (ORDER BY name read every row twice).
+        const snaps = await rosterSnaps(part), rest = part.filter(o => !snaps.has(o));
+        const rows = part.flatMap(o => snaps.get(o) || []);
+        if (rest.length) rows.push(...(await db.prepare(`SELECT ou,user_id,name,email,username,role FROM roster WHERE ou IN (${placeholders(rest.length)})`).bind(...rest).all()).results);
+        rows.sort((a, b) => binCmp(a.ou, b.ou) || binCmp(a.user_id, b.user_id));
+        rows.sort((a, b) => binCmp(a.name, b.name));
+        roster.push(...rows.map(r => ({ ou: r.ou, user_id: r.user_id, name: r.name, email: r.email, username: r.username, role: r.role })));
+        // Installed devices by email through devices(student) -- no scan of every device (I-B3). Each
+        // distinct email once (the join read every class-list row of every course again).
+        const ems = [...new Set(rows.map(r => r.email).filter(e => e != null))];
+        if (ems.length) devs.push(...(await db.prepare(`SELECT d.device_id, d.student AS who, d.platform, d.version, d.last_seen FROM json_each(?) j JOIN devices d ON d.student=j.value WHERE (d.student_verified=1 OR ?=0)`).bind(JSON.stringify(ems), codesOn ? 1 : 0).all()).results);
         // Old installs that typed a name (only while email codes are off).
         if (!codesOn) devs.push(...(await db.prepare(`SELECT device_id, lower(student) AS who, platform, version, last_seen FROM devices WHERE lower(student) IN (SELECT lower(name) FROM roster WHERE ou IN (${ph}))`).bind(...part).all()).results);
       }
-      const qz = (await db.prepare(`SELECT b.ou,b.qi,b.name,b.active,b.start_date,b.end_date,b.due_date,b.bs_has_password,b.bs_password_is_ours,b.orig,q.password,q.lock_id,q.gated FROM bs_quizzes b LEFT JOIN quizzes q ON q.qi=b.qi AND q.ou=b.ou WHERE b.ou IN (${sub}) ORDER BY b.name`).bind(me.id).all()).results
+      // Two plain reads matched here (the LEFT JOIN + ORDER BY read ~4 rows per quiz).
+      const lq = new Map((await db.prepare(`SELECT ou,qi,password,lock_id,gated FROM quizzes WHERE ou IN (${sub}) AND qi IS NOT NULL`).bind(me.id).all()).results.map(q => [String(q.ou) + "\u0000" + String(q.qi), q]));
+      const bq = (await db.prepare(`SELECT ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours,orig FROM bs_quizzes WHERE ou IN (${sub})`).bind(me.id).all()).results;
+      bq.sort((a, b) => binCmp(a.name, b.name));
+      const qz = bq.map(b => { const q = lq.get(String(b.ou) + "\u0000" + String(b.qi)); return { ...b, password: q ? q.password : null, lock_id: q ? q.lock_id : null, gated: q ? q.gated : null }; })
         .map(q => own.has(String(q.ou)) ? withOrig(q) : withOrig({ ...q, orig: null, password: null, lock_id: null, gated: null }));
       const by = {}; devs.forEach(d => { (by[d.who] = by[d.who] || []).push(d); });
       const adminEmails = new Set(((await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin'").all()).results).map(x => x.e));
@@ -2260,7 +2378,16 @@ export async function onRequest(context) {
       const liveOut = await (async () => {
       const qc = col => exact ? { sql: `${col}=?`, args: [quiz] } : { sql: `${col}>=? AND ${col}<?`, args: [quiz + "-", quiz + "."] };
       const lc = qc("l.quiz_id"), ec = qc("e.quiz_id");
-      const locks = (await db.prepare(`SELECT l.device_id,l.quiz_id,l.last_lock,l.helper_seen,l.ext_seen,l.signed,l.ip,d.student,d.platform,d.student_verified FROM locks l LEFT JOIN devices d ON d.device_id=l.device_id WHERE ${lc.sql}`).bind(...lc.args).all()).results;
+      // Lock rows only: each carries its device's student/platform/student_verified (migrate_029). A row
+      // written before that copy existed (sv NULL) reads its device row instead, as before.
+      const locks = (await db.prepare(`SELECT l.device_id,l.quiz_id,l.last_lock,l.helper_seen,l.ext_seen,l.signed,l.ip,l.student,l.platform,l.sv AS student_verified,(l.sv IS NULL) AS nocopy FROM locks l WHERE ${lc.sql}`).bind(...lc.args).all()).results;
+      const noCopy = [...new Set(locks.filter(l => Number(l.nocopy) === 1).map(l => l.device_id))];
+      if (noCopy.length) {
+        const dm = new Map((noCopy.length <= 100
+          ? await db.prepare("SELECT device_id, student, platform, student_verified FROM devices WHERE device_id IN (SELECT value FROM json_each(?))").bind(JSON.stringify(noCopy)).all()
+          : await db.prepare(`SELECT d.device_id, d.student, d.platform, d.student_verified FROM locks l JOIN devices d ON d.device_id=l.device_id WHERE ${lc.sql} AND l.sv IS NULL`).bind(...lc.args).all()).results.map(d => [d.device_id, d]));
+        for (const l of locks) if (Number(l.nocopy) === 1) { const d = dm.get(l.device_id); l.student = d ? d.student : null; l.platform = d ? d.platform : null; l.student_verified = d ? d.student_verified : null; }
+      }
       // ONE pass over this quiz's events: tamper, developer-mode lock claims, and every unlock / gap.
       // Index events(quiz_id, event): only these event rows are read (course-wide: quiz_id range).
       const evs = (await db.prepare(`SELECT e.device_id,e.quiz_id,e.event,e.detail,e.ts,d.student,d.platform,d.student_verified FROM events e LEFT JOIN devices d ON d.device_id=e.device_id WHERE ${ec.sql} AND ${exact ? "e.event" : "+e.event"} IN ('tamper','dev_lock','unlock','auto_unlock','lock_gap') ORDER BY e.ts`).bind(...ec.args).all()).results;
@@ -2314,9 +2441,18 @@ export async function onRequest(context) {
       // The whole-course scan is a fallback only for old installs that typed a name (codes off).
       const whoList = [...new Set(rows.map(r => String(r.student||"").toLowerCase()).filter(Boolean))];
       const byMail = whoList.filter(w => w.includes("@"));
-      let rl = byMail.length ? (await db.prepare("SELECT email AS e, lower(name) AS n, lower(username) AS u, name AS display, user_id FROM roster WHERE email IN (SELECT value FROM json_each(?)) AND ou=?").bind(JSON.stringify(byMail), _ou0).all()).results : [];
-      if (!codesOn && whoList.some(w => !w.includes("@")))
-        rl = (await db.prepare("SELECT lower(email) AS e, lower(name) AS n, lower(username) AS u, name AS display, user_id FROM roster WHERE ou=?").bind(_ou0).all()).results;
+      // The course's class-list snapshot (1 row, see roster_snap) answers both; the roster table only
+      // when the course has no snapshot.
+      const wholeCourse = !codesOn && whoList.some(w => !w.includes("@"));
+      const snap = byMail.length || wholeCourse ? (await rosterSnaps([_ou0])).get(_ou0) : null;
+      let rl;
+      if (snap) { const want = new Set(byMail);
+        rl = snap.filter(x => wholeCourse || (x.email != null && want.has(x.email))).map(x => ({ e: wholeCourse ? sqlLower(x.email) : x.email, n: sqlLower(x.name), u: sqlLower(x.username), display: x.name, user_id: x.user_id })); }
+      else {
+        rl = byMail.length ? (await db.prepare("SELECT email AS e, lower(name) AS n, lower(username) AS u, name AS display, user_id FROM roster WHERE email IN (SELECT value FROM json_each(?)) AND ou=?").bind(JSON.stringify(byMail), _ou0).all()).results : [];
+        if (wholeCourse)
+          rl = (await db.prepare("SELECT lower(email) AS e, lower(name) AS n, lower(username) AS u, name AS display, user_id FROM roster WHERE ou=?").bind(_ou0).all()).results;
+      }
       const byEmail = {}, byName = {}, byUser = {};
       rl.forEach(x => { if (x.e) byEmail[x.e] = x; if (x.n) byName[x.n] = x; if (x.u) byUser[x.u] = x; });
       rows.forEach(r => {

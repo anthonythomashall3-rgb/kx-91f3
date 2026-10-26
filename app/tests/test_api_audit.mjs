@@ -88,7 +88,8 @@ check(`repeat sync <= ${MAXQ} queries`, r.status === 200 && r.q <= MAXQ, `q=${r.
 check("repeat sync with nothing changed writes ~0 rows", r.w <= 1, `rows written=${r.w}`);
 const c2 = bigCourses(true); c2[0].classlist[5].name = "Renamed Student"; c2[1].classlist.pop(); c2[2].quizzes[0].name = "Renamed quiz";
 r = await call("/sync", { whoami: { id: PID }, courses: c2 }, { teacher: BIG });
-check("a sync with 3 small changes writes only those rows", r.status === 200 && r.w <= 4, `rows written=${r.w}`);
+// + one bookkeeping row per changed course: its roster_snap / bsq_hash row (migrate_029: 2 class lists + 1 quiz list).
+check("a sync with 3 small changes writes only those rows", r.status === 200 && r.w <= 4 + 3, `rows written=${r.w}`);
 check("removed student is gone from the roster", !one("SELECT 1 FROM roster WHERE ou='70001' AND user_id=?", String(100000 + 1000 + NS - 1)));
 check("renamed student updated", one("SELECT name FROM roster WHERE ou='70000' AND user_id=?", c2[0].classlist[5].id)?.name === "Renamed Student");
 r = await call("/submitted", { ou: "70000", qi: "800000", user_ids: Array.from({ length: 300 }, (_, i) => String(500000 + i)) }, { teacher: BIG });

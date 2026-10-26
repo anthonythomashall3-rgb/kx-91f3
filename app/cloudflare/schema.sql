@@ -54,7 +54,9 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_dev_quiz ON events(device_id, quiz_id, event);   -- /password (migrate_022)
 CREATE INDEX IF NOT EXISTS idx_events_quiz_ev ON events(quiz_id, event);              -- /live, /sessions (migrate_022)
-CREATE INDEX IF NOT EXISTS idx_events_event_ts ON events(event, ts);   -- rate limits (login_fail, code_sent ...) (migrate_021)
+-- rate limits (login_fail, code_sent ...) (migrate_021). PARTIAL (migrate_029): only these rows are indexed, so a
+-- lock/unlock/install/password event writes one index row less; queries repeat the exact term (RL_EV in the API).
+CREATE INDEX IF NOT EXISTS idx_events_event_ts ON events(event, ts) WHERE event IN ('login_fail','pay_code_new','pay_start','pay_stripe','pay_bank','signup','stripe_sess','code_sent','code_send_failed','reset_request','email_verified');
 CREATE INDEX IF NOT EXISTS idx_events_released ON events(student, ts) WHERE event='password_released';   -- /password sharing check (migrate_028)
 
 -- Current live lock per device+quiz. last_lock is refreshed by lock + quiz-time
@@ -70,6 +72,9 @@ CREATE TABLE IF NOT EXISTS locks (
   signed    INTEGER DEFAULT 0, -- 1 = lock proven by a request signed with the device key
   ip        TEXT,              -- device IP at lock (used by the gate to restrict the quiz to locked IPs)
   locked_at TEXT,              -- when this lock began (migrate_023)
+  student   TEXT,              -- copy of devices.student / platform / student_verified (migrate_029):
+  platform  TEXT,              -- /live reads the lock rows alone (no devices join). Set by the lock
+  sv        INTEGER,           -- write itself and kept in step by the devices triggers below.
   PRIMARY KEY (device_id, quiz_id)
 );
 CREATE INDEX IF NOT EXISTS idx_locks_quiz ON locks(quiz_id);   -- live monitor (migrate_021)
@@ -155,3 +160,37 @@ CREATE TABLE IF NOT EXISTS pay_slots (term TEXT NOT NULL, cents INTEGER NOT NULL
 -- Assistive tools a professor allows one student during locked quizzes (OSAS accommodation), per
 -- course. tools = JSON list of keys from ASSIST_TOOLS ([[route]].js); a missing row = none.
 CREATE TABLE IF NOT EXISTS assist (ou TEXT NOT NULL, email TEXT NOT NULL, tools TEXT NOT NULL, by_teacher TEXT, at TEXT, PRIMARY KEY (ou, email));
+-- D1 row budget (migrate_029). roster_snap: one row per course = the class list exactly as the last
+-- Sync wrote it (hash of the normalized list + the rows as JSON). A repeat Sync with the same list skips
+-- the class-list read; /live and /bs read 1 row per course instead of every student. Any roster write a
+-- Sync did not make (/forget, a manual edit) deletes the course's row by trigger (below), and a missing
+-- row always falls back to the roster table.
+CREATE TABLE IF NOT EXISTS roster_snap (ou TEXT PRIMARY KEY, hash TEXT, rows TEXT, at TEXT) WITHOUT ROWID;
+-- bsq_hash: per course, the hash of the Brightspace quiz list the last Sync compared in full, and which
+-- quizzes then carried the professor's own password. Any other change to the compared bs_quizzes columns
+-- (/sync-result, date edits: they never set synced_at) deletes it by trigger; a Sync's own writes go in
+-- one transaction with the new hash. A matching hash therefore means bs_quizzes is unchanged.
+CREATE TABLE IF NOT EXISTS bsq_hash (ou TEXT PRIMARY KEY, hash TEXT, own TEXT) WITHOUT ROWID;
+CREATE TRIGGER IF NOT EXISTS trg_bsq_hash_ins AFTER INSERT ON bs_quizzes BEGIN DELETE FROM bsq_hash WHERE ou=NEW.ou; END;
+CREATE TRIGGER IF NOT EXISTS trg_bsq_hash_del AFTER DELETE ON bs_quizzes BEGIN DELETE FROM bsq_hash WHERE ou=OLD.ou; END;
+-- roster_snap: any class-list row written outside a Sync (a Sync's own writes always set synced_at, and
+-- write the new snapshot in the same transaction) deletes the course's snapshot.
+CREATE TRIGGER IF NOT EXISTS trg_roster_snap_ins AFTER INSERT ON roster BEGIN DELETE FROM roster_snap WHERE ou=NEW.ou; END;
+CREATE TRIGGER IF NOT EXISTS trg_roster_snap_upd AFTER UPDATE ON roster WHEN NEW.synced_at IS OLD.synced_at OR NEW.ou IS NOT OLD.ou
+  BEGIN DELETE FROM roster_snap WHERE ou IN (OLD.ou, NEW.ou); END;
+CREATE TRIGGER IF NOT EXISTS trg_roster_snap_del AFTER DELETE ON roster BEGIN DELETE FROM roster_snap WHERE ou=OLD.ou; END;
+-- /sync + /bs: the few quizzes with saved professor settings (partial: Sync upserts never touch it).
+CREATE INDEX IF NOT EXISTS idx_bsq_orig ON bs_quizzes(ou, qi) WHERE orig IS NOT NULL;
+-- Guard: on a database the migrations have not reached yet (locks without the copy columns, bs_quizzes
+-- without over_min) this fails,
+-- so the triggers below are never created before their columns exist (migrate_031_triggers.sql creates them then).
+SELECT student, platform, sv FROM locks LIMIT 0;
+SELECT over_min FROM bs_quizzes LIMIT 0;
+CREATE TRIGGER IF NOT EXISTS trg_bsq_hash_upd AFTER UPDATE OF ou, qi, name, active, start_date, end_date, due_date, bs_has_password, bs_password_is_ours, over_min ON bs_quizzes
+  WHEN NEW.synced_at IS OLD.synced_at
+  BEGIN DELETE FROM bsq_hash WHERE ou IN (OLD.ou, NEW.ou); END;
+CREATE TRIGGER IF NOT EXISTS trg_devices_locks_upd AFTER UPDATE OF student, platform, student_verified ON devices
+  WHEN NEW.student IS NOT OLD.student OR NEW.platform IS NOT OLD.platform OR COALESCE(NEW.student_verified,0) IS NOT COALESCE(OLD.student_verified,0)
+  BEGIN UPDATE locks SET student=NEW.student, platform=NEW.platform, sv=COALESCE(NEW.student_verified,0) WHERE device_id=NEW.device_id; END;
+CREATE TRIGGER IF NOT EXISTS trg_devices_locks_ins AFTER INSERT ON devices
+  BEGIN UPDATE locks SET student=NEW.student, platform=NEW.platform, sv=COALESCE(NEW.student_verified,0) WHERE device_id=NEW.device_id; END;
