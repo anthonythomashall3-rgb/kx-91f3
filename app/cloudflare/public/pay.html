@@ -53,7 +53,7 @@
 
   <section id="pay" hidden style="display:flex;flex-direction:column;gap:10px">
     <p class="muted" style="margin:0">How do you want to pay?</p>
-    <button class="way" id="zelle" type="button" hidden aria-expanded="false"><span class="wn"><b>Zelle</b><small>Lowest price · arrives in minutes</small></span><span class="wp" id="zamt">Zelle</span></button>
+    <button class="way" id="zelle" type="button" hidden aria-expanded="false"><span class="wn"><b>Zelle</b></span><span class="wp" id="zamt">Zelle</span></button>
     <div class="zsteps" id="zsteps" hidden>
       <div id="ztax"></div>
       <ol>
@@ -66,25 +66,25 @@
       </ol>
       <p class="warn">No memo = LOCKqz can't tell the payment is yours.</p>
     </div>
-    <button class="way" id="bank" type="button" hidden aria-expanded="false"><span class="wn"><b>Bank transfer (ACH / wire)</b><small>1–3 business days</small></span><span class="wp" id="bto"></span></button>
+    <button class="way" id="bank" type="button" hidden aria-expanded="false"><span class="wn"><b>Bank transfer (ACH / wire)</b></span><span class="wp" id="bto"></span></button>
     <div class="zsteps" id="bpanel" hidden>
       <div id="btax"></div>
       <button class="btn prime" id="bsend" type="button" style="width:100%">Email me the bank details</button>
       <p class="muted" id="bmsg" style="margin:10px 0 0">LOCKqz emails you the account, amount and memo right away. Access turns on by itself when the money arrives.</p>
     </div>
-    <button class="way" id="venmo" type="button" hidden aria-expanded="false"><span class="wn"><b>Venmo</b><small>Memo filled in for you</small></span><span class="wp" id="vamt"></span></button>
+    <button class="way" id="venmo" type="button" hidden aria-expanded="false"><span class="wn"><b>Venmo</b></span><span class="wp" id="vamt"></span></button>
     <div class="zsteps" id="vpanel" hidden>
       <div id="vtax"></div>
       <a class="btn prime" id="vgo" href="#" target="_blank" rel="noopener">Open Venmo</a>
     </div>
-    <button class="way" id="card" type="button" hidden aria-expanded="false"><span class="wn"><b>Card</b><small>Debit or credit · instant</small></span><span class="wp" id="camt"></span></button>
+    <button class="way" id="card" type="button" hidden aria-expanded="false"><span class="wn"><b>Card</b></span><span class="wp" id="camt"></span></button>
     <div class="zsteps" id="cpanel" hidden>
       <div id="ctax"></div>
       <button class="btn prime" id="cgo" type="button" style="width:100%">Pay by card</button>
     </div>
     <button class="btn" id="ach" type="button" hidden style="background:#fff;border:1px solid #ccc"></button>
     <p class="muted" id="achwait" hidden>Bank payment pending · about 4 business days</p>
-    <button class="way" id="po" type="button" hidden aria-expanded="false"><span class="wn"><b>Purchase order (PO)</b><small>For a department paying for you</small></span><span class="wp" id="poamt"></span></button>
+    <button class="way" id="po" type="button" hidden aria-expanded="false"><span class="wn"><b>Purchase order (PO)</b></span><span class="wp" id="poamt"></span></button>
     <div class="zsteps" id="ppanel" hidden>
       <div id="ptax"></div>
       <a class="btn prime" id="pgo" href="#">Email the PO</a>
@@ -97,8 +97,9 @@
     <button class="btn" id="again" type="button" style="background:#fff;border:1px solid #ccc">Check again</button>
   </section>
 
-  <p class="ok" id="done" hidden>Paid ✓</p>
+  <p class="ok" id="done" hidden>Thank you — you’re paid ✓</p>
   <p class="muted" id="untilp" hidden>Access until <span id="until"></span></p>
+  <p class="muted" id="keep" hidden>Keep LOCKqz installed on the computer you take your exams on — if you remove it, your protected quizzes won’t open.</p>
   <p id="renewp" hidden><button class="link" id="renew" type="button"></button></p>
   <p class="ok" id="free" hidden>No payment needed yet</p>
   <p class="muted" id="err" hidden></p>
@@ -110,7 +111,7 @@ const lqL = (m, e, o) => typeof lqLoading === "function" ? lqLoading(m, e, o) : 
 const API = /\.pages\.dev$/.test(location.hostname) ? "https://lockqz.pages.dev/api" : "/api", $ = id => document.getElementById(id);
 const money = n => "$" + Number(n).toLocaleString("en-US");
 const money2 = n => "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: Number(n) % 1 ? 2 : 0, maximumFractionDigits: 2 });
-let WAYS = null, TAX = null, PICKED = null, VENMO = null, PO = null;
+let WAYS = null, TAX = null, PICKED = null, VENMO = null, PO = null, PAYING = false;
 const PANEL = { zelle: "zsteps", bank: "bpanel", venmo: "vpanel", card: "cpanel", po: "ppanel" }, TAXBOX = { zelle: "ztax", bank: "btax", venmo: "vtax", card: "ctax", po: "ptax" };
 // "LOCKqz $180 / Tax & fees (25%) $60 / Total $240" for one way.
 function taxLine(w){ if (!w) return "";
@@ -148,10 +149,10 @@ function stopPoll(){ clearTimeout(poll); poll = null; }
 function schedule(){ stopPoll();
   if (document.visibilityState === "hidden") return;
   if (Date.now() - since > 15 * 60000) { $("wait").textContent = "Paid already? Check again."; return; }
-  if (!/lqload/.test($("wait").innerHTML || "")) $("wait").innerHTML = WAITING();
+  if (!PAYING) { $("wait").innerHTML = ""; } else if (!/lqload/.test($("wait").innerHTML || "")) $("wait").innerHTML = WAITING();
   poll = setTimeout(check, Math.min(60000, 10000 * Math.pow(1.5, polls++))); }
 const WAITING = () => lqL("Processing your payment", "This should take no longer than a minute");
-function startPoll(){ polls = 0; since = Date.now(); $("wait").innerHTML = WAITING(); schedule(); }
+function startPoll(){ polls = 0; since = Date.now(); $("wait").innerHTML = PAYING ? WAITING() : ""; schedule(); }
 function showGot(got, due, paidMoney){ got = Number(got) || 0; $("got").hidden = !(got > 0); if (!(got > 0)) return;
   $("got").textContent = WAYS && TAX ? "Received " + money2(paidMoney ?? got) + " · " + money2(WAYS[PICKED || "zelle"].total) + " left" + (PICKED ? "" : " by Zelle") : "Received " + money(got) + " of " + money(due); }
 async function check(){
@@ -184,12 +185,12 @@ async function start(email){
   if (d.zelle) {
     $("zcode").textContent = d.code; $("zto").textContent = d.zelle;
     $("zelle").onclick = () => pick("zelle");
-    $("zcopy").onclick = async () => { await copy(d.code); $("zcopy").textContent = "Memo copied ✓  " + d.code; };
+    $("zcopy").onclick = async () => { PAYING = true; startPoll(); await copy(d.code); $("zcopy").textContent = "Memo copied ✓  " + d.code; };
     $("zcopyto").onclick = async () => { await copy(d.zelle); $("zcopyto").textContent = "Copied ✓"; }; $("zelle").hidden = false; }
-  if (d.bank) { $("bank").onclick = () => pick("bank"); $("bsend").onclick = () => bankDetails(email); $("bank").hidden = false; }
-  if (d.venmo) { VENMO = d.venmo; $("venmo").onclick = () => pick("venmo"); $("venmo").hidden = false; }
+  if (d.bank) { $("bank").onclick = () => pick("bank"); $("bsend").onclick = () => { PAYING = true; bankDetails(email); startPoll(); }; $("bank").hidden = false; }
+  if (d.venmo) { VENMO = d.venmo; $("venmo").onclick = () => pick("venmo"); $("vgo").addEventListener("click", () => { PAYING = true; startPoll(); }); $("venmo").hidden = false; }
   if (d.stripe) {
-    $("card").onclick = () => pick("card"); $("cgo").onclick = () => stripe(email, "card", $("cgo")); $("card").hidden = false;
+    $("card").onclick = () => pick("card"); $("cgo").onclick = () => { PAYING = true; stripe(email, "card", $("cgo")); }; $("card").hidden = false;
     $("ach").textContent = "Bank account " + money(d.stripe.bank); $("ach").onclick = () => stripe(email, "bank", $("ach")); $("ach").hidden = !d.stripe.bank;
   }
   if (d.po) { PO = { to: d.po, email }; $("po").onclick = () => pick("po"); $("po").hidden = false; }
@@ -209,7 +210,7 @@ async function stripe(email, method, btn){
   if (d.url) { location.href = d.url; return; }
   b.disabled = false; b.textContent = t; $("err").textContent = d.error || "Try again."; $("err").hidden = false;
 }
-function paid(){ stopPoll(); who = null; $("f").hidden = true; $("pay").hidden = true; $("done").hidden = false;
+function paid(){ stopPoll(); PAYING = false; who = null; $("f").hidden = true; $("pay").hidden = true; $("done").hidden = false; $("keep").hidden = false;
   if (UNTIL) { $("until").textContent = new Date(UNTIL + "T12:00:00").toLocaleDateString("en-US", { month:"long", day:"numeric", year:"numeric" }); $("untilp").hidden = false; } }
 let UNTIL = null;
 function renewUi(email, on){ $("renew").textContent = on === false ? "Turn renewal emails on" : "Stop renewal emails"; $("renewp").hidden = false;
@@ -220,6 +221,7 @@ $("f").addEventListener("submit", e => { e.preventDefault(); start($("em").value
 const qs = new URLSearchParams(location.search), q = qs.get("email");
 (async () => {
   if (q && qs.get("renew") === "off") try { await fetch(API + "/pay/renew", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ email: q.trim().toLowerCase(), on: false }) }); } catch {}
+  if (qs.get("stripe")) PAYING = true;
   if (q) { $("em").value = q; start(q.trim().toLowerCase()); }
 })();
 </script>

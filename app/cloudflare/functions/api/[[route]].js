@@ -701,7 +701,8 @@ export async function onRequest(context) {
     if (slot && zelleUnique() && feeOn() && stuZelle() && email) { const st = await studentStatus(email); if (!st.paid && !(st.received > 0)) zelle_amount = await zelleAmount(code, st.term); }
     const got = email ? (await studentStatus(email)).received : 0;
     const due = Math.round(STUDENT_FEE * 100) - Math.round(got * 100);
-    return { amount: STUDENT_FEE, code, venmo: stuVenmo(), zelle: stuZelle(), bank: stuBank(), po: stuBank(), zelle_amount, stripe: stripeInfo("student", due),
+    const cardOnly = String(env.STUDENT_CARD_ONLY||"") === "1" && stripeOn();   // students: card only, once Stripe is configured
+    return { amount: STUDENT_FEE, code, venmo: cardOnly ? null : stuVenmo(), zelle: cardOnly ? null : stuZelle(), bank: cardOnly ? null : stuBank(), po: null, zelle_amount: cardOnly ? null : zelle_amount, stripe: stripeInfo("student", due),
              tax: taxInfo(), ways: taxOn() ? waysFor("student", Math.max(0, STUDENT_FEE - got)) : null, bank_auto: true,
              url: PAY_URL + (email ? "?email=" + encodeURIComponent(String(email).toLowerCase()) : "") };
   }

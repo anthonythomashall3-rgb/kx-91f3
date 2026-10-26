@@ -102,7 +102,7 @@ const paidNow = async email => { const st = (await call(ON, "/pay/start", { emai
 await call(OFF, "/signup", { email: "admin@usc.edu", password: "adminpass1" });   // first account = admin
 console.log("S1 Stripe off: no card option, route refuses");
 let r = await call(OFF, "/pay/start", { email: "al@usc.edu" });
-check("no stripe block when keys missing", r.data?.stripe === null && r.data?.po === "pay@usc.edu", JSON.stringify(r.data));
+check("no stripe block when keys missing; no student PO", r.data?.stripe === null && r.data?.po === null, JSON.stringify(r.data));
 check("/pay/stripe 503 when off", (await call(OFF, "/pay/stripe", { email: "al@usc.edu", method: "card" })).status === 503);
 
 console.log("S2 Stripe on: student sees Card $200 + Bank $181.45 (nets $180)");
