@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- (none)
+- 2026-10-26 03:55 PT — 01KwFxq1: Stripe card ($200 student / $5,150 professor) + Stripe bank (ACH) + PO/invoice on pay page; files: app/cloudflare/functions/api/[[route]].js (pay/stripe routes only), app/cloudflare/public/pay.html, wrangler.toml, new test
 
 ## Recently finished
 - 2026-10-26 04:20 PT — 01S7QxVq: v0.4.9. REQUIRE_GATE=1: the Sync tab gates every protected quiz by itself (from 1 h before start; no LOCKqz requests until 2 min before; 30 s rounds while nobody is locked in); /password gives no password for an ungated protected quiz until it ends (reason gate_off, agents explain) and emails the professor once an hour to open Sync. test_sync_gate S7.
