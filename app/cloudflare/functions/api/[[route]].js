@@ -540,7 +540,6 @@ export async function onRequest(context) {
       "line_items[0][price_data][product_data][name]": `LOCKqz ${kind === "student" ? "student" : "professor"} · ${({1:"Spring",2:"Summer",3:"Fall"})[String(term).slice(4)] || ""} ${String(term).slice(0,4)}`.trim(),
       client_reference_id: code, "metadata[code]": code, "metadata[kind]": kind, "metadata[term]": String(term),
       "payment_intent_data[metadata][code]": code, "payment_intent_data[description]": "LOCKqz " + code,
-      "custom_text[submit][message]": "All payments are final. No refunds or cancellations.",
       success_url: back + (back.includes("?") ? "&" : "?") + "stripe=" + method, cancel_url: back });
     if (email) f.set("customer_email", email);
     const r = await fetch("https://api.stripe.com/v1/checkout/sessions", { method: "POST", body: f,

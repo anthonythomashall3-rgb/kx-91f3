@@ -232,8 +232,7 @@ console.log("S13 Stripe bank is OFF by default (ACH can be returned); STRIPE_BAN
   check("default: no Stripe bank option, card only", r.data?.stripe?.bank === null && r.data.stripe.card === 200, JSON.stringify(r.data?.stripe));
   const wt = readFileSync(join(CF, "wrangler.toml"), "utf8");
   check("wrangler.toml ships STRIPE_BANK = \"0\"", /^STRIPE_BANK = "0"$/m.test(wt)); }
-check("checkout says payments are final", sessions.some(x => x.f.get("custom_text[submit][message]") === "All payments are final. No refunds or cancellations."));
-check("pay page + dashboard say final, and show no cancel/refund control", /All payments are final/.test(readFileSync(join(CF, "public", "pay.html"), "utf8")) && /All payments are final/.test(readFileSync(join(CF, "public", "dashboard.html"), "utf8")) && !/\/pay\/(cancel|refund)/.test(readFileSync(join(CF, "public", "pay.html"), "utf8") + readFileSync(join(CF, "public", "dashboard.html"), "utf8")));
+check("no cancel/refund control on the pay page or dashboard", !/\/pay\/(cancel|refund)/.test(readFileSync(join(CF, "public", "pay.html"), "utf8") + readFileSync(join(CF, "public", "dashboard.html"), "utf8")));
 console.log("S13 STRIPE_BANK=0 hides the Stripe bank option");
 r = await call({ ...ON, STRIPE_BANK: "0" }, "/pay/start", { email: "gus@usc.edu" });
 check("bank null, card still there", r.data?.stripe?.bank === null && r.data.stripe.card === 200, JSON.stringify(r.data?.stripe));

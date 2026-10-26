@@ -45,7 +45,7 @@ Prices: students $180/semester, professors $5,000/semester.
 - **Stripe = automatic access:** card → webhook in seconds → access (the app re-checks every 15 s).
   Professors' accounts turn on by themselves at $5,000.
 - **No cancelling:** there is no cancel/refund control anywhere in LOCKqz (only the admin can void).
-  Checkout, pay page and dashboard say "All payments are final. No refunds or cancellations." If money is
+  No final-sale text is shown on any page (Anthony's call, 26 Oct). If money is
   pulled back anyway (card chargeback, refund, failed/returned payment), the Stripe webhook voids the
   payment: students lose access at once, a professor's payment-given activation is turned off.
   Same when the admin voids a Zelle/bank payment by hand.

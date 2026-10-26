@@ -530,7 +530,7 @@ function renderPay(){ const d=PAY, el=$("pay"); if(!el||!d) return;
       ${d.invoice ? `<a class="btn" style="text-align:center;display:flex;align-items:center;justify-content:center" href="mailto:${esc(d.invoice)}?subject=${encodeURIComponent("LOCKqz invoice "+d.memo)}&body=${encodeURIComponent("Please send an invoice for LOCKqz, "+termName(d.term)+", "+money(total)+".")}">Bank transfer (ACH / wire)</a>` : ""}
       ${d.po ? `<a class="btn" style="text-align:center;display:flex;align-items:center;justify-content:center" href="mailto:${esc(d.po)}?subject=${encodeURIComponent("LOCKqz purchase order "+d.memo)}&body=${encodeURIComponent("PO number:\nBilling contact:\nAmount: "+money(total)+"\nTerm: "+termName(d.term)+"\nMemo: "+d.memo)}">Purchase order (PO)</a>` : ""}
       ${!d.zelle && !link && !d.invoice ? `<p style="margin:0">Pay ${money(total)} to the LOCKqz admin.</p>` : ""}
-    </div><p class="muted" style="margin:0">Memo: <b>${esc(note)}</b> · All payments are final. No refunds or cancellations.</p>
+    </div><p class="muted" style="margin:0">Memo: <b>${esc(note)}</b></p>
     ${lqL("Processing your payment", "This should take no longer than a minute")}
     ${d.sections.length && usc ? `<details><summary class="muted">Not your sections?</summary>${nameBox}</details>` : ""}
   </section>`; }
