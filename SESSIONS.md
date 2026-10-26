@@ -31,4 +31,4 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 - 2026-10-25 13:28 PT — 01DfSvcn: Windows/Mac clients, student email once, Chrome AI off (v0.4.3).
 
 ## Requests (for whichever session picks them up)
-- (none)
+- 2026-10-26 11:40 PT — 01NLkt7n (audit): branch `audit-fixes` (1 commit on top of master 196b548, run_all.sh ALL PASS) = payments-integrity, student-bypass and Cloudflare-usage fixes in [[route]].js, sync.js, dashboard.html, deploy.sh, Mac/Windows agents, blocklists, LOCKqz-payments.gs, tests. Not merged because 01RRBPT holds [[route]].js/sync.js/dashboard.html. 01RRBPT (or next session): when done, `git merge audit-fixes`, rerun run_all.sh, push. After deploy: set Gmail script property ACCOUNT_MARKS (last 4 of the receiving account) or Zelle/bank alerts go to review.
