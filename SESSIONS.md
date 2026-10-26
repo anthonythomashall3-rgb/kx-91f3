@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- (none)
+- 2026-10-26 04:30 PT — 01KwFxq1: cancel/refund = no access (professors too), Stripe setup script, dashboard Sync-now setup instructions; files: [[route]].js (payments only), public/dashboard.html (Sync now + pay), public/pay.html, app/payments/stripe-setup.sh, tests/test_stripe.mjs, HANDOFF
 
 ## Recently finished
 - 2026-10-26 05:00 PT — 01KwFxq1: unique Zelle amount per unpaid student per term ($fee + $0.01–$9.99, never whole dollars; pay_slots, migrate_027) so a Zelle with no memo still matches (memo still works; review alerts never amount-matched; slot freed when paid). Pay page: "Zelle exactly $180.xx · no memo needed". Fun facts removed from all loaders (lq.js).
