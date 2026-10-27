@@ -352,3 +352,78 @@ chatllm.abacus.ai
 anakin.ai
 notegpt.io
 perchance.org/ai-chat
+
+# Audit 27 Oct 2026 (Anthony: AI inside other apps + more workarounds). An AI built into another app
+# (Claude for Excel, Copilot in Word/Excel/PowerPoint/Outlook, editor assistants, Raycast AI ...) still has
+# to reach its provider over the network: these are the provider / back-end hosts such add-ins call.
+# Microsoft Copilot inside Office (Augmentation Loop service) + Bing's Copilot Search page
+augloop.office.com
+bing.com/copilotsearch
+# search engines' AI chat pages (the search itself stays open)
+duckduckgo.com/aichat
+kagi.com/assistant
+# Brave Leo (the browser's AI; its back end)
+ai-chat.bsg.brave.com
+# editor AI back ends (the editors keep working for code notes; only their AI is cut)
+llm.zed.dev
+cloud.zed.dev
+tabnine.com
+supermaven.com
+grazie.ai
+grazie.aws.intellij.net
+codewhisperer.us-east-1.amazonaws.com
+q.us-east-1.amazonaws.com
+# cloud model endpoints that apps and scripts call directly (Azure OpenAI / AI Foundry, Vertex AI,
+# Bedrock, Hugging Face inference, more hosted-model providers)
+openai.azure.com
+services.ai.azure.com
+aiplatform.googleapis.com
+bedrock-runtime.us-east-1.amazonaws.com
+bedrock-runtime.us-west-2.amazonaws.com
+api-inference.huggingface.co
+llama-api.com
+api.lepton.ai
+siliconflow.cn
+siliconflow.com
+ark.cn-beijing.volces.com
+proxy.runpod.net
+modal.run
+baseten.co
+api.studio.nebius.com
+inference.friendli.ai
+# Raycast AI back end (the Raycast app is also closed on the Mac; this covers every platform)
+backend.raycast.com
+# more chat / companion / document AIs
+replika.com
+qwenlm.ai
+askyourpdf.com
+humata.ai
+pdf.ai
+# more homework solvers (same rule as symbolab / mathway / photomath)
+bartleby.com
+numerade.com
+socratic.org
+wolframalpha.com
+# more AI writers and "humanizers"
+deepl.com/write
+writer.com
+sudowrite.com
+textcortex.com
+humbot.ai
+bypassgpt.ai
+gptinf.com
+netus.ai
+# AI app builders (they answer questions while "building")
+base44.com
+emergent.sh
+same.new
+create.xyz
+a0.dev
+rork.com
+tempolabs.ai
+databutton.com
+softgen.ai
+# more AI browser-extension back ends (Firefox / Safari, where extensions stay on)
+wiseone.io
+compose.ai
+tinamind.com

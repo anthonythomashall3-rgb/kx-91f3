@@ -111,6 +111,19 @@ const need2 = ["gauthmath.com","questionai.com","studyx.ai","brainly.com","chegg
 const miss2 = need2.filter(d => !mac.includes(d));
 miss2.length === 0 ? ok(`all ${need2.length} round-2 entries present`) : bad("missing: " + miss2.join(", "));
 
+console.log("T13 27 Oct audit: AI inside other apps (Office Copilot back end, editor AIs, cloud model endpoints), more solvers / writers / extension back ends");
+const need3 = ["augloop.office.com","bing.com/copilotsearch","duckduckgo.com/aichat","ai-chat.bsg.brave.com","llm.zed.dev","tabnine.com",
+  "codewhisperer.us-east-1.amazonaws.com","openai.azure.com","aiplatform.googleapis.com","bedrock-runtime.us-east-1.amazonaws.com",
+  "api-inference.huggingface.co","backend.raycast.com","wolframalpha.com","numerade.com","deepl.com/write","humbot.ai","base44.com","wiseone.io"];
+const miss3 = need3.filter(d => !mac.includes(d));
+miss3.length === 0 ? ok(`all ${need3.length} 27-Oct entries present`) : bad("missing: " + miss3.join(", "));
+// the engines close a phone's screen shown on the computer (its apps and its network bypass the hosts block)
+const macXb = readFileSync(join(DIR, "../mac/extra-block.sh"), "utf8"), winEng = readFileSync(join(DIR, "../windows/lockqz.ps1"), "utf8");
+macXb.includes('"iPhone Mirroring"') ? ok("mac closes iPhone Mirroring during a quiz") : bad("mac: iPhone Mirroring not in REMOTE_APPS");
+winEng.includes('"PhoneExperienceHost"') ? ok("windows closes Phone Link during a quiz") : bad("windows: PhoneExperienceHost not in RemoteApps");
+const macAi = readFileSync(join(DIR, "../mac/lockqz.sh"), "utf8");
+['"Grok"','"Kimi"','"Qwen"','"Microsoft 365 Copilot"'].every(a => macAi.includes(a)) ? ok("mac closes the Grok / Kimi / Qwen / M365 Copilot apps") : bad("mac AI_APPS missing a 27-Oct app");
+
 console.log("T12 browser filters stay under their 1000-entry limits (Chromium URLBlocklist, Firefox WebsiteFilter)");
 const est = hostsE.length + 2 * pathsE.length + 20;
 est < 900 ? ok(`~${est} entries per browser list (limit 1000, room left for a school's own)`) : bad(`~${est} entries: too close to 1000`);

@@ -5,6 +5,39 @@ rules: pull --rebase, claim in SESSIONS.md, `bash app/tests/run_all.sh` before e
 commit as `Claude <noreply@anthropic.com>`). The claude.ai Project "LOCKqz" has the same handoff
 (`claude/LOCKqz-HANDOFF.md`) plus topic docs (`claude/LOCKqz-payments.md` and others).
 
+## 27 Oct 2026 — AI inside other apps + student workarounds audit (session 01UzHDaF)
+- **How an in-app AI is stopped** (Claude for Excel, Copilot in Word/Excel/PowerPoint/Outlook, editor assistants,
+  Raycast AI, any add-in): it must reach its provider over the network, and the hosts block (IPv4 + IPv6) routes
+  those hosts nowhere during a quiz. 59 hosts added (blocklist.txt x2 + AI_DOMAINS in [[route]].js; test T13):
+  Office Copilot's back end `augloop.office.com`, Bing Copilot Search, DuckDuckGo / Kagi AI pages, Brave Leo,
+  Zed / Tabnine / Supermaven / JetBrains / Amazon Q back ends, cloud model endpoints (Azure OpenAI + AI Foundry,
+  Vertex AI, Bedrock, HF inference, SiliconFlow, Volcano Ark, RunPod, Modal, Baseten, Nebius, Friendli, Lepton,
+  llama-api), Raycast, more chat/PDF AIs, solvers (WolframAlpha, Numerade, Bartleby, Socratic), writers /
+  humanizers, app builders, extension back ends. `substrate.office.com` deliberately NOT blocked (Outlook search).
+- **Phone screen on the computer:** iPhone Mirroring (Mac) and Phone Link (Windows) show the phone's own AI apps on
+  the laptop screen over the phone's network, past every block -> now closed at lock (REMOTE_APPS / $RemoteApps),
+  with Screens, NoMachine, Zoho Assist. Grok / Kimi / Qwen / Microsoft 365 Copilot desktop apps added to AI_APPS.
+- **Already covered (verified this audit, no change needed):** Google AI Mode (`udm=50`) is rewritten to plain web
+  results by the agent + Chromium/Firefox policies; AI Overviews cannot be removed without blocking Google search
+  (left open by design); DoH/DoT, Tor, VPNs, system proxies, VMs, remote desktop, overlays, local models (apps +
+  ports), Apple Intelligence, Gemini in Workspace (`appsgenaiserver-pa.*` blocked).
+- **Known narrow gaps (honest list):**
+  1. *Warm connection:* an app LOCKqz does not close (Office, Notion, Slack ...) that already holds an open
+     keep-alive HTTPS connection to an AI host when the quiz opens can reuse it until the server idles it out
+     (minutes). Browsers' AI tabs are blanked and AI apps killed, so this only applies to AI embedded in a kept-open
+     app, and only if the student pre-warmed it right before opening the quiz. Blocking the resolved IPs is NOT an
+     option (Cloudflare/Google anycast = would black out half the web incl. Brightspace/LOCKqz); killing Office's
+     WebKit networking helpers was judged too risky for a live exam. Accepted.
+  2. *AI in a host we cannot isolate:* Notion AI (notion.so), Google AI Overviews on ordinary search, AI replies
+     inside messaging apps (WhatsApp / Telegram / Discord bots) - blocking the host would block the notes / search /
+     app itself. Human help over messaging is out of scope by design (LOCKqz blocks AI, not people).
+  3. *An SSH `-D` SOCKS tunnel* set as a per-app proxy (CLI-level): system/browser proxies are forced off, so only a
+     hand-configured tool is affected; outbound 22 is not blocked (would break git/ssh). Admin-equivalent effort.
+  4. The inherent ones: admin on their own laptop, a second device / phone, booting another OS. Only managed
+     laptops or live proctoring close these (stated on the professor side).
+- Tests: test_blocklist T13 (new hosts + the phone-mirroring kills), test_windows_lint; test_update.sh now waits for
+  its two async lines instead of racing them (it flaked only under full-suite load).
+
 ## 27 Oct 2026 — student card auto-renew + download-page gear (session 01UzHDaF)
 - **Card renews EVERY term (Fall, Spring AND Summer).** Student Checkout saves the card (Customer +
   `setup_future_usage=off_session`, no Stripe Billing). Table `card_renew` (migrate_033). `/pay/tick` (Gmail script,

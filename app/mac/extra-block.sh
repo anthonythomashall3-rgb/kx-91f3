@@ -12,7 +12,8 @@ VM_APPS=("Parallels Desktop" "prl_vm_app" "UTM" "VirtualBox" "VirtualBoxVM" "VBo
 REMOTE_APPS=("TeamViewer" "AnyDesk" "RustDesk" "remoting_host" "chrome_remote_desktop" \
              "ScreenConnect" "ConnectWiseControl" "LogMeIn" "Splashtop" "SplashtopStreamer" \
              "RealVNC" "vncserver" "TigerVNC" "jump" "Jump Desktop" "GoToMyPC" "Parsec" "Moonlight" \
-             "Screen Sharing" "Microsoft Remote Desktop" "Windows App" "Chrome Remote Desktop Host")
+             "Screen Sharing" "Microsoft Remote Desktop" "Windows App" "Chrome Remote Desktop Host" \
+             "iPhone Mirroring" "Screens" "Screens 5" "NoMachine" "Zoho Assist")   # iPhone Mirroring = the phone's apps (and its network) on the Mac screen
 OVERLAY_APPS=("Cluely" "Interview Coder" "InterviewCoder" "LockedIn AI" "LockedInAI" "Final Round" \
               "FinalRound" "Ohmni" "Sensei" "Leetcode Wizard" "UltraCode" "ExamShield helper" "Pieces")
 LOCAL_MODEL_PROCS=("ollama" "llama-server" "llama-cli" "llama-run" "llama_cpp" "llamafile" "koboldcpp" \

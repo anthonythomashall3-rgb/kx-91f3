@@ -94,7 +94,9 @@ wait_log "$D" "installed (3 files)" && ok "update applied (log)" || bad "no 'ins
 grep -q '^VERSION = "9.9.9"' "$D/lockqzd.py" && ok "lockqzd.py replaced by the new version" || bad "lockqzd.py not replaced"
 [ -x "$D/new-tool.sh" ] && ok "new file added and executable" || bad "new file missing or not executable"
 [ ! -d "$D/.update" ] && ok "staging folder cleaned" || bad "staging folder left behind"
-grep -q "would restart" "$D/daemon.log" && ok "restart requested (dry-run)" || bad "no restart"
+# the restart line and the server report land a moment after "installed": wait for them (up to 10 s), never race them
+wait_log "$D" "would restart" && ok "restart requested (dry-run)" || bad "no restart"
+for i in $(seq 1 40); do grep -q '"event": "update"' "$TMP/posts.log" 2>/dev/null && break; sleep 0.25; done
 grep -q '"event": "update"' "$TMP/posts.log" && ok "update reported to the server" || bad "update not reported"
 grep -q '"to": "9.9.9"' "$TMP/posts.log" && ok "report names the new version" || bad "report lacks new version"
 grep -q '"device_id": "utest-dev"' "$D/config.json" && [ -f "$D/device.key" ] && ok "config and device key untouched" || bad "identity files changed"
