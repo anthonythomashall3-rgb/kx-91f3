@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- (none)
+- 2026-10-27 10:30 PT — 01UzHDaF: professor browser extension (new app/extension-prof/), dashboard connect page + bookmark detection, Stripe student subscription + cancel, download-page settings/account menu. Touches: [[route]].js (Stripe, /account, /ext), index.html, pay.html, dashboard.html, sync.js (small hook), wrangler.toml, new migrate_033, tests.
 
 ## Recently finished
 - 2026-10-27 10:00 PT — 01UzHDaF: Sync panel = dashboard. Same classes (a class the latest Sync no longer lists leaves the dashboard: teacher_courses.in_sync), same order/names, same exams (not ended, hidden ones too; ended = past; gated stay until the gate stops), same on/off rule (class ON = not turned off + every exam protected). Class switch + Send email on EVERY class on both (new course_off table + POST /class: off class's new quizzes are not auto-protected). Dashboard switches push to the open Sync tab (2.5 s debounce); panel switches tell the dashboard to redraw. migrate_032, test_class_parity.mjs. NOT PUSHED from this session (no GitHub credentials on the link): Anthony pushes.
