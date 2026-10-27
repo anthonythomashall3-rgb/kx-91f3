@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- (none)
+- 2026-10-27 09:15 PT — 01UzHDaF: Sync panel <-> dashboard class list parity (same classes, same on/off), LOCKqz toggle + Send email on every class. Files: public/sync.js, public/dashboard.html, functions/api/[[route]].js, tests.
 
 ## Recently finished
 - 2026-10-26 13:45 PT — 01NLkt7n: v0.5.0/0.5.1 + D1 row budget: /password sharing check indexed (5,329 -> 30 rows), round-3 security (email-code brute force, Sync-key scope, FERPA co-instructor scope, big classes not dropped, signup + bank-mail caps), Stripe one session per code + overpay carry, local-unlock checks, per-user helper tokens, Windows monotonic cap, course-wide password retired, local AI apps, OSAS timing + assistive tools, /live 1,264->364, /bs 6,550->1,210, /sync unchanged 2,826->226 (roster_snap, bsq_hash, triggers in migrate_031). Gmail script updated in script.google.com + ACCOUNT_MARKS set.
