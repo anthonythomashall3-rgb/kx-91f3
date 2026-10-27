@@ -1,7 +1,7 @@
 // Download page gear icon (Account + Settings) and the pay page's renewal wording, in a REAL browser
 // (headless Chromium via Playwright; skipped where Playwright is not installed). Real API (in-memory SQLite),
 // email + Stripe mocked. Checks: install steps unchanged, keyboard (Enter / Esc), sign in with the emailed
-// code, paid status + Pay link, cancel / turn on auto-renew with the confirm step, remove a computer, receipts,
+// code, paid status + Pay link, cancel subscription / turn auto-renew back on with the confirm step, computers (read-only), receipts,
 // sign out, storage blocked, phone width (16px gutters, no horizontal scroll).
 import { createRequire } from "node:module";
 import { DatabaseSync } from "node:sqlite";
@@ -95,26 +95,25 @@ try {
   check("signed in: email + Paid ✓ until <date>", await waitFor(async () => /cy@usc\.edu[\s\S]*Paid ✓[\s\S]*until \w+ \d+, \d{4}/.test(await pg.textContent("#lqm-acc"))), await pg.textContent("#lqm-acc"));
   const ls = await pg.evaluate(() => JSON.parse(localStorage.getItem("lqz_acct") || "null"));
   check("token saved in this browser for 30 days", ls && ls.email === "cy@usc.edu" && Math.abs(ls.exp - Date.now() - 30 * 86400000) < 120000, JSON.stringify(ls));
-  check("auto-renew On · Visa •••• 4242 + red Cancel auto-renew", /Auto-renew:?\s*On\s*· Visa •••• 4242/.test(await pg.textContent("#lqm-acc")) && await pg.isVisible("button.lqm-red >> text=Cancel auto-renew"), await pg.textContent("#lqm-acc"));
+  check("auto-renew On · Visa •••• 4242 + red Cancel subscription", /Auto-renew:?\s*On\s*· Visa •••• 4242/.test(await pg.textContent("#lqm-acc")) && await pg.isVisible("button.lqm-red >> text=Cancel subscription"), await pg.textContent("#lqm-acc"));
   check("red button is red", /rgb\(198, 40, 40\)/.test(await pg.$eval("button.lqm-red", b => getComputedStyle(b).color)));
 
-  console.log("B4 cancel auto-renew: confirm step, then off; turn it back on");
-  await pg.click("button.lqm-red >> text=Cancel auto-renew");
+  console.log("B4 cancel subscription: confirm step (stops auto-renew only, keeps the term), then turn it back on");
+  await pg.click("button.lqm-red >> text=Cancel subscription");
   const cq = await pg.textContent(".lqm-confirm");
-  check("confirm: 'Cancel auto-renew? You keep access until <term end>.'", /Cancel auto-renew\? You keep access until \w+ \d+, \d{4}\./.test(cq), cq);
+  check("confirm says it stops auto-renew only, keeps the semester, and points to the bank for a refund", /stops auto-renew only/.test(cq) && /rest of this semester/.test(cq) && /does not refund the current semester[\s\S]*contact your bank/.test(cq), cq);
   check("still on before confirming", sqlite.prepare("SELECT autorenew FROM card_renew WHERE email='cy@usc.edu'").get().autorenew === 1);
-  await pg.click("text=Yes, cancel auto-renew");
+  await pg.click("text=Yes, cancel subscription");
   check("off in the database and on the page; 'Turn auto-renew on' shown", await waitFor(() => pg.isVisible("text=Turn auto-renew on")) && sqlite.prepare("SELECT autorenew FROM card_renew WHERE email='cy@usc.edu'").get().autorenew === 0);
+  check("access unchanged after cancelling (still Paid ✓)", /Paid ✓/.test(await pg.textContent("#lqm-acc")));
   await pg.click("text=Turn auto-renew on");
-  check("back on", await waitFor(() => pg.isVisible("text=Cancel auto-renew")) && sqlite.prepare("SELECT autorenew FROM card_renew WHERE email='cy@usc.edu'").get().autorenew === 1);
+  check("back on", await waitFor(() => pg.isVisible("text=Cancel subscription")) && sqlite.prepare("SELECT autorenew FROM card_renew WHERE email='cy@usc.edu'").get().autorenew === 1);
 
-  console.log("B5 your computers: list + remove with a confirm step");
+  console.log("B5 your computers: listed read-only (no remove anywhere)");
   check("2 computers listed (Mac, Windows) with last seen", await pg.locator(".lqm-devs li").count() === 2 && /Mac[\s\S]*last seen[\s\S]*Windows/.test(await pg.textContent(".lqm-devs")));
-  await pg.click(".lqm-devs li:nth-child(2) >> text=Remove");
-  check("confirm shown", /Remove this Windows\? LOCKqz stops working on it\. You can remove 2 more this semester\./.test(await pg.textContent(".lqm-confirm")), await pg.textContent(".lqm-confirm"));
-  await pg.click(".lqm-confirm button.lqm-red");
-  check("removed: 1 left, device revoked", await waitFor(async () => await pg.locator(".lqm-devs li").count() === 1) && sqlite.prepare("SELECT revoked FROM devices WHERE device_id='win-bbb222'").get().revoked === 1, await pg.textContent("#lqm-acc"));
-  check("'Computer removed.' shown, 1 removal left", /Computer removed\./.test(await pg.textContent("#lqm-acc")) && sqlite.prepare("SELECT COUNT(*) AS n FROM events WHERE event='device_removed'").get().n === 1);
+  check("no Remove control anywhere in the menu", !(await pg.isVisible("text=Remove")), await pg.textContent("#lqm-acc"));
+  check("tells the student to email support to free a computer", /email lockqz\.app@gmail\.com/.test(await pg.textContent("#lqm-acc")));
+  check("nothing revoked", sqlite.prepare("SELECT COUNT(*) AS n FROM devices WHERE COALESCE(revoked,0)=1").get().n === 0);
 
   console.log("B6 receipts");
   mails.length = 0; await pg.click("#lqm-rcpt");
@@ -138,7 +137,7 @@ try {
   await waitFor(() => pg.isVisible("#lqm-code"));
   await pg.fill("#lqm-code", mails.at(-1).code); await pg.click("#lqm-acc button[type=submit]");
   check("Not paid + Pay link to /pay?email=…&t=<token>", await waitFor(async () => /Not paid/.test(await pg.textContent("#lqm-acc"))) && (await pg.getAttribute("a.lqm-pay", "href")) === `https://lockqz.pages.dev/pay?email=dee%40usc.edu&t=${payT(env, "dee@usc.edu")}`, await pg.getAttribute("a.lqm-pay", "href").catch(() => ""));
-  check("no saved card: Auto-renew Off, no cancel button", /Auto-renew:?\s*Off/.test(await pg.textContent("#lqm-acc")) && !(await pg.isVisible("text=Cancel auto-renew")));
+  check("no saved card: Auto-renew Off, no cancel button", /Auto-renew:?\s*Off/.test(await pg.textContent("#lqm-acc")) && !(await pg.isVisible("text=Cancel subscription")));
   check("no page errors with storage blocked", errs2.length === 0, errs2.join(" | "));
 
   console.log("B9 pay page: the card renewal said plainly on the button and next to the price");

@@ -962,23 +962,25 @@ export async function onRequest(context) {
   }
   // ---- Student card auto-renew (Anthony, 27 Oct 2026) ----
   // A student card payment through Checkout saves the card (Customer + setup_future_usage=off_session; no Stripe
-  // Billing, which costs 0.7% more). Each Fall/Spring (summer is skipped) /pay/tick (the Gmail script, hourly):
-  //  1. emails a reminder 7 days ahead (amount, date, how to cancel), a few per tick and <= RENEW_MAIL_DAY_MAX a day;
-  //  2. charges the card off-session on the first day a payment counts for the next term (term start - PAY_AHEAD_DAYS,
-  //     ahead()) or 7 days after the reminder if later, so access is ready on day one. Idempotency key per
-  //     email + term + attempt + amount: a retried call can never charge twice. Metadata = Checkout's (code, kind,
-  //     term) + renew=1, so the webhook credits it too (payment_intent.succeeded) and refunds/disputes void it.
+  // Billing, which costs 0.7% more). EVERY term (Fall, Spring and Summer), /pay/tick (the Gmail script, hourly):
+  //  1. arms each saved card for the term's renewal (NO reminder email -- not legally required, Anthony 27 Oct).
+  //  2. charges the card off-session on the first day a payment counts for the term (term start - PAY_AHEAD_DAYS,
+  //     ahead()), so access is ready on day one. Idempotency key per email + term + attempt + amount: a retried
+  //     call can never charge twice. Metadata = Checkout's (code, kind, term) + renew=1, so the webhook credits
+  //     it too (payment_intent.succeeded) and refunds/disputes void it.
   //  3. a failed charge (declined / bank wants confirmation) is marked, the student is emailed the pay link once,
   //     and it is retried at most once a day (3 tries; never when the bank asks to confirm). Access is unchanged:
   //     unpaid = today's unpaid behaviour.
-  // Cancel = autorenew 0 (gear icon on lockqz.pages.dev -> Account); the current term's access stays.
+  // Cancel = autorenew 0 (gear icon on lockqz.pages.dev -> Account -> Cancel subscription): auto-renew stops and
+  // the card is never charged again; the current term's access stays. There is NO way to cancel the current term
+  // from LOCKqz -- a student who wants this term's money back goes to their bank.
   const autoRenewOn = () => stripeOn() && String(env.STUDENT_AUTORENEW ?? "1") !== "0";
   const RENEW_LEAD = 7, RENEW_TRIES = 3;
   const termName = t => `${({1:"Spring",2:"Summer",3:"Fall"})[String(t).slice(4)] || ""} ${String(t).slice(0,4)}`.trim();
   const dayAdd = (d, n) => new Date(Date.parse(d + "T12:00:00Z") + n * 86400000).toISOString().slice(0, 10);
   const fmtDay = d => new Date(d + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
   const usd = c => "$" + (Number(c) / 100).toLocaleString("en-US", { minimumFractionDigits: Number(c) % 100 ? 2 : 0, maximumFractionDigits: 2 });
-  const isSemester = t => /[13]$/.test(String(t));
+  const isSemester = t => /[123]$/.test(String(t));   // every term renews (Fall, Spring AND Summer)
   const renewDayOf = t => dayAdd(termStartOf(t), -PAY_AHEAD_DAYS);          // = the first day ahead() is true for t
   // The Fall/Spring term whose renewal window holds `day`: 7 days before its renewal day .. 14 days after it starts.
   const renewTarget = (day = laToday()) => { let t = prevTerm(payTerm(day));
@@ -988,7 +990,7 @@ export async function onRequest(context) {
   const nextRenewal = after => { let t = nextTerm(after); if (!isSemester(t)) t = nextTerm(t);
     const d = renewDayOf(t), soonest = dayAdd(laToday(), RENEW_LEAD); return { term: t, day: d < soonest ? soonest : d }; };
   const cardFullCents = () => stripeCents("student", "card", Math.round(STUDENT_FEE * 100));
-  const CANCEL_HOW = "lockqz.pages.dev → gear icon (top right) → Account → Cancel auto-renew";
+  const CANCEL_HOW = "lockqz.pages.dev → gear icon (top right) → Account → Cancel subscription";
   const cardName = r => `${String(r.brand || "card").replace(/^./, c => c.toUpperCase())} •••• ${r.last4 || "????"}`;
   // Checkout paid with metadata save=1: remember the card (customer + payment method), and email the confirmation
   // the first time a card is saved (or a new card replaces it).
@@ -1010,13 +1012,13 @@ export async function onRequest(context) {
     const term = (res && res.term) || (await studentStatus(email)).term, nx = nextRenewal(term), amt = cardFullCents();
     const text = `Thank you, LOCKqz is paid for ${termName(term)} (access until ${fmtDay(termEndOf(term))}).\n\n`
       + `Your card (${cardName({ brand, last4 })}) renews automatically each semester at ${usd(amt)}.\n`
-      + `Next renewal: about ${fmtDay(nx.day)}, for ${termName(nx.term)}. LOCKqz emails you 7 days before.\n\n`
+      + `Next renewal: about ${fmtDay(nx.day)}, for ${termName(nx.term)}.\n\n`
       + `Cancel anytime: ${CANCEL_HOW}.\nIf you cancel, your current semester stays active and the card is not charged again.`;
     try { await sendMail(env, email, `LOCKqz paid · renews each semester at ${usd(amt)}`, text); } catch {}
   }
   async function cardRenewTick() {
     if (!autoRenewOn()) return { why: "off" };
-    if (!(env.MAIL_USER && env.MAIL_APP_PASSWORD) && typeof env.MAIL_SINK !== "function") return { why: "mail off" };   // never charge without the reminder
+    if (!(env.MAIL_USER && env.MAIL_APP_PASSWORD) && typeof env.MAIL_SINK !== "function") return { why: "mail off" };   // never charge when email is down (confirmation + failure notices)
     const day = laToday(), R = renewTarget(day);
     if (!R) return { why: "not renewal time" };
     const out = { term: R, reminded: 0, charged: 0, failed: 0, paid: 0, retry: 0, sub: 0 };
@@ -1025,21 +1027,17 @@ export async function onRequest(context) {
       for (const part of chunk(codes, 98)) (await db.prepare(`SELECT code, COALESCE(SUM(${CREDIT()}),0) AS s FROM payments WHERE code IN (${placeholders(part.length)}) AND term=? AND ${COUNTS} GROUP BY code`).bind(...part, R).all()).results.forEach(r => m.set(r.code, Number(r.s)));
       return m; };
     const keepUntil = fmtDay(termEndOf(curTerms()[0]));
-    // 1) Reminders, 7 days before the charge.
+    // 1) Arm each saved card for this term's renewal. No reminder email (Anthony 27 Oct -- not required). The
+    //    row is just scheduled: state 'reminded' here only means "armed for charge" (the charge step reads it).
     if (day <= dayAdd(termStartOf(R), 7)) {
-      const today = Number((await db.prepare("SELECT COUNT(*) AS n FROM card_renew WHERE autorenew=1 AND rterm=? AND reminded_at>?").bind(R, new Date(Date.now() - 86400000).toISOString()).first()).n);
-      const room = Math.max(0, Math.min(8, Number(env.RENEW_MAIL_DAY_MAX || 150) - today));
-      const rows = room ? (await db.prepare("SELECT c.email AS email, c.brand AS brand, c.last4 AS last4, s.code AS code FROM card_renew c JOIN pay_codes_students s ON s.email=c.email WHERE c.autorenew=1 AND c.pm IS NOT NULL AND (c.rterm IS NULL OR c.rterm<>?) LIMIT ?").bind(R, room).all()).results : [];
+      const rows = (await db.prepare("SELECT c.email AS email, s.code AS code FROM card_renew c JOIN pay_codes_students s ON s.email=c.email WHERE c.autorenew=1 AND c.pm IS NOT NULL AND (c.rterm IS NULL OR c.rterm<>?) LIMIT 200").bind(R).all()).results;
       const paid = await paidFor(rows);
       for (const r of rows) {
         const got = paid.get(r.code) || 0;
         if (FULL(got, STUDENT_FEE)) { acts.push(db.prepare("UPDATE card_renew SET rterm=?, state='paid', updated_at=? WHERE email=?").bind(R, t, r.email)); out.paid++; continue; }
-        const amt = stripeCents("student", "card", feeC - Math.round(got * 100)), soonest = dayAdd(day, RENEW_LEAD), on = renewDayOf(R) > soonest ? renewDayOf(R) : soonest;
-        const text = `Your LOCKqz renews automatically for ${termName(R)}.\n\nAmount: ${usd(amt)}\nCard: ${cardName(r)}\nDate: ${fmtDay(on)}\n\n`
-          + `Cancel anytime before then: ${CANCEL_HOW}.\nIf you cancel, you keep access until ${keepUntil} and the card is not charged.`;
-        try { out.sub++; await sendMail(env, r.email, `LOCKqz renews on ${fmtDay(on)} · ${usd(amt)}`, text); } catch { break; }
+        const amt = stripeCents("student", "card", feeC - Math.round(got * 100)), on = renewDayOf(R) > day ? renewDayOf(R) : day;
         acts.push(db.prepare("UPDATE card_renew SET rterm=?, state='reminded', charge_on=?, amount=?, reminded_at=?, tries=0, fail_day=NULL, fail_msg=NULL, pi=NULL, updated_at=? WHERE email=?").bind(R, on, amt, t, t, r.email));
-        out.reminded++;
+        out.armed = (out.armed || 0) + 1;
       }
       await runBatches(db, acts.splice(0));
     }
@@ -1182,7 +1180,7 @@ export async function onRequest(context) {
   // ---- Student account (gear icon on the download page): signed in with an emailed code; the token is
   // b64url(email).expiry.HMAC (30 days, stateless). Only the signed-in owner of the email sees its payment status.
   const acctSecret = () => String(env.ROT_SECRET || env.TEACHER_KEY || "");
-  const ACCT_DAYS = 30, REMOVALS_PER_TERM = 2;
+  const ACCT_DAYS = 30;
   const b64u = x => btoa(x).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   const acctSig = async (em, exp) => (await hmacHex(acctSecret(), "lqz-acct:" + em + ":" + exp)).slice(0, 40);
   const acctToken = async em => { const exp = unixNow() + ACCT_DAYS * 86400; return `${b64u(em)}.${exp}.${await acctSig(em, exp)}`; };
@@ -1194,7 +1192,6 @@ export async function onRequest(context) {
     if (!EMAIL_OK(em) || exp < unixNow() || exp > unixNow() + ACCT_DAYS * 86400 + 60) return null;
     return sameHex(m[3], await acctSig(em, m[2])) ? em : null;
   }
-  const removalsUsed = async em => Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE device_id=? AND quiz_id IS NULL AND event='device_removed' AND ts>=?").bind("acct:" + em, termStartOf(curTerms()[0]) + "T00:00:00Z").first())?.n || 0);
   const VIA_NAME = { "stripe-card": "Card", "stripe-bank": "Bank account", venmo: "Venmo", zelle: "Zelle", bank: "Bank transfer", po: "Purchase order" };
 
   try {
@@ -1766,26 +1763,18 @@ export async function onRequest(context) {
         }
         const devs = (await db.prepare("SELECT device_id, platform, version, installed_at, last_seen FROM devices WHERE student=? AND student_verified=1 AND COALESCE(revoked,0)=0 ORDER BY last_seen DESC LIMIT 10").bind(email).all()).results;
         return json({ email, required: feeOn(), paid, term: termName(paid ? upTerm : st.term), until: paid ? termEndOf(upTerm) : null, pay_url: paid ? null : await payLink(email),
-          renew, devices: devs.map(d => ({ id: d.device_id, os: /win/i.test(String(d.platform || "")) ? "Windows" : /mac|darwin/i.test(String(d.platform || "")) ? "Mac" : (d.platform || "Computer"), version: d.version || null, last_seen: d.last_seen || d.installed_at || null })),
-          removals_left: Math.max(0, REMOVALS_PER_TERM - await removalsUsed(email)) });
+          renew, devices: devs.map(d => ({ id: d.device_id, os: /win/i.test(String(d.platform || "")) ? "Windows" : /mac|darwin/i.test(String(d.platform || "")) ? "Mac" : (d.platform || "Computer"), version: d.version || null, last_seen: d.last_seen || d.installed_at || null })) });
       }
       if (op === "renew") {
         const cr = await db.prepare("SELECT pm FROM card_renew WHERE email=?").bind(email).first();
         if (!cr || !cr.pm) return json({ error: "no_card", message: "Pay by card once to turn on auto-renew." }, 409);
-        // Back on = a fresh start: the reminder comes again 7 days before any charge.
+        // Back on = a fresh start: re-armed for the next renewal.
         if (body.on) await db.prepare("UPDATE card_renew SET autorenew=1, rterm=NULL, state=NULL, tries=0, fail_day=NULL, fail_msg=NULL, updated_at=? WHERE email=? AND autorenew=0").bind(now(), email).run();
         else await db.prepare("UPDATE card_renew SET autorenew=0, updated_at=? WHERE email=?").bind(now(), email).run();
         return json({ ok: true, on: !!body.on });
       }
-      if (op === "remove") {
-        // Removing frees one of the 2 computer slots; 2 removals per semester so it cannot rotate a shared email.
-        const used = await removalsUsed(email);
-        if (used >= REMOVALS_PER_TERM) return json({ error: "limit", message: `You can remove ${REMOVALS_PER_TERM} computers per semester.` }, 429);
-        const r = await db.prepare("UPDATE devices SET revoked=1 WHERE device_id=? AND student=? AND student_verified=1 AND COALESCE(revoked,0)=0").bind(String(body.device_id || ""), email).run();
-        if (!r.meta.changes) return json({ error: "not_found", message: "That computer is not on your account." }, 404);
-        await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("acct:" + email, email, null, "device_removed", String(body.device_id).slice(0, 80), now()).run();
-        return json({ ok: true, removals_left: Math.max(0, REMOVALS_PER_TERM - used - 1) });
-      }
+      // No "remove a computer" op (Anthony 27 Oct): the account page shows a student's computers but never
+      // removes one. Removing is admin-only (email lockqz.app@gmail.com), as the too_many_devices message says.
       if (op === "receipts") {
         if (await db.prepare("SELECT 1 FROM events WHERE device_id=? AND quiz_id IS NULL AND event='receipts_sent' AND ts>?").bind("acct:" + email, new Date(Date.now() - 600000).toISOString()).first())
           return json({ ok: true, sent: true, again: true, to: email });   // once per 10 minutes

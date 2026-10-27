@@ -91,8 +91,8 @@ try {
   check("paid for Fall 2026", r.data?.result?.paid === true && r.data.result.term === "20263", JSON.stringify(r.data));
   check("card saved: cus + pm + visa 4242, autorenew on", row?.customer === "cus_al" && row.pm === "pm_card1" && row.brand === "visa" && row.last4 === "4242" && row.autorenew === 1, JSON.stringify(row));
   let m = mails.filter(x => x.to === "al@usc.edu" && /renews each semester/.test(x.subject));
-  check("one confirmation email: renews each semester at $280, next renewal Nov 30 for Spring 2027, gear icon -> Account -> Cancel auto-renew",
-    m.length === 1 && /renews automatically each semester at \$280/.test(m[0].text) && /November 30, 2026, for Spring 2027/.test(m[0].text) && /gear icon \(top right\) → Account → Cancel auto-renew/.test(m[0].text), m.map(x => x.text).join("|"));
+  check("one confirmation email: renews each semester at $280, next renewal Nov 30 for Spring 2027, gear icon -> Account -> Cancel subscription, no 7-days-before line",
+    m.length === 1 && /renews automatically each semester at \$280/.test(m[0].text) && /November 30, 2026, for Spring 2027/.test(m[0].text) && /gear icon \(top right\) → Account → Cancel subscription/.test(m[0].text) && !/7 days before/.test(m[0].text), m.map(x => x.text).join("|"));
   await hook(paidEv(AL, 28000, "pi_first"));   // Stripe retries the event
   check("retried event: no second confirmation, paid once", mails.filter(x => /renews each semester/.test(x.subject)).length === 1 && q("SELECT COUNT(*) AS n FROM payments WHERE code=?", AL).n === 1);
 
@@ -110,16 +110,16 @@ try {
   let t = await tick();
   check("Oct 27: not renewal time, no charge, no email", t.card?.why === "not renewal time" && intents.length === 0 && mails.length === 0, JSON.stringify(t));
 
-  console.log("A6 reminder 7 days before (Nov 23 for the Nov 30 charge), once");
+  console.log("A6 Nov 23 (window opens): the card is armed for the Nov 30 charge, with NO reminder email");
   at("2026-11-23T18:00:00Z");
   t = await tick();
   m = mails.filter(x => x.to === "al@usc.edu");
   row = q("SELECT * FROM card_renew WHERE email='al@usc.edu'");
-  check("reminder: amount $280, date Nov 30, visa 4242, how to cancel", m.length === 1 && /\$280/.test(m[0].text) && /November 30, 2026/.test(m[0].text) && /Visa •••• 4242/.test(m[0].text) && /Cancel auto-renew/.test(m[0].text) && /keep access until December 16, 2026/.test(m[0].text), m.map(x => x.subject + " " + x.text).join("|"));
-  check("row: reminded for Spring 2027, charge_on 2026-11-30", row.rterm === "20271" && row.state === "reminded" && row.charge_on === "2026-11-30", JSON.stringify(row));
-  check("bo (auto-renew off) gets nothing", !mails.some(x => x.to === "bo@usc.edu"));
+  check("no reminder email (not required, Anthony 27 Oct)", m.length === 0, m.map(x => x.subject + " " + x.text).join("|"));
+  check("row: armed for Spring 2027, charge_on 2026-11-30", row.rterm === "20271" && row.state === "reminded" && row.charge_on === "2026-11-30", JSON.stringify(row));
+  check("bo (auto-renew off) not armed", q("SELECT rterm FROM card_renew WHERE email='bo@usc.edu'").rterm === null);
   await tick();
-  check("next tick: no second reminder, no charge before the date", mails.filter(x => x.to === "al@usc.edu").length === 1 && intents.length === 0);
+  check("next tick: still no email, no charge before the date", mails.filter(x => x.to === "al@usc.edu").length === 0 && intents.length === 0);
 
   console.log("A7 the charge on Nov 30: off-session PaymentIntent, idempotency key, metadata like Checkout's");
   at("2026-11-30T17:00:00Z");
@@ -150,7 +150,7 @@ try {
   await hook(paidEv(CY, 28000, "pi_cy", { customer: "cus_cy" }));
   check("cy card saved", q("SELECT pm FROM card_renew WHERE email='cy@usc.edu'")?.pm === "pm_card1");
   at("2026-11-24T18:00:00Z"); mails.length = 0; await tick();
-  check("cy reminded (charge Dec 1)", q("SELECT charge_on FROM card_renew WHERE email='cy@usc.edu'").charge_on === "2026-12-01");
+  check("cy armed (charge Nov 30, the first day it counts)", q("SELECT charge_on FROM card_renew WHERE email='cy@usc.edu'").charge_on === "2026-11-30");
   piMode = "decline"; intents.length = 0;
   at("2026-12-01T17:00:00Z"); await tick();
   row = q("SELECT * FROM card_renew WHERE email='cy@usc.edu'");
@@ -228,23 +228,18 @@ try {
   check("status shows off; access unchanged", (await call("/account", { op: "status", token: TOK })).data?.renew?.on === false && (await call("/account", { op: "status", token: TOK })).data?.paid === true);
   r = await call("/account", { op: "renew", token: TOK, on: true });
   row = q("SELECT * FROM card_renew WHERE email='cy@usc.edu'");
-  check("turn back on: fresh start (reminder again before any charge)", r.data?.on === true && row.autorenew === 1 && row.rterm === null && row.tries === 0, JSON.stringify(row));
+  check("turn back on: fresh start (re-armed for the next renewal)", r.data?.on === true && row.autorenew === 1 && row.rterm === null && row.tries === 0, JSON.stringify(row));
   at("2026-12-27T19:00:00Z");
   check("token expires after 30 days", (await call("/account", { op: "status", token: TOK })).status === 401);
   at("2026-11-26T19:00:00Z");
   sqlite.prepare("DELETE FROM card_renew WHERE email='gus@usc.edu'").run();
 
-  console.log("A14 /account: your computers, remove (2 per semester), receipts (once per 10 min)");
+  console.log("A14 /account: your computers (read-only, no remove), receipts (once per 10 min)");
   for (const [id, pl, seen] of [["mac-1", "mac", "2026-11-25T00:00:00Z"], ["win-2", "windows", "2026-11-20T00:00:00Z"], ["mac-3", "mac", "2026-11-01T00:00:00Z"], ["mac-x", "mac", "2026-11-01T00:00:00Z"]])
     sqlite.prepare("INSERT INTO devices (device_id,student,platform,version,installed_at,last_seen,student_verified) VALUES (?,?,?,?,?,?,1)").run(id, id === "mac-x" ? "al@usc.edu" : "cy@usc.edu", pl, "0.5.1", seen, seen);
   r = await call("/account", { op: "status", token: TOK });
-  check("3 computers listed (newest first), not someone else's", r.data?.devices?.length === 3 && r.data.devices[0].id === "mac-1" && r.data.devices[1].os === "Windows" && r.data.removals_left === 2, JSON.stringify(r.data?.devices));
-  check("cannot remove another student's computer", (await call("/account", { op: "remove", token: TOK, device_id: "mac-x" })).status === 404 && q("SELECT revoked FROM devices WHERE device_id='mac-x'").revoked === 0);
-  r = await call("/account", { op: "remove", token: TOK, device_id: "mac-3" });
-  check("remove -> revoked", r.data?.ok === true && r.data.removals_left === 1 && q("SELECT revoked FROM devices WHERE device_id='mac-3'").revoked === 1);
-  await call("/account", { op: "remove", token: TOK, device_id: "win-2" });
-  r = await call("/account", { op: "remove", token: TOK, device_id: "mac-1" });
-  check("3rd removal this semester refused", r.status === 429 && q("SELECT revoked FROM devices WHERE device_id='mac-1'").revoked === 0, JSON.stringify(r.data));
+  check("3 computers listed (newest first), not someone else's, no removals_left", r.data?.devices?.length === 3 && r.data.devices[0].id === "mac-1" && r.data.devices[1].os === "Windows" && r.data.removals_left === undefined, JSON.stringify(r.data?.devices));
+  check("no remove op (account cannot remove a computer); nothing revoked", (await call("/account", { op: "remove", token: TOK, device_id: "mac-3" })).status === 400 && q("SELECT revoked FROM devices WHERE device_id='mac-3'").revoked === 0);
   mails.length = 0;
   r = await call("/account", { op: "receipts", token: TOK });
   check("receipts emailed: card payment listed", r.data?.sent === true && mails.length === 1 && mails[0].to === "cy@usc.edu" && /\$280\s+Card\s+Fall 2026/.test(mails[0].text), mails[0]?.text);
@@ -252,18 +247,16 @@ try {
   check("again within 10 min: no second email", r.data?.again === true && mails.length === 1);
   check("receipts need sign-in", (await call("/account", { op: "receipts" })).status === 401);
 
-  console.log("A16 Spring card -> renews for Fall (summer skipped), charged in July, counts for Fall");
+  console.log("A16 Spring card -> renews for Summer too (every term), charged ~Apr 7, counts for Summer");
   at("2027-02-01T18:00:00Z"); mails.length = 0; piMode = "ok";
   r = await payStart("jo@usc.edu"); const JO = r.data.code;
   await hook(paidEv(JO, 28000, "pi_jo", { customer: "cus_jo" }));
-  check("confirmation: next renewal July 11, 2027 for Fall 2027", mails.some(x => x.to === "jo@usc.edu" && /July 11, 2027, for Fall 2027/.test(x.text)), mails.map(x => x.text).join("|"));
-  at("2027-05-20T18:00:00Z"); intents.length = 0; await tick();
-  check("summer start: nothing charged for summer", !intents.some(x => x.f.get("metadata[code]") === JO));
-  at("2027-07-04T18:00:00Z"); await tick();
-  check("reminder July 4 for July 11", q("SELECT charge_on FROM card_renew WHERE email='jo@usc.edu'").charge_on === "2027-07-11" && mails.some(x => x.to === "jo@usc.edu" && /July 11, 2027/.test(x.subject)));
-  at("2027-07-11T18:00:00Z"); await tick();
-  check("charged July 11 for Fall 2027", intents.filter(x => x.f.get("metadata[code]") === JO).length === 1 && q("SELECT term FROM payments WHERE code=? AND via='stripe-card' ORDER BY received_at DESC LIMIT 1", JO).term === "20273");
-  check("access in July (summer) and ready for Fall day one", (await payStart("jo@usc.edu")).data?.paid === true);
+  check("confirmation: next renewal April 7, 2027 for Summer 2027", mails.some(x => x.to === "jo@usc.edu" && /April 7, 2027, for Summer 2027/.test(x.text)), mails.map(x => x.text).join("|"));
+  at("2027-03-15T18:00:00Z"); intents.length = 0; await tick();
+  check("before the window: nothing charged yet", !intents.some(x => x.f.get("metadata[code]") === JO));
+  at("2027-04-07T18:00:00Z"); await tick();
+  check("charged April 7 for Summer 2027, no reminder email first", intents.filter(x => x.f.get("metadata[code]") === JO).length === 1 && q("SELECT term FROM payments WHERE code=? AND via='stripe-card' ORDER BY received_at DESC LIMIT 1", JO).term === "20272");
+  check("access in Summer, ready day one", (await payStart("jo@usc.edu")).data?.paid === true);
 
   console.log("A15 off switch + professors untouched");
   const off = { ...env, STUDENT_AUTORENEW: "0" };

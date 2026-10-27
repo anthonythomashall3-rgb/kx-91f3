@@ -1,6 +1,6 @@
 /* LOCKqz download page: gear icon (top right) -> Account + Settings.
    Account: sign in with an emailed 6-digit code (token kept in this browser for 30 days), then this
-   semester's payment, auto-renew (cancel / turn on), your computers (remove), sign out.
+   semester's payment, subscription (cancel auto-renew / turn back on), your computers (view only), sign out.
    Settings: email me my receipts, privacy policy, contact support.
    Everything here is separate from the install steps: if this file fails, the page still installs. */
 (function () {
@@ -128,11 +128,12 @@
       if (r.failed) box.appendChild(el("p", { "class": "lqm-warn" }, ["Last renewal didn’t go through: " + r.failed + ". ", d.pay_url ? el("a", { href: d.pay_url, text: "Pay here" }) : null]));
       if (state.confirm === "renew") {
         box.appendChild(el("div", { "class": "lqm-confirm", role: "alertdialog", "aria-labelledby": "lqm-cq" }, [
-          el("p", { id: "lqm-cq", text: "Cancel auto-renew?" + (d.until ? " You keep access until " + day(d.until) + "." : " Your card won’t be charged again.") }),
+          el("p", { id: "lqm-cq", text: "Cancel your subscription? This stops auto-renew only." + (d.until ? " You keep LOCKqz for the rest of this semester (until " + day(d.until) + "), and your card is never charged again." : " Your card is never charged again, and this semester stays active.") }),
+          el("p", { "class": "lqm-small", text: "This does not refund the current semester. For a refund of money already paid, contact your bank." }),
           el("div", { "class": "lqm-links" }, [
-            el("button", { type: "button", "class": "lqm-btn lqm-red", text: "Yes, cancel auto-renew", on: { click: function () { setRenew(false); } } }),
+            el("button", { type: "button", "class": "lqm-btn lqm-red", text: "Yes, cancel subscription", on: { click: function () { setRenew(false); } } }),
             el("button", { type: "button", "class": "lqm-btn", text: "Keep it", on: { click: function () { state.confirm = null; render(); var b = acc.querySelector(".lqm-red"); if (b) b.focus(); } } })])]));
-      } else box.appendChild(el("button", { type: "button", "class": "lqm-btn lqm-red", text: "Cancel auto-renew", on: { click: function () { state.confirm = "renew"; render(); var b = acc.querySelector(".lqm-confirm .lqm-red"); if (b) b.focus(); } } }));
+      } else box.appendChild(el("button", { type: "button", "class": "lqm-btn lqm-red", text: "Cancel subscription", on: { click: function () { state.confirm = "renew"; render(); var b = acc.querySelector(".lqm-confirm .lqm-red"); if (b) b.focus(); } } }));
     } else if (r) {
       box.appendChild(row("Auto-renew", [el("b", { text: "Off" }), el("span", { "class": "lqm-small", text: " · " + cap(r.brand) + " •••• " + (r.last4 || "") })]));
       box.appendChild(el("button", { type: "button", "class": "lqm-btn", text: "Turn auto-renew on", on: { click: function () { setRenew(true); } } }));
@@ -141,33 +142,18 @@
     // Your computers
     var devs = d.devices || [], list = el("ul", { "class": "lqm-devs" });
     devs.forEach(function (x) {
-      var name = (x.os || "Computer") + (x.version ? " · LOCKqz " + x.version : "");
-      var kids = [el("span", { "class": "lqm-dn" }, [el("b", { text: x.os || "Computer" }), el("span", { "class": "lqm-small", text: (x.version ? " · LOCKqz " + x.version : "") + (x.last_seen ? " · last seen " + day(x.last_seen) : "") })])];
-      if (state.confirm === "dev:" + x.id) {
-        kids.push(el("div", { "class": "lqm-confirm", role: "alertdialog", "aria-label": "Remove " + name }, [
-          el("p", { text: "Remove this " + (x.os || "computer") + "? LOCKqz stops working on it. " + (d.removals_left === 1 ? "This is your last removal this semester." : "You can remove " + d.removals_left + " more this semester.") }),
-          el("div", { "class": "lqm-links" }, [
-            el("button", { type: "button", "class": "lqm-btn lqm-red", text: "Remove", on: { click: function () { removeDev(x.id); } } }),
-            el("button", { type: "button", "class": "lqm-btn", text: "Cancel", on: { click: function () { state.confirm = null; render(); } } })])]));
-      } else if (d.removals_left > 0) kids.push(el("button", { type: "button", "class": "lqm-link", text: "Remove", "aria-label": "Remove " + name, on: { click: function () { state.confirm = "dev:" + x.id; render(); var b = acc.querySelector(".lqm-confirm .lqm-red"); if (b) b.focus(); } } }));
-      list.appendChild(el("li", null, kids));
+      list.appendChild(el("li", null, [el("span", { "class": "lqm-dn" }, [el("b", { text: x.os || "Computer" }),
+        el("span", { "class": "lqm-small", text: (x.version ? " · LOCKqz " + x.version : "") + (x.last_seen ? " · last seen " + day(x.last_seen) : "") })])]));
     });
     acc.appendChild(el("div", { "class": "lqm-block" }, [el("p", { "class": "lqm-k", text: "Your computers" }),
       devs.length ? list : el("p", { "class": "lqm-small", text: "None yet. Install LOCKqz below." }),
-      devs.length && !(d.removals_left > 0) ? el("p", { "class": "lqm-small", text: "You can remove 2 computers per semester." }) : null]));
+      devs.length ? el("p", { "class": "lqm-small", text: "To free a computer, email lockqz.app@gmail.com." }) : null]));
     if (state.msg) acc.appendChild(msgEl());
   }
   function setRenew(on) {
     state.msg = ""; state.confirm = null;
     authed({ op: "renew", on: on }).then(function (d) {
-      if (d.ok) { state.msg = on ? "Auto-renew is on." : "Auto-renew is off. Your card won’t be charged again."; return authed({ op: "status" }).then(function (s) { if (!s.error) state.data = s; render(); }); }
-      if (d._status !== 401) { state.msg = d.message || "Try again."; render(); }
-    });
-  }
-  function removeDev(id) {
-    state.confirm = null; state.msg = "";
-    authed({ op: "remove", device_id: id }).then(function (d) {
-      if (d.ok) { state.msg = "Computer removed."; return authed({ op: "status" }).then(function (s) { if (!s.error) state.data = s; render(); }); }
+      if (d.ok) { state.msg = on ? "Subscription on: your card renews each semester." : "Subscription cancelled. Your card is never charged again; this semester stays active."; return authed({ op: "status" }).then(function (s) { if (!s.error) state.data = s; render(); }); }
       if (d._status !== 401) { state.msg = d.message || "Try again."; render(); }
     });
   }
