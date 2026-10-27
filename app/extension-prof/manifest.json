@@ -1,0 +1,80 @@
+{
+  "manifest_version": 3,
+  "name": "LOCKqz for Professors",
+  "version": "1.0.0",
+  "description": "Keeps your LOCKqz classes, rosters and exams in sync with Brightspace by itself. No bookmark, no tab to keep open.",
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://brightspace.usc.edu/*",
+    "https://usc.brightspace.com/*",
+    "https://prof.lockqz.pages.dev/*",
+    "https://lockqz.pages.dev/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "scripts": [
+      "background.js"
+    ]
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://brightspace.usc.edu/d2l/*",
+        "https://usc.brightspace.com/d2l/*"
+      ],
+      "js": [
+        "content-bs.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://prof.lockqz.pages.dev/*"
+      ],
+      "js": [
+        "content-dash.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "sync.js",
+        "lq.js"
+      ],
+      "matches": [
+        "https://brightspace.usc.edu/*",
+        "https://usc.brightspace.com/*"
+      ]
+    }
+  ],
+  "action": {
+    "default_title": "LOCKqz",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png"
+    }
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "prof@lockqz.app",
+      "strict_min_version": "121.0",
+      "data_collection_permissions": {
+        "required": [
+          "personallyIdentifyingInfo",
+          "websiteContent"
+        ]
+      }
+    }
+  }
+}

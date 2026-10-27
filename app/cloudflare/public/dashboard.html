@@ -227,7 +227,7 @@ async function refresh(){
   LOADERR = b.error || q.error || "";
   if(!b.error) BS = b.courses ? b : { courses: [] };
   if(!q.error) LEGACY = (q.quizzes||[]).filter(x=>!x.ou);   // quizzes added by link in the old UI, not from Brightspace
-  if(k.key) SYNCKEY = k.key;
+  if(k.key) { SYNCKEY = k.key; postKey(); }
 }
 // Every 15 min while the tab is visible (only /bs; ~6.5k D1 rows read per call for 4 classes of 300): new data, but never re-draw over something the user is
 // typing, picking or has open. Live has its own 10 s loop (visible only); Admin and Activity refresh on buttons.
@@ -262,11 +262,28 @@ const bmkHref = () => SYNCKEY ? `javascript:(function(){var s=document.createEle
 const BMK = () => `<a class="bmk" href="${esc(bmkHref())}" onclick="alert('Drag this button to your bookmarks bar, then click it while you are in Brightspace.');return false">${SHIELD('#fff',18)} LOCKqz Sync</a>`;
 const BARKEY = /Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent||"") ? "⌘ Shift B" : "Ctrl Shift B";
 // Shown with Sync now whenever Brightspace has not answered: the 3 steps, right there.
-const SYNCHELP = () => `<ol class="steps" style="margin:10px 0 0;text-align:left">
+const SYNCHELP = () => EXT() ? `<div style="margin-top:8px">Sign in to Brightspace in the tab LOCKqz opened, then press Sync now.</div>`
+  : EXT_URL() ? `<div style="margin-top:10px">${EXTBTN()} <span class="muted">One click, then LOCKqz syncs by itself.</span></div>`
+  : EVER() ? `<div style="margin-top:8px">In Brightspace, click <b>LOCKqz Sync</b> in your bookmarks bar. <a href="#" onclick="this.parentNode.outerHTML=BMKSTEPS();return false">Don't see it?</a></div>`
+  : BMKSTEPS();
+let SYNCHELPON = false;
+// ---- the LOCKqz professor extension (Edge / Firefox / Chrome): when installed it syncs by itself whenever
+// the professor is signed into Brightspace and opens its own Brightspace tab for each exam, so no bookmark
+// and no tab to keep open. Its content script marks this page (data-lqz-ext) and relays its status here as
+// window messages tagged lqzExt; this page hands it the Sync key. Store links: filled in once published.
+const EXT_STORE = { edge: "", firefox: "", chrome: "" };
+const EXT = () => { try { return !!document.documentElement.dataset.lqzExt; } catch { return false; } };
+const postKey = () => { if (EXT() && SYNCKEY) window.postMessage({ lqz: "ext-key", key: SYNCKEY }, location.origin); };
+const BROWSER = (() => { const u = navigator.userAgent || ""; return /Edg\//.test(u) ? "edge" : /Firefox\//.test(u) ? "firefox" : /Chrome\//.test(u) ? "chrome" : "other"; })();
+const BROWSER_NAME = { edge: "Edge", firefox: "Firefox", chrome: "Chrome", other: "your browser" }[BROWSER];
+const EXT_URL = () => EXT_STORE[BROWSER] || "";
+// Has this professor's bookmark ever synced? Then it is already in the bookmarks bar: one line, not 3 steps.
+const EVER = () => !!(BS.courses && BS.courses.length);
+const BMKSTEPS = () => `<ol class="steps" style="margin:10px 0 0;text-align:left">
   <li>Show your bookmarks bar: press <b>${BARKEY}</b>.</li>
   <li>Drag ${BMK()} onto it.</li>
   <li>In the Brightspace tab, click <b>LOCKqz Sync</b>. Leave that tab open.</li></ol>`;
-let SYNCHELPON = false;
+const EXTBTN = () => EXT_URL() ? `<a class="btn prime" href="${esc(EXT_URL())}" target="_blank" rel="noopener">Add LOCKqz to ${BROWSER_NAME}</a>` : "";
 function syncMsg(t, help = false){ SYNCMSG = t; SYNCHELPON = help; document.querySelectorAll(".syncst").forEach(e => e.innerHTML = syncHtml(t) + (help ? SYNCHELP() : "")); }
 function askSync(w){ BS_ORIGINS.forEach(o => { try { w.postMessage({ lqz: "sync" }, o); } catch {} }); }
 // After a switch here: the open LOCKqz Sync tab puts the change into Brightspace and redraws its panel, so
@@ -274,9 +291,14 @@ function askSync(w){ BS_ORIGINS.forEach(o => { try { w.postMessage({ lqz: "sync"
 // tab open: the "One more click" note stays (nothing opens by itself).
 let PUSHN = 0;
 function pushSync(){ if (typeof setTimeout !== "function") return; const n = ++PUSHN;
-  setTimeout(() => { if (n === PUSHN && BSWIN && !BSWIN.closed && !SYNCWAIT) syncNow(); }, 2500); }
+  setTimeout(() => { if (n === PUSHN && ((BSWIN && !BSWIN.closed) || EXT()) && !SYNCWAIT) syncNow(); }, 2500); }
 function syncNow(){
   if (SYNCWAIT) return;
+  if (EXT()) {   // the extension finds (or opens) a Brightspace tab by itself
+    syncMsg("Syncing…"); window.postMessage({ lqz: "ext-sync" }, location.origin);
+    SYNCWAIT = setTimeout(() => { SYNCWAIT = null; syncMsg("Brightspace didn't answer.", true); }, 180000);
+    return;
+  }
   let w = BSWIN && !BSWIN.closed ? BSWIN : null;
   if (!w) {
     const t = window.open("", "lqzbs");     // the Brightspace tab this dashboard opened before, if still open
@@ -292,13 +314,16 @@ function syncNow(){
   SYNCWAIT = setTimeout(() => { SYNCWAIT = null; syncMsg("Brightspace didn't answer. Once:", true); }, BSWIN ? 180000 : 10000);
 }
 window.addEventListener("message", async e => {
-  if (!BS_ORIGINS.includes(e.origin) || !e.data || typeof e.data !== "object" || !e.source) return;
-  const m = e.data;
-  if (m.lqz === "hello") { BSWIN = e.source; return; }
+  if (!e.data || typeof e.data !== "object" || !e.source) return;
+  const fromExt = e.source === window && e.origin === location.origin && e.data.lqzExt === 1;   // relayed by the extension
+  if (!fromExt && !BS_ORIGINS.includes(e.origin)) return;
+  const m = e.data, src = fromExt ? null : e.source;
+  if (fromExt && m.lqz === "ext-hello") { postKey(); if (shown() && ME && !busy() && viewName() === "connect") route(); return; }
+  if (m.lqz === "hello") { if (src) BSWIN = src; return; }
   // A switch flipped on the Sync panel: show it here at once.
-  if (m.lqz === "changed") { BSWIN = e.source; if (shown() && ME && !SAVING) { await refresh(); if (!busy()) route(); } return; }
+  if (m.lqz === "changed") { if (src) BSWIN = src; if (shown() && ME && !SAVING) { await refresh(); if (!busy()) route(); } return; }
   if (m.lqz === "synced") {
-    BSWIN = e.source; const asked = !!SYNCWAIT; clearTimeout(SYNCWAIT); SYNCWAIT = null;
+    if (src) BSWIN = src; const asked = !!SYNCWAIT; clearTimeout(SYNCWAIT); SYNCWAIT = null;
     if (shown() && ME) { await refresh(); route(); }
     if (asked) syncMsg(m.ok ? "Synced just now." : `Synced, but ${Number(m.errors)||0} quiz(zes) could not be updated: see the Brightspace tab.`);
     return;
@@ -354,7 +379,7 @@ function viewHome(){
   h += `<div id="pay"></div>`;
   if(LOADERR) h += `<div class="note red"><span>Could not load from LOCKqz: ${esc(LOADERR)}</span></div>`;
   if(!BS.courses.length) return h + viewConnect(true);
-  if(!ME.admin && !ME.verified) h += `<div class="note warn"><span>LOCKqz can't protect your exams until Brightspace shows you as the instructor. Click your <b>LOCKqz Sync</b> bookmark in Brightspace.</span><button class="btn warn" onclick="nav('connect')">How</button></div>`;
+  if(!ME.admin && !ME.verified) h += `<div class="note warn"><span>LOCKqz can't protect your exams until Brightspace shows you as the instructor. ${EXT() ? "Open Brightspace while signed in: LOCKqz connects by itself." : "Click your <b>LOCKqz Sync</b> bookmark in Brightspace."}</span><button class="btn warn" onclick="nav('connect')">How</button></div>`;
   const all = BS.courses.map(classStats);
   const exams = all.reduce((n,s)=>n+s.cur.length,0), prot = all.reduce((n,s)=>n+s.prot.length,0), students = BS.courses.reduce((n,c)=>n+c.students.length,0);
   const allOn = all.every(s=>s.on), allOff = prot===0 && !all.some(s=>s.on);
@@ -500,13 +525,17 @@ function viewConnect(first){
   <section class="card" style="display:flex;flex-direction:column;gap:18px">
     <div><h1 style="margin:0;font-size:24px;font-weight:700;letter-spacing:-.015em">${first?"One step, once.":"Brightspace connection"}</h1>
     <p class="sub">LOCKqz reads your classes, rosters and exams from Brightspace and protects every exam.</p></div>
-    <ol class="steps">
+    ${EXT() ? `<p style="margin:0"><b>Connected automatically.</b> The LOCKqz extension syncs your classes, rosters and exams whenever you're signed in to Brightspace, and opens its own Brightspace tab for each exam. Nothing to click or keep open.</p>`
+    : EXT_URL() ? `<div style="display:flex;flex-direction:column;gap:10px;align-items:flex-start">${EXTBTN()}<p class="muted" style="margin:0">One click to add it. After that LOCKqz syncs by itself: no bookmark, no tab to keep open.</p>
+      <a href="#" class="muted" onclick="this.outerHTML=BMKSTEPS();return false">Use a bookmark instead</a></div>`
+    : EVER() ? `<p style="margin:0">In Brightspace, click <b>LOCKqz Sync</b> in your bookmarks bar. Leave that tab open during exams. <a href="#" onclick="this.outerHTML=BMKSTEPS();return false">Don't see it?</a></p>`
+    : `<ol class="steps">
       <li>Show your bookmarks bar: press <b>${BARKEY}</b>.</li>
       <li>Drag this button onto it: &nbsp;${BMK()}</li>
       <li>Open <a href="https://brightspace.usc.edu" target="_blank" rel="noopener">brightspace.usc.edu</a> and click the bookmark. Leave that tab open: it re-syncs by itself every 15 minutes (new quizzes, added students). Keep it open during exams.</li>
       <li>Come back here. Your classes are filled in and every exam is on.</li>
       <li>New quiz later? Press <b>Sync now</b>. If a student opens a quiz LOCKqz hasn't seen, LOCKqz emails you.</li>
-    </ol>
+    </ol>`}
     ${BS.courses.length ? `<p class="muted">Last synced ${ago(BS.courses.map(c=>c.synced_at).sort().pop())}. ${pendingSync()?"Some changes you made here are waiting for the next click.":"Everything is up to date."}</p>` : ""}
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0">${SYNCBTN(true)}</div>
   </section>

@@ -17,14 +17,25 @@
   // force=1: the professor pressed "Sync now" on the LOCKqz dashboard: same as auto, but always syncs.
   var Q = SRC ? new URL(SRC).searchParams : null;
   var FORCE = !!Q && Q.get("force") === "1";
+  var ASKED = FORCE;   // a sync someone asked for (FORCE is cleared below when there is no panel yet)
   var AUTO = (!!Q && Q.get("auto") === "1") || FORCE;
   var AUTO_MS = 15 * 60000, FORCE_MS = 60 * 60000;
   var W = typeof window !== "undefined" ? window : null;
-  var DASH_ORIGIN = SRC ? new URL(SRC).origin : "";
+  // ext=1: loaded by the LOCKqz professor browser extension from its own package (SRC is the extension's
+  // address). base= then names the LOCKqz site (only the two real ones are accepted); quiet=1 keeps the
+  // panel hidden (it syncs in the background); nogate=1 never starts or resumes a gate in this tab (a
+  // tab the professor browses away from must never own a gate; the extension opens its own tab for that).
+  var EXT = !!Q && Q.get("ext") === "1";
+  var BASES = ["https://prof.lockqz.pages.dev", "https://lockqz.pages.dev"];
+  var ORIGIN = SRC ? (EXT ? (BASES.indexOf(Q.get("base")) >= 0 ? Q.get("base") : BASES[0]) : new URL(SRC).origin) : "";
+  var QUIET = EXT && Q.get("quiet") === "1", NOGATE = EXT && Q.get("nogate") === "1";
+  var DASH_ORIGIN = ORIGIN;
   // Messages to the LOCKqz dashboard tab (the one that opened this tab, or the one that asked last): no
   // data, only "connected" / "synced" / "failed", and only to the dashboard's own origin.
   var tell = function (m) {
     if (!W || !DASH_ORIGIN) return;
+    // The extension listens on this page (relayed to the dashboard and its own tab bookkeeping).
+    if (EXT) try { W.postMessage(Object.assign({}, m, { lqzExt: 1, gates: Object.keys(GATES || {}).length }), location.origin); } catch (e) {}
     [[W.__lqzDash, W.__lqzDashOrigin], [W.opener, DASH_ORIGIN]].forEach(function (t, i, all) {
       if (!t[0] || !t[1] || (i && t[0] === all[0][0])) return;
       try { if (!t[0].closed) t[0].postMessage(m, t[1]); } catch (e) {}
@@ -38,8 +49,8 @@
   }
   if (AUTO && !open) { if (!FORCE) return; AUTO = false; FORCE = false; }   // asked from the dashboard, no panel: a normal Sync
   var KEY = SRC ? new URL(SRC).searchParams.get("k") : "";
-  var API = SRC ? (/\.pages\.dev$/.test(new URL(SRC).hostname) ? "https://lockqz.pages.dev/api" : new URL(SRC).origin + "/api") : "";   // one API (main site secrets)
-  var DASH = SRC ? new URL(SRC).origin + "/dashboard" : "";
+  var API = SRC ? (/\.pages\.dev$/.test(new URL(ORIGIN).hostname) ? "https://lockqz.pages.dev/api" : ORIGIN + "/api") : "";   // one API (main site secrets)
+  var DASH = SRC ? ORIGIN + "/dashboard" : "";
 
   var box = document.createElement("div");
   box.id = "lqz-sync";
@@ -49,7 +60,8 @@
     '<span><span style="color:#000">LOCK</span><span style="color:#990000">qz</span> Sync</span><span id="lqz-x" style="cursor:pointer;padding:0 4px">&#10005;</span></div><div id="lqz-b" style="padding:12px 14px">Starting...</div>';
   // The shared LOCKqz look (red lock loader, LOCK black / qz red), from the LOCKqz site.
   var LW = typeof window !== "undefined" ? window : {};
-  try { if (SRC && !LW.lqLoading && document.head) { var lqs = document.createElement("script"); lqs.src = new URL(SRC).origin + "/lq.js"; document.head.appendChild(lqs); } } catch (e) {}
+  try { if (SRC && !LW.lqLoading && document.head) { var lqs = document.createElement("script"); lqs.src = EXT ? new URL("lq.js", SRC).href : new URL(SRC).origin + "/lq.js"; document.head.appendChild(lqs); } } catch (e) {}
+  if (QUIET) box.style.display = "none";   // the extension's background sync: the icon shows the panel
   if (!AUTO) document.body.appendChild(box);   // an auto re-check shows its panel only if something changed
   var B = box.querySelector("#lqz-b");
   var AUTOGATE = false;   // the server's REQUIRE_GATE: gate every protected quiz by itself (set by /sync)
@@ -229,6 +241,11 @@
     var FP = hashStr(JSON.stringify(courses, function (k, v) { return k === "has_password" || k === "lq_password" ? undefined : v; }));
     try { prev = JSON.parse(localStorage.getItem(FPK) || "null"); } catch (e) { prev = null; }
     var autoLine = function () { return "Re-syncs by itself every 15 min while this tab is open · checked " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); };
+    // The extension's background sync, no panel yet: nothing changed in Brightspace within the hour -> no
+    // LOCKqz request at all (same rule as the panel's own re-check).
+    if (QUIET && !AUTO && !ASKED && prev && prev.fp === FP && Date.now() - Number(prev.at || 0) < FORCE_MS) {
+      box.remove(); tell({ lqz: "synced", ok: true, unchanged: true }); return;
+    }
     if (AUTO) {
       if (!FORCE && prev && prev.fp === FP && Date.now() - Number(prev.at || 0) < FORCE_MS) { var al = open.querySelector("#lqz-auto"); if (al) al.textContent = autoLine(); return; }
       if (!document.body.contains(open) || (open.dataset && open.dataset.gates === "1")) {
@@ -656,7 +673,7 @@
     // Resume any gate that was on before this tab was (re)opened, so a reload never strands a class
     // (a gate whose quiz has ended stops on its first tick).
     (state.protect || []).forEach(function (p) {
-      if (Number(p.gated) !== 1) return;
+      if (NOGATE || Number(p.gated) !== 1) return;
       var gb = B.querySelector('[data-gate="' + p.ou + ":" + p.qi + '"]'), st = B.querySelector('[data-gst="' + p.qi + '"]');
       if (!gb || !st || GATES[String(p.qi)]) return;
       startGate(String(p.ou), String(p.qi), pw_of(p.qi), st, true).then(function () { showGateBtn(String(p.ou), String(p.qi)); })
@@ -682,8 +699,11 @@
           .catch(function (er) { st.textContent = "auto gate failed: " + er.message.slice(0, 60) + " (click Start gate)"; st.style.color = "#990000"; showGateBtn(ou, qi); });
       });
     };
-    if (state.auto_gate) autoGate();
-    var agTimer = state.auto_gate && setInterval(function () { if (!(document.body.contains && document.body.contains(box))) { clearInterval(agTimer); return; } autoGate(); }, 60000);
+    // For the extension: when each protected quiz runs, so it can open its own Brightspace tab for the gate.
+    if (EXT) tell({ lqz: "schedule", auto_gate: !!state.auto_gate, quizzes: (state.protect || []).map(function (p) {
+      var q = qInfo(String(p.ou), String(p.qi)) || {}; return { ou: String(p.ou), qi: String(p.qi), start: q.start || null, end: q.end || null, active: q.active !== false, gated: Number(p.gated) === 1 }; }) });
+    if (state.auto_gate && !NOGATE) autoGate();
+    var agTimer = state.auto_gate && !NOGATE && setInterval(function () { if (!(document.body.contains && document.body.contains(box))) { clearInterval(agTimer); return; } autoGate(); }, 60000);
 
     // ---- the dashboard's "Sync now" button ----
     // The dashboard link opens the dashboard as this tab's child (so it can talk to this tab); a dashboard
