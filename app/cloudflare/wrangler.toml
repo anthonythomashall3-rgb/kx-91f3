@@ -66,3 +66,8 @@ FEE_EXEMPT = "dbristow@usc.edu,dbristow@marshall.usc.edu,huutienn@usc.edu"
 # locking (it starts the gate by itself from 1 h before the start), and no password is given for an
 # ungated protected quiz until it ends (the professor is emailed to open the Sync tab). "0" = off.
 REQUIRE_GATE = "1"
+
+# Exam emails (27 Oct 2026): reminders 48 h / 3 h before each protected exam to students without LOCKqz, and
+# the professor's T-70 check-in, run by POST /api/cron (X-LOCKqz-Pay). Cloudflare Pages Functions have no
+# [triggers] crons (Workers only), so the Gmail script (app/payments/LOCKqz-payments.gs, every minute) calls
+# /api/cron every ~10 min and /api/pay/tick hourly runs the same tick. $0, nothing to deploy.

@@ -94,7 +94,8 @@ CREATE TABLE IF NOT EXISTS teachers (
   verified  INTEGER DEFAULT 0,  -- proven instructor/TA via their own Brightspace login
   bs_user_id TEXT,              -- their own Brightspace user id, bound from a trusted roster at sync (migrate_016)
   vouched   INTEGER DEFAULT 0,  -- 1 = the admin vouched for the account holder (invite / first account); only these can verify (migrate_020)
-  sync_key_kept INTEGER DEFAULT 0  -- 1 = sync_key kept through a password reset only because a gate ran (migrate_025)
+  sync_key_kept INTEGER DEFAULT 0, -- 1 = sync_key kept through a password reset only because a gate ran (migrate_025)
+  ext_seen  TEXT                   -- when the professor's browser extension last checked in (migrate_034)
 );
 CREATE INDEX IF NOT EXISTS idx_teachers_token ON teachers(token);
 CREATE INDEX IF NOT EXISTS idx_teachers_sync_key ON teachers(sync_key);
@@ -164,6 +165,12 @@ CREATE TABLE IF NOT EXISTS card_renew (
 CREATE INDEX IF NOT EXISTS idx_card_renew_due ON card_renew(autorenew, rterm);
 -- professor emailed once when a student opens a quiz newer than their last Sync
 CREATE TABLE IF NOT EXISTS sync_nudges (ou TEXT, qi TEXT, at TEXT, PRIMARY KEY (ou, qi));
+-- Emails LOCKqz sent for a class (migrate_034): one row per class per kind per day. kind 'all'/'missing'
+-- (dashboard Email students), 'r48:<qi>'/'r3:<qi>' (automatic reminders), 'ck:<qi>' (T-70 check-in).
+CREATE TABLE IF NOT EXISTS mail_sent (ou TEXT NOT NULL, kind TEXT NOT NULL, day TEXT NOT NULL, n INTEGER, at TEXT, PRIMARY KEY (ou, kind, day));
+CREATE INDEX IF NOT EXISTS idx_mail_sent_day ON mail_sent(day);
+-- A class the professor turned automatic reminders off for (migrate_034); no row = on.
+CREATE TABLE IF NOT EXISTS class_mail (ou TEXT PRIMARY KEY, reminders INTEGER DEFAULT 1, teacher_id TEXT, at TEXT);
 -- unique Zelle amount per unpaid student per term (no memo needed)
 CREATE TABLE IF NOT EXISTS pay_slots (term TEXT NOT NULL, cents INTEGER NOT NULL, code TEXT NOT NULL, at TEXT, PRIMARY KEY (term, cents), UNIQUE (term, code));
 

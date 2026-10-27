@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 PUB=../cloudflare/public
 rm -rf build dist; mkdir -p build/chromium build/firefox dist
 for b in chromium firefox; do
-  cp background.js content-bs.js content-dash.js icon16.png icon48.png icon128.png "$PUB/sync.js" "$PUB/lq.js" "build/$b/"
+  cp background.js content-bs.js content-dash.js popup.html popup.js icon16.png icon48.png icon128.png "$PUB/sync.js" "$PUB/lq.js" "build/$b/"
 done
 python3 - <<'P'
 import json

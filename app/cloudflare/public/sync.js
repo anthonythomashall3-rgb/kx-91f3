@@ -701,7 +701,8 @@
     };
     // For the extension: when each protected quiz runs, so it can open its own Brightspace tab for the gate.
     if (EXT) tell({ lqz: "schedule", auto_gate: !!state.auto_gate, quizzes: (state.protect || []).map(function (p) {
-      var q = qInfo(String(p.ou), String(p.qi)) || {}; return { ou: String(p.ou), qi: String(p.qi), start: q.start || null, end: q.end || null, active: q.active !== false, gated: Number(p.gated) === 1 }; }) });
+      var q = qInfo(String(p.ou), String(p.qi)) || {}, c0 = courses.filter(function (x) { return String(x.ou) === String(p.ou); })[0];
+      return { ou: String(p.ou), qi: String(p.qi), name: String(q.name || p.title || "").slice(0, 120), course: c0 ? cname(c0).slice(0, 120) : "", start: q.start || null, end: q.end || null, active: q.active !== false, gated: Number(p.gated) === 1 }; }) });
     if (state.auto_gate && !NOGATE) autoGate();
     var agTimer = state.auto_gate && !NOGATE && setInterval(function () { if (!(document.body.contains && document.body.contains(box))) { clearInterval(agTimer); return; } autoGate(); }, 60000);
 

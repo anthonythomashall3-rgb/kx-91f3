@@ -13,6 +13,8 @@ const MIN = 60000;
 const QUIET_MS = 15 * MIN, BG_MS = 6 * 60 * MIN, LEAD_MS = 65 * MIN, AFTER_MS = 10 * MIN;
 const NO_ANSWER_MS = 3 * MIN, TMP_MAX_MS = 4 * MIN, NOTE_EVERY_MS = 60 * MIN;
 const BASES = ["https://prof.lockqz.pages.dev", "https://lockqz.pages.dev"];
+const API = "https://lockqz.pages.dev/api";   // one API (main site secrets)
+const SEEN_MS = 4 * 60 * MIN;   // check in with LOCKqz this often while the browser is open (T-70 email stays quiet)
 const get = k => api.storage.local.get(k);
 const set = o => api.storage.local.set(o);
 const tabAlive = async id => { if (id == null) return null; try { return await api.tabs.get(id); } catch { return null; } };
@@ -67,7 +69,7 @@ async function tick() {
       await set({ gateTab: t.id, gateOpenedAt: now, gateSeen: 0, gates: 0 });
     } else if (now - Math.max(Number(st.gateOpenedAt || 0), Number(st.gateSeen || 0)) > NO_ANSWER_MS) {
       // The exam tab is not running LOCKqz Sync: almost always a Brightspace sign-in page.
-      badge("!");
+      badge("!"); await set({ signin: true });
       await note(st, now, "Your exam is coming up. Sign in to Brightspace in the LOCKqz tab so LOCKqz can open it for your students. Click here.");
     }
   } else if (gate) {
@@ -81,10 +83,17 @@ async function tick() {
       relay({ lqz: "failed", error: "Brightspace didn't answer. Sign in to Brightspace in the tab LOCKqz opened, then press Sync now." });
       try { await api.tabs.update(tmp.id, { active: true }); } catch {}
     } else { try { await api.tabs.remove(tmp.id); } catch {} badge("!"); }
-    await set({ tmpTab: null });
+    await set({ tmpTab: null, signin: true });
   }
   // Every 6 h while the browser is open: a quiet sync in a background tab (new quizzes, roster changes).
   if (!tmp && !gate && now - Number(st.lastSync || 0) > BG_MS && now - Number(st.tmpAt || 0) > BG_MS) await syncNow(false);
+  // Every 4 h while the browser is open: "I'm here" to LOCKqz (one tiny request; the server writes at most
+  // once per 4 h). Without it LOCKqz emails the professor an hour before an exam to open Chrome.
+  const seen = await get(["seenAt"]);
+  if (now - Number(seen.seenAt || 0) > SEEN_MS) {
+    await set({ seenAt: now });
+    try { await fetch(API + "/ext-seen", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Sync": st.key }, body: "{}" }); } catch {}
+  }
 }
 
 async function syncNow(asked) {
@@ -127,13 +136,18 @@ async function handle(msg, sender) {
   }
   if (msg.t === "sync") { await syncNow(true); return { ok: true }; }
   if (msg.t === "loaded") {
-    const st = await get(["key", "base", "gateTab", "tmpTab", "lastRun"]);
+    const st = await get(["key", "base", "gateTab", "tmpTab", "lastRun", "welcomed", "lastSync"]);
     if (!st.key) return {};
     const role = tab === st.gateTab ? "gate" : tab === st.tmpTab ? "tmp" : "browse";
     if (role === "gate") await set({ gateSeen: now });
-    if (role === "browse" && now - Number(st.lastRun || 0) < QUIET_MS) return { key: st.key, base: st.base, role, run: false };
+    // The professor's first Brightspace visit after install (or reinstall: storage starts empty): the
+    // content script shows the one-time "Syncing your classes" card. Never again after that.
+    const first = role === "browse" && !st.welcomed;
+    if (first) await set({ welcomed: now });
+    const extra = first ? { first: true, synced: !!st.lastSync } : {};
+    if (role === "browse" && now - Number(st.lastRun || 0) < QUIET_MS) return { key: st.key, base: st.base, role, run: false, ...extra };
     await set({ lastRun: now });
-    return { key: st.key, base: st.base, role, run: true, force: role === "tmp" };
+    return { key: st.key, base: st.base, role, run: true, force: role === "tmp", ...extra };
   }
   if (msg.t === "from-sync") {
     const m = msg.m || {};
@@ -144,7 +158,7 @@ async function handle(msg, sender) {
       setTimeout(() => serial(tick), 0);   // after this message is answered (one event at a time)
       return;
     }
-    if (m.lqz === "synced") { await set({ lastSync: now }); badge(""); }
+    if (m.lqz === "synced") { await set({ lastSync: now, signin: false, statusAt: 0 }); badge(""); }
     if (m.lqz === "failed") badge("!");
     if ((m.lqz === "synced" || m.lqz === "failed") && tab != null && tab === st.tmpTab) {
       await set({ tmpTab: null });
@@ -155,10 +169,4 @@ async function handle(msg, sender) {
   }
 }
 
-// The toolbar icon: in Brightspace it shows the LOCKqz panel; anywhere else it opens the dashboard.
-api.action.onClicked.addListener(async t => {
-  const onBs = t && t.url && /^https:\/\/(brightspace\.usc\.edu|usc\.brightspace\.com)\/d2l\//.test(t.url);
-  if (onBs) { try { await api.tabs.sendMessage(t.id, { t: "show" }); return; } catch {} }
-  const st = await get(["base"]);
-  api.tabs.create({ url: (BASES.includes(st.base) ? st.base : BASES[0]) + "/" });
-});
+// The toolbar icon opens the popup (popup.html: status, Open dashboard, Sync now).

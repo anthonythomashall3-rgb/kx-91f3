@@ -34,6 +34,14 @@
   .sw.big i{width:56px;height:32px;border-radius:16px}.sw.big i::after{width:26px;height:26px}.sw.big[aria-pressed=true] i::after{left:27px}
   .sw:disabled{opacity:.5;cursor:wait}
   .eyebrow{margin:0 0 -6px 4px;font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6b6861}
+  /* set-up checklist: one card per step left; the whole block goes when every step is done */
+  .setup{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+  .setup .step{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+  .setup .num{flex:none;width:30px;height:30px;border-radius:50%;background:var(--usc);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .setup .step>div:first-of-type{flex:1;min-width:200px}.setup .step b{display:block;font-size:15px}.setup .step .d{display:block;font-size:13px;color:var(--mute);margin-top:2px}
+  .setup .acts{display:flex;gap:8px;flex-wrap:wrap}
+  .lqtoast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:9500;background:#1a1a1a;color:#fff;padding:12px 18px;border-radius:10px;font-size:14px;font-weight:600;box-shadow:0 8px 30px rgba(0,0,0,.3)}
+  .cls .nx{font-size:13px;color:var(--mute);margin-top:4px}.cls .rem{font-size:12px;color:var(--faint);display:flex;align-items:center;gap:6px;margin-top:10px}
   .cls{display:flex;flex-direction:column;gap:20px}
   .cls.off{opacity:.72}
   .cls .top{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
@@ -159,6 +167,11 @@
 // The red lock loader from /lq.js (plain text if it did not load).
 const lqL = (m, e, o) => typeof lqLoading === "function" ? lqLoading(m, e, o) : m + "…";
 const API = /\.pages\.dev$/.test(location.hostname) ? "https://lockqz.pages.dev/api" : "/api", INSTALL = "https://lockqz.pages.dev";   // one API (main site secrets)
+// ---- Professor extension store links: fill in when the store listing is live. Until a link is filled in,
+// "Add LOCKqz to <browser>" links the packaged extension (.zip) with a one-line load-unpacked fallback. ----
+const EXT_STORE = { CHROME: "", EDGE: "", FIREFOX: "" };   // fill in when store listing is live
+const EXT_ZIP = { chrome: INSTALL + "/download/lockqz-prof-chromium.zip", edge: INSTALL + "/download/lockqz-prof-chromium.zip", firefox: INSTALL + "/download/lockqz-prof-firefox.zip", other: INSTALL + "/download/lockqz-prof-chromium.zip" };
+const BS_SITE = "https://brightspace.usc.edu";
 let token = localStorage.getItem("lockqz_token") || "";
 let signup = false, ME = null, BS = { courses: [] }, LEGACY = [], SYNCKEY = "", liveTimer = null, INVITE = "", LOADERR = "", AUTO = null;
 const $ = id => document.getElementById(id);
@@ -271,19 +284,21 @@ let SYNCHELPON = false;
 // the professor is signed into Brightspace and opens its own Brightspace tab for each exam, so no bookmark
 // and no tab to keep open. Its content script marks this page (data-lqz-ext) and relays its status here as
 // window messages tagged lqzExt; this page hands it the Sync key. Store links: filled in once published.
-const EXT_STORE = { edge: "", firefox: "", chrome: "" };
 const EXT = () => { try { return !!document.documentElement.dataset.lqzExt; } catch { return false; } };
 const postKey = () => { if (EXT() && SYNCKEY) window.postMessage({ lqz: "ext-key", key: SYNCKEY }, location.origin); };
 const BROWSER = (() => { const u = navigator.userAgent || ""; return /Edg\//.test(u) ? "edge" : /Firefox\//.test(u) ? "firefox" : /Chrome\//.test(u) ? "chrome" : "other"; })();
 const BROWSER_NAME = { edge: "Edge", firefox: "Firefox", chrome: "Chrome", other: "your browser" }[BROWSER];
-const EXT_URL = () => EXT_STORE[BROWSER] || "";
+const EXT_FROM_STORE = () => !!EXT_STORE[BROWSER.toUpperCase()];
+const EXT_URL = () => EXT_STORE[BROWSER.toUpperCase()] || EXT_ZIP[BROWSER] || EXT_ZIP.other;
 // Has this professor's bookmark ever synced? Then it is already in the bookmarks bar: one line, not 3 steps.
 const EVER = () => !!(BS.courses && BS.courses.length);
 const BMKSTEPS = () => `<ol class="steps" style="margin:10px 0 0;text-align:left">
   <li>Show your bookmarks bar: press <b>${BARKEY}</b>.</li>
   <li>Drag ${BMK()} onto it.</li>
   <li>In the Brightspace tab, click <b>LOCKqz Sync</b>. Leave that tab open.</li></ol>`;
-const EXTBTN = () => EXT_URL() ? `<a class="btn prime" href="${esc(EXT_URL())}" target="_blank" rel="noopener">Add LOCKqz to ${BROWSER_NAME}</a>` : "";
+const EXT_PAGE = { edge: "edge://extensions", firefox: "about:debugging#/runtime/this-firefox", chrome: "chrome://extensions", other: "chrome://extensions" }[BROWSER];
+const EXTBTN = () => `<a class="btn prime" href="${esc(EXT_URL())}" target="_blank" rel="noopener">Add LOCKqz to ${BROWSER_NAME}</a>` +
+  (EXT_FROM_STORE() ? "" : `<span class="muted" style="display:block;margin-top:6px;font-size:13px">Unzip it, open <b>${EXT_PAGE}</b>, turn on Developer mode, click <b>${BROWSER === "firefox" ? "Load Temporary Add-on" : "Load unpacked"}</b> and pick the folder.</span>`);
 function syncMsg(t, help = false){ SYNCMSG = t; SYNCHELPON = help; document.querySelectorAll(".syncst").forEach(e => e.innerHTML = syncHtml(t) + (help ? SYNCHELP() : "")); }
 function askSync(w){ BS_ORIGINS.forEach(o => { try { w.postMessage({ lqz: "sync" }, o); } catch {} }); }
 // After a switch here: the open LOCKqz Sync tab puts the change into Brightspace and redraws its panel, so
@@ -318,7 +333,7 @@ window.addEventListener("message", async e => {
   const fromExt = e.source === window && e.origin === location.origin && e.data.lqzExt === 1;   // relayed by the extension
   if (!fromExt && !BS_ORIGINS.includes(e.origin)) return;
   const m = e.data, src = fromExt ? null : e.source;
-  if (fromExt && m.lqz === "ext-hello") { postKey(); if (shown() && ME && !busy() && viewName() === "connect") route(); return; }
+  if (fromExt && m.lqz === "ext-hello") { postKey(); if (shown() && ME && !busy() && ["", "connect"].includes(viewName())) route(); return; }   // the set-up step "Add LOCKqz" goes the moment the extension is here
   if (m.lqz === "hello") { if (src) BSWIN = src; return; }
   // A switch flipped on the Sync panel: show it here at once.
   if (m.lqz === "changed") { if (src) BSWIN = src; if (shown() && ME && !SAVING) { await refresh(); if (!busy()) route(); } return; }
@@ -378,7 +393,8 @@ function viewHome(){
   let h = "";
   h += `<div id="pay"></div>`;
   if(LOADERR) h += `<div class="note red"><span>Could not load from LOCKqz: ${esc(LOADERR)}</span></div>`;
-  if(!BS.courses.length) return h + viewConnect(true);
+  if(!BS.courses.length) return h + setupBlock() + (EXT() ? `<p class="foot">LOCKqz is syncing your classes from Brightspace. They appear here by themselves.</p>` : viewConnect(true));
+  h += setupBlock();
   if(!ME.admin && !ME.verified) h += `<div class="note warn"><span>LOCKqz can't protect your exams until Brightspace shows you as the instructor. ${EXT() ? "Open Brightspace while signed in: LOCKqz connects by itself." : "Click your <b>LOCKqz Sync</b> bookmark in Brightspace."}</span><button class="btn warn" onclick="nav('connect')">How</button></div>`;
   const all = BS.courses.map(classStats);
   const exams = all.reduce((n,s)=>n+s.cur.length,0), prot = all.reduce((n,s)=>n+s.prot.length,0), students = BS.courses.reduce((n,c)=>n+c.students.length,0);
@@ -404,13 +420,10 @@ function viewHome(){
         <a href="#class/${esc(c.ou)}"><span class="nm">${esc(cname(c))}</span><span class="sm">${esc(c.code||"")}${c.code?" · ":""}${c.students.length} students</span></a>
         <button class="sw" aria-pressed="${s.on}" aria-label="LOCKqz on for this class" data-ou="${esc(c.ou)}" onclick="setClass(this.dataset.ou,${!s.on})"><b>${s.on?"On":"Off"}</b><i></i></button>
       </div>
-      <div class="tiles">
-        <div class="tile"><span class="k">Students ready</span><span class="v">${s.ready}<small> / ${c.students.length}</small></span><span class="bar"><span style="width:${pct}%"></span></span></div>
-        <div class="tile"><span class="k">Exams protected</span><span class="v">${s.prot.length}<small> / ${s.cur.length}</small></span><span class="n">${s.cur.length===0?(s.on?"no upcoming exams · new ones protected":"no upcoming exams · LOCKqz is off"):s.on?"all of them, automatically":s.prot.length?(s.cur.length-s.prot.length)+" turned off":"LOCKqz is off for this class"}</span></div>
-        <div class="tile"><span class="k">Next exam</span><span class="v md">${s.next?esc(s.next.name):"—"}</span><span class="n">${s.next?when(s.next.start_date):"none scheduled"}</span></div>
-      </div>
-      ${s.missing.length ? `<div class="note warn"><span>${s.missing.length} student${s.missing.length===1?"":"s"} still need${s.missing.length===1?"s":""} to install LOCKqz${s.next?" before "+esc(s.next.name):""}.</span>${mailBtns(c,s)}</div>`
-        : `<div class="note ok"><span>${c.students.length?"Every student has LOCKqz installed.":"No students on the Brightspace roster yet."}</span>${mailBtns(c,s)}</div>`}
+      <div class="nx">${s.next ? `Next exam: <b>${esc(s.next.name)}</b> · ${when(s.next.start_date)}` : s.cur.length ? `${s.cur.length} upcoming exam${s.cur.length===1?"":"s"}` : (s.on ? "No upcoming exams · new ones are protected by themselves" : "No upcoming exams · LOCKqz is off")}</div>
+      ${s.missing.length ? `<div class="note warn"><span><b>${s.ready} of ${c.students.length}</b> students installed${s.next?" · "+s.missing.length+" need it before "+esc(s.next.name):""}.</span>${mailBtns(c,s)}</div>`
+        : `<div class="note ok"><span>${c.students.length?`<b>${s.ready} of ${c.students.length}</b> students installed. Every student has LOCKqz.`:"No students on the Brightspace roster yet."}</span>${mailBtns(c,s)}</div>`}
+      ${BS.mail_on ? `<label class="rem"><input type="checkbox" data-ou="${esc(c.ou)}"${c.reminders===false?"":" checked"} onchange="setReminders(this.dataset.ou,this.checked,this)"> Remind students without LOCKqz by email 2 days and 3 hours before each exam</label>` : ""}
     </article>`;
   });
   h += `</section>`;
@@ -418,6 +431,33 @@ function viewHome(){
   h += `<p class="foot">New classes, students and exams appear here on their own. Students without LOCKqz cannot open a protected exam.</p>`;
   return h;
 }
+// ---- Set up: N of 3 done. A step card disappears the moment it is done; the block goes when all are.
+//  1. the extension is installed (data-lqz-ext)   2. the first sync landed   3. every class was emailed.
+const mailedAll = () => BS.courses.length > 0 && BS.courses.filter(c=>!c.roster_hidden).every(c => c.mailed_at || !c.students.length);
+function setupBlock(){
+  if (ME.admin && !BS.courses.length) return "";
+  const steps = [EXT(), BS.courses.length > 0, mailedAll()], done = steps.filter(Boolean).length;
+  if (done === 3) return "";
+  const todo = BS.courses.filter(c => !c.roster_hidden && !c.mailed_at && c.students.length);
+  let h = `<section class="card" aria-label="Set up"><div class="hrow"><h2 style="margin:0">Set up — ${done} of 3 done</h2><span class="muted">About a minute. Each step disappears once it's done.</span></div><div class="setup">`;
+  if (!steps[0]) h += `<div class="step"><span class="num">1</span><div><b>Add LOCKqz to ${BROWSER_NAME}</b><span class="d">One click. After that LOCKqz syncs your classes and watches every exam by itself.</span></div><div class="acts" style="flex-direction:column;align-items:flex-start">${EXTBTN()}</div></div>`;
+  if (!steps[1]) h += `<div class="step"><span class="num">2</span><div><b>Open Brightspace once</b><span class="d">Sign in as usual. Your classes appear here within a minute.</span></div><div class="acts"><a class="btn prime" href="${BS_SITE}" target="_blank" rel="noopener">Open Brightspace</a></div></div>`;
+  if (!steps[2]) h += `<div class="step"><span class="num">3</span><div><b>Email your students</b><span class="d">So they install LOCKqz before the first exam. Students without it can't open the exam.</span></div><div class="acts">${steps[1] ? todo.map(c => `<button class="btn prime" data-ou="${esc(c.ou)}" onclick="emailClass(this.dataset.ou,'all',this)">Email students${todo.length>1?" · "+esc(cname(c)):""}</button>`).join("") : `<span class="muted">After step 2.</span>`}</div></div>`;
+  return h + `</div></section>`;
+}
+// A short confirmation at the bottom of the page.
+function toast(t){ const e = document.createElement("div"); e.className = "lqtoast"; e.textContent = t; document.body.appendChild(e); setTimeout(() => e.remove(), 4000); }
+// Email students (kind "all") or only those who have not installed ("missing"): sent by LOCKqz, signed by
+// the professor, replies go to the professor. The row then shows "Remind the N who haven't installed".
+async function emailClass(ou, kind, b){
+  if (b) { b.disabled = true; b.textContent = "Sending…"; }
+  const d = await post("/email/students", { ou, kind });
+  if (d.error) { alert(d.error === "limit" ? (d.message || "LOCKqz reached today's email limit. Try again tomorrow.") : (d.message || d.error)); if (b) { b.disabled = false; } route(); return; }
+  toast(d.sent ? `Sent to ${d.sent} student${d.sent===1?"":"s"}` : "Nobody to email yet");
+  await refresh(); route();
+}
+async function setReminders(ou, on, cb){ if (cb) cb.disabled = true; const d = await post("/class-mail", { ou, reminders: on }); if (d.error) { alert(d.error); if (cb) cb.checked = !on; }
+  else { const c = BS.courses.find(x=>x.ou===ou); if (c) c.reminders = on; } if (cb) cb.disabled = false; }
 // Send email, on every class (dashboard + Sync panel): to the students who still need LOCKqz, or to the
 // whole class once everyone has it (a reminder before the exam).
 const mailTo = s => (s.missing.length ? s.missing : (s.all||[])).map(x=>x.email).filter(Boolean);
@@ -428,7 +468,13 @@ function mailMissing(c,s,withBcc=true){
   return `mailto:?${bcc?"bcc="+encodeURIComponent(bcc)+"&":""}subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`;
 }
 // Mail apps drop mailto links over ~2000 characters: a big class gets the email without Bcc + a Copy emails button.
-function mailBtns(c,s){ s = { ...s, all: c.students }; const full = mailMissing(c,s), long = full.length > 1900, k = s.missing.length ? "warn" : "";
+function mailBtns(c,s){ s = { ...s, all: c.students };
+  if (BS.mail_on) {   // LOCKqz sends the email itself (HTML, signed by the professor)
+    if (!c.students.length) return "";
+    if (!c.mailed_at) return `<button class="btn prime" data-ou="${esc(c.ou)}" onclick="emailClass(this.dataset.ou,'all',this)">Email students</button>`;
+    return s.missing.length ? `<button class="btn warn" data-ou="${esc(c.ou)}" onclick="emailClass(this.dataset.ou,'missing',this)">Remind the ${s.missing.length} who haven't installed</button>` : "";
+  }
+  const full = mailMissing(c,s), long = full.length > 1900, k = s.missing.length ? "warn" : "";
   const tip = s.missing.length ? `Emails the ${s.missing.length} student${s.missing.length===1?"":"s"} who still need LOCKqz` : "Emails the whole class a reminder";
   return long ? `<span style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ${k}" data-ou="${esc(c.ou)}" onclick="copyMissing(this)">Copy emails</button><a class="btn ${k} mailbtn" title="${tip}" href="${mailMissing(c,s,false)}">Send email</a></span>`
               : `<a class="btn ${k} mailbtn" title="${tip}" href="${full}">Send email</a>`; }
@@ -460,6 +506,7 @@ function viewClass(ou){
     <button class="sw" aria-pressed="${s.on}" aria-label="LOCKqz on for this class" data-ou="${esc(ou)}" onclick="setClass(this.dataset.ou,${!s.on})"><b>LOCKqz ${s.on?"on":"off"}</b><i></i></button></div>
   <div class="two">
     <section class="card"><div class="hrow"><h2>Exams</h2><span>every exam starts protected</span></div>
+      ${s.cur.length ? `<p class="muted" style="margin:6px 0 0">Nothing to do — LOCKqz sets the password and opens the exam for installed students.</p>` : ""}
       <ul class="list">${s.cur.map(row).join("") || `<li class="d">No upcoming exams in Brightspace.</li>`}</ul>
       ${past.length ? `<details class="past"><summary>${past.length} past</summary><ul class="list">${past.map(q=>`<li><div class="grow"><span class="t" style="color:#6b6861">${esc(q.name)}</span><span class="d">${q.end_date?"ended "+when(q.end_date):q.due_date?"due "+when(q.due_date):""}</span></div><span class="st">${q.password?"was protected":""}</span></li>`).join("")}</ul></details>` : ""}
     </section>
@@ -526,7 +573,7 @@ function viewConnect(first){
     <div><h1 style="margin:0;font-size:24px;font-weight:700;letter-spacing:-.015em">${first?"One step, once.":"Brightspace connection"}</h1>
     <p class="sub">LOCKqz reads your classes, rosters and exams from Brightspace and protects every exam.</p></div>
     ${EXT() ? `<p style="margin:0"><b>Connected automatically.</b> The LOCKqz extension syncs your classes, rosters and exams whenever you're signed in to Brightspace, and opens its own Brightspace tab for each exam. Nothing to click or keep open.</p>`
-    : EXT_URL() ? `<div style="display:flex;flex-direction:column;gap:10px;align-items:flex-start">${EXTBTN()}<p class="muted" style="margin:0">One click to add it. After that LOCKqz syncs by itself: no bookmark, no tab to keep open.</p>
+    : EXT_URL() ? `<div style="display:flex;flex-direction:column;gap:10px;align-items:flex-start"><div>${EXTBTN()}</div><p class="muted" style="margin:0">One click to add it. After that LOCKqz syncs by itself: no bookmark, no tab to keep open.</p>
       <a href="#" class="muted" onclick="this.outerHTML=BMKSTEPS();return false">Use a bookmark instead</a></div>`
     : EVER() ? `<p style="margin:0">In Brightspace, click <b>LOCKqz Sync</b> in your bookmarks bar. Leave that tab open during exams. <a href="#" onclick="this.outerHTML=BMKSTEPS();return false">Don't see it?</a></p>`
     : `<ol class="steps">
