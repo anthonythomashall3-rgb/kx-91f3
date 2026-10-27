@@ -20,20 +20,25 @@ list=$(s "$API/webhook_endpoints?limit=100") || { echo "::error::Stripe refused 
 printf '%s' "$STRIPE_SECRET_KEY" | $W pages secret put STRIPE_SECRET_KEY --project-name "$PROJECT" >/dev/null
 echo "stripe: STRIPE_SECRET_KEY set on $PROJECT"
 have=$($W pages secret list --project-name "$PROJECT" 2>/dev/null | grep -c "STRIPE_WEBHOOK_SECRET" || true)
+# The events the API handles (payment_intent.succeeded = student card renewals, 27 Oct 2026).
+EVENTS=(-d "enabled_events[]=checkout.session.completed" -d "enabled_events[]=checkout.session.async_payment_succeeded"
+  -d "enabled_events[]=charge.refunded" -d "enabled_events[]=charge.dispute.created" -d "enabled_events[]=charge.failed"
+  -d "enabled_events[]=payment_intent.payment_failed" -d "enabled_events[]=payment_intent.canceled" -d "enabled_events[]=payment_intent.succeeded")
 if [ "$have" = 0 ] || [ "$STRIPE_RESET_WEBHOOK" = 1 ]; then
   for id in $(printf '%s' "$list" | python3 -c 'import sys,json; [print(e["id"]) for e in json.load(sys.stdin).get("data",[]) if e.get("url")==sys.argv[1]]' "$HOOK"); do
     s -X DELETE "$API/webhook_endpoints/$id" >/dev/null && echo "stripe: removed old webhook $id"
   done
-  made=$(s "$API/webhook_endpoints" -d "url=$HOOK" -d "description=LOCKqz payments" \
-    -d "enabled_events[]=checkout.session.completed" -d "enabled_events[]=checkout.session.async_payment_succeeded" \
-    -d "enabled_events[]=charge.refunded" -d "enabled_events[]=charge.dispute.created" -d "enabled_events[]=charge.failed" \
-    -d "enabled_events[]=payment_intent.payment_failed" -d "enabled_events[]=payment_intent.canceled")
+  made=$(s "$API/webhook_endpoints" -d "url=$HOOK" -d "description=LOCKqz payments" "${EVENTS[@]}")
   whsec=$(printf '%s' "$made" | python3 -c 'import sys,json; print(json.load(sys.stdin)["secret"])')
   [ -n "$whsec" ] || { echo "::error::Stripe did not return a webhook secret"; exit 1; }
   printf '%s' "$whsec" | $W pages secret put STRIPE_WEBHOOK_SECRET --project-name "$PROJECT" >/dev/null
   echo "stripe: webhook created -> $HOOK; STRIPE_WEBHOOK_SECRET set on $PROJECT"
 else
   echo "stripe: webhook secret already set (STRIPE_RESET_WEBHOOK=1 makes a new one)"
+  # Same endpoint, same secret: keep its event list up to date (adds events new code handles).
+  for id in $(printf '%s' "$list" | python3 -c 'import sys,json; [print(e["id"]) for e in json.load(sys.stdin).get("data",[]) if e.get("url")==sys.argv[1]]' "$HOOK"); do
+    s "$API/webhook_endpoints/$id" "${EVENTS[@]}" >/dev/null && echo "stripe: webhook $id events updated" || echo "::warning::could not update the Stripe webhook events"
+  done
 fi
 pmc=$(s "$API/payment_method_configurations?limit=20" 2>/dev/null | python3 -c 'import sys,json
 d=json.load(sys.stdin).get("data",[]); x=[c for c in d if c.get("is_default")] or d; print(x[0]["id"] if x else "")' 2>/dev/null || true)

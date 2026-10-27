@@ -154,6 +154,14 @@ CREATE INDEX IF NOT EXISTS payments_code ON payments (code, term);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_quizzes_ou_qi ON quizzes(ou, qi);
 CREATE TABLE IF NOT EXISTS renew_optout (email TEXT PRIMARY KEY, at TEXT);
 CREATE TABLE IF NOT EXISTS renew_sent (email TEXT NOT NULL, term TEXT NOT NULL, at TEXT, PRIMARY KEY (email, term));
+-- Student card auto-renew (migrate_033): saved card per email, charged off-session each Fall/Spring from /pay/tick.
+CREATE TABLE IF NOT EXISTS card_renew (
+  email TEXT PRIMARY KEY, customer TEXT, pm TEXT, brand TEXT, last4 TEXT,
+  autorenew INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT,
+  rterm TEXT, state TEXT, charge_on TEXT, amount INTEGER, reminded_at TEXT,
+  tries INTEGER DEFAULT 0, fail_day TEXT, fail_msg TEXT, pi TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_card_renew_due ON card_renew(autorenew, rterm);
 -- professor emailed once when a student opens a quiz newer than their last Sync
 CREATE TABLE IF NOT EXISTS sync_nudges (ou TEXT, qi TEXT, at TEXT, PRIMARY KEY (ou, qi));
 -- unique Zelle amount per unpaid student per term (no memo needed)

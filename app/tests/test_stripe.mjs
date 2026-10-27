@@ -175,6 +175,7 @@ check("bank nets $5,000 (fee capped $5)", 5005 - Math.min(5005 * 0.008, 5) === 5
 r = await call(ON, "/pay/stripe-prof", { method: "card", back: "https://evil.example/" }, { teacher: PT });
 s = sessions.at(-1).f;
 check("prof checkout $5,150, memo code, foreign return URL replaced", r.status === 200 && s.get("line_items[0][price_data][unit_amount]") === "515000" && s.get("metadata[code]") === MEMO && s.get("cancel_url") === "https://prof.lockqz.pages.dev/", s.toString());
+check("professor card stays one-time: no saved card, no auto-renew", !s.has("payment_intent_data[setup_future_usage]") && !s.has("metadata[save]") && !s.has("customer_creation"), s.toString());
 check("not active before payment", (await getc(ON, "/me", { teacher: PT })).data?.active === false);
 r = await hook(done(MEMO, 515000, "pi_prof"));
 check("webhook: professor paid", r.data?.result?.matched === "professor" && r.data.result.paid === true, JSON.stringify(r.data));

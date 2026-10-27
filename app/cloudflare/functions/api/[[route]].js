@@ -267,9 +267,10 @@ async function smtpSend(open, { user, pass, to, subject, text, fromName = "LOCKq
   } finally { try { await sock.close?.(); } catch {} }
   return true;
 }
-async function sendCode(env, to, code) {
+async function sendCode(env, to, code, web = false) {
   const subject = `Your LOCKqz code: ${code}`;
-  const text = (isExempt(env, to) ? WELCOME + "\n\n" : "") + `Your LOCKqz code is ${code}\n\nType it into the LOCKqz window on your computer. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
+  const text = web ? `Your LOCKqz sign-in code is ${code}\n\nType it on lockqz.pages.dev to open your account. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`
+    : (isExempt(env, to) ? WELCOME + "\n\n" : "") + `Your LOCKqz code is ${code}\n\nType it into the LOCKqz window on your computer. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
   if (typeof env.MAIL_SINK === "function") return env.MAIL_SINK({ to, subject, text, code });   // tests
   const open = typeof env.MAIL_OPEN === "function" ? env.MAIL_OPEN   // tests: fake SMTP server
     : async () => (await import("cloudflare:sockets")).connect({ hostname: env.MAIL_HOST || "smtp.gmail.com", port: Number(env.MAIL_PORT || 465) },
@@ -641,9 +642,9 @@ export async function onRequest(context) {
   // Remembered as an events row (device_id "code:<code>", event "stripe_sess"): 1 read per checkout, 1 write
   // per new session (D1 Free), purged after 2 days.
   const STRIPE_REUSE_MS = 30 * 60000;
-  const stripeApi = async (path, form) => {
+  const stripeApi = async (path, form, extra = {}) => {
     const r = await fetch("https://api.stripe.com/v1/" + path, form ? { method: "POST", body: form,
-      headers: { Authorization: "Bearer " + env.STRIPE_SECRET_KEY, "Content-Type": "application/x-www-form-urlencoded" } }
+      headers: { Authorization: "Bearer " + env.STRIPE_SECRET_KEY, "Content-Type": "application/x-www-form-urlencoded", ...extra } }
       : { headers: { Authorization: "Bearer " + env.STRIPE_SECRET_KEY } });
     return { ok: r.ok, d: await r.json().catch(() => ({})) };
   };
@@ -687,7 +688,14 @@ export async function onRequest(context) {
       "payment_intent_data[metadata][code]": code, "payment_intent_data[description]": "LOCKqz " + code,
       success_url: back + (back.includes("?") ? "&" : "?") + "stripe=" + method, cancel_url: back,
       expires_at: String(unixNow() + 2 * 3600) });   // never payable for long; reused for 30 min, expired when replaced
-    if (email) f.set("customer_email", email);
+    // Student card: the card is saved (one Customer per email) and renews each Fall/Spring off-session (no
+    // Stripe Billing: it costs 0.7% more). The pay page says so on the button and next to the price.
+    if (kind === "student" && method === "card" && autoRenewOn()) {
+      const cr = email ? await db.prepare("SELECT customer FROM card_renew WHERE email=?").bind(String(email).toLowerCase()).first().catch(() => null) : null;
+      f.set("payment_intent_data[setup_future_usage]", "off_session"); f.set("metadata[save]", "1");
+      if (cr && /^cus_[A-Za-z0-9]+$/.test(String(cr.customer || ""))) f.set("customer", cr.customer); else f.set("customer_creation", "always");
+    }
+    if (email && !f.has("customer")) f.set("customer_email", email);
     const { ok, d } = await stripeApi("checkout/sessions", f);
     return ok && d.url ? { url: d.url, id: String(d.id || ""), amount: amt / 100 } : { error: "Card payments are not available right now. Try again in a minute." };
   }
@@ -837,6 +845,7 @@ export async function onRequest(context) {
     const cardOnly = String(env.STUDENT_CARD_ONLY||"") === "1" && stripeOn();   // students: card only, once Stripe is configured
     return { amount: STUDENT_FEE, code, venmo: cardOnly ? null : stuVenmo(), zelle: cardOnly ? null : stuZelle(), bank: null, po: null, zelle_amount: cardOnly ? null : zelle_amount, stripe: stripeInfo("student", due),
              tax: taxInfo(), ways: taxOn() ? waysFor("student", Math.max(0, STUDENT_FEE - got)) : null, bank_auto: true,
+             card_renew: autoRenewOn() && stripeInfo("student", due) ? cardFullCents() / 100 : null,
              url: email ? await payLink(email) : PAY_URL };
   }
   // Memo codes typed by people: "lqs-ab12c", "LQS AB12C", "LQ AB12C". Student (LQS+5) first, then
@@ -859,7 +868,8 @@ export async function onRequest(context) {
       const alt = p.msg ? "gmail:" + String(p.msg).slice(0, 100) : null;   // same alert under its Gmail id
       items.push({ i, txn, alt, amount: Number.isFinite(amount) ? amount : 0, review, code: memoCode(`${p.note||""} ${p.subject||""}`),
         email: (String(p.note||"").match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/) || [])[0] || null,
-        via: String(p.via||"").slice(0,20), payer: String(p.payer||"").slice(0,120), note: String(p.note||"").slice(0,300), why: str(p.review_reason, 120) });
+        via: String(p.via||"").slice(0,20), payer: String(p.payer||"").slice(0,120), note: String(p.note||"").slice(0,300), why: str(p.review_reason, 120),
+        want: /^\d{4}[123]$/.test(String(p.want_term || "")) ? String(p.want_term) : null });
     });
     const seen = new Set(), keys = [...new Set(items.flatMap(x => [x.txn, x.alt]).filter(Boolean))];
     for (const part of chunk(keys, 99)) (await db.prepare(`SELECT txn FROM payments WHERE txn IN (${placeholders(part.length)})`).bind(...part).all()).results.forEach(r => seen.add(r.txn));
@@ -888,7 +898,8 @@ export async function onRequest(context) {
     const priceOf = c => /^LQS[A-Z0-9]{5}$/.test(c) ? STUDENT_FEE : PRICE;
     const rows = [], t = now();
     for (const x of fresh) {
-      x.term = x.code ? payTermFor(sums.get(x.code + "|" + cur) || 0, priceOf(x.code)) : cur;
+      // want = the term a card renewal was charged for (never from /pay/notify): it counts there, if that term is open.
+      x.term = x.code ? (x.want && [cur, nxt, nn].includes(x.want) ? x.want : payTermFor(sums.get(x.code + "|" + cur) || 0, priceOf(x.code))) : cur;
       // Overpaid (e.g. two card checkouts both paid, or card + Zelle): a payment for a term that is already
       // paid in full counts for the next term instead (at most 2 terms ahead), never lost. Tagged in the
       // note so Admin -> Payments shows it (the admin may refund it instead: Void, then refund at the source).
@@ -948,6 +959,125 @@ export async function onRequest(context) {
       } catch (e) { break; }
     }
     return { sent, term: cur };
+  }
+  // ---- Student card auto-renew (Anthony, 27 Oct 2026) ----
+  // A student card payment through Checkout saves the card (Customer + setup_future_usage=off_session; no Stripe
+  // Billing, which costs 0.7% more). Each Fall/Spring (summer is skipped) /pay/tick (the Gmail script, hourly):
+  //  1. emails a reminder 7 days ahead (amount, date, how to cancel), a few per tick and <= RENEW_MAIL_DAY_MAX a day;
+  //  2. charges the card off-session on the first day a payment counts for the next term (term start - PAY_AHEAD_DAYS,
+  //     ahead()) or 7 days after the reminder if later, so access is ready on day one. Idempotency key per
+  //     email + term + attempt + amount: a retried call can never charge twice. Metadata = Checkout's (code, kind,
+  //     term) + renew=1, so the webhook credits it too (payment_intent.succeeded) and refunds/disputes void it.
+  //  3. a failed charge (declined / bank wants confirmation) is marked, the student is emailed the pay link once,
+  //     and it is retried at most once a day (3 tries; never when the bank asks to confirm). Access is unchanged:
+  //     unpaid = today's unpaid behaviour.
+  // Cancel = autorenew 0 (gear icon on lockqz.pages.dev -> Account); the current term's access stays.
+  const autoRenewOn = () => stripeOn() && String(env.STUDENT_AUTORENEW ?? "1") !== "0";
+  const RENEW_LEAD = 7, RENEW_TRIES = 3;
+  const termName = t => `${({1:"Spring",2:"Summer",3:"Fall"})[String(t).slice(4)] || ""} ${String(t).slice(0,4)}`.trim();
+  const dayAdd = (d, n) => new Date(Date.parse(d + "T12:00:00Z") + n * 86400000).toISOString().slice(0, 10);
+  const fmtDay = d => new Date(d + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+  const usd = c => "$" + (Number(c) / 100).toLocaleString("en-US", { minimumFractionDigits: Number(c) % 100 ? 2 : 0, maximumFractionDigits: 2 });
+  const isSemester = t => /[13]$/.test(String(t));
+  const renewDayOf = t => dayAdd(termStartOf(t), -PAY_AHEAD_DAYS);          // = the first day ahead() is true for t
+  // The Fall/Spring term whose renewal window holds `day`: 7 days before its renewal day .. 14 days after it starts.
+  const renewTarget = (day = laToday()) => { let t = prevTerm(payTerm(day));
+    for (let i = 0; i < 5; i++, t = nextTerm(t)) if (isSemester(t) && day >= dayAdd(renewDayOf(t), -RENEW_LEAD) && day <= dayAdd(termStartOf(t), 14)) return t;
+    return null; };
+  // The semester a card paid for `after` renews for next, and about when.
+  const nextRenewal = after => { let t = nextTerm(after); if (!isSemester(t)) t = nextTerm(t);
+    const d = renewDayOf(t), soonest = dayAdd(laToday(), RENEW_LEAD); return { term: t, day: d < soonest ? soonest : d }; };
+  const cardFullCents = () => stripeCents("student", "card", Math.round(STUDENT_FEE * 100));
+  const CANCEL_HOW = "lockqz.pages.dev → gear icon (top right) → Account → Cancel auto-renew";
+  const cardName = r => `${String(r.brand || "card").replace(/^./, c => c.toUpperCase())} •••• ${r.last4 || "????"}`;
+  // Checkout paid with metadata save=1: remember the card (customer + payment method), and email the confirmation
+  // the first time a card is saved (or a new card replaces it).
+  async function saveCard(code, customer, pi, res) {
+    if (!/^cus_[A-Za-z0-9]+$/.test(customer) || !/^pi_[A-Za-z0-9]+$/.test(pi)) return;
+    const st = await db.prepare("SELECT email FROM pay_codes_students WHERE code=?").bind(code).first();
+    if (!st) return;
+    const email = String(st.email).toLowerCase();
+    const g = await stripeApi("payment_intents/" + pi + "?expand[]=payment_method");
+    const pm = g.ok ? g.d.payment_method : null, id = String((pm && typeof pm === "object" ? pm.id : pm) || "");
+    if (!/^pm_[A-Za-z0-9]+$/.test(id) || (pm && pm.type && pm.type !== "card")) return;
+    const brand = String(pm?.card?.brand || "card").slice(0, 20), last4 = String(pm?.card?.last4 || "").replace(/\D/g, "").slice(0, 4);
+    const prev = await db.prepare("SELECT pm, autorenew FROM card_renew WHERE email=?").bind(email).first();
+    const t = now();
+    await db.prepare(`INSERT INTO card_renew (email,customer,pm,brand,last4,autorenew,created_at,updated_at) VALUES (?,?,?,?,?,1,?,?)
+      ON CONFLICT(email) DO UPDATE SET customer=excluded.customer, pm=excluded.pm, brand=excluded.brand, last4=excluded.last4, autorenew=1, updated_at=excluded.updated_at,
+        tries=0, fail_day=NULL, fail_msg=NULL, state=CASE WHEN card_renew.state='failed' THEN 'reminded' ELSE card_renew.state END`).bind(email, customer, id, brand, last4, t, t).run();
+    if (prev && prev.pm === id && Number(prev.autorenew) === 1) return;
+    const term = (res && res.term) || (await studentStatus(email)).term, nx = nextRenewal(term), amt = cardFullCents();
+    const text = `Thank you, LOCKqz is paid for ${termName(term)} (access until ${fmtDay(termEndOf(term))}).\n\n`
+      + `Your card (${cardName({ brand, last4 })}) renews automatically each semester at ${usd(amt)}.\n`
+      + `Next renewal: about ${fmtDay(nx.day)}, for ${termName(nx.term)}. LOCKqz emails you 7 days before.\n\n`
+      + `Cancel anytime: ${CANCEL_HOW}.\nIf you cancel, your current semester stays active and the card is not charged again.`;
+    try { await sendMail(env, email, `LOCKqz paid · renews each semester at ${usd(amt)}`, text); } catch {}
+  }
+  async function cardRenewTick() {
+    if (!autoRenewOn()) return { why: "off" };
+    if (!(env.MAIL_USER && env.MAIL_APP_PASSWORD) && typeof env.MAIL_SINK !== "function") return { why: "mail off" };   // never charge without the reminder
+    const day = laToday(), R = renewTarget(day);
+    if (!R) return { why: "not renewal time" };
+    const out = { term: R, reminded: 0, charged: 0, failed: 0, paid: 0, retry: 0, sub: 0 };
+    const feeC = Math.round(STUDENT_FEE * 100), t = now(), acts = [], credits = [];
+    const paidFor = async rows => { const m = new Map(), codes = [...new Set(rows.map(r => r.code).filter(Boolean))];
+      for (const part of chunk(codes, 98)) (await db.prepare(`SELECT code, COALESCE(SUM(${CREDIT()}),0) AS s FROM payments WHERE code IN (${placeholders(part.length)}) AND term=? AND ${COUNTS} GROUP BY code`).bind(...part, R).all()).results.forEach(r => m.set(r.code, Number(r.s)));
+      return m; };
+    const keepUntil = fmtDay(termEndOf(curTerms()[0]));
+    // 1) Reminders, 7 days before the charge.
+    if (day <= dayAdd(termStartOf(R), 7)) {
+      const today = Number((await db.prepare("SELECT COUNT(*) AS n FROM card_renew WHERE autorenew=1 AND rterm=? AND reminded_at>?").bind(R, new Date(Date.now() - 86400000).toISOString()).first()).n);
+      const room = Math.max(0, Math.min(8, Number(env.RENEW_MAIL_DAY_MAX || 150) - today));
+      const rows = room ? (await db.prepare("SELECT c.email AS email, c.brand AS brand, c.last4 AS last4, s.code AS code FROM card_renew c JOIN pay_codes_students s ON s.email=c.email WHERE c.autorenew=1 AND c.pm IS NOT NULL AND (c.rterm IS NULL OR c.rterm<>?) LIMIT ?").bind(R, room).all()).results : [];
+      const paid = await paidFor(rows);
+      for (const r of rows) {
+        const got = paid.get(r.code) || 0;
+        if (FULL(got, STUDENT_FEE)) { acts.push(db.prepare("UPDATE card_renew SET rterm=?, state='paid', updated_at=? WHERE email=?").bind(R, t, r.email)); out.paid++; continue; }
+        const amt = stripeCents("student", "card", feeC - Math.round(got * 100)), soonest = dayAdd(day, RENEW_LEAD), on = renewDayOf(R) > soonest ? renewDayOf(R) : soonest;
+        const text = `Your LOCKqz renews automatically for ${termName(R)}.\n\nAmount: ${usd(amt)}\nCard: ${cardName(r)}\nDate: ${fmtDay(on)}\n\n`
+          + `Cancel anytime before then: ${CANCEL_HOW}.\nIf you cancel, you keep access until ${keepUntil} and the card is not charged.`;
+        try { out.sub++; await sendMail(env, r.email, `LOCKqz renews on ${fmtDay(on)} · ${usd(amt)}`, text); } catch { break; }
+        acts.push(db.prepare("UPDATE card_renew SET rterm=?, state='reminded', charge_on=?, amount=?, reminded_at=?, tries=0, fail_day=NULL, fail_msg=NULL, pi=NULL, updated_at=? WHERE email=?").bind(R, on, amt, t, t, r.email));
+        out.reminded++;
+      }
+      await runBatches(db, acts.splice(0));
+    }
+    // 2) Charges that are due (at most once a day after a failure).
+    const due = (await db.prepare("SELECT c.email AS email, c.customer AS customer, c.pm AS pm, c.brand AS brand, c.last4 AS last4, c.tries AS tries, s.code AS code FROM card_renew c JOIN pay_codes_students s ON s.email=c.email WHERE c.autorenew=1 AND c.rterm=? AND c.state IN ('reminded','failed') AND c.charge_on<=? AND (c.fail_day IS NULL OR c.fail_day<?) AND COALESCE(c.tries,0)<? AND c.pm IS NOT NULL AND c.customer IS NOT NULL LIMIT 10")
+      .bind(R, day, day, RENEW_TRIES).all()).results;
+    const paid2 = await paidFor(due);
+    for (const r of due) {
+      const got = paid2.get(r.code) || 0;
+      if (FULL(got, STUDENT_FEE)) { acts.push(db.prepare("UPDATE card_renew SET state='paid', updated_at=? WHERE email=?").bind(t, r.email)); out.paid++; continue; }
+      const amt = stripeCents("student", "card", feeC - Math.round(got * 100)), tries = Number(r.tries) || 0;
+      const f = new URLSearchParams({ amount: String(amt), currency: "usd", customer: r.customer, payment_method: r.pm, off_session: "true", confirm: "true",
+        description: "LOCKqz " + r.code + " renewal", "metadata[code]": r.code, "metadata[kind]": "student", "metadata[term]": R, "metadata[renew]": "1" });
+      let res; out.sub++;
+      try { res = await stripeApi("payment_intents", f, { "Idempotency-Key": `lqz-renew:${r.email}:${R}:${tries}:${amt}` }); } catch { res = { ok: false, d: {} }; }
+      const d = res.d || {}, err = d.error || null, pi = String(d.id || err?.payment_intent?.id || "").slice(0, 80) || null;
+      if (res.ok && d.status === "succeeded") {
+        credits.push({ txn: "stripe:" + d.id, amount: Number(d.amount_received || d.amount) / 100, note: r.code, via: "stripe-card", payer: r.email, want_term: R });
+        acts.push(db.prepare("UPDATE card_renew SET state='paid', pi=?, updated_at=? WHERE email=?").bind(pi, t, r.email)); out.charged++; continue;
+      }
+      if (res.ok && d.status === "processing") { acts.push(db.prepare("UPDATE card_renew SET state='pending', pi=?, updated_at=? WHERE email=?").bind(pi, t, r.email)); continue; }
+      const definite = (err && (err.type === "card_error" || err.type === "invalid_request_error")) || (res.ok && /^requires_/.test(String(d.status || "")));
+      if (!definite) { out.retry++; continue; }   // Stripe/network trouble: same key next hour (Stripe answers a repeat with the first result)
+      const auth = err?.code === "authentication_required" || err?.decline_code === "authentication_required" || d.status === "requires_action";
+      const n = auth ? RENEW_TRIES : tries + 1, why = auth ? "your bank wants you to confirm this payment" : String(err?.message || "the card was declined").slice(0, 160);
+      acts.push(db.prepare("UPDATE card_renew SET state='failed', tries=?, fail_day=?, fail_msg=?, pi=?, updated_at=? WHERE email=?").bind(n, day, why, pi, t, r.email));
+      out.failed++;
+      if (tries === 0) {
+        const text = `LOCKqz could not renew for ${termName(R)}: ${why}.\nYour card (${cardName(r)}) was not charged.\n\n`
+          + `Pay here to keep LOCKqz working next semester:\n${await payLink(r.email)}\n\n`
+          + (n < RENEW_TRIES ? "LOCKqz tries the card once more tomorrow. If you pay first, it does not.\n" : "")
+          + `Cancel auto-renew: ${CANCEL_HOW}.`;
+        try { out.sub++; await sendMail(env, r.email, "LOCKqz renewal did not go through", text); } catch {}
+      }
+    }
+    if (credits.length) await applyPayments(credits);
+    await runBatches(db, acts);
+    return out;
   }
   async function settle(code, term) {
     if (!code) return { matched:null };
@@ -1030,6 +1160,43 @@ export async function onRequest(context) {
     return { protect, clear };
   }
 
+  // Email a fresh 6-digit code (H5 limits: per computer 5/h 15/day, per RECIPIENT 3/h 5/day across computers and
+  // the download page, per IP 10/h, global MAIL_DAILY_MAX with half kept for synced class lists) -> null when sent,
+  // else the error response. dev = the computer (app email setup) or "web:<email>" (download-page sign-in).
+  async function issueEmailCode(dev, email, web = false) {
+    const since = ms => new Date(Date.now() - ms).toISOString(), hr = since(3600000);
+    const c = await db.prepare("SELECT COALESCE(SUM(ts>=? AND device_id=?),0) AS dh, COALESCE(SUM(device_id=?),0) AS dd, COALESCE(SUM(ts>=? AND student=?),0) AS eh, COALESCE(SUM(student=?),0) AS ed, COALESCE(SUM(ts>=? AND detail=?),0) AS ih, COUNT(*) AS total FROM events WHERE event='code_sent' AND " + RL_EV + " AND ts>=?")
+      .bind(hr, dev, dev, hr, email, email, hr, "ip:" + clientIp, since(86400000)).first();
+    if (Number(c.dh) >= 5 || Number(c.dd) >= 15 || Number(c.eh) >= 3 || Number(c.ed) >= 5 || Number(c.ih) >= 10) return json({ error: "too_many_codes", retry_minutes: 60 }, 429);
+    const max = Number(env.MAIL_DAILY_MAX || 480);
+    if (Number(c.total) >= max || (Number(c.total) >= max / 2 && !(await db.prepare("SELECT name FROM roster WHERE email=? AND name IS NOT NULL LIMIT 1").bind(email).first()))) return json({ error: "mail_busy" }, 503);
+    const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, "0");
+    try { await sendCode(env, email, code, web); }
+    catch (e) { await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(dev, email, null, "code_send_failed", String(e).slice(0, 200), now()).run(); return json({ error: "send_failed" }, 502); }
+    await db.batch([
+      db.prepare("INSERT OR REPLACE INTO email_codes (device_id,email,code_hash,expires,tries,created_at) VALUES (?,?,?,?,0,?)")
+        .bind(dev, email, await sha256hex(enc.encode(dev + ":" + code)), Date.now() + CODE_MS, now()),
+      db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(dev, email, null, "code_sent", "ip:" + clientIp, now())]);
+    return null;
+  }
+  // ---- Student account (gear icon on the download page): signed in with an emailed code; the token is
+  // b64url(email).expiry.HMAC (30 days, stateless). Only the signed-in owner of the email sees its payment status.
+  const acctSecret = () => String(env.ROT_SECRET || env.TEACHER_KEY || "");
+  const ACCT_DAYS = 30, REMOVALS_PER_TERM = 2;
+  const b64u = x => btoa(x).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const acctSig = async (em, exp) => (await hmacHex(acctSecret(), "lqz-acct:" + em + ":" + exp)).slice(0, 40);
+  const acctToken = async em => { const exp = unixNow() + ACCT_DAYS * 86400; return `${b64u(em)}.${exp}.${await acctSig(em, exp)}`; };
+  async function acctEmail(tok) {
+    const m = String(tok || "").match(/^([A-Za-z0-9_-]{4,400})\.(\d{9,11})\.([0-9a-f]{40})$/);
+    if (!m || !acctSecret()) return null;
+    let em = null; try { em = atob(m[1].replace(/-/g, "+").replace(/_/g, "/")); } catch { return null; }
+    const exp = Number(m[2]);
+    if (!EMAIL_OK(em) || exp < unixNow() || exp > unixNow() + ACCT_DAYS * 86400 + 60) return null;
+    return sameHex(m[3], await acctSig(em, m[2])) ? em : null;
+  }
+  const removalsUsed = async em => Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE device_id=? AND quiz_id IS NULL AND event='device_removed' AND ts>=?").bind("acct:" + em, termStartOf(curTerms()[0]) + "T00:00:00Z").first())?.n || 0);
+  const VIA_NAME = { "stripe-card": "Card", "stripe-bank": "Bank account", venmo: "Venmo", zelle: "Zelle", bank: "Bank transfer", po: "Purchase order" };
+
   try {
     // The Sync bookmark's key authorizes ONLY the Brightspace-connector endpoints (it is exposed in the
     // bookmarklet URL inside the Brightspace page). Everything else needs the real session token.
@@ -1076,22 +1243,7 @@ export async function onRequest(context) {
       // H5: limits per computer (5/h, 15/day), per RECIPIENT across computers (3/h, 5/day), per IP
       // (10/h) and global (MAIL_DAILY_MAX); half of the global budget is reserved for addresses on a
       // synced class list. One indexed read covers them all (events(event, ts)).
-      const issue = async () => {             // email a fresh code (rate-limited) -> response
-        const hr = since(3600000);
-        const c = await db.prepare("SELECT COALESCE(SUM(ts>=? AND device_id=?),0) AS dh, COALESCE(SUM(device_id=?),0) AS dd, COALESCE(SUM(ts>=? AND student=?),0) AS eh, COALESCE(SUM(student=?),0) AS ed, COALESCE(SUM(ts>=? AND detail=?),0) AS ih, COUNT(*) AS total FROM events WHERE event='code_sent' AND " + RL_EV + " AND ts>=?")
-          .bind(hr, dev, dev, hr, email, email, hr, "ip:" + clientIp, since(86400000)).first();
-        if (Number(c.dh) >= 5 || Number(c.dd) >= 15 || Number(c.eh) >= 3 || Number(c.ed) >= 5 || Number(c.ih) >= 10) return json({ error: "too_many_codes", retry_minutes: 60 }, 429);
-        const max = Number(env.MAIL_DAILY_MAX || 480);
-        if (Number(c.total) >= max || (Number(c.total) >= max / 2 && !(await rosterName()))) return json({ error: "mail_busy" }, 503);
-        const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, "0");
-        try { await sendCode(env, email, code); }
-        catch (e) { await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(dev, email, null, "code_send_failed", String(e).slice(0, 200), now()).run(); return json({ error: "send_failed" }, 502); }
-        await db.batch([
-          db.prepare("INSERT OR REPLACE INTO email_codes (device_id,email,code_hash,expires,tries,created_at) VALUES (?,?,?,?,0,?)")
-            .bind(dev, email, await sha256hex(enc.encode(dev + ":" + code)), Date.now() + CODE_MS, now()),
-          db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(dev, email, null, "code_sent", "ip:" + clientIp, now())]);
-        return null;
-      };
+      const issue = () => issueEmailCode(dev, email);   // email a fresh code (rate-limited) -> null, or the error response
       // H10: before the code is typed, only a masked name ("J*** S***") is shown -- enough for the
       // student to see it is their class list, without revealing a classmate's full name.
       if (op === "check") { const nm = await rosterName(); return json({ email, found: !!nm, name: maskName(nm), codes: codesOn }); }
@@ -1576,6 +1728,78 @@ export async function onRequest(context) {
     // ---- payments (public + Apps Script + admin) ----
     // /pay/status needs the code or this token from /pay/start (H10: nobody can look up whether an
     // arbitrary email paid or belongs to a professor).
+    // Student account (download page gear icon -> Account). ops: send | code (sign in), then with the token:
+    // status | renew {on} | remove {device_id} | receipts.
+    if (p === "/account" && request.method === "POST") {
+      const op = String(body.op || "");
+      if (!acctSecret()) return json({ error: "off", message: "Accounts are not available right now." }, 503);
+      if (op === "send" || op === "code") {
+        const email = String(body.email || "").trim().toLowerCase();
+        if (!EMAIL_OK(email)) return json({ error: "bad_email", message: "Enter your school email." }, 400);
+        if (!codesOn) return json({ error: "off", message: "Sign-in is not available right now." }, 503);
+        const dev = "web:" + email;
+        if (op === "send") return (await issueEmailCode(dev, email, true)) || json({ ok: true, sent: true, minutes: CODE_MS / 60000 });
+        const row = await db.prepare("SELECT email, code_hash, expires, tries FROM email_codes WHERE device_id=?").bind(dev).first();
+        if (!row || row.email !== email || Date.now() > Number(row.expires)) return json({ error: "expired", message: "That code expired. Send a new one." }, 400);
+        const given = String(body.code || "").replace(/\D/g, "").slice(0, 6);
+        if (!sameHex(await sha256hex(enc.encode(dev + ":" + given)), row.code_hash)) {
+          // The 5th wrong try kills the code (same rule as the app's email codes).
+          if (Number(row.tries) + 1 >= CODE_TRIES) { await db.prepare("DELETE FROM email_codes WHERE device_id=?").bind(dev).run(); return json({ error: "too_many_tries", message: "Too many wrong codes. Send a new one." }, 400); }
+          await db.prepare("UPDATE email_codes SET tries=tries+1 WHERE device_id=?").bind(dev).run();
+          return json({ error: "wrong_code", message: "Wrong code.", tries_left: CODE_TRIES - Number(row.tries) - 1 }, 400);
+        }
+        await db.prepare("DELETE FROM email_codes WHERE device_id=?").bind(dev).run();
+        return json({ ok: true, email, token: await acctToken(email), days: ACCT_DAYS });
+      }
+      const email = await acctEmail(body.token);
+      if (!email) return json({ error: "signed_out", message: "Sign in again." }, 401);
+      const [cur, nxt] = curTerms();
+      if (op === "status") {
+        const st = await studentStatus(email), paid = await studentPaid(email);
+        const upTerm = st.code && (ahead() || inGap()) && FULL(await paidSum(st.code, nxt), STUDENT_FEE) ? nxt : cur;
+        const cr = await db.prepare("SELECT brand, last4, autorenew, pm, rterm, state, charge_on, amount, fail_msg FROM card_renew WHERE email=?").bind(email).first();
+        let renew = null;
+        if (cr && cr.pm) {
+          const R = renewTarget(), live = cr.rterm === R && ["reminded", "failed", "pending"].includes(cr.state), nx = live ? { term: R, day: cr.charge_on } : nextRenewal(upTerm);
+          renew = { on: Number(cr.autorenew) === 1, brand: cr.brand || "card", last4: cr.last4 || "", amount: ((live && cr.amount) || cardFullCents()) / 100,
+                    next_term: termName(nx.term), next_day: nx.day, failed: live && cr.state === "failed" ? (cr.fail_msg || "declined") : null };
+        }
+        const devs = (await db.prepare("SELECT device_id, platform, version, installed_at, last_seen FROM devices WHERE student=? AND student_verified=1 AND COALESCE(revoked,0)=0 ORDER BY last_seen DESC LIMIT 10").bind(email).all()).results;
+        return json({ email, required: feeOn(), paid, term: termName(paid ? upTerm : st.term), until: paid ? termEndOf(upTerm) : null, pay_url: paid ? null : await payLink(email),
+          renew, devices: devs.map(d => ({ id: d.device_id, os: /win/i.test(String(d.platform || "")) ? "Windows" : /mac|darwin/i.test(String(d.platform || "")) ? "Mac" : (d.platform || "Computer"), version: d.version || null, last_seen: d.last_seen || d.installed_at || null })),
+          removals_left: Math.max(0, REMOVALS_PER_TERM - await removalsUsed(email)) });
+      }
+      if (op === "renew") {
+        const cr = await db.prepare("SELECT pm FROM card_renew WHERE email=?").bind(email).first();
+        if (!cr || !cr.pm) return json({ error: "no_card", message: "Pay by card once to turn on auto-renew." }, 409);
+        // Back on = a fresh start: the reminder comes again 7 days before any charge.
+        if (body.on) await db.prepare("UPDATE card_renew SET autorenew=1, rterm=NULL, state=NULL, tries=0, fail_day=NULL, fail_msg=NULL, updated_at=? WHERE email=? AND autorenew=0").bind(now(), email).run();
+        else await db.prepare("UPDATE card_renew SET autorenew=0, updated_at=? WHERE email=?").bind(now(), email).run();
+        return json({ ok: true, on: !!body.on });
+      }
+      if (op === "remove") {
+        // Removing frees one of the 2 computer slots; 2 removals per semester so it cannot rotate a shared email.
+        const used = await removalsUsed(email);
+        if (used >= REMOVALS_PER_TERM) return json({ error: "limit", message: `You can remove ${REMOVALS_PER_TERM} computers per semester.` }, 429);
+        const r = await db.prepare("UPDATE devices SET revoked=1 WHERE device_id=? AND student=? AND student_verified=1 AND COALESCE(revoked,0)=0").bind(String(body.device_id || ""), email).run();
+        if (!r.meta.changes) return json({ error: "not_found", message: "That computer is not on your account." }, 404);
+        await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("acct:" + email, email, null, "device_removed", String(body.device_id).slice(0, 80), now()).run();
+        return json({ ok: true, removals_left: Math.max(0, REMOVALS_PER_TERM - used - 1) });
+      }
+      if (op === "receipts") {
+        if (await db.prepare("SELECT 1 FROM events WHERE device_id=? AND quiz_id IS NULL AND event='receipts_sent' AND ts>?").bind("acct:" + email, new Date(Date.now() - 600000).toISOString()).first())
+          return json({ ok: true, sent: true, again: true, to: email });   // once per 10 minutes
+        const c = await db.prepare("SELECT code FROM pay_codes_students WHERE email=?").bind(email).first();
+        const rows = c ? (await db.prepare("SELECT amount, via, term, received_at, matched FROM payments WHERE code=? AND COALESCE(matched,'')<>'review' ORDER BY received_at DESC LIMIT 50").bind(c.code).all()).results : [];
+        const lines = rows.map(x => `${String(x.received_at || "").slice(0, 10)}  ${usd(Math.round(Number(x.amount) * 100))}  ${VIA_NAME[String(x.via || "").toLowerCase()] || "Zelle"}  ${x.term ? termName(x.term) : ""}${x.matched === "void" ? "  (refunded / cancelled)" : ""}`);
+        const text = `LOCKqz receipts for ${email}${c ? ` (memo ${c.code})` : ""}\n\n` + (lines.length ? lines.join("\n") : "No payments yet.") + "\n\nQuestions: reply to this email.";
+        try { await sendMail(env, email, "Your LOCKqz receipts", text); } catch { return json({ error: "send_failed", message: "Could not send the email. Try again in a minute." }, 502); }
+        await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("acct:" + email, email, null, "receipts_sent", String(rows.length), now()).run();
+        return json({ ok: true, sent: true, to: email, count: rows.length });
+      }
+      return json({ error: "bad op" }, 400);
+    }
+
     if (p === "/pay/start" && request.method === "POST") {
       const email = String(body.email||"").trim().toLowerCase();
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"enter your school email" }, 400);
@@ -1638,6 +1862,16 @@ export async function onRequest(context) {
         const code = String(o.metadata?.code || o.client_reference_id || "");
         const res = await applyPayments([{ txn: "stripe:" + (o.payment_intent || o.id), amount: Number(o.amount_total) / 100, note: code,
           via: "stripe-" + ((o.payment_method_types || [])[0] === "us_bank_account" ? "bank" : "card"), payer: String(o.customer_details?.email || o.customer_email || "") }]);
+        if (o.metadata?.save === "1" && o.customer && autoRenewOn() && res[0]?.ok && !(res[0].matched === null && !res[0].duplicate))
+          try { await saveCard(code, String(o.customer), String(o.payment_intent || ""), res[0]); } catch {}
+        return json({ ok: true, result: res[0] });
+      }
+      // A card renewal (off-session PaymentIntent from /pay/tick): credited here too, in case the tick never saw
+      // Stripe's answer (same txn, so it counts once). Checkout's own PaymentIntents carry no renew mark.
+      if (ev.type === "payment_intent.succeeded" && o.metadata?.renew === "1" && String(o.currency).toLowerCase() === "usd" && /^pi_/.test(String(o.id || ""))) {
+        const code = String(o.metadata.code || ""), term = String(o.metadata.term || "");
+        const res = await applyPayments([{ txn: "stripe:" + o.id, amount: Number(o.amount_received || o.amount) / 100, note: code, via: "stripe-card", payer: "", want_term: term }]);
+        await db.prepare("UPDATE card_renew SET state='paid', pi=?, updated_at=? WHERE rterm=? AND email=(SELECT email FROM pay_codes_students WHERE code=?)").bind(String(o.id), now(), term, code).run();
         return json({ ok: true, result: res[0] });
       }
       // Cancelled money = no access: refunds, disputes (card chargebacks, bank-account returns) and failed payments.
@@ -1651,12 +1885,18 @@ export async function onRequest(context) {
         const pi = String(ev.type.startsWith("payment_intent.") ? o.id : o.payment_intent || "");
         const pr = pi ? await db.prepare("SELECT code FROM payments WHERE txn=? AND via='stripe-bank'").bind("stripe:" + pi).first() : null;
         if (pr) { await db.prepare("UPDATE payments SET matched='void' WHERE txn=?").bind("stripe:" + pi).run(); await unsettle(pr.code); }
+        // A renewal that was still processing failed: marked like a declined charge (retried at most once a day).
+        if (ev.type === "payment_intent.payment_failed" && o.metadata?.renew === "1")
+          await db.prepare("UPDATE card_renew SET state='failed', tries=COALESCE(tries,0)+1, fail_day=?, fail_msg=?, updated_at=? WHERE state='pending' AND rterm=? AND email=(SELECT email FROM pay_codes_students WHERE code=?)")
+            .bind(laToday(), String(o.last_payment_error?.message || "the card was declined").slice(0, 160), now(), String(o.metadata.term || ""), String(o.metadata.code || "")).run();
         return json({ ok: true, voided: !!pr });
       }
       if (["charge.refunded", "charge.dispute.created"].includes(ev.type)) {
         const pi = String(o.payment_intent || "");
         const pr = pi ? await db.prepare("SELECT code FROM payments WHERE txn=?").bind("stripe:" + pi).first() : null;
-        if (pr) { await db.prepare("UPDATE payments SET matched='void' WHERE txn=?").bind("stripe:" + pi).run(); await unsettle(pr.code); }
+        if (pr) { await db.prepare("UPDATE payments SET matched='void' WHERE txn=?").bind("stripe:" + pi).run(); await unsettle(pr.code);
+          // Money pulled back = no more automatic charges on that card (the student can turn it back on).
+          if (isStu(pr.code)) await db.prepare("UPDATE card_renew SET autorenew=0, updated_at=? WHERE email=(SELECT email FROM pay_codes_students WHERE code=?)").bind(now(), pr.code).run(); }
         else if (pi) await db.prepare("INSERT OR IGNORE INTO payments (txn,code,amount,via,payer,note,term,received_at,matched) VALUES (?,NULL,0,'stripe-card','',?,NULL,?,'void')").bind("stripe:" + pi, ev.type, now()).run();
         return json({ ok: true, voided: !!pr });
       }
@@ -1726,13 +1966,16 @@ export async function onRequest(context) {
     if (p === "/pay/tick" && request.method === "POST") {
       const secret = await paySecret();
       if (secret.length < 16 || !sameHex(String(request.headers.get("X-LOCKqz-Pay") || ""), secret)) return json({ error:"unauthorized" }, 401);   // constant-time
-      return json(await renewalTick());
+      let card; try { card = await cardRenewTick(); } catch (e) { card = { error: String(e && e.message || e).slice(0, 120) }; }
+      // Workers Free: 50 subrequests per call; a busy card round leaves the renewal emails for the next hour.
+      if (Number(card && card.sub) > 20) return json({ sent: 0, why: "card renewals busy", card });
+      return json({ ...(await renewalTick()), card });
     }
     if (p === "/pay/notify" && request.method === "POST") {
       const secret = await paySecret();
       const got = String(request.headers.get("X-LOCKqz-Pay") || "");
       if (secret.length < 16 || !sameHex(got, secret)) return json({ error:"unauthorized" }, 401);   // constant-time
-      const list = Array.isArray(body.payments) ? body.payments.slice(0, 100) : [body];
+      const list = (Array.isArray(body.payments) ? body.payments.slice(0, 100) : [body]).map(x => x && typeof x === "object" ? { ...x, want_term: null } : x);
       return json({ results: await applyPayments(list) });
     }
     if (p === "/payments") {

@@ -55,6 +55,11 @@ PROF_OTHER_PRICE = "5000"
 # Bank transfer details emailed automatically: Pages SECRET BANK_DETAILS (bank, account holder, routing, account).
 # Stripe bank account (ACH) off: consumers can return ACH debits for 60 days. "1" turns it on.
 STRIPE_BANK = "0"
+# Student card auto-renew: a student card payment saves the card and renews each Fall/Spring off-session (charged
+# on the first day a payment counts for the next term, after a reminder email 7 days before). "0" = one-time cards.
+# RENEW_MAIL_DAY_MAX = renewal reminder emails per day (Gmail's send limit is shared with the email codes).
+STUDENT_AUTORENEW = "1"
+RENEW_MAIL_DAY_MAX = "150"
 # Trial testers: never pay (student or professor fee) and get the test-run welcome. Comma-separated.
 FEE_EXEMPT = "dbristow@usc.edu,dbristow@marshall.usc.edu,huutienn@usc.edu"
 # Every LOCKqz-protected quiz is gated: the professor's Sync tab hides it and admits only students LOCKqz is

@@ -20,9 +20,51 @@
   footer{margin-top:24px;font-size:13px}
   footer a{color:#777}
   .none{color:#777}
+  /* gear icon (top right) -> Account + Settings (account.js) */
+  #lqgear{position:fixed;top:12px;right:16px;z-index:20;text-align:left}
+  #lqgearbtn{width:44px;height:44px;border-radius:50%;border:1px solid #ddd;background:#fff;color:#111;display:grid;place-items:center;cursor:pointer;padding:0}
+  #lqgearbtn:hover{border-color:#bbb}#lqgearbtn[aria-expanded=true]{border-color:var(--usc);color:var(--usc)}
+  #lqmenu{position:absolute;right:0;top:52px;width:340px;max-width:calc(100vw - 32px);max-height:calc(100vh - 80px);overflow:auto;box-sizing:border-box;background:#fff;border:1px solid #ddd;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.16);padding:16px;font-size:15px;color:#111}
+  #lqmenu h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:#555;margin:0 0 10px}
+  #lqmenu section+section{margin-top:16px;padding-top:14px;border-top:1px solid #eee}
+  #lqmenu :focus-visible{outline:2px solid var(--usc);outline-offset:2px}
+  .lqm-form{display:flex;flex-direction:column;gap:8px}.lqm-form label{font-weight:700;font-size:14px}
+  .lqm-form input{min-height:44px;padding:0 12px;font-size:16px;border:1px solid #ccc;border-radius:10px;box-sizing:border-box;width:100%}
+  .lqm-btn{display:block;width:100%;min-height:44px;margin:8px 0 0;padding:8px 12px;border-radius:10px;border:1px solid #ccc;background:#fff;color:#111;font:inherit;font-weight:700;cursor:pointer;text-align:center;box-sizing:border-box}
+  .lqm-prime{background:var(--usc);border-color:var(--usc);color:#fff}
+  .lqm-red{background:#fff;border:2px solid #c62828;color:#c62828}.lqm-confirm .lqm-red{background:#c62828;color:#fff}
+  .lqm-btn[disabled]{opacity:.6;cursor:default}
+  .lqm-link{background:none;border:0;padding:4px 0;color:var(--usc);font:inherit;font-size:14px;text-decoration:underline;cursor:pointer;min-height:32px}
+  .lqm-links{display:flex;gap:10px;flex-wrap:wrap}.lqm-links .lqm-btn{flex:1;min-width:120px}
+  .lqm-email{font-weight:700;margin:0 0 8px;word-break:break-all}
+  .lqm-row2{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 6px;margin:6px 0}.lqm-k{font-weight:700;margin:0}.lqm-row2 .lqm-k::after{content:":"}
+  .lqm-small{color:#555;font-size:14px;margin:4px 0}.lqm-msg{margin:8px 0 0;font-size:14px;color:#111}
+  .lqm-ok{color:#1a7f37}.lqm-bad{color:#c62828}.lqm-pay{color:var(--usc);font-weight:700}
+  .lqm-warn{color:#c62828;font-size:14px;margin:6px 0}
+  .lqm-block{margin:12px 0 0;padding-top:10px;border-top:1px solid #f0f0f0}
+  .lqm-confirm{margin:8px 0 0;padding:10px 12px;border:1px solid #f0c9c9;background:#fff6f6;border-radius:10px}.lqm-confirm p{margin:0 0 4px;font-weight:600}
+  .lqm-devs{list-style:none;margin:6px 0 0;padding:0}.lqm-devs li{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:4px 10px;padding:6px 0;border-bottom:1px solid #f4f4f4}
+  .lqm-dn{flex:1;min-width:0}
+  .lqm-set{display:flex;align-items:center;width:100%;min-height:44px;padding:0;border:0;background:none;font:inherit;color:#111;text-decoration:none;cursor:pointer;text-align:left}
+  .lqm-set:hover{color:var(--usc)}
+  [hidden]{display:none!important}
 </style><script src="/lq.js"></script>
 </head>
 <body>
+  <div id="lqgear">
+    <button id="lqgearbtn" type="button" aria-label="Account and settings" aria-haspopup="true" aria-expanded="false" aria-controls="lqmenu">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+    </button>
+    <div id="lqmenu" role="dialog" aria-label="Account and settings" hidden>
+      <section aria-labelledby="lqm-acc-h"><h2 id="lqm-acc-h">Account</h2><div id="lqm-acc"></div></section>
+      <section aria-labelledby="lqm-set-h"><h2 id="lqm-set-h">Settings</h2>
+        <button class="lqm-set" id="lqm-rcpt" type="button">Email me my receipts</button>
+        <p class="lqm-small" id="lqm-rcpt-msg" aria-live="polite"></p>
+        <a class="lqm-set" href="/privacy">Privacy policy</a>
+        <a class="lqm-set" href="mailto:lockqz.app@gmail.com">Contact support</a>
+      </section>
+    </div>
+  </div>
   <div class="card">
     <h1>LOCKqz</h1>
     <p class="tag" id="os"></p>
@@ -106,4 +148,5 @@
       .then(function () { b.textContent = "Copied"; setTimeout(function () { b.textContent = "Copy"; }, 1500); }, function () {});
   });
 </script>
+<script src="/account.js" defer></script>
 </body></html>

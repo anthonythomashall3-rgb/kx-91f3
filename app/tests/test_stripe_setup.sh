@@ -36,5 +36,6 @@ grep -q "us_bank_account\[display_preference\]\[preference\]=off" "$T/curl.log" 
 ! grep -q "sk_live_GOOD\|whsec_FAKESECRET" "$T/out" && ok "no secret printed" || bad "secret printed: $(cat "$T/out")"
 echo "S4 second run: key refreshed, webhook not remade"
 : > "$T/put.log"; : > "$T/curl.log"
-rc=$(run "sk_live_NEW"); [ "$rc" = 0 ] && grep -qx "STRIPE_SECRET_KEY=sk_live_NEW" "$T/put.log" && ! grep -q WEBHOOK "$T/put.log" && ! grep -q "enabled_events" "$T/curl.log" && ok "idempotent" || bad "$(cat "$T/out")"
+rc=$(run "sk_live_NEW"); [ "$rc" = 0 ] && grep -qx "STRIPE_SECRET_KEY=sk_live_NEW" "$T/put.log" && ! grep -q WEBHOOK "$T/put.log" && ! grep -q "url=" "$T/curl.log" && ! grep -q "DELETE" "$T/curl.log" && ok "idempotent (no new webhook, same secret)" || bad "$(cat "$T/out")"
+grep -q "webhook_endpoints/we_old .*enabled_events\[\]=payment_intent.succeeded" "$T/curl.log" && ! grep -q "we_other" "$T/curl.log" && ok "existing webhook gets the renewal event (payment_intent.succeeded)" || bad "$(cat "$T/curl.log")"
 echo ""; echo "RESULT: $P passed, $F failed"; [ $F -eq 0 ]

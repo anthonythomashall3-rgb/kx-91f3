@@ -32,6 +32,8 @@ run "17/18 Student email code (once per computer; real API + fake SMTP)" node --
 run "Per-section billing (\$1,000 per USC section, Venmo code)" node --no-warnings test_sections.mjs
 run "Student fee + automatic Venmo/Zelle matching" node --no-warnings test_pay.mjs
 run "Stripe card + bank (ACH): fee-inclusive prices, signed webhook, refunds void" node --no-warnings test_stripe.mjs
+run "Student card auto-renew (reminder, off-session charge, failures, refunds) + /account API" node --no-warnings test_autorenew.mjs
+run "Download page gear: Account + Settings, pay page renewal wording (real Chromium)" node --no-warnings test_account_menu.mjs
 run "Income tax on top (25%), payments credited by how they came, bank details emailed" node --no-warnings test_tax.mjs
 run "Stripe one-time setup script (fake Stripe + wrangler)" bash test_stripe_setup.sh
 run "Gmail payment script parser (forged alerts refused)" node test_pay_script.mjs

@@ -5,6 +5,22 @@ rules: pull --rebase, claim in SESSIONS.md, `bash app/tests/run_all.sh` before e
 commit as `Claude <noreply@anthropic.com>`). The claude.ai Project "LOCKqz" has the same handoff
 (`claude/LOCKqz-HANDOFF.md`) plus topic docs (`claude/LOCKqz-payments.md` and others).
 
+## 27 Oct 2026 — student card auto-renew + download-page gear (session 01UzHDaF)
+- **Card renews each semester (Fall/Spring; summer skipped).** Student Checkout saves the card (Customer +
+  `setup_future_usage=off_session`, no Stripe Billing). Table `card_renew` (migrate_033). `/pay/tick` (Gmail script,
+  hourly) emails a reminder 7 days ahead, then charges off-session on the first day a payment counts for the next
+  term (term start − 42 days, e.g. 30 Nov for Spring 2027; Fall: ~11 July), idempotency key per email+term+try.
+  Declined = student emailed the pay link once, retried once a day (3 tries; never when the bank asks to confirm).
+  Refund/dispute voids it and turns auto-renew off. Off switch: `STUDENT_AUTORENEW="0"`. Professors stay one-time.
+- Pay page: button "Pay $280 by card · renews each semester" + one normal line "Renews automatically each semester
+  at $280. Cancel anytime: gear icon → Account." (amounts computed). Confirmation email after the first card payment.
+- **Gear icon (top right of lockqz.pages.dev, `public/account.js`)**: Account (sign in with an emailed 6-digit code,
+  same limits as the app's codes; 30-day signed token) → paid / not paid + Pay link, auto-renew cancel / on, your
+  computers + Remove (revokes; 2 per semester), Sign out. Settings: Email me my receipts (10 min), Privacy, Support.
+  API: `POST /api/account` ops send | code | status | renew | remove | receipts.
+- CI's Stripe step now also adds `payment_intent.succeeded` to the existing webhook (same secret).
+- Tests: test_autorenew.mjs (60), test_account_menu.mjs (real Chromium, 37; skipped without Playwright).
+
 ## 26 Oct 2026 06:30 PT — income tax on top, Venmo, bank auto-email, professor tour (session 01359vfr)
 - **Whole-number prices with "Tax & fees" = 25% of the total** (Anthony, 26 Oct 06:05; TAX_LABEL, STUDENT_TOTAL, STUDENT_OTHER_TOTAL, PROF_TOTAL, PROF_CARD_TOTAL):
   totals are set; base = 75% of the total so Anthony keeps the base after setting aside income tax. Vars: TAX_RATE="0.25",

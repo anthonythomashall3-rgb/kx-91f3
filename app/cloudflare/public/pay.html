@@ -80,7 +80,8 @@
     <button class="way" id="card" type="button" hidden aria-expanded="false"><span class="wn"><b>Card</b></span><span class="wp" id="camt"></span></button>
     <div class="zsteps" id="cpanel" hidden>
       <div id="ctax"></div>
-      <button class="btn prime" id="cgo" type="button" style="width:100%">Pay by card</button>
+      <p id="crenew" hidden style="margin:0 0 12px;font-size:16px;color:#111;line-height:1.4"></p>
+      <button class="btn prime" id="cgo" type="button" style="width:100%;padding:8px 14px;text-align:center">Pay by card</button>
     </div>
     <button class="btn" id="ach" type="button" hidden style="background:#fff;border:1px solid #ccc"></button>
     <p class="muted" id="achwait" hidden>Bank payment pending · about 4 business days</p>
@@ -111,7 +112,7 @@ const lqL = (m, e, o) => typeof lqLoading === "function" ? lqLoading(m, e, o) : 
 const API = /\.pages\.dev$/.test(location.hostname) ? "https://lockqz.pages.dev/api" : "/api", $ = id => document.getElementById(id);
 const money = n => "$" + Number(n).toLocaleString("en-US");
 const money2 = n => "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: Number(n) % 1 ? 2 : 0, maximumFractionDigits: 2 });
-let WAYS = null, TAX = null, PICKED = null, VENMO = null, PO = null, PAYING = false;
+let WAYS = null, TAX = null, PICKED = null, VENMO = null, PO = null, PAYING = false, RENEW = null;
 const PANEL = { zelle: "zsteps", bank: "bpanel", venmo: "vpanel", card: "cpanel", po: "ppanel" }, TAXBOX = { zelle: "ztax", bank: "btax", venmo: "vtax", card: "ctax", po: "ptax" };
 // "LOCKqz $180 / Tax & fees (25%) $60 / Total $240" for one way.
 function taxLine(w){ if (!w) return "";
@@ -125,7 +126,9 @@ function prices(){ if (!WAYS || !who) return;
   if (!PICKED) $("amt").textContent = money2(w.zelle.total);
   for (const k in TAXBOX) $(TAXBOX[k]).innerHTML = taxLine(w[k]);
   if (VENMO) { $("vgo").href = `https://venmo.com/?txn=pay&recipients=${encodeURIComponent(VENMO)}&amount=${encodeURIComponent(w.venmo.total.toFixed(2))}&note=${encodeURIComponent(code)}`; $("vgo").textContent = `Open Venmo · ${money2(w.venmo.total)} to @${VENMO}`; }
-  $("cgo").textContent = "Pay " + money2(w.card.total) + " by card";
+  // Card renews each semester (Fall/Spring): said plainly on the button and next to the price, at the real amount.
+  $("cgo").textContent = "Pay " + money2(w.card.total) + " by card" + (RENEW ? " · renews each semester" : "");
+  $("crenew").hidden = !RENEW; if (RENEW) $("crenew").textContent = "Renews automatically each semester at " + money2(RENEW) + ". Cancel anytime: gear icon → Account.";
   if (PO) { $("pgo").href = `mailto:${PO.to}?subject=${encodeURIComponent("LOCKqz purchase order " + code)}&body=${encodeURIComponent("PO number:\nBilling contact:\nAmount: " + money2(w.po.total) + (TAX && w.po.tax > 0 ? " (LOCKqz " + money2(w.po.base) + " + " + TAX.label.toLowerCase() + " " + money2(w.po.tax) + ")" : "") + "\nMemo: " + code + " (" + PO.email + ")")}`; $("poto").textContent = "To " + PO.to; }
   if (PICKED) { $("amt").textContent = money2(w[PICKED].total); }
 }
@@ -183,7 +186,7 @@ async function start(email){
   // Every way to pay, Zelle first. Picking one opens its steps and shows its price with the income tax line.
   const fixed = n => ({ total: n, base: n, tax: 0 });
   WAYS = d.ways || { zelle: fixed(d.zelle_amount || d.amount), bank: fixed(d.amount), venmo: fixed(d.amount), po: fixed(d.amount), card: fixed(d.stripe ? d.stripe.card : d.amount) };
-  TAX = d.tax || null;
+  TAX = d.tax || null; RENEW = d.card_renew || null;
   if (d.zelle) {
     $("zcode").textContent = d.code; $("zto").textContent = d.zelle;
     $("zelle").onclick = () => pick("zelle");
