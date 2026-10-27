@@ -46,9 +46,8 @@ TAX_FROM = "2026-10-26T13:00:00Z"
 STUDENT_OTHER_PRICE = "200"
 # Whole-number totals people see (tax & fees = TAX_RATE of these).
 STUDENT_TOTAL = "240"
-# Students pay by card only (Stripe) at $280; the other student methods hide once STRIPE_SECRET_KEY +
-# STRIPE_WEBHOOK_SECRET are set. Until then students keep their current options (never locked out).
-STUDENT_CARD_ONLY = "1"
+# Student payment options (Zelle first, then bank transfer, then card). "1" would hide everything but card.
+STUDENT_CARD_ONLY = "0"
 STUDENT_OTHER_TOTAL = "280"
 PROF_TOTAL = "6500"
 PROF_CARD_TOTAL = "6700"
