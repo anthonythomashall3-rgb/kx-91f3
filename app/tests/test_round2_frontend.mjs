@@ -4,6 +4,7 @@
 // QuizAttemptData.Completed = UTCDateTime|null, SpecialAccessData) and the REAL LOCKqz API
 // (in-memory SQLite). Each check names the audit item it guards; every one fails on the 0.4.0 pages.
 // Run against other copies with LQZ_PUBLIC=<dir with the pages> and LQZ_ROUTE=<[[route]].js>.
+import { payT } from "./pay_t.mjs";
 import vm from "node:vm";
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync, writeFileSync, mkdtempSync, readdirSync } from "node:fs";
@@ -416,7 +417,7 @@ check("Activity header has Device", /<th>Device<\/th>/.test(d.app()));
 
 console.log("dashboard admin: Reassign + Void on every payment, reset requests, delete a student");
 w.sqlite.prepare("INSERT INTO payments (txn,code,amount,via,payer,note,term,received_at) VALUES (?,?,?,?,?,?,?,?)").run("T1", null, 7, "venmo", "Al A", "LQSXXXXX", "20263", new Date().toISOString());
-const ps = await w.api("/pay/start", { email: "bo@usc.edu" }); const bocode = ps.data?.code;
+const ps = await w.api("/pay/start", { email: "bo@usc.edu", t: payT(w.env, "bo@usc.edu") }); const bocode = ps.data?.code;
 w.sqlite.prepare("INSERT INTO payments (txn,code,amount,via,payer,note,term,received_at) VALUES (?,?,?,?,?,?,?,?)").run("T2", bocode, 7, "zelle", "Bo B", bocode, "20263", new Date().toISOString());
 d = dashTab(w, { token: w.ADMIN, hash: "#admin", canned: { "/reset-requests": { requests: [{ email: "lost@usc.edu", at: new Date().toISOString() }] }, "/pay-void": { ok: true }, "/forget": { ok: true, email: "al@usc.edu", devices: 4, roster_rows: 2 } } });
 await w.idle(); await sleep(20); await w.idle();
@@ -447,7 +448,7 @@ console.log("pay.html: back-off 10 s -> 60 s, stops after 15 min / when hidden, 
   const timers = [], listeners = {}, fetched = []; let T = Date.now(), hidden = false;
   const D = class extends Date { constructor(...a) { if (a.length) super(...a); else super(T); } static now() { return T; } };
   const ctx = { document: { getElementById: el, addEventListener(ev, fn) { listeners[ev] = fn; }, get visibilityState() { return hidden ? "hidden" : "visible"; } },
-    location: { search: "?email=al%40usc.edu" }, history: { replaceState() {} }, Date: D, Math, JSON, encodeURIComponent, URLSearchParams, console, Number,
+    location: { search: "?email=al%40usc.edu&t=" + payT(w.env, "al@usc.edu") }, history: { replaceState() {} }, Date: D, Math, JSON, encodeURIComponent, URLSearchParams, console, Number,
     fetch: (u, o) => { fetched.push(String(u)); if (/\/pay\/status/.test(u)) return Promise.resolve(jr({ paid: false, required: true, received: 3, amount: 7 })); return w.fetchApi(ORIGIN + u, o); },
     setTimeout: (fn, ms) => { timers.push({ fn, ms, live: true }); return timers.length; }, clearTimeout: i => { if (timers[i - 1]) timers[i - 1].live = false; },
     setInterval: (fn, ms) => { timers.push({ fn, ms, live: true, interval: true }); return timers.length; }, clearInterval: i => { if (timers[i - 1]) timers[i - 1].live = false; } };
@@ -478,7 +479,7 @@ console.log("index.html: OK/Allow line, Command Line Tools note, no uninstall op
     vm.createContext(ctx); vm.runInContext(script("index.html"), ctx); await sleep(10);
     check(`${os}: tells students to click OK/Allow`, /OK or Allow/.test(body));
     check(`${os}: no remove/uninstall option on the page`, !els.rm || els.rm.hidden !== false, "");
-    if (os === "mac") check("mac: Command Line Tools note", /Command Line Tools/.test(els.pw.textContent), els.pw.textContent);
+    if (os === "mac") check("mac: password note, no Command Line Tools sentence (removed 26 Oct)", /Mac password/.test(els.pw.textContent) && !/Command Line Tools/.test(els.pw.textContent), els.pw.textContent);
   }
   const pv = page("privacy.html");
   check("privacy: codes only when email codes are on; macOS version; tab addresses not sent; deletion on request; invites; pay codes",
