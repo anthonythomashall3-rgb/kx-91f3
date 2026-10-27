@@ -1,3 +1,4 @@
+import { withPayT } from "./pay_t.mjs";
 // 26 Oct 2026 fixes (real API, in-memory SQLite, Stripe mocked with real session states):
 //   F1 one payable Stripe Checkout per code (reuse / expire / race) + overpayments carried to the next term
 //   F3 a LOCAL unlock the server did not expect is red on /live until Brightspace proves the submission
@@ -37,6 +38,7 @@ const env = { DB: d1(sqlite), TEACHER_KEY: "admin-key-o26", REQUIRE_SIGNED: "1",
 const BASE = "https://lockqz.test";
 const sign = (key, path, ts, raw) => createHmac("sha256", key).update(`POST\n${path}\n${ts}\n${createHash("sha256").update(raw).digest("hex")}`).digest("hex");
 async function call(path, body, { teacher = null, dev = null, get = false, ip = "10.0.0.9" } = {}) {
+  body = withPayT(path, body, env);
   const raw = JSON.stringify(body ?? {});
   const h = { "Content-Type": "application/json", "CF-Connecting-IP": ip };
   if (teacher) h["X-LOCKqz-Teacher"] = teacher;

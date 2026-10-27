@@ -1,3 +1,4 @@
+import { withPayT } from "./pay_t.mjs";
 // API audit regressions (24 Oct 2026) + D1 Free-plan budgets. Runs the REAL API against in-memory
 // SQLite with a D1 shim that (a) enforces the 100-bound-parameter cap, (b) counts D1 queries per request
 // (first/all/run = 1, db.batch = 1; Free plan limit is 50) and (c) counts rows written.
@@ -42,6 +43,7 @@ const BASE = "https://lockqz.test";
 const sign = (key, path, ts, raw) => createHmac("sha256", key).update(`POST\n${path}\n${ts}\n${createHash("sha256").update(raw).digest("hex")}`).digest("hex");
 let last = { q: 0, w: 0 };
 async function call(path, body, { teacher = null, sync = null, key = null, device = null, get = false, ip = null, hdr = {} } = {}) {
+  body = withPayT(path, body, env);
   const raw = JSON.stringify(body ?? {});
   const h = { "Content-Type": "application/json", ...hdr };
   if (teacher) h["X-LOCKqz-Teacher"] = teacher;

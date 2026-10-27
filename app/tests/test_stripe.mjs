@@ -1,3 +1,4 @@
+import { withPayT } from "./pay_t.mjs";
 // Stripe card + bank (ACH): prices carry the fee, only signed webhooks record payments, refunds void. Real API, in-memory SQLite, Stripe mocked.
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
@@ -58,6 +59,7 @@ function makeDb(oldSchema) {
 }
 
 async function call(env, path, body, { teacher = null, sync = null, key = null, device = null } = {}) {
+  body = withPayT(path, body, env);
   const raw = JSON.stringify(body ?? {});
   const h = { "Content-Type": "application/json" };
   if (teacher) h["X-LOCKqz-Teacher"] = teacher;
@@ -118,7 +120,7 @@ let s = sessions.at(-1).f;
 check("returns Stripe URL", r.status === 200 && /^https:\/\/checkout\.stripe\.com\//.test(r.data?.url||""), JSON.stringify(r.data));
 check("card, $200.00, usd, code in metadata", s.get("payment_method_types[0]") === "card" && s.get("line_items[0][price_data][unit_amount]") === "20000" && s.get("line_items[0][price_data][currency]") === "usd" && s.get("metadata[code]") === AL && s.get("customer_email") === "al@usc.edu", s.toString());
 check("secret key sent as Bearer", sessions.at(-1).auth === "Bearer sk_test_x");
-check("success url returns to pay page", s.get("success_url") === "https://lockqz.pages.dev/pay?email=al%40usc.edu&stripe=card");
+check("success url returns to pay page", /^https:\/\/lockqz\.pages\.dev\/pay\?email=al%40usc\.edu&t=[0-9a-f]{32}&stripe=card$/.test(s.get("success_url") || ""));
 await call(ON, "/pay/stripe", { email: "al@usc.edu", method: "bank" });
 s = sessions.at(-1).f;
 check("bank: us_bank_account, $181.45", s.get("payment_method_types[0]") === "us_bank_account" && s.get("line_items[0][price_data][unit_amount]") === "18145", s.toString());

@@ -1,3 +1,4 @@
+import { withPayT } from "./pay_t.mjs";
 // Round-3 API regressions (26 Oct 2026): one block per finding fixed in app/cloudflare/functions/api.
 // Runs the REAL API against in-memory SQLite with a D1 shim that enforces the 100-parameter cap, counts
 // D1 queries per request (Free plan: 50; target <= 45) and rows written, and logs every statement so a
@@ -49,6 +50,7 @@ const env = { DB: d1(sqlite), TEACHER_KEY: "admin-key-r3", REQUIRE_SIGNED: "1", 
 const BASE = "https://lockqz.test";
 const sign = (key, path, ts, raw) => createHmac("sha256", key).update(`POST\n${path}\n${ts}\n${createHash("sha256").update(raw).digest("hex")}`).digest("hex");
 async function call(path, body, { teacher = null, sync = null, dev = null, get = false, ip = "10.0.0.9", hdr = {}, envx = {} } = {}) {
+  body = withPayT(path, body, { ...env, ...envx });
   const raw = JSON.stringify(body ?? {});
   const h = { "Content-Type": "application/json", "CF-Connecting-IP": ip, ...hdr };
   if (teacher) h["X-LOCKqz-Teacher"] = teacher;
@@ -176,6 +178,28 @@ console.log("S6 bank-details emails have a global daily cap (Gmail's quota is sh
 console.log("S7 /pay/tick: wrong key refused, right key accepted");
 check("/pay/tick wrong key -> 401", (await call("/pay/tick", {}, { hdr: { "X-LOCKqz-Pay": "x".repeat(env.PAY_SECRET.length) } })).status === 401);
 check("/pay/tick right key -> 200", (await call("/pay/tick", {}, { hdr: { "X-LOCKqz-Pay": env.PAY_SECRET } })).status === 200);
+
+console.log("S8 payment status: only the email's owner (pay-link token) or the admin can see it");
+{ const FEE = { STUDENT_FEE_FROM: "2000-01-01" }, E = "priv@usc.edu";
+  const k = MAILS.length;
+  const anon = await call("/pay/start", { email: E, t: null }, { envx: FEE, ip: "10.9.9.1" });
+  check("typed email (no token): no code, no paid status, no amounts", anon.status === 200 && anon.data?.link_sent === true && !("code" in anon.data) && !("paid" in anon.data) && !("received" in anon.data) && !("token" in anon.data), JSON.stringify(anon.data));
+  const mail = MAILS.slice(k).find(m => m.to === E);
+  check("the owner is emailed a pay link with the token", !!mail && /pay\?email=priv%40usc\.edu&t=[0-9a-f]{32}/.test(JSON.stringify(mail)), JSON.stringify(mail));
+  const again = await call("/pay/start", { email: E, t: null }, { envx: FEE, ip: "10.9.9.1" });
+  check("a second ask within 10 min sends no second email", again.data?.link_sent === true && MAILS.slice(k).filter(m => m.to === E).length === 1);
+  const wrong = await call("/pay/start", { email: E, t: "0".repeat(32) }, { envx: FEE, ip: "10.9.9.1" });
+  check("wrong token: same answer as no token", wrong.data?.link_sent === true && !("code" in wrong.data));
+  const own = await call("/pay/start", { email: E }, { envx: FEE, ip: "10.9.9.1" });
+  check("owner's link (token): full pay info", /^LQS/.test(own.data?.code || "") && own.data?.paid === false, JSON.stringify(own.data));
+  const adm = await call("/pay/start", { email: E, t: null }, { envx: FEE, teacher: ADMIN, ip: "10.9.9.1" });
+  check("admin: full pay info for any email", adm.data?.code === own.data?.code && "paid" in adm.data, JSON.stringify(adm.data));
+  check("/pay/stripe without token -> 403", (await call("/pay/stripe", { email: E, t: null }, { envx: { ...FEE, STRIPE_SECRET_KEY: "sk_test_x", STRIPE_WEBHOOK_SECRET: "whsec_x" }, ip: "10.9.9.2" })).status === 403);
+  check("/pay/renew without token -> 403", (await call("/pay/renew", { email: E, on: false, t: null }, { envx: FEE })).status === 403);
+  const bk = await call("/pay/bank", { email: E, t: null }, { envx: FEE, ip: "10.9.9.3" });
+  check("/pay/bank without token: never says paid or the amount", bk.data && !("paid" in bk.data) && !("amount" in bk.data), JSON.stringify(bk.data));
+  check("/pay/status without code or token -> 403", (await call("/pay/status?email=" + encodeURIComponent(E), null, { envx: FEE, get: true })).status === 403);
+}
 
 console.log("");
 console.log(`RESULT: ${pass} passed, ${fail} failed`);

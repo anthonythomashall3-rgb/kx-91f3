@@ -1,3 +1,4 @@
+import { withPayT } from "./pay_t.mjs";
 // Live access gate + teacher self-verification (23 Oct 2026). Runs the REAL API against an in-memory
 // SQLite DB (node:sqlite), no network. Proves:
 //   * a teacher signs up (admin invite = vouched) and is UNVERIFIED -> cannot protect or gate a quiz;
@@ -66,6 +67,7 @@ function makeDb(oldSchema) {
 }
 
 async function call(env, path, body, { teacher = null, sync = null, key = null, device = null } = {}) {
+  body = withPayT(path, body, env);
   const raw = JSON.stringify(body ?? {});
   const h = { "Content-Type": "application/json" };
   if (teacher) h["X-LOCKqz-Teacher"] = teacher;

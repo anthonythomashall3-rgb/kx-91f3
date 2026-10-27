@@ -1,3 +1,4 @@
+import { withPayT } from "./pay_t.mjs";
 // Round-2 API regressions (25 Oct 2026): one block per finding fixed in app/cloudflare/functions/api.
 // Runs the REAL API against in-memory SQLite with a D1 shim that enforces the 100-parameter cap, counts
 // D1 queries per request (Free plan: 50; target <= 45) and rows written, and logs every statement so a
@@ -49,6 +50,7 @@ const env = { DB: d1(sqlite), TEACHER_KEY: "admin-key-r2", REQUIRE_SIGNED: "1", 
 const BASE = "https://lockqz.test";
 const sign = (key, path, ts, raw) => createHmac("sha256", key).update(`POST\n${path}\n${ts}\n${createHash("sha256").update(raw).digest("hex")}`).digest("hex");
 async function call(path, body, { teacher = null, sync = null, dev = null, get = false, ip = "10.0.0.9", hdr = {}, envx = {} } = {}) {
+  body = withPayT(path, body, { ...env, ...envx });
   const raw = JSON.stringify(body ?? {});
   const h = { "Content-Type": "application/json", "CF-Connecting-IP": ip, ...hdr };
   if (teacher) h["X-LOCKqz-Teacher"] = teacher;

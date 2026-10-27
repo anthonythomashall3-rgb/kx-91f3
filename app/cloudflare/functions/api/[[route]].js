@@ -723,6 +723,11 @@ export async function onRequest(context) {
   const nearEnd = () => { const ce = Date.parse(classesEndOf(curTerms()[0]) + "T00:00:00Z"), t = Date.parse(laToday() + "T00:00:00Z"); return ce - t <= 14 * 86400000; };
   const payTermFor = (paidThisTerm, price) => { const [cur, nxt] = curTerms(); return inGap() || (ahead() && (FULL(paidThisTerm, price) || (nearEnd() && !(Number(paidThisTerm) > 0)))) ? nxt : cur; };   // a balance on a part-paid term stays on that term
   const PAY_URL = "https://lockqz.pages.dev/pay";
+  // Pay links carry t = HMAC(email): only the owner of an email (the link reaches them from their own LOCKqz app
+  // or their inbox) or the admin can see that email's memo code and payment status (Anthony, 26 Oct).
+  const statusToken = async email => (await hmacHex(String(env.ROT_SECRET || env.TEACHER_KEY || "lqz-fallback"), "lqz-pay-status:" + String(email||"").trim().toLowerCase())).slice(0, 32);
+  const payLink = async (email, extra = "") => `${PAY_URL}?email=${encodeURIComponent(String(email).toLowerCase())}&t=${await statusToken(email)}${extra}`;
+  const payOk = async (email, t) => !!(me && (me.admin || String(me.email||"").toLowerCase() === String(email||"").trim().toLowerCase())) || (!!t && sameHex(String(t), await statusToken(email)));
   // The Gmail script's key: PAY_SECRET if set, else derived from the server's own secret (the admin
   // copies it from Admin -> Payments into the script once). Nothing new to configure in Cloudflare.
   const paySecret = async () => env.PAY_SECRET ? String(env.PAY_SECRET) : ((env.ROT_SECRET || env.TEACHER_KEY) ? "lqp_" + (await hmacHex(String(env.ROT_SECRET || env.TEACHER_KEY), "lockqz-pay-notify")).slice(0, 40) : "");
@@ -832,7 +837,7 @@ export async function onRequest(context) {
     const cardOnly = String(env.STUDENT_CARD_ONLY||"") === "1" && stripeOn();   // students: card only, once Stripe is configured
     return { amount: STUDENT_FEE, code, venmo: cardOnly ? null : stuVenmo(), zelle: cardOnly ? null : stuZelle(), bank: cardOnly ? null : stuBank(), po: null, zelle_amount: cardOnly ? null : zelle_amount, stripe: stripeInfo("student", due),
              tax: taxInfo(), ways: taxOn() ? waysFor("student", Math.max(0, STUDENT_FEE - got)) : null, bank_auto: true,
-             url: PAY_URL + (email ? "?email=" + encodeURIComponent(String(email).toLowerCase()) : "") };
+             url: email ? await payLink(email) : PAY_URL };
   }
   // Memo codes typed by people: "lqs-ab12c", "LQS AB12C", "LQ AB12C". Student (LQS+5) first, then
   // professor (LQ+5; an older professor code may itself start with S).
@@ -932,8 +937,8 @@ export async function onRequest(context) {
     let sent = 0;
     for (const r of due) {
       const email = String(r.email).toLowerCase(), amt = totalOf(r.kind === "student" ? "student" : "professor", "zelle");
-      const link = r.kind === "student" ? `${PAY_URL}?email=${encodeURIComponent(email)}` : "https://prof.lockqz.pages.dev/";
-      const text = `LOCKqz renews for the new semester.\n\n${r.kind === "student" ? `Pay $${amt.toLocaleString("en-US")}${taxOn() ? ` (includes ${taxInfo().label.toLowerCase()})` : ""} with memo ${r.code}:\n${link}\n\nZelle ${stuZelle()||""} (paste ${r.code} in the Zelle memo/note)${stripeOn() ? "  ·  Card" : ""}${stuVenmo() ? `  ·  Venmo @${stuVenmo()}` : ""}  ·  Bank transfer: email ${stuBank()||""}` : `Pay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nVenmo @${(env.VENMO_HANDLE||"").replace(/^@/,"")}  ·  Zelle ${env.ZELLE_TO||""}`}\n\nAccess turns on as soon as the payment arrives and lasts until ${termEndOf(cur)}.\n\nStop these emails: ${PAY_URL}?email=${encodeURIComponent(email)}&renew=off`;
+      const link = r.kind === "student" ? await payLink(email) : "https://prof.lockqz.pages.dev/";
+      const text = `LOCKqz renews for the new semester.\n\n${r.kind === "student" ? `Pay $${amt.toLocaleString("en-US")}${taxOn() ? ` (includes ${taxInfo().label.toLowerCase()})` : ""} with memo ${r.code}:\n${link}\n\nZelle ${stuZelle()||""} (paste ${r.code} in the Zelle memo/note)${stripeOn() ? "  ·  Card" : ""}${stuVenmo() ? `  ·  Venmo @${stuVenmo()}` : ""}  ·  Bank transfer: email ${stuBank()||""}` : `Pay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nVenmo @${(env.VENMO_HANDLE||"").replace(/^@/,"")}  ·  Zelle ${env.ZELLE_TO||""}`}\n\nAccess turns on as soon as the payment arrives and lasts until ${termEndOf(cur)}.\n\nStop these emails: ${await payLink(email, "&renew=off")}`;
       try {
         if (typeof env.MAIL_SINK === "function") await env.MAIL_SINK({ to: email, subject: "Renew LOCKqz", text });
         else await smtpSend(async () => (await import("cloudflare:sockets")).connect({ hostname: env.MAIL_HOST || "smtp.gmail.com", port: Number(env.MAIL_PORT || 465) }, { secureTransport: "on", allowHalfOpen: false }),
@@ -1565,7 +1570,6 @@ export async function onRequest(context) {
     // ---- payments (public + Apps Script + admin) ----
     // /pay/status needs the code or this token from /pay/start (H10: nobody can look up whether an
     // arbitrary email paid or belongs to a professor).
-    const statusToken = async email => (await hmacHex(String(env.ROT_SECRET || env.TEACHER_KEY || "lqz-fallback"), "lqz-pay-status:" + email)).slice(0, 32);
     if (p === "/pay/start" && request.method === "POST") {
       const email = String(body.email||"").trim().toLowerCase();
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"enter your school email" }, 400);
@@ -1574,6 +1578,17 @@ export async function onRequest(context) {
       if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_start' AND " + RL_EV + " AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 30)
         return json({ error:"too many requests — try again in an hour" }, 429);
       await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + clientIp, null, null, "pay_start", null, now()).run();
+      // No link token (someone typed an email): nothing about that email is shown. The owner gets their own
+      // pay link by email (same answer for every address, so the reply never says whether it paid).
+      if (!(await payOk(email, body.t))) {
+        if (!feeOn()) return json({ required: false });
+        const recent = await db.prepare("SELECT 1 FROM events WHERE device_id=? AND quiz_id IS NULL AND event='pay_link' AND ts>?").bind("mail:" + email, new Date(Date.now() - 600000).toISOString()).first();
+        if (!recent) {
+          await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("mail:" + email, null, null, "pay_link", clientIp, now()).run();
+          try { await sendMail(env, email, "Your LOCKqz pay link", `Open your LOCKqz pay page:\n${await payLink(email)}\n\nThis link is only for ${email}. If you did not ask for it, ignore this email.`); } catch {}
+        }
+        return json({ link_sent: true, to: email, required: true });
+      }
       const info = await payInfo(email, clientIp, !(await studentPaid(email)));
       if (info.limited) return json({ error:"too many requests — try again in an hour" }, 429);
       const stt = await studentStatus(email);
@@ -1593,6 +1608,7 @@ export async function onRequest(context) {
       if (!stripeOn()) return json({ error:"Card payments are not on yet." }, 503);
       const email = String(body.email||"").trim().toLowerCase(), method = body.method === "bank" && stripeBank() ? "bank" : "card";
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"enter your school email" }, 400);
+      if (!(await payOk(email, body.t))) return json({ error:"Open the pay link LOCKqz emailed you." }, 403);
       const hr = new Date(Date.now() - 3600000).toISOString();
       if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_stripe' AND " + RL_EV + " AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 20)
         return json({ error:"too many requests — try again in an hour" }, 429);
@@ -1601,7 +1617,7 @@ export async function onRequest(context) {
       if (!code || typeof code === "object") return json({ error:"too many requests — try again in an hour" }, 429);
       if (await studentPaid(email)) return json({ error:"already paid" }, 409);
       const st = await studentStatus(email), due = Math.round(STUDENT_FEE * 100) - Math.round(st.received * 100);
-      const r = await stripeCheckout({ kind: "student", method, code, email, term: st.term, dueC: due, back: `${PAY_URL}?email=${encodeURIComponent(email)}` });
+      const r = await stripeCheckout({ kind: "student", method, code, email, term: st.term, dueC: due, back: await payLink(email) });
       return json(r, r.url ? 200 : r.processing ? 409 : 502);
     }
     // Stripe's webhook (signed). Paid checkouts are recorded like any other payment (txn = the
@@ -1674,7 +1690,9 @@ export async function onRequest(context) {
         left = (await studentPaid(email)) ? 0 : STUDENT_FEE - (await studentStatus(email)).received;
       }
       await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + (script ? "gmail" : clientIp), email, null, "pay_bank", kind, now()).run();
-      if (!(left > 0.005)) return json({ ok: true, paid: true });
+      // Without the email's pay-link token the answer is the same whatever the email (never says "paid" or the balance).
+      const seeAll = script || await payOk(email, body.t);
+      if (!(left > 0.005)) return json(seeAll ? { ok: true, paid: true } : { ok: true, sent: true, to: email });
       const w = taxOn() ? waysFor(kind, left).bank : { total: Math.round(left * 100) / 100, base: Math.round(left * 100) / 100, tax: 0 };
       const m = n => "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       const details = String(env.BANK_DETAILS || "").trim();
@@ -1688,11 +1706,12 @@ export async function onRequest(context) {
       try { await sendMail(env, email, `LOCKqz bank transfer details · ${code}`, text); }
       catch (e) { return json({ error: "Could not send the email. Try again in a minute." }, 502); }
       if (!details && env.ADMIN_EMAIL) try { await sendMail(env, String(env.ADMIN_EMAIL), `Send bank details: ${email} (${code})`, `${email} asked to pay ${m(w.total)} by bank transfer (memo ${code}).\nReply to them with LOCKqz's bank details.\nTo answer automatically: set the Pages secret BANK_DETAILS.`); } catch {}
-      return json({ ok: true, sent: true, to: email, amount: w.total });
+      return json(seeAll ? { ok: true, sent: true, to: email, amount: w.total } : { ok: true, sent: true, to: email });
     }
     if (p === "/pay/renew" && request.method === "POST") {
       const email = String(body.email||"").trim().toLowerCase();
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"bad email" }, 400);
+      if (!(await payOk(email, body.t))) return json({ error:"Open the pay link LOCKqz emailed you." }, 403);
       if (body.on) await db.prepare("DELETE FROM renew_optout WHERE email=?").bind(email).run();
       else await db.prepare("INSERT OR IGNORE INTO renew_optout (email,at) VALUES (?,?)").bind(email, now()).run();
       return json({ ok:true, renew: !!body.on });

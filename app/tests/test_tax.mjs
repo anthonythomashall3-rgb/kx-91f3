@@ -1,3 +1,4 @@
+import { withPayT } from "./pay_t.mjs";
 // Income tax on top (25%): every price = base / 0.75, shown as its own line; payments credited by how they came. Real API, in-memory SQLite.
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
@@ -58,6 +59,7 @@ function makeDb(oldSchema) {
 }
 
 async function call(env, path, body, { teacher = null, sync = null, key = null, device = null } = {}) {
+  body = withPayT(path, body, env);
   const raw = JSON.stringify(body ?? {});
   const h = { "Content-Type": "application/json" };
   if (teacher) h["X-LOCKqz-Teacher"] = teacher;

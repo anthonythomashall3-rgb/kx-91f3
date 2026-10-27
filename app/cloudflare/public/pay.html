@@ -140,7 +140,7 @@ function pick(k){ const open = PICKED !== k || $(PANEL[k]).hidden;
   const pr = $("price"); pr.className = "price"; void pr.offsetWidth; if (w && WAYS && w.total !== WAYS.zelle.total) pr.className = "price bump"; }
 // Bank transfer: LOCKqz emails the details (account, amount with tax, memo) at once.
 async function bankDetails(email){ const b = $("bsend"); b.disabled = true; b.innerHTML = '<span class="spin"></span>Sending';
-  let d; try { d = await (await fetch(API + "/pay/bank", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ email }) })).json(); } catch { d = { error:"No connection. Try again." }; }
+  let d; try { d = await (await fetch(API + "/pay/bank", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ email, t: TOK }) })).json(); } catch { d = { error:"No connection. Try again." }; }
   b.disabled = false; b.textContent = d.sent ? "Sent ✓ Check " + email : "Email me the bank details";
   $("bmsg").textContent = d.error ? d.error : d.paid ? "Already paid." : "Sent to " + email + ". Send the amount with memo " + (who ? who.code : "") + ". Access turns on by itself when the money arrives."; }
 // Polling: 10 s, slowing to 60 s; stops after 15 min or while the tab is hidden ("Check again" restarts it).
@@ -166,10 +166,12 @@ async function check(){
 }
 async function start(email){
   $("err").hidden = true; $("ld").innerHTML = lqL("Finding your account", "This takes about 2 seconds");
-  let d; try { d = await (await fetch(API + "/pay/start", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ email }) })).json(); } catch { d = { error:"No connection. Try again." }; }
+  let d; try { d = await (await fetch(API + "/pay/start", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ email, t: email === TOK_EMAIL ? TOK : undefined }) })).json(); } catch { d = { error:"No connection. Try again." }; }
   $("ld").innerHTML = "";
   if (d.error) { $("err").textContent = d.error; $("err").hidden = false; return; }
-  history.replaceState(null, "", "?email=" + encodeURIComponent(email));
+  // Typed an email (no link token): LOCKqz emails that address its own pay link; nothing else is shown.
+  if (d.link_sent) { $("err").textContent = "We emailed your pay link to " + email + ". Open it from that inbox to pay."; $("err").hidden = false; return; }
+  history.replaceState(null, "", "?email=" + encodeURIComponent(email) + (TOK && email === TOK_EMAIL ? "&t=" + encodeURIComponent(TOK) : ""));
   if (!d.required) { stopPoll(); $("f").hidden = true; $("pay").hidden = true; $("free").hidden = false; return; }   // fee not on yet
   const amt = money(d.amount);
   $("amt").textContent = amt; $("price").hidden = false;
@@ -206,7 +208,7 @@ async function copy(t){ try { await navigator.clipboard.writeText(t); return tru
         document.body.appendChild(a); a.select(); const ok = document.execCommand("copy"); a.remove(); return ok; } catch { return false; } }
 async function stripe(email, method, btn){
   $("err").hidden = true; const b = btn || $(method === "card" ? "cgo" : "ach"), t = b.textContent; b.disabled = true; b.innerHTML = '<span class="spin"></span>' + t;
-  let d; try { d = await (await fetch(API + "/pay/stripe", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ email, method }) })).json(); } catch { d = { error:"No connection. Try again." }; }
+  let d; try { d = await (await fetch(API + "/pay/stripe", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ email, method, t: TOK }) })).json(); } catch { d = { error:"No connection. Try again." }; }
   if (d.url) { location.href = d.url; return; }
   b.disabled = false; b.textContent = t; $("err").textContent = d.error || "Try again."; $("err").hidden = false;
 }
@@ -214,13 +216,14 @@ function paid(){ stopPoll(); PAYING = false; who = null; $("f").hidden = true; $
   if (UNTIL) { $("until").textContent = new Date(UNTIL + "T12:00:00").toLocaleDateString("en-US", { month:"long", day:"numeric", year:"numeric" }); $("untilp").hidden = false; } }
 let UNTIL = null;
 function renewUi(email, on){ $("renew").textContent = on === false ? "Turn renewal emails on" : "Stop renewal emails"; $("renewp").hidden = false;
-  $("renew").onclick = async () => { try { const r = await (await fetch(API + "/pay/renew", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ email, on: on === false }) })).json(); if (r.ok) renewUi(email, r.renew); } catch {} }; }
+  $("renew").onclick = async () => { try { const r = await (await fetch(API + "/pay/renew", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ email, on: on === false, t: TOK }) })).json(); if (r.ok) renewUi(email, r.renew); } catch {} }; }
 $("again").addEventListener("click", () => { since = Date.now(); polls = 0; stopPoll(); check(); });
 document.addEventListener("visibilitychange", () => { if (!who) return; if (document.visibilityState === "hidden") stopPoll(); else { since = Date.now(); polls = 0; stopPoll(); check(); } });
 $("f").addEventListener("submit", e => { e.preventDefault(); start($("em").value.trim().toLowerCase()); });
 const qs = new URLSearchParams(location.search), q = qs.get("email");
+const TOK = qs.get("t") || "", TOK_EMAIL = (q || "").trim().toLowerCase();
 (async () => {
-  if (q && qs.get("renew") === "off") try { await fetch(API + "/pay/renew", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ email: q.trim().toLowerCase(), on: false }) }); } catch {}
+  if (q && qs.get("renew") === "off") try { await fetch(API + "/pay/renew", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ email: q.trim().toLowerCase(), on: false, t: TOK }) }); } catch {}
   if (qs.get("stripe")) PAYING = true;
   if (q) { $("em").value = q; start(q.trim().toLowerCase()); }
 })();

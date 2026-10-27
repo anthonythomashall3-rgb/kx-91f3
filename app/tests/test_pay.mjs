@@ -1,3 +1,4 @@
+import { withPayT, payT } from "./pay_t.mjs";
 // Student fee ($5/semester) + automatic Venmo/Zelle matching + professor auto-activation. Real API, in-memory SQLite.
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
@@ -58,6 +59,7 @@ function makeDb(oldSchema) {
 }
 
 async function call(env, path, body, { teacher = null, sync = null, key = null, device = null } = {}) {
+  body = withPayT(path, body, env);
   const raw = JSON.stringify(body ?? {});
   const h = { "Content-Type": "application/json" };
   if (teacher) h["X-LOCKqz-Teacher"] = teacher;
@@ -100,7 +102,7 @@ check("fee off: password released", r.status === 200 && r.data?.password === "LQ
 console.log("P2 fee on, unpaid: no password, payment info instead");
 r = await pw(ON);
 check("unpaid: 402", r.status === 402, `got ${r.status}`);
-check("pay info: $5, Zelle + bank transfer, NO Venmo, LQS code, pay page", r.data?.pay?.amount === 5 && r.data.pay.venmo === null && r.data.pay.bank === "pay@usc.edu" && r.data.pay.zelle === "(858) 900-4347" && /^LQS[A-Z0-9]{5}$/.test(r.data.pay.code||"") && r.data.pay.url === "https://lockqz.pages.dev/pay?email=al%40usc.edu", JSON.stringify(r.data));
+check("pay info: $5, Zelle + bank transfer, NO Venmo, LQS code, pay page", r.data?.pay?.amount === 5 && r.data.pay.venmo === null && r.data.pay.bank === "pay@usc.edu" && r.data.pay.zelle === "(858) 900-4347" && /^LQS[A-Z0-9]{5}$/.test(r.data.pay.code||"") && r.data.pay.url === "https://lockqz.pages.dev/pay?email=al%40usc.edu&t=" + payT(ON, "al@usc.edu"), JSON.stringify(r.data));
 const CODE = r.data.pay.code;
 r = await call(ON, "/pay/start", { email: "AL@usc.edu" });
 check("pay page gives the same code", r.data?.code === CODE && r.data.paid === false && r.data.required === true, JSON.stringify(r.data));
