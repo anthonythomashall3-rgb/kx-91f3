@@ -332,7 +332,7 @@ export async function onRequest(context) {
   // Not /bs (every class list with student emails: FERPA) and not /synckey (would let a leaked key rotate
   // itself and lock the professor's real bookmark out): the Sync tab never calls either; the dashboard
   // uses the session token.
-  const SYNC_OK = new Set(["/sync","/sync-result","/protect","/gate","/rotating","/rotated","/submitted","/live","/me"]);
+  const SYNC_OK = new Set(["/sync","/sync-result","/protect","/class","/gate","/rotating","/rotated","/submitted","/live","/me"]);
   const teacher = () => !!me;
   const mine = (col="teacher_id") => me.admin ? { sql:"1=1", args:[] } : { sql:`${col}=?`, args:[me.id] };
   // Only the INSTRUCTOR of a course (named Instructor on a roster an admin or verified professor synced)
@@ -1010,6 +1010,12 @@ export async function onRequest(context) {
   const withOrig = row => { let o = {}; try { o = JSON.parse(row.orig || "{}") || {}; } catch {}
     const { orig, ...r } = row;
     return { ...r, orig_password: "pw" in o ? o.pw : null, orig_password_saved: "pw" in o, orig_hidden: "hidden" in o ? !!o.hidden : null, orig_hidden_saved: "hidden" in o }; };
+  async function classOff(ous) {
+    const out = new Set();
+    for (const part of chunk(ous.map(String).filter(o => /^\d+$/.test(o)), 98))
+      (await db.prepare(`SELECT ou FROM course_off WHERE ou IN (${placeholders(part.length)})`).bind(...part).all()).results.forEach(r => out.add(String(r.ou)));
+    return out;
+  }
   async function bsState(ous) {
     ous = ous.map(String).filter(o => /^\d+$/.test(o));
     if (!ous.length) return { protect: [], clear: [] };
@@ -1800,11 +1806,11 @@ export async function onRequest(context) {
     // ---- teacher endpoints (need a logged-in teacher or the admin key) ----
     if (!teacher()) return json({ error: "unauthorized" }, 401);
 
-    if ((p === "/quiz" || p === "/course" || p === "/protect" || p === "/gate") && request.method === "POST" && !me.admin && !me.verified)
+    if ((p === "/quiz" || p === "/course" || p === "/protect" || p === "/class" || p === "/gate") && request.method === "POST" && !me.admin && !me.verified)
       return json({ error: "Verify you teach this course first: open Brightspace and click LOCKqz Sync." }, 403);
     // PAID ONLY: verification proves you are a professor; only the admin's Activate (after payment)
     // turns the tool on. Nothing that protects, gates or rotates a quiz works for an unpaid account.
-    if ((p === "/quiz" || p === "/course" || (p === "/protect" && body.on) || (p === "/gate" && body.on) || p === "/rotating") && request.method === "POST") {
+    if ((p === "/quiz" || p === "/course" || ((p === "/protect" || p === "/class") && body.on) || (p === "/gate" && body.on) || p === "/rotating") && request.method === "POST") {
       const u = String(body.url||"");
       const payOu = p === "/quiz" ? ids(u).ou : p === "/course" ? (u.match(/ou=(\d+)/) || u.match(/\/home\/(\d+)/) || u.match(/\/(\d+)(?:\/|$)/) || [])[1] : String(body.ou||"");
       if (!(await paidOu(payOu))) return json({ error: `Not active. LOCKqz turns on after payment ($${totalOf("professor", "zelle").toLocaleString("en-US")} per semester).` }, 402);
@@ -1951,7 +1957,7 @@ export async function onRequest(context) {
         for (const part of chunk(list, 99 - extra.length)) out.push(...(await db.prepare(sql.replace("%IN%", placeholders(part.length))).bind(...extra, ...part).all()).results);
         return out;
       };
-      const oldTc = new Map((A.length ? await sel("SELECT ou,name,code,role,synced_at FROM teacher_courses WHERE teacher_id=? AND ou IN (%IN%)", A, [me.id]) : []).map(r => [String(r.ou), r]));
+      const oldTc = new Map((A.length ? await sel("SELECT ou,name,code,role,synced_at,in_sync FROM teacher_courses WHERE teacher_id=? AND ou IN (%IN%)", A, [me.id]) : []).map(r => [String(r.ou), r]));
       // H15: students deleted on request are never imported again (until they confirm their email again).
       const forgotten = withRoster.length ? new Set((await db.prepare("SELECT email FROM forgotten").all().catch(() => ({ results: [] }))).results.map(r => r.email)) : new Set();
       // Each class list as it would be stored (deduped, forgotten students left out), and its hash. A
@@ -2003,11 +2009,14 @@ export async function onRequest(context) {
       for (const ou of A) {
         const c = byOu.get(ou), o = oldTc.get(ou);
         const v = [str(c.name), str(c.code), str(c.role, 80)];
-        if (!o || !same(o.name, v[0]) || !same(o.code, v[1]) || !same(o.role, v[2])) tcRows.push([me.id, ou, ...v, t]);
+        if (!o || !same(o.name, v[0]) || !same(o.code, v[1]) || !same(o.role, v[2]) || Number(o.in_sync) === 0) tcRows.push([me.id, ou, ...v, t, 1]);
         else if (!o.synced_at || o.synced_at < touchBefore) touch.push(ou);
       }
-      st.push(...multiInsert(db, "INSERT INTO teacher_courses (teacher_id,ou,name,code,role,synced_at)", 6, tcRows,
-        "ON CONFLICT(teacher_id,ou) DO UPDATE SET name=excluded.name,code=excluded.code,role=excluded.role,synced_at=excluded.synced_at"));
+      st.push(...multiInsert(db, "INSERT INTO teacher_courses (teacher_id,ou,name,code,role,synced_at,in_sync)", 7, tcRows,
+        "ON CONFLICT(teacher_id,ou) DO UPDATE SET name=excluded.name,code=excluded.code,role=excluded.role,synced_at=excluded.synced_at,in_sync=1"));
+      // Parity with the Sync panel: a class this Sync no longer lists (ended, hidden, dropped) leaves the
+      // dashboard too. One statement; writes only the rows that change (0 on a repeat sync).
+      if (Array.isArray(body.courses)) st.push(db.prepare("UPDATE teacher_courses SET in_sync=0 WHERE teacher_id=? AND COALESCE(in_sync,1)<>0 AND ou NOT IN (SELECT value FROM json_each(?))").bind(me.id, JSON.stringify(A)));
       for (const part of chunk(touch, 98)) st.push(db.prepare(`UPDATE teacher_courses SET synced_at=? WHERE teacher_id=? AND ou IN (${placeholders(part.length)})`).bind(t, me.id, ...part));
       // Class lists: upsert changed/new students, delete the ones Brightspace no longer lists.
       // Each course's writes and its new roster_snap row go out as ONE group (one db.batch = one
@@ -2110,6 +2119,8 @@ export async function onRequest(context) {
       // The answer's protect/clear lists, read once: they also tell auto-protect which quizzes LOCKqz
       // already holds, and are re-read at the end only if this request changed quizzes.
       const pre = await bsState(mineA);
+      // Classes the professor turned LOCKqz off for (Sync panel or dashboard): no auto-protect there.
+      const offSet = await classOff(mineA);
       let add = [];
       if (autoOus.length) {
         const seen = new Set(), autoSet = new Set(autoOus);
@@ -2117,7 +2128,7 @@ export async function onRequest(context) {
         for (const part of chunk(autoOus, 98))
           (await db.prepare(`SELECT ou,qi FROM lockqz_off WHERE ou IN (${placeholders(part.length)})`).bind(...part).all())
             .results.forEach(r => seen.add(String(r.ou) + "-" + String(r.qi)));
-        for (const ou of autoOus) for (const q of byOu.get(ou).quizzes.slice(0, 1000)) {
+        for (const ou of autoOus.filter(o => !offSet.has(o))) for (const q of byOu.get(ou).quizzes.slice(0, 1000)) {
           const qi = String(q && q.qi || ""); if (!/^\d+$/.test(qi) || seen.has(`${ou}-${qi}`)) continue;
           if (ownPw.has(`${ou}-${qi}`)) continue;
           const end = q.end ? Date.parse(q.end) : NaN; if (!isNaN(end) && end < Date.now()) continue;   // skip ended quizzes
@@ -2131,7 +2142,9 @@ export async function onRequest(context) {
       await runBatches(db, st2);
       const released = await releaseUnpaid(me);
       // Only hand back passwords for courses this caller instructs (never leak another course's).
-      return json({ ...(add.length || released ? await bsState(mineA) : pre), auto_gate: gateRequired() });
+      // ous: the classes the dashboard shows after this Sync (the panel shows exactly these);
+      // class_off: those of them the professor turned LOCKqz off for.
+      return json({ ...(add.length || released ? await bsState(mineA) : pre), auto_gate: gateRequired(), ous: A, class_off: [...offSet] });
     }
     if (p === "/sync-result" && request.method === "POST") {
       const list = (Array.isArray(body.results) ? body.results : []).slice(0, 1000).filter(r => r && typeof r === "object");
@@ -2158,6 +2171,18 @@ export async function onRequest(context) {
       }
       await runBatches(db, st);
       return json({ ok:true });
+    }
+    // LOCKqz on/off for a WHOLE class (the class switch on the Sync panel and the dashboard). The caller
+    // then turns each of the class's quizzes on/off with /protect; this row decides what happens to the
+    // class's NEW quizzes (off: auto-protect skips them) and is what both screens show for a class with no
+    // exams yet. Written only when it changes.
+    if (p === "/class" && request.method === "POST") {
+      const ou = String(body.ou||"");
+      if (!/^\d+$/.test(ou)) return json({ error:"bad class" }, 400);
+      if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this class can change LOCKqz for it." }, 403);
+      if (body.on) await db.prepare("DELETE FROM course_off WHERE ou=?").bind(ou).run();
+      else await db.prepare("INSERT INTO course_off (ou,teacher_id,at) VALUES (?,?,?) ON CONFLICT(ou) DO NOTHING").bind(ou, me.id, now()).run();
+      return json({ ou, on: !!body.on });
     }
     if (p === "/protect" && request.method === "POST") {
       const ou = String(body.ou||""), qi = String(body.qi||"");
@@ -2290,14 +2315,15 @@ export async function onRequest(context) {
       return json({ ok: true, ou, email, tools });
     }
     if (p === "/bs") {
-      const cs = (await db.prepare("SELECT ou,name,code,role,synced_at FROM teacher_courses WHERE teacher_id=? ORDER BY name LIMIT 200").bind(me.id).all()).results;
+      const cs = (await db.prepare("SELECT ou,name,code,role,synced_at FROM teacher_courses WHERE teacher_id=? AND COALESCE(in_sync,1)<>0 ORDER BY name LIMIT 200").bind(me.id).all()).results;
       if (!cs.length) return json({ courses: [] });
       // Passwords, protection state, class lists and who-installed are shown ONLY for courses the
       // caller INSTRUCTS (trusted roster). A seed row (e.g. a student who synced the course first)
       // lists the course and its quizzes, never a class list (H4, FERPA) or a password.
       const own = await trustedOus(cs.map(c => String(c.ou)));
       const ownList = cs.map(c => String(c.ou)).filter(o => own.has(o));
-      const sub = "SELECT ou FROM teacher_courses WHERE teacher_id=?";
+      const sub = "SELECT ou FROM teacher_courses WHERE teacher_id=? AND COALESCE(in_sync,1)<>0";
+      const offOus = await classOff(ownList);
       const roster = [], devs = [], assist = new Map();
       for (const part of chunk(ownList, 98)) {
         const ph = placeholders(part.length);
@@ -2325,7 +2351,7 @@ export async function onRequest(context) {
         .map(q => own.has(String(q.ou)) ? withOrig(q) : withOrig({ ...q, orig: null, password: null, lock_id: null, gated: null }));
       const by = {}; devs.forEach(d => { (by[d.who] = by[d.who] || []).push(d); });
       const adminEmails = new Set(((await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin'").all()).results).map(x => x.e));
-      return json({ courses: cs.map(c => ({ ...c, roster_hidden: !own.has(String(c.ou)),
+      return json({ courses: cs.map(c => ({ ...c, roster_hidden: !own.has(String(c.ou)), off: offOus.has(String(c.ou)),
         // Everyone LOCKqz locks: Learners AND TAs (any non-instructor role). The admin is the one
         // exempt person (developer mode), so he is never listed as someone who must install.
         students: roster.filter(r => r.ou === c.ou && takesQuizzes(r.role) && !adminEmails.has((r.email||"").toLowerCase())).map(r => {

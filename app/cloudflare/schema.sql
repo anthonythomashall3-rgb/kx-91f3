@@ -112,7 +112,9 @@ CREATE TABLE IF NOT EXISTS invites (
 
 -- Brightspace connector (23 Oct 2026): courses a teacher synced, class lists, quizzes,
 -- and LOCKqz passwords waiting to be removed from Brightspace. Safe to re-run.
-CREATE TABLE IF NOT EXISTS teacher_courses (teacher_id TEXT, ou TEXT, name TEXT, code TEXT, role TEXT, synced_at TEXT, PRIMARY KEY (teacher_id, ou));
+CREATE TABLE IF NOT EXISTS teacher_courses (teacher_id TEXT, ou TEXT, name TEXT, code TEXT, role TEXT, synced_at TEXT, in_sync INTEGER, PRIMARY KEY (teacher_id, ou));
+-- A class the professor turned LOCKqz off for (migrate_032): auto-protect skips its new quizzes.
+CREATE TABLE IF NOT EXISTS course_off (ou TEXT PRIMARY KEY, teacher_id TEXT, at TEXT);
 CREATE TABLE IF NOT EXISTS roster (ou TEXT, user_id TEXT, name TEXT, email TEXT, username TEXT, org_id TEXT, role TEXT, synced_at TEXT, PRIMARY KEY (ou, user_id));
 CREATE INDEX IF NOT EXISTS idx_roster_email ON roster(email);
 -- orig = the professor's own settings before LOCKqz changed the quiz: JSON {"pw":..., "hidden":...} (migrate_024)

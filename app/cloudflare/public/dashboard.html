@@ -269,6 +269,12 @@ const SYNCHELP = () => `<ol class="steps" style="margin:10px 0 0;text-align:left
 let SYNCHELPON = false;
 function syncMsg(t, help = false){ SYNCMSG = t; SYNCHELPON = help; document.querySelectorAll(".syncst").forEach(e => e.innerHTML = syncHtml(t) + (help ? SYNCHELP() : "")); }
 function askSync(w){ BS_ORIGINS.forEach(o => { try { w.postMessage({ lqz: "sync" }, o); } catch {} }); }
+// After a switch here: the open LOCKqz Sync tab puts the change into Brightspace and redraws its panel, so
+// Brightspace, the panel and this page agree within seconds. Several clicks in a row = one sync. No Sync
+// tab open: the "One more click" note stays (nothing opens by itself).
+let PUSHN = 0;
+function pushSync(){ if (typeof setTimeout !== "function") return; const n = ++PUSHN;
+  setTimeout(() => { if (n === PUSHN && BSWIN && !BSWIN.closed && !SYNCWAIT) syncNow(); }, 2500); }
 function syncNow(){
   if (SYNCWAIT) return;
   let w = BSWIN && !BSWIN.closed ? BSWIN : null;
@@ -289,6 +295,8 @@ window.addEventListener("message", async e => {
   if (!BS_ORIGINS.includes(e.origin) || !e.data || typeof e.data !== "object" || !e.source) return;
   const m = e.data;
   if (m.lqz === "hello") { BSWIN = e.source; return; }
+  // A switch flipped on the Sync panel: show it here at once.
+  if (m.lqz === "changed") { BSWIN = e.source; if (shown() && ME && !SAVING) { await refresh(); if (!busy()) route(); } return; }
   if (m.lqz === "synced") {
     BSWIN = e.source; const asked = !!SYNCWAIT; clearTimeout(SYNCWAIT); SYNCWAIT = null;
     if (shown() && ME) { await refresh(); route(); }
@@ -308,14 +316,18 @@ document.addEventListener("click", e=>{ const m=$("menu"); if(m && !m.contains(e
 const now = () => Date.now();
 const live = q => q.password && q.start_date && Date.parse(q.start_date) <= now() && (!q.end_date || Date.parse(q.end_date) > now()) && (!q.start_date || now() - Date.parse(q.start_date) < 6*3600e3);
 const ended = q => (q.end_date && Date.parse(q.end_date) < now()) || (q.due_date && !q.end_date && Date.parse(q.due_date) < now() - 86400e3);
-const current = c => c.quizzes.filter(q => q.active !== 0 && !ended(q));
+// The quizzes LOCKqz covers for a class: every quiz that has not ended, hidden (inactive) ones too (they
+// are protected before they open). The Sync panel uses this exact rule (sync.js: openQ), so both screens
+// list the same exams with the same switches.
+const current = c => c.quizzes.filter(q => !ended(q) || Number(q.gated) === 1);   // a running gate stays listed until it stops
 // Brightspace does not match LOCKqz yet: on but our password not there, or off but our password still there.
 const pend = q => q.password ? !q.bs_password_is_ours : !!q.bs_password_is_ours;
 const pendingSync = () => BS.courses.some(c => c.quizzes.some(pend));
 function classStats(c){
   const cur = current(c), prot = cur.filter(q=>q.password), ready = c.students.filter(s=>s.installed).length;
   const next = cur.filter(q=>q.start_date && Date.parse(q.start_date) > now()).sort((a,b)=>Date.parse(a.start_date)-Date.parse(b.start_date))[0];
-  return { cur, prot, ready, next, missing: c.students.filter(s=>!s.installed), on: cur.length ? prot.length>0 : true, inprog: cur.filter(live) };
+  // Class switch, same rule as the Sync panel: ON = not turned off for the class AND every exam protected.
+  return { cur, prot, ready, next, missing: c.students.filter(s=>!s.installed), on: !c.off && prot.length===cur.length, inprog: cur.filter(live) };
 }
 
 // ---- router ----
@@ -345,17 +357,17 @@ function viewHome(){
   if(!ME.admin && !ME.verified) h += `<div class="note warn"><span>LOCKqz can't protect your exams until Brightspace shows you as the instructor. Click your <b>LOCKqz Sync</b> bookmark in Brightspace.</span><button class="btn warn" onclick="nav('connect')">How</button></div>`;
   const all = BS.courses.map(classStats);
   const exams = all.reduce((n,s)=>n+s.cur.length,0), prot = all.reduce((n,s)=>n+s.prot.length,0), students = BS.courses.reduce((n,c)=>n+c.students.length,0);
-  const allOn = exams>0 && prot===exams, allOff = prot===0;
+  const allOn = all.every(s=>s.on), allOff = prot===0 && !all.some(s=>s.on);
   const synced = BS.courses.map(c=>c.synced_at).sort().pop();
   const inprog = all.flatMap(s=>s.inprog.map(q=>({q, c: BS.courses[all.indexOf(s)]})));
-  const headline = exams===0 ? "No upcoming exams in Brightspace yet." : allOff ? "LOCKqz is off. Students can use AI during your exams." : allOn ? `LOCKqz is on for all ${exams} of your upcoming exam${exams===1?"":"s"}.` : `LOCKqz is on for ${prot} of your ${exams} upcoming exams.`;
+  const headline = exams===0 ? (allOff ? "LOCKqz is off for your classes." : "No upcoming exams in Brightspace yet.") : allOff ? "LOCKqz is off. Students can use AI during your exams." : allOn ? `LOCKqz is on for all ${exams} of your upcoming exam${exams===1?"":"s"}.` : `LOCKqz is on for ${prot} of your ${exams} upcoming exams.`;
   h += `<section class="card band" aria-label="Status">
     <div style="display:flex;align-items:center;gap:20px;min-width:0">
       <div class="orb ${allOff?'off':''}">${SHIELD(allOff?'#6b6861':'#1a7f37',30)}</div>
       <div><h1>${headline}</h1><p class="sub">Synced with Brightspace ${ago(synced)} · ${BS.courses.length} class${BS.courses.length===1?"":"es"} · ${students} students${pendingSync()?"":" · nothing for you to do"}</p>
         <div class="sub" style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">${SYNCBTN()}</div></div>
     </div>
-    ${exams ? `<button class="sw big" aria-pressed="${!allOff}" aria-label="LOCKqz on for all exams" onclick="setAll(${allOff})"><b>${allOff?"Off":"On"}</b><i></i></button>` : ""}
+    <button class="sw big" aria-pressed="${allOn}" aria-label="LOCKqz on for all classes" onclick="setAll(${!allOn})"><b>${allOn?"On":"Off"}</b><i></i></button>
   </section>`;
   if(pendingSync()) h += `<div class="note warn"><span>One more click to send these changes to Brightspace.</span><button class="btn warn" onclick="syncNow()">Sync now</button></div>`;
   inprog.forEach(({q,c}) => h += `<div class="note ok"><span style="display:flex;align-items:center;gap:10px"><span class="pulse"></span><b>${esc(q.name)}</b> is in progress · ${esc(cname(c))}</span><a class="btn ok" href="#live/${esc(c.ou)}-${esc(q.qi)}">Watch live</a></div>`);
@@ -365,14 +377,15 @@ function viewHome(){
     h += `<article class="card cls ${s.on?'':'off'}">
       <div class="top">
         <a href="#class/${esc(c.ou)}"><span class="nm">${esc(cname(c))}</span><span class="sm">${esc(c.code||"")}${c.code?" · ":""}${c.students.length} students</span></a>
-        ${s.cur.length ? `<button class="sw" aria-pressed="${s.on}" aria-label="LOCKqz on for this class" data-ou="${esc(c.ou)}" onclick="setClass(this.dataset.ou,${!s.on})"><b>${s.on?"On":"Off"}</b><i></i></button>` : ""}
+        <button class="sw" aria-pressed="${s.on}" aria-label="LOCKqz on for this class" data-ou="${esc(c.ou)}" onclick="setClass(this.dataset.ou,${!s.on})"><b>${s.on?"On":"Off"}</b><i></i></button>
       </div>
       <div class="tiles">
         <div class="tile"><span class="k">Students ready</span><span class="v">${s.ready}<small> / ${c.students.length}</small></span><span class="bar"><span style="width:${pct}%"></span></span></div>
-        <div class="tile"><span class="k">Exams protected</span><span class="v">${s.prot.length}<small> / ${s.cur.length}</small></span><span class="n">${s.cur.length===0?"no upcoming exams":s.on&&s.prot.length===s.cur.length?"all of them, automatically":s.on?"some turned off":"LOCKqz is off for this class"}</span></div>
+        <div class="tile"><span class="k">Exams protected</span><span class="v">${s.prot.length}<small> / ${s.cur.length}</small></span><span class="n">${s.cur.length===0?(s.on?"no upcoming exams · new ones protected":"no upcoming exams · LOCKqz is off"):s.on?"all of them, automatically":s.prot.length?(s.cur.length-s.prot.length)+" turned off":"LOCKqz is off for this class"}</span></div>
         <div class="tile"><span class="k">Next exam</span><span class="v md">${s.next?esc(s.next.name):"—"}</span><span class="n">${s.next?when(s.next.start_date):"none scheduled"}</span></div>
       </div>
-      ${s.on && s.missing.length && s.cur.length ? `<div class="note warn"><span>${s.missing.length} student${s.missing.length===1?"":"s"} still need${s.missing.length===1?"s":""} to install LOCKqz${s.next?" before "+esc(s.next.name):""}.</span>${mailBtns(c,s)}</div>` : ""}
+      ${s.missing.length ? `<div class="note warn"><span>${s.missing.length} student${s.missing.length===1?"":"s"} still need${s.missing.length===1?"s":""} to install LOCKqz${s.next?" before "+esc(s.next.name):""}.</span>${mailBtns(c,s)}</div>`
+        : `<div class="note ok"><span>${c.students.length?"Every student has LOCKqz installed.":"No students on the Brightspace roster yet."}</span>${mailBtns(c,s)}</div>`}
     </article>`;
   });
   h += `</section>`;
@@ -380,46 +393,53 @@ function viewHome(){
   h += `<p class="foot">New classes, students and exams appear here on their own. Students without LOCKqz cannot open a protected exam.</p>`;
   return h;
 }
+// Send email, on every class (dashboard + Sync panel): to the students who still need LOCKqz, or to the
+// whole class once everyone has it (a reminder before the exam).
+const mailTo = s => (s.missing.length ? s.missing : (s.all||[])).map(x=>x.email).filter(Boolean);
 function mailMissing(c,s,withBcc=true){
-  const bcc = withBcc ? s.missing.map(x=>x.email).filter(Boolean).join(",") : "";
+  const bcc = withBcc ? mailTo(s).join(",") : "";
   const subj = `Install LOCKqz before ${s.next?s.next.name:"our next exam"} (${cname(c)})`;
-  const body = `Hi,\n\nOur Brightspace exams in ${cname(c)} use LOCKqz. You need it installed once, or the exam will not open for you.\n\n1. Go to ${INSTALL}\n2. Click Download and run the installer.\n\nThat is all. It only blocks AI tools while an exam is open and turns itself off after.\n\n${ME.name||""}`;
+  const body = `Hi,\n\nOur Brightspace exams in ${cname(c)} use LOCKqz. You need it installed once, or the exam will not open for you.\n\n1. Go to ${INSTALL}\n2. Click Download and run the installer.\n\nIf you already installed LOCKqz, you are all set. That is all. It only blocks AI tools while an exam is open and turns itself off after.\n\n${ME.name||""}`;
   return `mailto:?${bcc?"bcc="+encodeURIComponent(bcc)+"&":""}subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`;
 }
 // Mail apps drop mailto links over ~2000 characters: a big class gets the email without Bcc + a Copy emails button.
-function mailBtns(c,s){ const full = mailMissing(c,s), long = full.length > 1900;
-  return long ? `<span style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn warn" data-ou="${esc(c.ou)}" onclick="copyMissing(this)">Copy emails</button><a class="btn warn" href="${mailMissing(c,s,false)}">Send them the install link</a></span>`
-              : `<a class="btn warn" href="${full}">Send them the install link</a>`; }
+function mailBtns(c,s){ s = { ...s, all: c.students }; const full = mailMissing(c,s), long = full.length > 1900, k = s.missing.length ? "warn" : "";
+  const tip = s.missing.length ? `Emails the ${s.missing.length} student${s.missing.length===1?"":"s"} who still need LOCKqz` : "Emails the whole class a reminder";
+  return long ? `<span style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ${k}" data-ou="${esc(c.ou)}" onclick="copyMissing(this)">Copy emails</button><a class="btn ${k} mailbtn" title="${tip}" href="${mailMissing(c,s,false)}">Send email</a></span>`
+              : `<a class="btn ${k} mailbtn" title="${tip}" href="${full}">Send email</a>`; }
 async function copyMissing(b){ const c=BS.courses.find(x=>x.ou===b.dataset.ou); if(!c) return;
-  try { await navigator.clipboard.writeText(classStats(c).missing.map(x=>x.email).filter(Boolean).join(", ")); b.textContent="Copied"; }
+  try { await navigator.clipboard.writeText(mailTo({ ...classStats(c), all: c.students }).join(", ")); b.textContent="Copied"; }
   catch(e){ alert("Could not copy the emails."); } }
 // Change, then re-draw from the server (so the page shows what is really saved), then say what failed.
-async function after(results){ await refresh(); route(); const bad = results.filter(d=>d && d.error);
+async function after(results){ await refresh(); route(); pushSync(); const bad = results.filter(d=>d && d.error);
   if(bad.length) alert(bad.length===1 ? bad[0].error : `${bad.length} exams were not changed: ${bad[0].error}`); }
 let SAVING = false;   // one change at a time: a double click never sends the same switch twice
 const once = f => async (...a) => { if(SAVING) return; SAVING = true; try { await f(...a); } finally { SAVING = false; } };
-const setAll = once(async function(on){ const jobs=[]; BS.courses.forEach(c=>current(c).forEach(q=>{ if(!!q.password!==on) jobs.push(post("/protect",{ou:c.ou,qi:q.qi,on})); })); await after(await Promise.all(jobs)); });
-const setClass = once(async function(ou,on){ const c=BS.courses.find(x=>x.ou===ou); if(!c) return; const jobs=current(c).filter(q=>!!q.password!==on).map(q=>post("/protect",{ou,qi:q.qi,on})); await after(await Promise.all(jobs)); });
+// A class switch: the class row first (decides its NEW quizzes), then each of its exams. Same calls as the
+// Sync panel's class switch.
+const classJobs = (c,on) => [post("/class",{ou:c.ou,on}), ...current(c).filter(q=>!!q.password!==on).map(q=>post("/protect",{ou:c.ou,qi:q.qi,on}))];
+const setAll = once(async function(on){ await after(await Promise.all(BS.courses.filter(c=>!c.roster_hidden).flatMap(c=>classJobs(c,on)))); });
+const setClass = once(async function(ou,on){ const c=BS.courses.find(x=>x.ou===ou); if(!c) return; await after(await Promise.all(classJobs(c,on))); });
 const setQuiz = once(async function(ou,qi,on){ await after([await post("/protect",{ou,qi,on})]); });
 async function delLegacy(id){ if(confirm("Remove this quiz from LOCKqz?")) await after([await post("/delete",{quiz_id:id})]); }
 
 // ---- CLASS ----
 function viewClass(ou){
   const c = BS.courses.find(x=>x.ou===ou); if(!c) return viewHome();
-  const s = classStats(c), past = c.quizzes.filter(q=>ended(q) || q.active===0);
+  const s = classStats(c), past = c.quizzes.filter(q=>ended(q) && Number(q.gated) !== 1);
   const row = q => { const on=!!q.password, p = pend(q), lv = `#live/${esc(ou)}-${esc(q.qi)}`;
-    return `<li><div class="grow"><span class="t" style="color:${on?'var(--ink)':'#6b6861'}">${esc(q.name)}</span><span class="d">${q.start_date?when(q.start_date):"no start date"}${q.end_date?" – "+when(q.end_date):""}${live(q)?` · <a href="${lv}">in progress — watch</a>`:on?` · <a href="${lv}">watch live</a>`:""}</span></div>
+    return `<li><div class="grow"><span class="t" style="color:${on?'var(--ink)':'#6b6861'}">${esc(q.name)}</span><span class="d">${q.active===0?"hidden in Brightspace · ":""}${q.start_date?when(q.start_date):"no start date"}${q.end_date?" – "+when(q.end_date):""}${live(q)?` · <a href="${lv}">in progress — watch</a>`:on?` · <a href="${lv}">watch live</a>`:""}</span></div>
       <button class="sw" aria-pressed="${on}" aria-label="Protect this exam" data-ou="${esc(ou)}" data-qi="${esc(q.qi)}" onclick="this.disabled=true;setQuiz(this.dataset.ou,this.dataset.qi,${!on})"><b class="st ${p?'warn':on?'ok':''}" style="min-width:110px;text-align:right">${on?(p?"Protected · 1 click left":"Protected"):(p?"Off · 1 click left":"Not protected")}</b><i></i></button></li>`; };
   return `${BACK('', 'All classes')}
   <div class="band"><div><h1 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-.015em">${esc(cname(c))}</h1><p class="sub">${esc(c.code||"")}${c.code?" · ":""}${c.students.length} students · from Brightspace, updated ${ago(c.synced_at)}</p></div>
-    ${s.cur.length ? `<button class="sw" aria-pressed="${s.on}" aria-label="LOCKqz on for this class" data-ou="${esc(ou)}" onclick="setClass(this.dataset.ou,${!s.on})"><b>LOCKqz ${s.on?"on":"off"}</b><i></i></button>` : ""}</div>
+    <button class="sw" aria-pressed="${s.on}" aria-label="LOCKqz on for this class" data-ou="${esc(ou)}" onclick="setClass(this.dataset.ou,${!s.on})"><b>LOCKqz ${s.on?"on":"off"}</b><i></i></button></div>
   <div class="two">
     <section class="card"><div class="hrow"><h2>Exams</h2><span>every exam starts protected</span></div>
       <ul class="list">${s.cur.map(row).join("") || `<li class="d">No upcoming exams in Brightspace.</li>`}</ul>
-      ${past.length ? `<details class="past"><summary>${past.length} past or inactive</summary><ul class="list">${past.map(q=>`<li><div class="grow"><span class="t" style="color:#6b6861">${esc(q.name)}</span><span class="d">${q.end_date?"ended "+when(q.end_date):q.active===0?"inactive":""}</span></div><span class="st">${q.password?"was protected":""}</span></li>`).join("")}</ul></details>` : ""}
+      ${past.length ? `<details class="past"><summary>${past.length} past</summary><ul class="list">${past.map(q=>`<li><div class="grow"><span class="t" style="color:#6b6861">${esc(q.name)}</span><span class="d">${q.end_date?"ended "+when(q.end_date):q.due_date?"due "+when(q.due_date):""}</span></div><span class="st">${q.password?"was protected":""}</span></li>`).join("")}</ul></details>` : ""}
     </section>
     <section class="card"><div class="hrow"><h2>Students</h2><span><b style="color:var(--ok)">${s.ready} ready</b>${s.missing.length?` · <b style="color:var(--warn)">${s.missing.length} not yet</b>`:""}</span></div>
-      ${s.missing.length ? `<div class="note warn"><span>${s.missing.length} student${s.missing.length===1?" has":"s have"} not installed LOCKqz. They cannot open a protected exam until they do.</span>${mailBtns(c,s)}</div>` : `<div class="note ok"><span>Every student has LOCKqz installed.</span></div>`}
+      ${s.missing.length ? `<div class="note warn"><span>${s.missing.length} student${s.missing.length===1?" has":"s have"} not installed LOCKqz. They cannot open a protected exam until they do.</span>${mailBtns(c,s)}</div>` : `<div class="note ok"><span>${c.students.length?"Every student has LOCKqz installed.":"No students on the Brightspace roster yet."}</span>${mailBtns(c,s)}</div>`}
       <ul class="list">${[...s.missing, ...c.students.filter(x=>x.installed)].map(x=>`<li><span class="dot ${x.installed?'ok':'warn'}"></span><span class="grow"><span style="font-size:15px">${esc(x.name)}</span>${x.ta?' <span class="sm" style="color:var(--muted,#777)">· TA</span>':""}${assistBox(ou,x)}</span><span class="st ${x.installed?'ok':'warn'}">${x.installed?"Ready"+(x.platform?" · "+esc(x.platform):""):"Needs LOCKqz"}</span></li>`).join("") || `<li class="d">No students on the Brightspace roster.</li>`}</ul>
     </section>
   </div>`;

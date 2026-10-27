@@ -324,23 +324,58 @@
     try { localStorage.setItem(FPK, JSON.stringify({ fp: FP, at: Date.now() })); } catch (e) {}
     tell({ lqz: "synced", ok: !errors.length, courses: courses.length, errors: errors.length });
 
+    // ---- Send email (every class): the same install email the dashboard's Send email button writes, to
+    // the class's students from Brightspace's own class list. (Who has installed LOCKqz is shown only on
+    // the dashboard: the Sync bookmark's key never reads LOCKqz data about students, FERPA.)
+    var INSTALL = "https://lockqz.pages.dev";
+    var myName = ((me.FirstName || "") + " " + (me.LastName || "")).trim();
+    function mailLink(c, learnersL) {
+      var nextQ = openQ(c).filter(function (q) { var st = dt(q.start); return st !== null && st > Date.now(); })
+        .sort(function (a, b) { return dt(a.start) - dt(b.start); })[0];
+      var subj = "Install LOCKqz before " + (nextQ ? nextQ.name : "our next exam") + " (" + cname(c) + ")";
+      var body = "Hi,\n\nOur Brightspace exams in " + cname(c) + " use LOCKqz. You need it installed once, or the exam will not open for you.\n\n1. Go to " + INSTALL + "\n2. Click Download and run the installer.\n\nIf you already installed LOCKqz, you are all set. That is all. It only blocks AI tools while an exam is open and turns itself off after.\n\n" + myName;
+      var bcc = learnersL.map(function (s) { return s.email; }).filter(Boolean).join(",");
+      var href = "mailto:?" + (bcc ? "bcc=" + encodeURIComponent(bcc) + "&" : "") + "subject=" + encodeURIComponent(subj) + "&body=" + encodeURIComponent(body);
+      if (href.length > 1900) href = "mailto:?subject=" + encodeURIComponent(subj) + "&body=" + encodeURIComponent(body);   // mail apps drop longer links
+      return '<a class="lqmail" data-ou="' + c.ou + '" href="' + esc(href) + '" title="Email this class the LOCKqz install link" style="color:#990000;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap">Send email</a>';
+    }
+
     // ---- 4. panel: choose protected quizzes ----
     var prot = {}; (state.protect || []).forEach(function (p) { prot[String(p.qi)] = true; });
+    // Same classes, same order, same names and the same on/off as the LOCKqz dashboard:
+    //  * only the classes LOCKqz saved for this account (state.ous; the dashboard lists exactly these);
+    //  * sorted by name, Brightspace's term prefix cut the dashboard's way (cname);
+    //  * a class is ON when it is not turned off (state.class_off) and every quiz that has not ended is
+    //    protected (dashboard classStats); quizzes that ended are listed, without a switch, under "past".
+    var SHOWN = null; if (state && Array.isArray(state.ous)) { SHOWN = {}; state.ous.forEach(function (o) { SHOWN[String(o)] = true; }); }
+    var CLASSOFF = {}; (state.class_off || []).forEach(function (o) { CLASSOFF[String(o)] = true; });
+    var byName = function (a, b) { var x = String(a.name || ""), y = String(b.name || ""); return x < y ? -1 : x > y ? 1 : 0; };
+    var cname = function (c) { return String(c.name || c.ou).replace(/^\d+_\w+\s*/, ""); };
+    var endedQ = function (q) { var e = dt(q.end), d = dt(q.due), n = Date.now(); return (e !== null && e < n) || (d !== null && e === null && d < n - 86400000); };
+    // A quiz whose gate is still on stays listed after its end, so a reloaded tab resumes the gate and the
+    // gate stops itself (15 min after the end) instead of leaving the quiz hidden.
+    var GATED = {}; (state.protect || []).forEach(function (p) { if (Number(p.gated) === 1) GATED[String(p.qi)] = true; });
+    var openQ = function (c) { return (c.quizzes || []).filter(function (q) { return !endedQ(q) || GATED[String(q.qi)]; }); };
+    var view = courses.filter(function (c) { return !SHOWN || SHOWN[String(c.ou)]; }).sort(byName);
+    var notMine = courses.length - view.length;
     var students = 0, nq = 0, unread = 0;
     var html = "";
-    courses.forEach(function (c) {
-      var learners = (c.classlist || []).filter(function (s) { return !INSTR.test(s.role || "") && !!(s.role || "").trim(); }).length;
-      students += learners; nq += (c.quizzes || []).length;
+    view.forEach(function (c) {
+      var learnersL = (c.classlist || []).filter(function (s) { return !INSTR.test(s.role || "") && !!(s.role || "").trim(); });
+      var learners = learnersL.length;
+      students += learners; nq += openQ(c).length;
       html += '<div style="display:flex;align-items:center;gap:12px;margin:16px 0 6px">' +
-        '<span style="flex:1;min-width:0;font-weight:700">' + esc(c.name.replace(/^\d+_\d+\s*/, "")) + '</span>' +
+        '<span style="flex:1;min-width:0;font-weight:700">' + esc(cname(c)) + '</span>' +
+        mailLink(c, learnersL) +
         '<label class="lqsw" title="LOCKqz for the whole class"><input type="checkbox" class="lqcls-all" data-cls="' + c.ou + '"><span class="lqsl"></span></label>' +
         '</div>';
       if (!c.quizzes) { unread++; html += '<div style="color:#990000;font-size:13px">Could not read quizzes from Brightspace. Click Sync again.</div>'; return; }
-      if (!c.quizzes.length) html += '<div style="color:#888;font-size:13px">No quizzes.</div>';
-      c.quizzes.forEach(function (q) {
+      var openList = openQ(c).slice().sort(byName), past = c.quizzes.filter(function (q) { return endedQ(q) && !GATED[String(q.qi)]; }).sort(byName);
+      if (!openList.length) html += '<div style="color:#888;font-size:13px">No upcoming quizzes' + (CLASSOFF[String(c.ou)] ? " · LOCKqz is off for this class." : " · new ones are protected by themselves.") + "</div>";
+      openList.forEach(function (q) {
         var on = !!prot[String(q.qi)], own = !on && OWNPW[String(q.qi)];
         var sd = q.start ? day(q.start) : "", ed = q.end ? day(q.end) : "";
-        var dates = (sd || ed) ? '<span style="color:#888;font-size:12px;display:block;margin-top:2px">' + esc(sd && ed ? sd + " – " + ed : (sd || ed)) + "</span>" : "";
+        var dates = (sd || ed || q.active === false) ? '<span style="color:#888;font-size:12px;display:block;margin-top:2px">' + (q.active === false ? "hidden in Brightspace" + (sd || ed ? " · " : "") : "") + esc(sd && ed ? sd + " – " + ed : (sd || ed)) + "</span>" : "";
         html += '<div style="padding:9px 0;border-bottom:1px solid #eee;display:flex;align-items:center;gap:12px">' +
           '<span style="flex:1;min-width:0"><span style="font-weight:600">' + esc(q.name) + "</span>" + dates + "</span>" +
           '<label class="lqsw"><input type="checkbox" data-ou="' + c.ou + '" data-qi="' + q.qi + '"' + (on ? " checked" : "") + '><span class="lqsl"></span></label>' +
@@ -348,9 +383,12 @@
           '<span style="display:none"><button data-gate="' + c.ou + ":" + q.qi + '"' + (on ? "" : " disabled") + '>Start gate</button> <span data-gst="' + q.qi + '">off</span></span>' +
           "</div>";
       });
+      if (past.length) html += '<details style="margin-top:6px;color:#888;font-size:13px"><summary>' + past.length + " past</summary>" +
+        past.map(function (q) { return '<div style="padding:4px 0">' + esc(q.name) + (prot[String(q.qi)] ? " · was protected" : "") + "</div>"; }).join("") + "</details>";
     });
-    say('<style>.lqsw{position:relative;display:inline-block;width:40px;height:24px;flex:none}.lqsw input{position:absolute;opacity:0;width:0;height:0;margin:0}.lqsl{position:absolute;inset:0;background:#ccc;border-radius:24px;transition:.15s;cursor:pointer}.lqsl:before{content:"";position:absolute;height:18px;width:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.15s}.lqsw input:checked+.lqsl{background:#990000}.lqsw input:checked+.lqsl:before{transform:translateX(16px)}.lqsw input:disabled+.lqsl{opacity:.55;cursor:default}</style><div style="background:#eafbea;padding:8px 10px;border-radius:8px">Synced ' + courses.length + " course" + (courses.length === 1 ? "" : "s") +
+    say('<style>.lqsw{position:relative;display:inline-block;width:40px;height:24px;flex:none}.lqsw input{position:absolute;opacity:0;width:0;height:0;margin:0}.lqsl{position:absolute;inset:0;background:#ccc;border-radius:24px;transition:.15s;cursor:pointer}.lqsl:before{content:"";position:absolute;height:18px;width:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.15s}.lqsw input:checked+.lqsl{background:#990000}.lqsw input:checked+.lqsl:before{transform:translateX(16px)}.lqsw input:disabled+.lqsl{opacity:.55;cursor:default}</style><div style="background:#eafbea;padding:8px 10px;border-radius:8px">Synced ' + view.length + " class" + (view.length === 1 ? "" : "es") +
       ", " + students + " students, " + nq + " quizzes.</div>" +
+      (notMine ? '<div style="color:#888;font-size:12px;margin-top:6px">' + notMine + " other Brightspace course" + (notMine === 1 ? " is" : "s are") + " not on your LOCKqz account (another professor runs LOCKqz there, or Brightspace does not list you as its instructor yet).</div>" : "") +
       (unread ? '<div style="color:#990000;margin-top:8px">' + unread + " course" + (unread === 1 ? "" : "s") + " not read: LOCKqz kept the quizzes it had.</div>" : "") +
       (errors.length ? '<div style="color:#990000;margin-top:8px">Could not update: ' + esc(errors.join("; ")) + "</div>" : "") +
       '<div style="margin-top:10px;font-weight:700">Protect with LOCKqz (blocks AI during the quiz):</div>' + html +
@@ -570,24 +608,31 @@
           if (!cb.checked) delete PW[String(qi)];
           await lq("/sync-result", { results: [{ ou: ou, qi: qi, status: status }] });
           st.style.color = cb.checked ? "#1a7f37" : "#888"; st.textContent = cb.checked ? "protected" : "";
+          if (!cb.__lqBulk) tell({ lqz: "changed" });   // the dashboard redraws at once
         } catch (e) {
           cb.checked = !cb.checked; st.style.color = "#990000"; st.textContent = e.message.slice(0, 60);
         }
         cb.disabled = false;
         showGateBtn(ou, qi);
+        var cls = B.querySelector('input[data-cls="' + ou + '"]'); if (cls && cls.__refl && !cb.__lqBulk) cls.__refl();
       };
     });
     B.querySelectorAll("input[data-cls]").forEach(function (ca) {
       if (!ca.dataset || !ca.dataset.cls) return;   // real class toggles only (tests have none)
       var ou = ca.dataset.cls;
       var kids = function () { return [].slice.call(B.querySelectorAll('input[data-ou="' + ou + '"][data-qi]')); };
-      var refl = function () { var k = kids(); ca.checked = k.length > 0 && k.every(function (c) { return c.checked; }); };
-      refl();
+      // ON = not turned off for the class and every listed (not ended) quiz protected: the dashboard's rule.
+      var refl = function () { var k = kids(); ca.checked = !CLASSOFF[ou] && k.every(function (c) { return c.checked; }); };
+      refl(); ca.__refl = refl;
       ca.onchange = async function () {
         var want = ca.checked; ca.disabled = true;
+        var r = await lqres("/class", { ou: ou, on: want });
+        if (!r.ok) { ca.disabled = false; refl(); alert((r.data && r.data.error) || "LOCKqz could not change this class. Try again."); return; }
+        if (want) delete CLASSOFF[ou]; else CLASSOFF[ou] = true;
         var k = kids();
-        for (var i = 0; i < k.length; i++) { if (k[i].checked !== want) { k[i].checked = want; if (k[i].onchange) await k[i].onchange(); } }
+        for (var i = 0; i < k.length; i++) { if (k[i].checked !== want) { k[i].checked = want; k[i].__lqBulk = true; try { if (k[i].onchange) await k[i].onchange(); } finally { k[i].__lqBulk = false; } } }
         ca.disabled = false; refl();
+        tell({ lqz: "changed" });
       };
     });
     B.querySelectorAll("button[data-gate]").forEach(function (gb) {
