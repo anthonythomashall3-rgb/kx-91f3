@@ -46,6 +46,15 @@ r = A.rewrite_search
 ok("google All -> Web") if r("https://www.google.com/search?q=what+is+gdp") == "https://www.google.com/search?udm=14&q=what+is+gdp" else bad("google All not rewritten")
 ok("AI Mode -> Web") if "udm=14" in (r("https://www.google.com/search?udm=50&q=gdp") or "") else bad("AI mode not rewritten")
 ok("Web left alone") if r("https://www.google.com/search?udm=14&q=gdp") is None else bad("Web rewritten")
+# 27 Oct: more engines that answer with AI -> Google Web (Safari's only layer); other pages on those hosts untouched
+for u in ["https://www.ecosia.org/search?q=gdp", "https://www.ecosia.org/chat", "https://yandex.ru/search/?text=gdp", "https://ya.ru/search/?text=gdp",
+          "https://www.baidu.com/s?wd=gdp", "https://search.naver.com/search.naver?query=gdp", "https://www.ask.com/web?q=gdp",
+          "https://yep.com/web?q=gdp", "https://search.aol.com/aol/search?q=gdp", "https://www.sogou.com/web?query=gdp", "https://www.so.com/s?q=gdp"]:
+    ok("AI-answer engine -> Web: " + u.split("/")[2]) if (r(u) or "").startswith("https://www.google.com/search?udm=14") else bad("not rewritten: " + u)
+ok("ecosia.org home left alone") if r("https://www.ecosia.org/") is None else bad("ecosia home rewritten")
+ok("baidu non-search page left alone") if r("https://www.baidu.com/about") is None else bad("baidu about rewritten")
+ok("udm=14 plus a sneaked-in udm=50 -> Web") if "udm=14" in (r("https://www.google.com/search?udm=14&udm=50&q=gdp") or "") else bad("double udm not rewritten")
+ok("google.co.uk AI Mode -> Web") if "udm=14" in (r("https://www.google.co.uk/search?udm=50&q=gdp") or "") else bad("co.uk AI mode not rewritten")
 ok("Images left alone") if r("https://www.google.com/search?tbm=isch&q=gdp") is None else bad("Images rewritten")
 ok("bing -> Web") if (r("https://www.bing.com/search?q=gdp") or "").startswith("https://www.google.com/search?udm=14") else bad("bing not rewritten")
 ok("ddg -> Web") if r("https://duckduckgo.com/?q=gdp&ia=chat") else bad("ddg not rewritten")

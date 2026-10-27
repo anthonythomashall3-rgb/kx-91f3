@@ -35,7 +35,8 @@ $Mark     = "LOCKqzManaged"
 
 $SearchBlock = @("google.com/search","google.com/webhp","bing.com/search","bing.com/copilotsearch","bing.com/chat",
                  "copilot.microsoft.com","duckduckgo.com","duck.ai","search.yahoo.com","search.brave.com",
-                 "you.com","kagi.com","yandex.com/search","ecosia.org/search","startpage.com")
+                 "you.com","kagi.com","yandex.com/search","ecosia.org/search","startpage.com",
+                 "yandex.ru/search","ya.ru/search","baidu.com/s","search.naver.com","ask.com","yep.com","search.aol.com","ecosia.org/chat","sogou.com/web","so.com/s")
 # Google verticals with no AI answer: Web (udm=14), Images, News, Video, Books.
 # + DuckDuckGo's no-AI site (Search Assist, Duck.ai and AI images off).
 $SearchAllow = @("noai.duckduckgo.com","google.com/search?udm=14","google.com/search?udm=2","google.com/search?udm=12",
@@ -44,7 +45,10 @@ $SearchAllow = @("noai.duckduckgo.com","google.com/search?udm=14","google.com/se
 $FfBlock = @("https://www.google.com/search*","https://www.google.com/webhp*","https://www.bing.com/*search*",
              "https://www.bing.com/chat*","https://copilot.microsoft.com/*","https://duckduckgo.com/*","https://duck.ai/*",
              "https://search.yahoo.com/*","https://search.brave.com/*","https://you.com/*","https://kagi.com/*",
-             "https://yandex.com/search*","https://www.ecosia.org/search*","https://www.startpage.com/*")
+             "https://yandex.com/search*","https://www.ecosia.org/search*","https://www.startpage.com/*",
+             "https://yandex.ru/search*","https://ya.ru/search*","https://www.baidu.com/s*","https://search.naver.com/*",
+             "https://www.ask.com/*","https://yep.com/*","https://search.aol.com/*","https://www.ecosia.org/chat*",
+             "https://www.sogou.com/web*","https://www.so.com/s*")
 $FfAllow = @("https://www.google.com/search?*udm=14*","https://www.google.com/search?*udm=2*","https://www.google.com/search?*udm=12*",
              "https://www.google.com/search?*udm=7*","https://www.google.com/search?*udm=36*","https://www.google.com/search?*tbm=isch*",
              "https://www.google.com/search?*tbm=nws*","https://www.google.com/search?*tbm=vid*","https://www.google.com/search?*tbm=bks*")

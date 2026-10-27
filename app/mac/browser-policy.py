@@ -101,7 +101,10 @@ GOOGLE_CC = ["co.uk", "ca", "com.au", "co.in", "de", "fr", "es", "it", "nl", "be
 SEARCH_BLOCK = ["google.%s/search" % c for c in GOOGLE_CC] + ["google.%s/webhp" % c for c in GOOGLE_CC] + ["google.com/search", "google.com/webhp", "bing.com/search", "bing.com/copilotsearch",
                 "bing.com/chat", "copilot.microsoft.com", "duckduckgo.com", "duck.ai",
                 "search.yahoo.com", "search.brave.com", "you.com", "kagi.com",
-                "yandex.com/search", "ecosia.org/search", "startpage.com"]
+                "yandex.com/search", "ecosia.org/search", "startpage.com",
+                # more engines that answer with AI
+                "yandex.ru/search", "ya.ru/search", "baidu.com/s", "search.naver.com", "ask.com", "yep.com",
+                "search.aol.com", "ecosia.org/chat", "sogou.com/web", "so.com/s"]
 # Google verticals that carry no AI answer: Web, Images, News, Video, Books; DuckDuckGo's no-AI
 # site (Search Assist, Duck.ai and AI images off).
 SEARCH_ALLOW = ["noai.duckduckgo.com", "google.com/search?udm=14", "google.com/search?udm=2", "google.com/search?udm=12",
@@ -160,7 +163,10 @@ def firefox_policy():
            "https://www.bing.com/chat*", "https://copilot.microsoft.com/*", "https://duckduckgo.com/*",
            "https://duck.ai/*", "https://search.yahoo.com/*", "https://search.brave.com/*",
            "https://you.com/*", "https://kagi.com/*", "https://yandex.com/search*",
-           "https://www.ecosia.org/search*", "https://www.startpage.com/*"]
+           "https://www.ecosia.org/search*", "https://www.startpage.com/*",
+           "https://yandex.ru/search*", "https://ya.ru/search*", "https://www.baidu.com/s*", "https://search.naver.com/*",
+           "https://www.ask.com/*", "https://yep.com/*", "https://search.aol.com/*", "https://www.ecosia.org/chat*",
+           "https://www.sogou.com/web*", "https://www.so.com/s*"]
     pol = {MARK: True, "EnterprisePoliciesEnabled": True,
            "DNSOverHTTPS": {"Enabled": False, "Locked": True},
            "Proxy": {"Mode": "none", "Locked": True},

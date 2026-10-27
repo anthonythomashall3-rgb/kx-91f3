@@ -60,7 +60,9 @@ const polMust = ["google.com/search?udm=14", "GeminiSettings", "GenAiDefaultSett
               // round 2: Brave Tor/VPN, Firefox Smart Window + built-in VPN, safe-extension allowlist,
               // DuckDuckGo no-AI site, every blocklist host mirrored into the browsers' own filters
               "TorDisabled", "BraveVPNDisabled", "SmartWindow", "SidebarChatbot", "IPProtectionAvailable",
-              "ExtensionInstallAllowlist", "noai.duckduckgo.com", "nngceckbapebfimnlniiiahkandclblb"];
+              "ExtensionInstallAllowlist", "noai.duckduckgo.com", "nngceckbapebfimnlniiiahkandclblb",
+              // 27 Oct: more AI-answer engines blocked in the browsers' own filters (Safari relies on the agent rewrite)
+              "baidu.com/s", "search.naver.com", "ask.com", "yep.com", "search.aol.com", "ecosia.org/chat", "yandex.ru/search"];
 let polMiss = polMust.filter(m => !pyPol.includes(m));
 polMiss.length === 0 ? ok("mac policy has every rule") : bad("mac policy missing: " + polMiss.join(", "));
 polMiss = polMust.filter(m => !psPol.includes(m));

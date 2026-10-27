@@ -229,6 +229,12 @@ def rewrite_search(url):
     if host.endswith("bing.com") and path.startswith(("/search", "/copilotsearch", "/chat")): return web
     if host.endswith("duckduckgo.com") or host == "duck.ai": return web
     if host in ("search.yahoo.com", "search.brave.com", "you.com", "kagi.com") or host.endswith(".search.yahoo.com"): return web
+    # More engines that answer with AI (Ecosia AI, Yandex Neuro, Baidu AI, Naver Cue, Ask, Yep, AOL=Bing, Sogou, 360):
+    # their search pages go to Google Web too. Everything else on those hosts is left alone.
+    if host.endswith(("ecosia.org", "yandex.com", "yandex.ru", "ya.ru", "ask.com", "yep.com", "sogou.com")) and path.startswith(("/search", "/web", "/chat")): return web
+    if host.endswith("search.naver.com") and path.startswith("/search"): return web
+    if host.endswith("search.aol.com") and path.startswith("/aol/"): return web
+    if host.endswith(("baidu.com", "so.com")) and (path == "/s" or path.startswith(("/s?", "/search"))): return web
     return None
 
 def parse_blocklist(lines):
