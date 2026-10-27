@@ -102,7 +102,7 @@ check("fee off: password released", r.status === 200 && r.data?.password === "LQ
 console.log("P2 fee on, unpaid: no password, payment info instead");
 r = await pw(ON);
 check("unpaid: 402", r.status === 402, `got ${r.status}`);
-check("pay info: $5, Zelle + bank transfer, NO Venmo, LQS code, pay page", r.data?.pay?.amount === 5 && r.data.pay.venmo === null && r.data.pay.bank === "pay@usc.edu" && r.data.pay.zelle === "(858) 900-4347" && /^LQS[A-Z0-9]{5}$/.test(r.data.pay.code||"") && r.data.pay.url === "https://lockqz.pages.dev/pay?email=al%40usc.edu&t=" + payT(ON, "al@usc.edu"), JSON.stringify(r.data));
+check("pay info: $5, Zelle only (no bank/Venmo/PO), LQS code, pay page", r.data?.pay?.amount === 5 && r.data.pay.venmo === null && r.data.pay.bank === null && r.data.pay.po === null && r.data.pay.zelle === "(858) 900-4347" && /^LQS[A-Z0-9]{5}$/.test(r.data.pay.code||"") && r.data.pay.url === "https://lockqz.pages.dev/pay?email=al%40usc.edu&t=" + payT(ON, "al@usc.edu"), JSON.stringify(r.data));
 const CODE = r.data.pay.code;
 r = await call(ON, "/pay/start", { email: "AL@usc.edu" });
 check("pay page gives the same code", r.data?.code === CODE && r.data.paid === false && r.data.required === true, JSON.stringify(r.data));
@@ -205,7 +205,7 @@ console.log("P10 USC terms: access through the term's last day of finals; renewa
 console.log("P11 price: $180 by default; business Zelle replaces the personal one; Venmo only if STUDENT_VENMO=1");
 { const E = { ...ON }; delete E.STUDENT_FEE;
   let s = (await call(E, "/pay/start", { email: "new180@usc.edu" })).data;
-  check("default student price is $180", s.amount === 180 && s.venmo === null && s.zelle === "(858) 900-4347" && s.bank === "pay@usc.edu", JSON.stringify(s));
+  check("default student price is $180", s.amount === 180 && s.venmo === null && s.zelle === "(858) 900-4347" && s.bank === null, JSON.stringify(s));
   s = (await call({ ...E, ZELLE_BUSINESS_TO: "pay@lockqz.com" }, "/pay/start", { email: "new180@usc.edu" })).data;
   check("business Zelle shown instead of personal", s.zelle === "pay@lockqz.com", JSON.stringify(s));
   s = (await call({ ...E, STUDENT_VENMO: "1" }, "/pay/start", { email: "new180@usc.edu" })).data;
