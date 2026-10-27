@@ -40,7 +40,6 @@ const AI_DOMAINS = [
   "doh.opendns.com","dns.nextdns.io","firefox.dns.nextdns.io","chromium.dns.nextdns.io","doh.xfinity.com","private.canadianshield.cira.ca","wikimedia-dns.org","dns.adguard-dns.com",
   "doh.mullvad.net","freedns.controld.com","dns.alidns.com","doh.pub","appsgenaiserver-pa.clients6.google.com","appsgenaiserver-pa.googleapis.com","chat.learnwise.ai","learnwise.ai",
   "blackbox.ai","www.blackbox.ai","hf.space","translate.goog","lens.google.com","abacus.ai","chatllm.abacus.ai","anakin.ai","notegpt.io","perchance.org/ai-chat",
-  // audit 27 Oct 2026: AI inside other apps (Office Copilot, editor AIs, cloud model endpoints), more solvers/writers/extension back ends
   "augloop.office.com","bing.com/copilotsearch","duckduckgo.com/aichat","kagi.com/assistant","ai-chat.bsg.brave.com","llm.zed.dev","cloud.zed.dev","tabnine.com",
   "supermaven.com","grazie.ai","grazie.aws.intellij.net","codewhisperer.us-east-1.amazonaws.com","q.us-east-1.amazonaws.com","openai.azure.com","services.ai.azure.com","aiplatform.googleapis.com",
   "bedrock-runtime.us-east-1.amazonaws.com","bedrock-runtime.us-west-2.amazonaws.com","api-inference.huggingface.co","llama-api.com","api.lepton.ai","siliconflow.cn","siliconflow.com","ark.cn-beijing.volces.com",
@@ -48,7 +47,7 @@ const AI_DOMAINS = [
   "askyourpdf.com","humata.ai","pdf.ai","bartleby.com","numerade.com","socratic.org","wolframalpha.com","deepl.com/write",
   "writer.com","sudowrite.com","textcortex.com","humbot.ai","bypassgpt.ai","gptinf.com","netus.ai","base44.com",
   "emergent.sh","same.new","create.xyz","a0.dev","rork.com","tempolabs.ai","databutton.com","softgen.ai",
-  "wiseone.io","compose.ai","tinamind.com",
+  "wiseone.io","compose.ai","tinamind.com"
 ];
 const now = () => new Date().toISOString();
 // "Today" in America/Los_Angeles as YYYY-MM-DD, so a professor stays active through the end of their

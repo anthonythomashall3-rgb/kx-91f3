@@ -133,6 +133,9 @@ est < 900 ? ok(`~${est} entries per browser list (limit 1000, room left for a sc
 console.log("T8 the server sends the full list (helpers refresh from it every 12 h)");
 const route = readFileSync(join(DIR, "../cloudflare/functions/api/[[route]].js"), "utf8");
 const apiList = [...(route.match(/const AI_DOMAINS = \[([\s\S]*?)\];/) || [, ""])[1].matchAll(/"([^"]+)"/g)].map(m => m[1]);
+// deploy.sh JSON.parses the array literal verbatim: no comments, no trailing comma, nothing but strings
+let deployParse = null; try { deployParse = JSON.parse((route.match(/const AI_DOMAINS = (\[[\s\S]*?\]);/) || [])[1]); } catch (e) { deployParse = e; }
+Array.isArray(deployParse) && deployParse.length === apiList.length ? ok("AI_DOMAINS is plain JSON (deploy.sh JSON.parses it)") : bad("AI_DOMAINS is not JSON.parse-able as deploy.sh does: " + (deployParse && deployParse.message));
 const notServed = mac.filter(d => !apiList.includes(d));
 notServed.length === 0 ? ok(`API serves all ${mac.length} domains (${apiList.length} total)`)
   : bad(`API list is missing ${notServed.length}: ${notServed.slice(0, 8).join(", ")}...`);
