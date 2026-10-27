@@ -181,6 +181,30 @@ function Show-Pay($r) {
   }
   return $true
 }
+# Once ever: the first time a Brightspace tab is seen after install, a Windows toast says LOCKqz is ready
+# and there is nothing to do until the exam. The flag file keeps it to once (survives restarts).
+$ReadyFile = "$UserDir\ready-shown"
+$script:ReadyTold = Test-Path $ReadyFile
+function Show-Ready {
+  $script:ReadyTold = $true
+  try { Set-Content $ReadyFile ([DateTime]::UtcNow.ToString("o")) -Encoding UTF8 } catch {}
+  $text = "LOCKqz is ready. Nothing to do until your exam " + [char]0x2014 + " just open it in Brightspace."
+  # A toast through WinRT, in its own hidden process (never stalls the watch loop); a message box if toasts are off.
+  $cmd = @"
+try {
+  [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+  [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
+  `$x = New-Object Windows.Data.Xml.Dom.XmlDocument
+  `$x.LoadXml('<toast><visual><binding template="ToastGeneric"><text>LOCKqz</text><text>$text</text></binding></visual></toast>')
+  `$t = New-Object Windows.UI.Notifications.ToastNotification `$x
+  [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe').Show(`$t)
+} catch { Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('$text', 'LOCKqz') | Out-Null }
+"@
+  try {
+    $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))
+    Start-Process powershell -ArgumentList "-WindowStyle Hidden -EncodedCommand $enc" -WindowStyle Hidden
+  } catch { Log "ready notice: $_" }
+}
 function Show-Message($text) {
   # Non-blocking: the box runs in its own process so the watch loop never stalls.
   $safe = $text.Replace([char]39, [char]34)
@@ -505,6 +529,7 @@ function Send-Unlock($quiz, $reason) {
 while ($true) {
   try {
     $wins = @(Get-BrowserWindows)
+    if ((-not $ReadyTold) -and (@($wins | Where-Object { $_.Url -match '/d2l/' }).Count -gt 0)) { Show-Ready }
     $quizWin = $wins | Where-Object { Is-Quiz $_.Url } | Select-Object -First 1
     $openId = if ($quizWin) { Lock-Id $quizWin.Url } else { $null }
     Step-Caps $openId $(if ($quizWin) { $quizWin.Url } else { "" })

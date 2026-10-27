@@ -22,6 +22,8 @@ SYS_CONF = "/Library/Application Support/LOCKqz/config.json"
 # Per-user copy of the helper's random control token, written by the helper (root) for the console user.
 TOKEN_DIR = os.environ.get("LOCKQZ_TOKEN_DIR") or "/Library/Application Support/LOCKqz/tokens"
 USER_DIR = os.path.expanduser("~/Library/Application Support/LOCKqz")
+READY_FLAG = os.path.join(USER_DIR, "ready-shown")   # written once the "LOCKqz is ready" notice was shown
+READY_TEXT = "LOCKqz is ready. Nothing to do until your exam \u2014 just open it in Brightspace."
 USER_CONF = os.path.join(USER_DIR, "student.json")
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -674,6 +676,7 @@ class Agent:
         self.cap_left = {}           # quiz id -> its page left the attempt pages since the release (summary seen)
         self.cap_forgot = {}         # quiz id -> when this agent forgot its release (the helper's older one is ignored)
         self.tabs_seen = 0           # how many tabs were open while the quiz was open
+        self.ready_told = os.path.exists(READY_FLAG)   # the one-time "LOCKqz is ready" notice (first Brightspace visit)
         self.last_check, self.lock_fail_shown = 0.0, {}
         self.pw, self.pw_next, self.start_told = None, 0.0, None   # next /password check; "opens at" shown for
         self.quiz_app, self.opera_warned = None, False             # browser holding the quiz
@@ -971,6 +974,18 @@ class Agent:
             return False
         return True
 
+    def ready_notice(self, urls):
+        """Once ever: the first time a Brightspace tab is seen after install, a notification says LOCKqz is
+        ready and there is nothing to do until the exam. The flag file keeps it to once."""
+        if self.ready_told or not any("/d2l/" in (u or "") for u in urls): return
+        self.ready_told = True
+        try:
+            os.makedirs(USER_DIR, exist_ok=True)
+            with open(READY_FLAG, "w") as f: f.write(time.strftime("%Y-%m-%dT%H:%M:%S"))
+        except Exception as e: log("ready flag: %s" % e)
+        try: subprocess.run(["osascript", "-e", 'display notification "%s" with title "LOCKqz"' % READY_TEXT], timeout=10, capture_output=True)
+        except Exception as e: log("ready notice: %s" % e)
+
     def tick(self, tabs=None, dev=None):
         # Developer mode (admin only): same quiz flow (gate password, start/end reporting) but the
         # daemon never blocks AI and search tabs are never rewritten.
@@ -984,6 +999,7 @@ class Agent:
         tabs = [(a, w, t, inner_url(u)) for (a, w, t, u) in tabs]   # quizzes opened from Content/Lessons
         now = time.time()
         urls = [u for (_, _, _, u) in tabs]
+        self.ready_notice(urls)
         present, left = classify(urls)
         any_leaving = any(is_leaving(u) for u in urls)
         # A quiz released by the safety cap or by the server is never re-locked while it stays open; once

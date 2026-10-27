@@ -90,6 +90,12 @@ function run() {
   threads.forEach(th => th.addLabel(label));
   props.setProperty("LAST_RUN", String(started));
   try { answerBankAsks_(secret, own); } catch (e) { Logger.log("bank answers: " + e); }
+  // Every ~10 min: LOCKqz's exam emails (reminders 48 h / 3 h before an exam to students without LOCKqz,
+  // the professor's T-70 check-in). Pages has no cron, so this script is LOCKqz's clock ($0).
+  if (started - Number(props.getProperty("LAST_CRON") || 0) > 9 * 60) {
+    props.setProperty("LAST_CRON", String(started));
+    try { UrlFetchApp.fetch(API.replace("/pay/notify", "/cron"), { method: "post", contentType: "application/json", muteHttpExceptions: true, headers: { "X-LOCKqz-Pay": secret }, payload: "{}" }); } catch (e) { Logger.log("cron: " + e); }
+  }
   // About once an hour: let LOCKqz send any due renewal emails (it does nothing outside renewal time).
   if (started - Number(props.getProperty("LAST_TICK") || 0) > 55 * 60) {
     props.setProperty("LAST_TICK", String(started));

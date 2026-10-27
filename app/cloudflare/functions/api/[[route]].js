@@ -239,7 +239,11 @@ const isExempt = (env, e) => !!e && exemptSet(env).has(String(e).trim().toLowerC
 const WELCOME = "Welcome to the LOCKqz test run! You are exempt from paying during this trial period. Have fun testing!\n\nThank you for joining me on the USC students\u2019 edification journey.\n\nLocks keep honest people honest.";
 const b64 = s => btoa(String.fromCharCode(...enc.encode(s)));
 // Minimal SMTP client over a TLS socket. `open` returns { readable, writable } (cloudflare:sockets).
-async function smtpSend(open, { user, pass, to, subject, text, fromName = "LOCKqz" }) {
+// to: one address or a list (each recipient gets its own copy; the others' addresses are never shown).
+// html: optional HTML part (multipart/alternative). replyTo: optional Reply-To (e.g. the professor).
+async function smtpSend(open, { user, pass, to, subject, text, html = null, fromName = "LOCKqz", replyTo = null }) {
+  const rcpts = (Array.isArray(to) ? to : [to]).map(x => String(x || "").trim()).filter(x => x && /^[^@\s<>]+@[^@\s<>]+$/.test(x));
+  if (!rcpts.length) throw new Error("smtp no recipient");
   const sock = await open();
   const w = sock.writable.getWriter(), r = sock.readable.getReader(), dec = new TextDecoder();
   let buf = "";
@@ -263,13 +267,21 @@ async function smtpSend(open, { user, pass, to, subject, text, fromName = "LOCKq
     await say("EHLO lockqz.pages.dev", [250]);
     await say("AUTH PLAIN " + b64("\0" + user + "\0" + pass), [235]);
     await say(`MAIL FROM:<${user}>`, [250]);
-    await say(`RCPT TO:<${to}>`, [250, 251]);
+    for (const r of rcpts) await say(`RCPT TO:<${r}>`, [250, 251]);
     await say("DATA", [354]);
-    const msg = [`From: ${fromName} <${user}>`, `To: <${to}>`, `Subject: ${subject}`,
+    const dot = t => String(t == null ? "" : t).split("\n").map(l => (l.startsWith(".") ? "." + l : l)).join("\r\n");
+    const subj = /^[\x20-\x7e]*$/.test(subject) ? subject : "=?utf-8?B?" + b64(subject) + "?=";   // RFC 2047 for non-ASCII
+    const head = [`From: ${fromName} <${user}>`, rcpts.length === 1 ? `To: <${rcpts[0]}>` : `To: ${fromName} <${user}>`,
+      ...(replyTo ? [`Reply-To: <${replyTo}>`] : []), `Subject: ${subj}`,
       `Date: ${new Date().toUTCString().replace("GMT", "+0000")}`,
-      `Message-ID: <${crypto.randomUUID()}@lockqz.pages.dev>`, "MIME-Version: 1.0",
-      "Content-Type: text/plain; charset=utf-8", "Content-Transfer-Encoding: 8bit", "",
-      ...text.split("\n").map(l => (l.startsWith(".") ? "." + l : l))].join("\r\n");
+      `Message-ID: <${crypto.randomUUID()}@lockqz.pages.dev>`, "MIME-Version: 1.0"];
+    let msg;
+    if (html) {
+      const b = "lqz" + crypto.randomUUID().replace(/-/g, "");
+      msg = [...head, `Content-Type: multipart/alternative; boundary="${b}"`, "", `--${b}`,
+        "Content-Type: text/plain; charset=utf-8", "Content-Transfer-Encoding: 8bit", "", dot(text), "", `--${b}`,
+        "Content-Type: text/html; charset=utf-8", "Content-Transfer-Encoding: 8bit", "", dot(html), "", `--${b}--`].join("\r\n");
+    } else msg = [...head, "Content-Type: text/plain; charset=utf-8", "Content-Transfer-Encoding: 8bit", "", dot(text)].join("\r\n");
     await say(msg + "\r\n.", [250]);
     try { await w.write(enc.encode("QUIT\r\n")); } catch {}
   } finally { try { await sock.close?.(); } catch {} }
@@ -286,13 +298,89 @@ async function sendCode(env, to, code, web = false) {
   return smtpSend(open, { user: env.MAIL_USER, pass: String(env.MAIL_APP_PASSWORD).replace(/\s+/g, ""), to, subject, text });
 }
 
-async function sendMail(env, to, subject, text) {
-  if (typeof env.MAIL_SINK === "function") return env.MAIL_SINK({ to, subject, text });   // tests
+// opts: { html, replyTo }. `to` may be a list (one SMTP session, one copy per recipient).
+async function sendMail(env, to, subject, text, opts = {}) {
+  if (typeof env.MAIL_SINK === "function") return env.MAIL_SINK({ to, subject, text, html: opts.html || null, replyTo: opts.replyTo || null });   // tests
   const open = typeof env.MAIL_OPEN === "function" ? env.MAIL_OPEN
     : async () => (await import("cloudflare:sockets")).connect({ hostname: env.MAIL_HOST || "smtp.gmail.com", port: Number(env.MAIL_PORT || 465) },
                                 { secureTransport: "on", allowHalfOpen: false });
-  return smtpSend(open, { user: env.MAIL_USER, pass: String(env.MAIL_APP_PASSWORD).replace(/\s+/g, ""), to, subject, text });
+  return smtpSend(open, { user: env.MAIL_USER, pass: String(env.MAIL_APP_PASSWORD).replace(/\s+/g, ""), to, subject, text, html: opts.html || null, replyTo: opts.replyTo || null });
 }
+const mailOn = env => typeof env.MAIL_SINK === "function" || !!(env.MAIL_USER && env.MAIL_APP_PASSWORD);
+
+// ---- Email templates (27 Oct 2026): text + HTML, the LOCKqz look (cardinal header, logo, 560px) ----
+const SITE_URL = "https://lockqz.pages.dev", DASH_URL = "https://prof.lockqz.pages.dev", BS_URL = "https://brightspace.usc.edu";
+const LOGO_URL = SITE_URL + "/icon128.png";
+// Chrome Web Store listing: filled in when it is live (until then the dashboard links the extension package).
+const EXT_STORE_URL = "";
+const hesc = v => String(v == null ? "" : v).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const mailBtn = (href, label) => `<a href="${hesc(href)}" style="display:inline-block;background:#990000;color:#ffffff;text-decoration:none;font-weight:700;padding:11px 18px;border-radius:8px;font-size:15px">${hesc(label)}</a>`;
+const mailWrap = (bodyHtml, footer = "") => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head><body style="margin:0;padding:0;background:#f6f5f2;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#1a1a1a">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f6f5f2"><tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#ffffff;border-radius:14px;border:1px solid #e6e3dc">
+<tr><td style="background:#990000;border-radius:14px 14px 0 0;padding:14px 22px"><img src="${LOGO_URL}" width="30" height="30" alt="" style="vertical-align:middle;border-radius:7px;border:0"><span style="color:#ffffff;font-size:19px;font-weight:700;vertical-align:middle;margin-left:10px;letter-spacing:-.01em">LOCKqz</span></td></tr>
+<tr><td style="padding:22px 24px 8px;font-size:15px;line-height:1.55">${bodyHtml}</td></tr>
+${footer ? `<tr><td style="padding:12px 24px 16px;border-top:1px solid #e6e3dc;font-size:12px;line-height:1.5;color:#8a877f">${footer}</td></tr>` : ""}
+</table></td></tr></table></body></html>`;
+const P = t => `<p style="margin:0 0 14px">${t}</p>`;
+const mailWhen = iso => { const t = iso ? Date.parse(iso) : NaN; if (isNaN(t)) return "";
+  try { return new Date(t).toLocaleString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + " PT"; } catch { return new Date(t).toISOString(); } };
+const lastName = n => { const w = String(n || "").trim().split(/\s+/).filter(Boolean); return w.length ? w[w.length - 1] : ""; };
+const courseLabel = c => { const name = String(c && c.name || "").replace(/^\d+_\S+\s*/, "").trim(), code = String(c && c.code || "").trim();
+  return code && name && !name.toLowerCase().startsWith(code.toLowerCase()) ? `${code} \u2013 ${name}` : (name || code || "your class"); };
+const STEPS_TXT = `1. Download LOCKqz: ${SITE_URL} \u2014 choose Mac or Windows.\n2. Open the downloaded file and follow the on-screen steps (about one minute).\n3. Open Brightspace once: ${BS_URL} \u2014 LOCKqz will tell you it's ready.\n\nNothing else to do, ever.\n\nOn exam day: open the exam in Brightspace like normal. LOCKqz enters the password for you.`;
+const STEPS_HTML = `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 16px"><tr><td style="padding:6px 0;font-size:15px"><b>1.</b> ${mailBtn(SITE_URL, "Download LOCKqz")} <span style="color:#5c5952">\u2014 choose Mac or Windows.</span></td></tr>
+<tr><td style="padding:6px 0;font-size:15px"><b>2.</b> Open the downloaded file and follow the on-screen steps (about one minute).</td></tr>
+<tr><td style="padding:6px 0;font-size:15px"><b>3.</b> ${mailBtn(BS_URL, "Open Brightspace")} <span style="color:#5c5952">once \u2014 LOCKqz will tell you it's ready.</span></td></tr></table>
+${P("<b>Nothing else to do, ever.</b>")}${P("<b>On exam day:</b> open the exam in Brightspace like normal. LOCKqz enters the password for you.")}`;
+const signTxt = (prof, course) => `Respectfully,\nProfessor ${prof}\n${course}`;
+const signHtml = (prof, course) => P(`Respectfully,<br>Professor ${hesc(prof)}<br><span style="color:#5c5952">${hesc(course)}</span>`);
+const studentFooter = last => `Sent by LOCKqz on behalf of Professor ${hesc(last)}. Replies go to your professor. <a href="${SITE_URL}/privacy" style="color:#8a877f">lockqz.pages.dev/privacy</a>`;
+const MAIL = {
+  // To the professor, right after sign-up.
+  welcome({ last, storeUrl }) {
+    const store = storeUrl || EXT_STORE_URL || (SITE_URL + "/download/lockqz-prof-chromium.zip");
+    const subject = "Welcome to LOCKqz \u2014 2 steps and you're done";
+    const text = `Hi Professor ${last},\n\nYour LOCKqz account is ready. Two steps, about one minute:\n\n1. Add LOCKqz to Chrome: ${store} \u2014 click Add to Chrome, then Add extension.\n2. Open Brightspace: ${BS_URL} \u2014 and sign in as usual. Your classes appear on your LOCKqz dashboard within a minute.\n\nThat's it. From then on LOCKqz protects every exam in every class automatically \u2014 you never set a password and never do anything on exam day.\n\nWhen your classes appear, click Email students on each class so students install LOCKqz before the first exam. Students who don't install can't open the exam.\n\nDashboard: ${DASH_URL}\n\nRespectfully,\nThe LOCKqz Team`;
+    const html = mailWrap(P(`Hi Professor ${hesc(last)},`) + P("Your LOCKqz account is ready. Two steps, about one minute:") +
+      `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 16px"><tr><td style="padding:6px 0;font-size:15px"><b>1.</b> ${mailBtn(store, "Add LOCKqz to Chrome")} <span style="color:#5c5952">\u2014 click <b>Add to Chrome</b>, then <b>Add extension</b>.</span></td></tr>
+<tr><td style="padding:6px 0;font-size:15px"><b>2.</b> ${mailBtn(BS_URL, "Open Brightspace")} <span style="color:#5c5952">and sign in as usual. Your classes appear on your LOCKqz dashboard within a minute.</span></td></tr></table>` +
+      P("<b>That's it.</b> From then on LOCKqz protects every exam in every class automatically \u2014 you never set a password and never do anything on exam day.") +
+      P("When your classes appear, click <b>Email students</b> on each class so students install LOCKqz before the first exam. Students who don't install can't open the exam.") +
+      P(`Dashboard: <a href="${DASH_URL}" style="color:#990000">prof.lockqz.pages.dev</a>`) + P("Respectfully,<br>The LOCKqz Team"));
+    return { subject, text, html };
+  },
+  // To the class (kind "all"): install before the first exam.
+  student({ course, code, prof, last, firstExam }) {
+    const label = courseLabel({ name: course, code });
+    const subject = `${code || label}: install LOCKqz before your first exam`;
+    const ex = firstExam && firstExam.name ? `First exam: ${firstExam.name}${firstExam.start_date ? ", " + mailWhen(firstExam.start_date) : ""}.` : "";
+    const text = `Hi,\n\n${label} uses LOCKqz for exams. LOCKqz blocks AI tools on your computer only while an exam is open and turns them back on when you submit. Your notes, files and the rest of the web stay available. No camera, no microphone, no recording.\n\nInstall it before the exam. If LOCKqz is not installed, the exam will not open.\n\n${STEPS_TXT}\n\n${ex ? ex + "\n\n" : ""}${signTxt(prof, label)}\n\n--\nSent by LOCKqz on behalf of Professor ${last}. Replies go to your professor. ${SITE_URL}/privacy`;
+    const html = mailWrap(P("Hi,") + P(`<b>${hesc(label)}</b> uses LOCKqz for exams. LOCKqz blocks AI tools on your computer only while an exam is open and turns them back on when you submit. Your notes, files and the rest of the web stay available. No camera, no microphone, no recording.`) +
+      P("<b>Install it before the exam.</b> If LOCKqz is not installed, the exam will not open.") + STEPS_HTML + (ex ? P(`<b>${hesc(ex)}</b>`) : "") + signHtml(prof, label), studentFooter(last));
+    return { subject, text, html };
+  },
+  // To the students who have not installed (kind "missing", and the automatic 48 h / 3 h reminders).
+  reminder({ course, code, prof, last, exam, when, start_date }) {
+    const label = courseLabel({ name: course, code }), date = mailWhen(start_date);
+    const subject = `Reminder: install LOCKqz before ${exam}${date ? " on " + date : ""}`;
+    const text = `Hi,\n\nLOCKqz is not installed on your computer yet, and ${exam} for ${label} is ${when}. Without it the exam will not open.\n\n${STEPS_TXT}\n\n${signTxt(prof, label)}\n\n--\nSent by LOCKqz on behalf of Professor ${last}. Replies go to your professor. ${SITE_URL}/privacy`;
+    const html = mailWrap(P("Hi,") + P(`<b>LOCKqz is not installed on your computer yet</b>, and <b>${hesc(exam)}</b> for ${hesc(label)} is <b>${hesc(when)}</b>. Without it the exam will not open.`) + STEPS_HTML + signHtml(prof, label), studentFooter(last));
+    return { subject, text, html };
+  },
+  // To the professor, ~70 min before an exam, when the extension has not checked in for 6 h.
+  checkin({ exam }) {
+    const subject = `${exam} starts in about an hour \u2014 open Chrome`;
+    const text = `LOCKqz hasn't heard from your browser extension today. Open Chrome (any page) so LOCKqz can watch ${exam}.\n\nStudents who installed LOCKqz can still open the exam either way.\n\nRespectfully,\nThe LOCKqz Team`;
+    const html = mailWrap(P(`LOCKqz hasn't heard from your browser extension today. <b>Open Chrome</b> (any page) so LOCKqz can watch <b>${hesc(exam)}</b>.`) + P("Students who installed LOCKqz can still open the exam either way.") + P("Respectfully,<br>The LOCKqz Team"));
+    return { subject, text, html };
+  },
+};
+// "in N days" / "tomorrow" / "in 3 hours" for the reminder.
+const inWords = ms => { const h = ms / 3600000; if (h <= 1.5) return "in about an hour"; if (h < 24) return `in ${Math.round(h)} hours`; const d = Math.round(h / 24); return d <= 1 ? "tomorrow" : `in ${d} days`; };
+// Gmail sends at most 500 messages a day (recipients count): LOCKqz keeps the student emails + reminders
+// under MAIL_DAY_MAX a day in all, so the email codes always have room.
+const MAIL_DAY_MAX = 400, MAIL_BATCH = 90;   // Gmail: at most 100 recipients per message
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -341,7 +429,7 @@ export async function onRequest(context) {
   // Not /bs (every class list with student emails: FERPA) and not /synckey (would let a leaked key rotate
   // itself and lock the professor's real bookmark out): the Sync tab never calls either; the dashboard
   // uses the session token.
-  const SYNC_OK = new Set(["/sync","/sync-result","/protect","/class","/gate","/rotating","/rotated","/submitted","/live","/me"]);
+  const SYNC_OK = new Set(["/sync","/sync-result","/protect","/class","/gate","/rotating","/rotated","/submitted","/live","/me","/ext-seen","/ext-status"]);
   const teacher = () => !!me;
   const mine = (col="teacher_id") => me.admin ? { sql:"1=1", args:[] } : { sql:`${col}=?`, args:[me.id] };
   // Only the INSTRUCTOR of a course (named Instructor on a roster an admin or verified professor synced)
@@ -1171,6 +1259,19 @@ export async function onRequest(context) {
   const withOrig = row => { let o = {}; try { o = JSON.parse(row.orig || "{}") || {}; } catch {}
     const { orig, ...r } = row;
     return { ...r, orig_password: "pw" in o ? o.pw : null, orig_password_saved: "pw" in o, orig_hidden: "hidden" in o ? !!o.hidden : null, orig_hidden_saved: "hidden" in o }; };
+  // A class's students' emails (Learners and TAs, never instructors, never the admin). kind "missing": only
+  // those with no (verified) LOCKqz device. Same rule as /bs's installed flag.
+  async function classRecipients(ou, kind) {
+    const snaps = await rosterSnaps([ou]);
+    const rows = snaps.get(String(ou)) || (await db.prepare("SELECT ou,user_id,name,email,username,role FROM roster WHERE ou=?").bind(String(ou)).all()).results;
+    const admins = new Set(((await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin'").all()).results).map(x => x.e));
+    let ems = [...new Set(rows.filter(r => takesQuizzes(r.role) && r.email && EMAIL_OK(String(r.email).toLowerCase())).map(r => String(r.email).toLowerCase()))].filter(e => !admins.has(e));
+    if (kind === "missing" && ems.length) {
+      const have = new Set((await db.prepare("SELECT DISTINCT d.student AS e FROM json_each(?) j JOIN devices d ON d.student=j.value WHERE (d.student_verified=1 OR ?=0)").bind(JSON.stringify(ems), codesOn ? 1 : 0).all()).results.map(x => String(x.e).toLowerCase()));
+      ems = ems.filter(e => !have.has(e));
+    }
+    return ems;
+  }
   async function classOff(ous) {
     const out = new Set();
     for (const part of chunk(ous.map(String).filter(o => /^\d+$/.test(o)), 98))
@@ -1615,6 +1716,10 @@ export async function onRequest(context) {
       } else
         await db.prepare("INSERT INTO teachers (id,email,name,pw_hash,salt,token,created_at,role,active_until,vouched) VALUES (?,?,?,?,?,?,?,?,?,?)")
           .bind(id, email, String(body.name||"").trim()||null, await hashPw(pw,salt,PEPPER), salt, token, now(), n===0?"admin":"teacher", inv ? inv.active_until : null, vouched).run();
+      // Welcome email (HTML): the two steps. Sent in the background; sign-up never waits for Gmail.
+      if (mailOn(env)) { const w = MAIL.welcome({ last: lastName(body.name) || email.split("@")[0] });
+        const go = sendMail(env, email, w.subject, w.text, { html: w.html }).catch(() => {});
+        if (typeof context.waitUntil === "function") context.waitUntil(go); else await go; }
       return json({ token, email, name: body.name||null });
     }
     if (p === "/login" && request.method === "POST") {
@@ -1988,14 +2093,72 @@ export async function onRequest(context) {
       else await db.prepare("INSERT OR IGNORE INTO renew_optout (email,at) VALUES (?,?)").bind(email, now()).run();
       return json({ ok:true, renew: !!body.on });
     }
+    // Exam emails (27 Oct 2026), run by the Gmail script every ~10 min (POST /cron) and by /pay/tick:
+    //  * 48 h and 3 h before each protected exam: the reminder to students who have not installed LOCKqz
+    //    (unless the professor turned reminders off for that class: class_mail.reminders=0);
+    //  * ~70 min before each protected exam whose professor's extension has not checked in for 6 h: one
+    //    email to the professor ("open Chrome").
+    // Pages Functions have no cron trigger, so an outside clock calls this (the Gmail script, $0).
+    // One mail_sent row per exam per kind, ever; the daily cap keeps Gmail's 500/day safe.
+    async function examMailTick() {
+      const out = { reminders: 0, checkins: 0, skipped: 0 };
+      if (!mailOn(env)) return { ...out, why: "mail off" };
+      const nowMs = Date.now(), from = new Date(nowMs).toISOString(), to = new Date(nowMs + 49 * 3600000).toISOString();
+      const rows = (await db.prepare(`SELECT q.ou AS ou, q.qi AS qi, b.name AS name, b.start_date AS start_date, tc.code AS code, tc.name AS course,
+          t.id AS tid, t.email AS email, t.name AS tname, t.ext_seen AS ext_seen, (SELECT reminders FROM class_mail cm WHERE cm.ou=q.ou) AS reminders
+        FROM quizzes q JOIN bs_quizzes b ON b.ou=q.ou AND b.qi=q.qi
+        JOIN teacher_courses tc ON tc.ou=q.ou AND COALESCE(tc.in_sync,1)<>0
+        JOIN teachers t ON t.id=tc.teacher_id AND (t.verified=1 OR t.role='admin')
+        WHERE q.qi IS NOT NULL AND b.start_date>? AND b.start_date<? AND NOT EXISTS (SELECT 1 FROM course_off co WHERE co.ou=q.ou)
+        ORDER BY b.start_date, t.role='admin' LIMIT 120`).bind(from, to).all()).results;
+      const seenQ = new Set(), day = laToday();
+      let used = Number((await db.prepare("SELECT COALESCE(SUM(n),0) AS n FROM mail_sent WHERE day=?").bind(day).first()).n) || 0;
+      const sent = new Set((await db.prepare("SELECT ou||'|'||kind AS k FROM mail_sent WHERE kind LIKE 'r48:%' OR kind LIKE 'r3:%' OR kind LIKE 'ck:%'").all()).results.map(r => r.k));
+      const record = (ou, kind, n) => db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, kind, day, n, now()).run();
+      let sends = 0;
+      for (const r of rows) {
+        const key = String(r.ou) + "-" + String(r.qi); if (seenQ.has(key)) continue; seenQ.add(key);   // one professor per exam (the first non-admin)
+        if (sends >= 12) break;   // Workers subrequest budget per call; the next tick continues
+        const lead = Date.parse(r.start_date) - nowMs; if (isNaN(lead) || lead <= 0) continue;
+        const exam = String(r.name || "your exam").slice(0, 120), prof = String(r.tname || r.email).trim(), last = lastName(prof) || prof;
+        // Reminders to students who have not installed.
+        const kind = lead <= 3 * 3600000 ? "r3:" + r.qi : lead <= 48 * 3600000 ? "r48:" + r.qi : null;
+        if (kind && Number(r.reminders ?? 1) !== 0 && !sent.has(r.ou + "|" + kind)) {
+          sent.add(r.ou + "|" + kind);
+          const list = await classRecipients(String(r.ou), "missing");
+          if (!list.length) await record(String(r.ou), kind, 0);
+          else if (used + list.length > MAIL_DAY_MAX) out.skipped++;
+          else {
+            const m = MAIL.reminder({ course: r.course, code: r.code, prof, last, exam, when: inWords(lead), start_date: r.start_date });
+            try { for (const part of chunk(list, MAIL_BATCH)) { await sendMail(env, part, m.subject, m.text, { html: m.html, replyTo: r.email }); sends++; }
+              used += list.length; out.reminders += list.length; await record(String(r.ou), kind, list.length); } catch { out.skipped++; }
+          }
+        }
+        // T-70 check-in to the professor.
+        const ck = "ck:" + r.qi;
+        if (lead <= 70 * 60000 && !sent.has(r.ou + "|" + ck) && r.email && r.ext_seen && nowMs - Date.parse(r.ext_seen) > 6 * 3600000   /* bookmark-only professors (never checked in) are not nagged */) {
+          sent.add(r.ou + "|" + ck);
+          const m = MAIL.checkin({ exam });
+          try { await sendMail(env, r.email, m.subject, m.text, { html: m.html }); sends++; used++; out.checkins++; await record(String(r.ou), ck, 1); } catch { out.skipped++; }
+        }
+      }
+      return out;
+    }
+    if (p === "/cron" && request.method === "POST") {
+      const secret = await paySecret();
+      if (secret.length < 16 || !sameHex(String(request.headers.get("X-LOCKqz-Pay") || ""), secret)) return json({ error:"unauthorized" }, 401);   // constant-time
+      let r; try { r = await examMailTick(); } catch (e) { r = { error: String(e && e.message || e).slice(0, 120) }; }
+      return json({ ok: true, exams: r });
+    }
     // Called by the Gmail script about once an hour: sends due renewal emails, a few per call.
     if (p === "/pay/tick" && request.method === "POST") {
       const secret = await paySecret();
       if (secret.length < 16 || !sameHex(String(request.headers.get("X-LOCKqz-Pay") || ""), secret)) return json({ error:"unauthorized" }, 401);   // constant-time
+      let exams; try { exams = await examMailTick(); } catch (e) { exams = { error: String(e && e.message || e).slice(0, 120) }; }
       let card; try { card = await cardRenewTick(); } catch (e) { card = { error: String(e && e.message || e).slice(0, 120) }; }
       // Workers Free: 50 subrequests per call; a busy card round leaves the renewal emails for the next hour.
-      if (Number(card && card.sub) > 20) return json({ sent: 0, why: "card renewals busy", card });
-      return json({ ...(await renewalTick()), card });
+      if (Number(card && card.sub) > 20) return json({ sent: 0, why: "card renewals busy", card, exams });
+      return json({ ...(await renewalTick()), card, exams });
     }
     if (p === "/pay/notify" && request.method === "POST") {
       const secret = await paySecret();
@@ -2445,6 +2608,71 @@ export async function onRequest(context) {
     // then turns each of the class's quizzes on/off with /protect; this row decides what happens to the
     // class's NEW quizzes (off: auto-protect skips them) and is what both screens show for a class with no
     // exams yet. Written only when it changes.
+    // The extension checked in (every few hours while the browser is open): the T-70 check-in email stays
+    // quiet. One write per professor per 4 h at most.
+    if (p === "/ext-seen" && request.method === "POST") {
+      if (me.admin) return json({ ok: true });
+      const cut = new Date(Date.now() - 4 * 3600000).toISOString();
+      await db.prepare("UPDATE teachers SET ext_seen=? WHERE id=? AND (ext_seen IS NULL OR ext_seen<?)").bind(now(), me.id, cut).run();
+      return json({ ok: true });
+    }
+    // The extension's popup: counts only (classes, protected exams, the next exam and how many of its
+    // students installed) -- never a student's name or email. Also counts as a check-in.
+    if (p === "/ext-status") {
+      const cs = (await db.prepare("SELECT ou,name,code,synced_at FROM teacher_courses WHERE teacher_id=? AND COALESCE(in_sync,1)<>0 ORDER BY name LIMIT 200").bind(me.id).all()).results;
+      const ous = cs.map(c => String(c.ou));
+      let exams = 0, next = null;
+      if (ous.length) {
+        const off = await classOff(ous), live = ous.filter(o => !off.has(o)), nowIso = now();
+        for (const part of chunk(live, 98)) {
+          const rows = (await db.prepare(`SELECT b.ou AS ou, b.qi AS qi, b.name AS name, b.start_date AS start_date FROM bs_quizzes b JOIN quizzes q ON q.ou=b.ou AND q.qi=b.qi WHERE b.ou IN (${placeholders(part.length)}) AND (b.end_date IS NULL OR b.end_date>?)`).bind(...part, nowIso).all()).results;
+          exams += rows.length;
+          for (const r of rows) if (r.start_date && r.start_date > nowIso && (!next || r.start_date < next.start_date)) next = r;
+        }
+        if (next) {
+          const all = await classRecipients(String(next.ou), "all"), miss = await classRecipients(String(next.ou), "missing");
+          const c = cs.find(x => String(x.ou) === String(next.ou)) || {};
+          next = { course: String(c.name || "").replace(/^\d+_\w+\s*/, "").slice(0, 120), name: String(next.name || "").slice(0, 120), start: next.start_date, total: all.length, ready: all.length - miss.length };
+        }
+      }
+      if (!me.admin) { const cut = new Date(Date.now() - 4 * 3600000).toISOString();
+        await db.prepare("UPDATE teachers SET ext_seen=? WHERE id=? AND (ext_seen IS NULL OR ext_seen<?)").bind(now(), me.id, cut).run(); }
+      return json({ name: me.name || null, classes: cs.length, exams, next, last_sync: cs.map(c => c.synced_at).filter(Boolean).sort().pop() || null });
+    }
+    // Automatic reminders (48 h / 3 h before each exam, to students without LOCKqz) on or off for a class.
+    if (p === "/class-mail" && request.method === "POST") {
+      const ou = String(body.ou||"");
+      if (!/^\d+$/.test(ou)) return json({ error:"bad class" }, 400);
+      if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this class can change this." }, 403);
+      if (body.reminders) await db.prepare("DELETE FROM class_mail WHERE ou=?").bind(ou).run();
+      else await db.prepare("INSERT INTO class_mail (ou,reminders,teacher_id,at) VALUES (?,0,?,?) ON CONFLICT(ou) DO UPDATE SET reminders=0, at=excluded.at").bind(ou, me.id, now()).run();
+      return json({ ou, reminders: !!body.reminders });
+    }
+    // Email the class (kind "all") or only the students who have not installed LOCKqz (kind "missing"),
+    // from LOCKqz, signed by the professor, Reply-To the professor. One row per class per kind per day.
+    if (p === "/email/students" && request.method === "POST") {
+      const ou = String(body.ou||""), kind = body.kind === "missing" ? "missing" : "all";
+      if (!/^\d+$/.test(ou)) return json({ error:"bad class" }, 400);
+      if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this class can email it." }, 403);
+      if (!mailOn(env)) return json({ error:"mail_off", message: "Email is not set up on LOCKqz yet." }, 503);
+      const c = await db.prepare("SELECT name, code FROM teacher_courses WHERE ou=? ORDER BY teacher_id=? DESC LIMIT 1").bind(ou, me.id).first() || {};
+      const list = await classRecipients(ou, kind);
+      if (!list.length) return json({ sent: 0, kind, none: true });
+      const day = laToday();
+      const used = Number((await db.prepare("SELECT COALESCE(SUM(n),0) AS n FROM mail_sent WHERE day=?").bind(day).first()).n) || 0;
+      if (used + list.length > MAIL_DAY_MAX) return json({ error: "limit", message: `LOCKqz can send ${Math.max(0, MAIL_DAY_MAX - used)} more emails today. Try again tomorrow.`, left: Math.max(0, MAIL_DAY_MAX - used) }, 429);
+      const prof = String(me.name || me.email).trim(), last = lastName(prof) || prof;
+      const fe = await db.prepare("SELECT b.name AS name, b.start_date AS start_date FROM bs_quizzes b JOIN quizzes q ON q.ou=b.ou AND q.qi=b.qi WHERE b.ou=? AND b.start_date>? ORDER BY b.start_date LIMIT 1").bind(ou, now()).first();
+      let m;
+      if (kind === "all") m = MAIL.student({ course: c.name, code: c.code, prof, last, firstExam: fe });
+      else { const lead = fe && fe.start_date ? Date.parse(fe.start_date) - Date.now() : NaN;
+        m = MAIL.reminder({ course: c.name, code: c.code, prof, last, exam: fe && fe.name ? fe.name : "your next exam", when: isNaN(lead) ? "coming up" : inWords(lead), start_date: fe ? fe.start_date : null }); }
+      let sent = 0;
+      try { for (const part of chunk(list, MAIL_BATCH)) { await sendMail(env, part, m.subject, m.text, { html: m.html, replyTo: me.email }); sent += part.length; } }
+      catch (e) { if (!sent) return json({ error: "send_failed", message: "Could not send the email. Try again in a minute." }, 502); }
+      await db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, kind, day, sent, now()).run();
+      return json({ sent, kind, to: list.length });
+    }
     if (p === "/class" && request.method === "POST") {
       const ou = String(body.ou||"");
       if (!/^\d+$/.test(ou)) return json({ error:"bad class" }, 400);
@@ -2594,6 +2822,12 @@ export async function onRequest(context) {
       const ownList = cs.map(c => String(c.ou)).filter(o => own.has(o));
       const sub = "SELECT ou FROM teacher_courses WHERE teacher_id=? AND COALESCE(in_sync,1)<>0";
       const offOus = await classOff(ownList);
+      // Emails sent to each class (dashboard: "Email students" done / "Remind the N who haven't") and the
+      // class's automatic-reminders switch.
+      const mailedAt = new Map(), remOff = new Set();
+      for (const part of chunk(ownList, 98)) { const ph = placeholders(part.length);
+        (await db.prepare(`SELECT ou, MAX(at) AS at FROM mail_sent WHERE ou IN (${ph}) AND kind IN ('all','missing') GROUP BY ou`).bind(...part).all().catch(() => ({ results: [] }))).results.forEach(r => mailedAt.set(String(r.ou), r.at));
+        (await db.prepare(`SELECT ou FROM class_mail WHERE ou IN (${ph}) AND reminders=0`).bind(...part).all().catch(() => ({ results: [] }))).results.forEach(r => remOff.add(String(r.ou))); }
       const roster = [], devs = [], assist = new Map();
       for (const part of chunk(ownList, 98)) {
         const ph = placeholders(part.length);
@@ -2621,7 +2855,7 @@ export async function onRequest(context) {
         .map(q => own.has(String(q.ou)) ? withOrig(q) : withOrig({ ...q, orig: null, password: null, lock_id: null, gated: null }));
       const by = {}; devs.forEach(d => { (by[d.who] = by[d.who] || []).push(d); });
       const adminEmails = new Set(((await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin'").all()).results).map(x => x.e));
-      return json({ courses: cs.map(c => ({ ...c, roster_hidden: !own.has(String(c.ou)), off: offOus.has(String(c.ou)),
+      return json({ mail_on: mailOn(env), courses: cs.map(c => ({ ...c, roster_hidden: !own.has(String(c.ou)), off: offOus.has(String(c.ou)), mailed_at: mailedAt.get(String(c.ou)) || null, reminders: !remOff.has(String(c.ou)),
         // Everyone LOCKqz locks: Learners AND TAs (any non-instructor role). The admin is the one
         // exempt person (developer mode), so he is never listed as someone who must install.
         students: roster.filter(r => r.ou === c.ou && takesQuizzes(r.role) && !adminEmails.has((r.email||"").toLowerCase())).map(r => {

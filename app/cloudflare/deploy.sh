@@ -36,6 +36,9 @@ for f in mac/install.sh mac/uninstall.sh windows/install.ps1 windows/uninstall.p
 done
 if [ $bad -ne 0 ]; then echo "Refusing to deploy. Run:  bash release-local.sh   (or let CI build the release), then deploy again."; exit 1; fi
 echo "  ok: pkg, exe, update.json signed (v$VERSION), one-line installers"
+# The professor browser extension packages (dashboard "Add LOCKqz to Chrome" links them until the store
+# listings are live; the welcome email too). Built from app/extension-prof + the site's own sync.js/lq.js.
+if bash ../extension-prof/build.sh >/dev/null 2>&1; then cp ../extension-prof/dist/lockqz-prof-*.zip "$d/"; echo "  ok: professor extension zips in $d"; else echo "  warning: extension build failed (zip missing?); keeping the zips already in $d"; fi
 
 echo "== who am I =="; $W whoami | tail -3
 
