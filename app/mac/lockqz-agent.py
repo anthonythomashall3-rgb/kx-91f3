@@ -818,6 +818,15 @@ class Agent:
             log("other school: %s not protected" % self.quiz)
             self.locked, self.quiz, self.url, self.missing_since = False, None, None, None
             return "other"
+        if reason == "not_protected":
+            # This class is not using LOCKqz (its professor has not signed up / is not active). The helper
+            # locked AI when the quiz opened; restore it now, quietly, and tell no one.
+            q = self.quiz
+            self.send_unlock(q, "not_protected")
+            self.add_cap(q, now)
+            log("not protected: %s (class not using LOCKqz)" % q)
+            self.locked, self.quiz, self.url, self.missing_since = False, None, None, None
+            return "other"
         if reason == "verify":
             self.ensure_identity(force=True)   # the server needs the confirmed school email first
         if reason == "gate_off" and getattr(self, "gate_told", None) != self.quiz:

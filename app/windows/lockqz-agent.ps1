@@ -465,6 +465,16 @@ function Handle-Pw($pr, [bool]$first, [string]$note) {
     Add-Cap ([string]$script:Quiz)
     return "other"
   }
+  if ($why -eq "not_protected") {
+    # This class is not using LOCKqz (its professor has not signed up / is not active). AI was locked when
+    # the quiz opened; restore it now, quietly, and report nothing.
+    $q = [string]$script:Quiz
+    [void](Send-Unlock $q "not_protected")
+    Add-Cap $q
+    Log "not protected: $q (class not using LOCKqz)"
+    Clear-Quiz
+    return "other"
+  }
   if (($why -eq "verify") -and (([DateTime]::UtcNow - $script:SetupAt).TotalSeconds -gt 60)) { Start-Setup -Quiz }   # school email first
   if (($why -eq "gate_off") -and ($script:GateTold -ne $script:Quiz)) {
     # The professor's gate is not running yet: the password is held; it arrives by itself.

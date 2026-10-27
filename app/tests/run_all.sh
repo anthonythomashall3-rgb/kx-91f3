@@ -28,6 +28,7 @@ run "15/18 Professor Sync tab + quiz gate (real sync.js, simulated Brightspace)"
 run "Auto re-sync (zero LOCKqz requests when nothing changed) + new-quiz email" node --no-warnings test_sync_auto.mjs
 run "Dashboard Sync now button (real Chromium: dashboard + Brightspace tabs)" node --no-warnings test_dashboard_sync_now.mjs
 run "Professor browser extension: syncs by itself, Sync now, exam tab + gate (real Chromium, built package)" node --no-warnings test_prof_extension.mjs
+run "Per-class scope: LOCKqz only locks/charges a signed-up prof's class; reconnect email once per episode" node --no-warnings test_class_scope.mjs
 run "16/18 Security regressions (cross-course, D1 limits, auth, rate limits)" node --no-warnings test_security.mjs
 run "17/18 Student email code (once per computer; real API + fake SMTP)" node --no-warnings test_email_verify.mjs
 run "Per-section billing (\$1,000 per USC section, Venmo code)" node --no-warnings test_sections.mjs

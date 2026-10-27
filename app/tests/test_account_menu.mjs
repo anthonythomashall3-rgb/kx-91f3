@@ -101,7 +101,7 @@ try {
   console.log("B4 cancel subscription: confirm step (stops auto-renew only, keeps the term), then turn it back on");
   await pg.click("button.lqm-red >> text=Cancel subscription");
   const cq = await pg.textContent(".lqm-confirm");
-  check("confirm says it stops auto-renew only, keeps the semester, and points to the bank for a refund", /stops auto-renew only/.test(cq) && /rest of this semester/.test(cq) && /does not refund the current semester[\s\S]*contact your bank/.test(cq), cq);
+  check("confirm box says only that the card is never charged again (no bank/semester lines)", /Your card is never charged again/.test(cq) && !/bank/i.test(cq) && !/rest of this semester/.test(cq), cq);
   check("still on before confirming", sqlite.prepare("SELECT autorenew FROM card_renew WHERE email='cy@usc.edu'").get().autorenew === 1);
   await pg.click("text=Yes, cancel subscription");
   check("off in the database and on the page; 'Turn auto-renew on' shown", await waitFor(() => pg.isVisible("text=Turn auto-renew on")) && sqlite.prepare("SELECT autorenew FROM card_renew WHERE email='cy@usc.edu'").get().autorenew === 0);

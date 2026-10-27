@@ -424,14 +424,39 @@ export async function onRequest(context) {
   // LOCKqz is locking, and starts the gate by itself), and no password is given for a protected quiz
   // that is not gated while it can still be taken -- so a password passed around opens nothing.
   const gateRequired = () => String(env.REQUIRE_GATE || "") === "1";
+  // Per-class scope: a class is covered by LOCKqz only when its own professor signed up and is allowed to
+  // run it -- an active, synced course (admin, a trial/exempt professor, or one paid for this term) that the
+  // professor has not turned off. A class with no such professor is not LOCKqz's to touch (no lock, no
+  // charge, no report). "active" mirrors me.active + releaseUnpaid: admin, trial(exempt), active_until, or
+  // a paid section. One indexed read.
+  const courseCovered = async ou => {
+    const o = String(ou), d = laToday(), ex = [...exemptSet(env)];
+    const exSql = ex.length ? ` OR lower(t.email) IN (${placeholders(ex.length)})` : "";
+    // Covered when the class is ON (not turned off) AND either it has a protected quiz already (only an
+    // active professor's quizzes survive -- releaseUnpaid strips an unpaid one's), OR an active, signed-up
+    // professor has it synced (covers a brand-new quiz before protect-by-default has run).
+    const r = await db.prepare(
+      `SELECT 1 FROM (SELECT 1) WHERE NOT EXISTS (SELECT 1 FROM course_off WHERE ou=?)
+         AND (EXISTS (SELECT 1 FROM quizzes WHERE ou=?)
+              OR EXISTS (SELECT 1 FROM teacher_courses tc LEFT JOIN teachers t ON t.id=tc.teacher_id
+                   WHERE tc.ou=? AND COALESCE(tc.in_sync,1)<>0
+                     AND (tc.teacher_id='admin' OR t.role='admin'
+                          OR ((t.verified=1 OR t.vouched=1) AND (COALESCE(t.active_until,'')>=? OR EXISTS (SELECT 1 FROM paid_sections ps WHERE ps.teacher_id=t.id AND ps.until>=?)${exSql})))))`)
+      .bind(o, o, o, d, d, ...ex).first();
+    return !!r;
+  };
   const nudgeGate = async (ou, qi) => {
     try {
       if (!codesOn) return false;
-      const since = new Date(Date.now() - 3600000).toISOString(), key = "gate:" + qi;
-      const t = await db.prepare("SELECT t.email AS email, tc.name AS course FROM teacher_courses tc JOIN teachers t ON t.id=tc.teacher_id WHERE tc.ou=? AND (t.verified=1 OR t.role='admin') AND NOT EXISTS (SELECT 1 FROM sync_nudges n WHERE n.ou=? AND n.qi=? AND n.at>?) ORDER BY t.role='admin' LIMIT 1")
-        .bind(ou, ou, key, since).first();
+      // Once per disconnection episode (Anthony 27 Oct): email only when the gate is not running, and only
+      // once -- the "gate:<qi>" row stays until the gate next starts (/gate on deletes it), so the next
+      // time the professor is not connected for this quiz LOCKqz emails once more, never hourly.
+      const key = "gate:" + qi;
+      const t = await db.prepare("SELECT t.email AS email, tc.name AS course FROM teacher_courses tc JOIN teachers t ON t.id=tc.teacher_id WHERE tc.ou=? AND (t.verified=1 OR t.role='admin') AND NOT EXISTS (SELECT 1 FROM sync_nudges n WHERE n.ou=? AND n.qi=?) ORDER BY t.role='admin' LIMIT 1")
+        .bind(ou, ou, key).first();
       if (!t || !t.email) return false;
-      await db.prepare("INSERT OR REPLACE INTO sync_nudges (ou,qi,at) VALUES (?,?,?)").bind(ou, key, now()).run();
+      const ins = await db.prepare("INSERT OR IGNORE INTO sync_nudges (ou,qi,at) VALUES (?,?,?)").bind(ou, key, now()).run();
+      if (!ins.meta.changes) return false;
       const course = String(t.course || "your class").replace(/^\d+_\d+\s*/, "").slice(0, 120);
       const text = `A student is waiting to start a LOCKqz quiz in ${course}, but its gate is not running, so LOCKqz is holding the password.\n\nOpen Brightspace and click your LOCKqz Sync bookmark, and leave that tab open during the quiz. The gate starts by itself and the student gets in.\n\nLOCKqz`;
       const go = sendMail(env, t.email, "LOCKqz: open your Sync tab — a student is waiting", text).catch(() => {});
@@ -1414,6 +1439,10 @@ export async function onRequest(context) {
       if (!fresh) return json({ password: null, reason: "not locked" }, 403);
       const devLk = await db.prepare("SELECT 1 FROM events e JOIN devices d ON d.device_id=e.device_id WHERE e.device_id=? AND e.quiz_id=? AND (e.event='dev_lock' OR (e.event='lock' AND e.detail LIKE '%\"developer\":true%')) AND lower(COALESCE(d.student,'')) NOT IN (SELECT lower(email) FROM teachers WHERE role='admin') LIMIT 1").bind(device_id, lockId).first();
       if (devLk) return json({ password: null, reason: "not locked" }, 403);   // dev mode is admin-only
+      // Per-class scope (Anthony 27 Oct): LOCKqz only locks and charges in a class whose own professor
+      // signed up (active + synced + on). Any other Brightspace quiz is not ours -> the app restores AI,
+      // and no student is charged and nothing is reported.
+      if (!(await courseCovered(ou))) return json({ password: null, reason: "not_protected" }, 200);
       // Student fee: no password until this semester's fee is paid (matched automatically from Zelle / bank alerts).
       const stu = v.ok ? v.dev : (feeOn() ? await db.prepare("SELECT student, student_verified FROM devices WHERE device_id=?").bind(device_id).first() : null);
       if (feeOn()) {
@@ -2470,6 +2499,7 @@ export async function onRequest(context) {
       if (body.on && !(Number(cur.gated) === 1 && keep)) keep = JSON.stringify((Array.isArray(body.keep) ? body.keep : []).map(String).filter(x => /^\d+$/.test(x)).slice(0, 3000));
       if (!body.on) keep = null;
       const st = [db.prepare("UPDATE quizzes SET gated=?, sa_keep=?, bs_code=CASE WHEN ?=1 THEN bs_code ELSE NULL END WHERE qi=? AND ou=?").bind(body.on?1:0, keep, body.on?1:0, qi, ou)];
+      if (body.on) st.push(db.prepare("DELETE FROM sync_nudges WHERE ou=? AND qi=?").bind(ou, "gate:" + qi));   // gate running: the next disconnection emails once more
       // F4/I-H6: the Sync tab may pass the quiz's dates as Brightspace has them right now (the start
       // check while gated uses them); null = no date in Brightspace.
       const dt = v => v === null ? null : (typeof v === "string" && !isNaN(Date.parse(v)) ? v.slice(0, 40) : undefined);

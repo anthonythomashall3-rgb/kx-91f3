@@ -128,8 +128,7 @@
       if (r.failed) box.appendChild(el("p", { "class": "lqm-warn" }, ["Last renewal didn’t go through: " + r.failed + ". ", d.pay_url ? el("a", { href: d.pay_url, text: "Pay here" }) : null]));
       if (state.confirm === "renew") {
         box.appendChild(el("div", { "class": "lqm-confirm", role: "alertdialog", "aria-labelledby": "lqm-cq" }, [
-          el("p", { id: "lqm-cq", text: "Cancel your subscription? This stops auto-renew only." + (d.until ? " You keep LOCKqz for the rest of this semester (until " + day(d.until) + "), and your card is never charged again." : " Your card is never charged again, and this semester stays active.") }),
-          el("p", { "class": "lqm-small", text: "This does not refund the current semester. For a refund of money already paid, contact your bank." }),
+          el("p", { id: "lqm-cq", text: "Cancel your subscription? Your card is never charged again." }),
           el("div", { "class": "lqm-links" }, [
             el("button", { type: "button", "class": "lqm-btn lqm-red", text: "Yes, cancel subscription", on: { click: function () { setRenew(false); } } }),
             el("button", { type: "button", "class": "lqm-btn", text: "Keep it", on: { click: function () { state.confirm = null; render(); var b = acc.querySelector(".lqm-red"); if (b) b.focus(); } } })])]));
