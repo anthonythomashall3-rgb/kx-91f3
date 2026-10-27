@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-10-27 — 01UzHDaE (subagent): professor zero-effort pass — [[route]].js (HTML email, /email/students, cron reminders, T-70 check-in), schema.sql + migrate_034, dashboard.html (setup checklist, store config, email buttons), extension-prof (popup, field lock, first-visit toast), sync.js, mac/windows agents (ready notice), tests/test_prof_zero_effort.mjs
+- PARKED (no live process; found uncommitted on Anthony's Mac at 16:00 PT, last edit 14:41 PT; committed UNREVIEWED/UNTESTED to branch wip/prof-zero-effort-orphan on origin — review + run_all before merging, do not wait on this claim) — was: 2026-10-27 — 01UzHDaE (subagent): professor zero-effort pass — [[route]].js (HTML email, /email/students, cron reminders, T-70 check-in), schema.sql + migrate_034, dashboard.html (setup checklist, store config, email buttons), extension-prof (popup, field lock, first-visit toast), sync.js, mac/windows agents (ready notice), tests/test_prof_zero_effort.mjs
 
 ## Recently finished
 - 2026-10-27 14:55 PT — 01UzHDaF: v0.5.2 — version bump so the release guard ships today's agent/engine changes (Releases for a221b4d and b88322a were refused: 'files changed but the version is still 0.5.1'). Pushed from the session's cloud clone (Anthony authorized pushes).
