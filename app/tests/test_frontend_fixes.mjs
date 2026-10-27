@@ -1,3 +1,4 @@
+import { payT } from "./pay_t.mjs";
 // Front-end regressions (audit 24 Oct 2026). NO browser: the REAL sync.js, dashboard.html and pay.html
 // scripts run in node:vm sandboxes against a simulated Brightspace and the REAL LOCKqz API
 // (in-memory SQLite). Each check names the audit item it guards.
@@ -175,7 +176,7 @@ function dashTab(w, { token = "", hash = "", now = null } = {}) {
 // ---- pay.html (fake DOM, real API) ----
 function payTab(w, email) {
   const els = {}, el = id => (els[id] = els[id] || { textContent: "", value: "", href: "", addEventListener() {} });
-  const ctx = { document: { getElementById: el, addEventListener() {}, visibilityState: "visible" }, location: { search: "?email=" + encodeURIComponent(email) }, history: { replaceState() {} },
+  const ctx = { document: { getElementById: el, addEventListener() {}, visibilityState: "visible" }, location: { search: "?email=" + encodeURIComponent(email) + "&t=" + payT(w.env, email) }, history: { replaceState() {} },
     fetch: (u, o) => w.fetchApi(ORIGIN + u, o), setInterval: () => 1, clearInterval() {}, setTimeout: () => 1, clearTimeout() {}, URLSearchParams, console };
   vm.createContext(ctx); vm.runInContext(PAY_SRC, ctx);
   return { el };
