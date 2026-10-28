@@ -22,10 +22,10 @@ echo "E2 messy blocklist (dupes, CRLF, spaces, blank lines, comments) -> clean b
 MBL="$TMP/messy.txt"
 printf 'chatgpt.com\r\n chatgpt.com \n\n#comment\n  claude.ai  \nCLAUDE.AI\n' > "$MBL"
 B="$(build_block_from "$MBL")"
-chk "chatgpt present once-ish" 'echo "$B" | grep -q "0.0.0.0 chatgpt.com"'
-chk "claude present" 'echo "$B" | grep -q "0.0.0.0 claude.ai"'
-chk "no stray spaces in output" '! echo "$B" | grep -qE "0.0.0.0 .* "'
-chk "no blank domain lines" '! echo "$B" | grep -qE "^0.0.0.0 $"'
+chk "chatgpt present once-ish" 'grep -q "0.0.0.0 chatgpt.com" <<<"$B"'
+chk "claude present" 'grep -q "0.0.0.0 claude.ai" <<<"$B"'
+chk "no stray spaces in output" '! grep -qE "0.0.0.0 .* " <<<"$B"'
+chk "no blank domain lines" '! grep -qE "^0.0.0.0 $" <<<"$B"'
 
 echo "E3 student has a rich custom hosts file -> every custom line preserved"
 H="$TMP/h3"
@@ -62,10 +62,10 @@ hosts_remove_block "$H"; chk "no LOCKqz residue" '! grep -q "LOCKqz" "$H"'
 
 echo "E8 block contains the three biggest AIs every single time"
 B="$(build_block_from "$BL")"
-chk "chatgpt" 'echo "$B" | grep -q "0.0.0.0 chatgpt.com"'
-chk "claude"  'echo "$B" | grep -q "0.0.0.0 claude.ai"'
-chk "gemini"  'echo "$B" | grep -q "0.0.0.0 gemini.google.com"'
-chk "IPv6 too (AAAA lookups blocked)" 'echo "$B" | grep -q "^:: chatgpt.com$"'
+chk "chatgpt" 'grep -q "0.0.0.0 chatgpt.com" <<<"$B"'
+chk "claude"  'grep -q "0.0.0.0 claude.ai" <<<"$B"'
+chk "gemini"  'grep -q "0.0.0.0 gemini.google.com" <<<"$B"'
+chk "IPv6 too (AAAA lookups blocked)" 'grep -q "^:: chatgpt.com$" <<<"$B"'
 
 echo "E9 closing AI apps matches ONLY that app (never a substring of some other process)"
 chk "Dia app matched"          'echo "/Applications/Dia.app/Contents/MacOS/Dia" | grep -qiE "$(app_re Dia)"'
