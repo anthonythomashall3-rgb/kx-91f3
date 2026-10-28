@@ -141,5 +141,17 @@ notServed.length === 0 ? ok(`API serves all ${mac.length} domains (${apiList.len
   : bad(`API list is missing ${notServed.length}: ${notServed.slice(0, 8).join(", ")}...`);
 
 console.log("");
+console.log("T14 28 Oct audit: quiz-answer tools (SmartSolve/Homeworkify; Quizlet/Studocu stay open), coding agents (Replit/Devin/Augment/Qodo), AI portals, more writers/humanizers, ChatGPT wrappers");
+const need4 = ["smartsolve.ai","homeworkify.st","mathsolver.microsoft.com","replit.com","devin.ai","augmentcode.com","qodo.ai",
+  "firebase.studio","ai.azure.com","copilotstudio.microsoft.com","nova.amazon.com","chat.com","languagetool.org","walterwrites.ai","chatgot.io"];
+const miss4 = need4.filter(d => !mac.includes(d));
+miss4.length === 0 ? ok(`all ${need4.length} 28-Oct entries present`) : bad("missing: " + miss4.join(", "));
+// the served list (AI_DOMAINS) must equal blocklist.txt exactly, in order, and parse as JSON (deploy.sh builds blocklist.json from it)
+const routeSrc = readFileSync(join(DIR, "../cloudflare/functions/api/[[route]].js"), "utf8");
+const aiM = routeSrc.match(/const AI_DOMAINS = (\[[\s\S]*?\]);/);
+let served = null; try { served = JSON.parse(aiM[1]); } catch (e) {}
+served ? ok("AI_DOMAINS parses as plain JSON (no comments inside the array)") : bad("AI_DOMAINS is not plain JSON - deploy.sh would fail to build blocklist.json");
+served && JSON.stringify(served) === JSON.stringify(mac) ? ok(`AI_DOMAINS == blocklist.txt (${served.length} entries)`) : bad("AI_DOMAINS and blocklist.txt differ");
+
 console.log(`RESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

@@ -47,7 +47,20 @@ const AI_DOMAINS = [
   "askyourpdf.com","humata.ai","pdf.ai","bartleby.com","numerade.com","socratic.org","wolframalpha.com","deepl.com/write",
   "writer.com","sudowrite.com","textcortex.com","humbot.ai","bypassgpt.ai","gptinf.com","netus.ai","base44.com",
   "emergent.sh","same.new","create.xyz","a0.dev","rork.com","tempolabs.ai","databutton.com","softgen.ai",
-  "wiseone.io","compose.ai","tinamind.com"
+  "wiseone.io","compose.ai","tinamind.com",
+  "smartsolve.ai","app.smartsolve.ai","homeworkify.st","quizard.ai","quizgecko.com",
+  "cymath.com","mathsolver.microsoft.com","cameramath.com","mathgpt.ai","mathful.com","turbolearn.ai","mindgrasp.ai","coconote.app",
+  "scholarcy.com","explainpaper.com","gizmo.ai",
+  "replit.com","sourcegraph.com","devin.ai","app.devin.ai","augmentcode.com","app.augmentcode.com","qodo.ai","app.qodo.ai",
+  "bito.ai","app.warp.dev","continue.dev","api.continue.dev","trypear.ai","codegpt.co","app.codegpt.co","firebase.studio",
+  "studio.firebase.google.com","idx.google.com","opal.withgoogle.com","stitch.withgoogle.com",
+  "chat.com","ai.azure.com","oai.azure.com","copilotstudio.microsoft.com","nova.amazon.com","ernie.baidu.com","chat.baidu.com","alice.yandex.ru",
+  "clova-x.naver.com","kilocode.ai","api.kilocode.ai","requesty.ai","glama.ai","nano-gpt.com","portkey.ai","api.portkey.ai",
+  "chutes.ai","featherless.ai","api.featherless.ai","lambda.ai","api.lambda.ai","exa.ai","morphic.sh",
+  "languagetool.org","prowritingaid.com","hemingwayapp.com","wordvice.ai","paraphrasingtool.ai","editpad.org","essaygenius.ai","myessaywriter.ai",
+  "essaywriter.ai","perfectessaywriter.ai","textero.ai","samwell.ai","yomu.ai","writefull.com","trinka.ai","walterwrites.ai",
+  "phrasly.ai","ryne.ai","twixify.com","aihumanizer.com","humanizeai.io",
+  "chatgot.io","chatbotapp.ai","aichatting.net","talkai.info","gptgo.ai","chatgptfree.ai","writingmate.ai","copilot.live"
 ];
 const now = () => new Date().toISOString();
 // "Today" in America/Los_Angeles as YYYY-MM-DD, so a professor stays active through the end of their

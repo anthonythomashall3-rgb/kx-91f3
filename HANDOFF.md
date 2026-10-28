@@ -1,9 +1,28 @@
-# LOCKqz — HANDOFF (26 Oct 2026, 04:45 PT) — start here
+# LOCKqz — HANDOFF (28 Oct 2026) — start here
 
 A new Claude account picks up from here. Read this file, then `SESSIONS.md`, then `CLAUDE.md` (the repo
 rules: pull --rebase, claim in SESSIONS.md, `bash app/tests/run_all.sh` before every push, $0 plans only,
 commit as `Claude <noreply@anthropic.com>`). The claude.ai Project "LOCKqz" has the same handoff
 (`claude/LOCKqz-HANDOFF.md`) plus topic docs (`claude/LOCKqz-payments.md` and others).
+
+## 28 Oct 2026 — health audit (session 015umora)
+- **Deploys were silently failing.** Release #90-#92 (20b217f, c097c45, 042702e) died in "Build the signed update
+  manifest": the agents (`lockqz-agent.py` / `lockqz-agent.ps1`, status-truth ready notice) changed while the version
+  stayed 0.5.3, so `make-manifest.py` E10 refused to sign and the live site stayed on 50b1676. Fixed by bumping to
+  **v0.5.4** (app/VERSION + both daemons). Rule of thumb: ANY change under app/mac or app/windows needs a version bump
+  in the same push, or nothing deploys (not even the API). Check `curl https://lockqz.pages.dev/api/version` after a push.
+- `bash app/tests/run_all.sh` all green at 042702e (~2,100 checks; pwsh suites run on Windows CI).
+- Blocklist: +88 hosts (blocklist.txt x2 + AI_DOMAINS; test_blocklist T14): quiz-answer tools (SmartSolve, Homeworkify,
+  Quizard, QuizGecko, Microsoft Math Solver, Cymath, CameraMath, MathGPT, TurboLearn, Mindgrasp, Coconote, Scholarcy,
+  ExplainPaper, Gizmo), coding agents (Replit, Sourcegraph/Cody, Devin, Augment, Qodo, Bito, Warp AI, Continue, PearAI,
+  CodeGPT, Firebase Studio / IDX, Google Opal + Stitch), portals + gateways (chat.com, Azure AI Foundry portal, Azure OpenAI
+  Studio, Copilot Studio, Amazon Nova, Ernie, Yandex Alice, Naver CLOVA X, Kilo Code, Requesty, Glama, NanoGPT, Portkey,
+  Chutes, Featherless, Lambda, Exa, Morphic), writers/humanizers (LanguageTool, ProWritingAid, Hemingway, Wordvice,
+  Paraphrasingtool.ai, Editpad, essay writers, Textero, Samwell, Yomu, Writefull, Trinka, Walter Writes, Phrasly, Ryne,
+  Twixify, AIHumanizer, HumanizeAI.io), ChatGPT wrappers. Quizlet / Studocu / Knowt deliberately stay open (notes +
+  flashcards, test T10). AI_DOMAINS must stay plain JSON (no comments inside the array): deploy.sh JSON.parses it.
+- Reminder: /etc/hosts entries are exact names (+www.); subdomains are covered only inside Chromium/Firefox (URLBlocklist)
+  and by the agent. Known gaps list below (27 Oct) still stands.
 
 ## 27 Oct 2026 — AI inside other apps + student workarounds audit (session 01UzHDaF)
 - **How an in-app AI is stopped** (Claude for Excel, Copilot in Word/Excel/PowerPoint/Outlook, editor assistants,
