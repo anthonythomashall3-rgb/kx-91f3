@@ -254,7 +254,8 @@ const isRegistered = async (db, id) => !!(id && await db.prepare("SELECT 1 AS r 
 // ---- Student email verification (25 Oct 2026) ----
 // A device's student email counts (quiz gate, professor's "Ready" list) only after the student
 // types the 6-digit code LOCKqz emailed to it. Codes: 15 minutes, 5 tries, only a hash is stored.
-// Mail goes out through Gmail SMTP (free, 500/day) using Pages secrets MAIL_USER + MAIL_APP_PASSWORD.
+// Mail goes out through Amazon SES when it is configured (sesOn below); otherwise, and as SES's fallback, through
+// Gmail SMTP (free, 500/day) using Pages secrets MAIL_USER + MAIL_APP_PASSWORD.
 // Without those secrets codes are off and an email is accepted after the roster check (old behaviour).
 const CODE_MS = 15 * 60000, CODE_TRIES = 5;
 const EMAIL_OK = e => /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(e);
@@ -313,6 +314,12 @@ async function smtpSend(open, { user, pass, to, subject, text, html = null, from
   } finally { try { await sock.close?.(); } catch {} }
   return true;
 }
+function codeMail(env, to, code, web = false) {
+  const subject = `Your LOCKqz code: ${code}`;
+  const text = web ? `Your LOCKqz sign-in code is ${code}\n\nType it on lockqz.pages.dev to open your account. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`
+    : (isExempt(env, to) ? WELCOME + "\n\n" : "") + `Your LOCKqz code is ${code}\n\nType it into the LOCKqz window on your computer. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
+  return { subject, text };
+}
 async function sendCode(env, to, code, web = false) {
   const subject = `Your LOCKqz code: ${code}`;
   const text = web ? `Your LOCKqz sign-in code is ${code}\n\nType it on lockqz.pages.dev to open your account. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`
@@ -332,7 +339,53 @@ async function sendMail(env, to, subject, text, opts = {}) {
                                 { secureTransport: "on", allowHalfOpen: false });
   return smtpSend(open, { user: env.MAIL_USER, pass: String(env.MAIL_APP_PASSWORD).replace(/\s+/g, ""), to, subject, text, html: opts.html || null, replyTo: opts.replyTo || null });
 }
-const mailOn = env => typeof env.MAIL_SINK === "function" || !!(env.MAIL_USER && env.MAIL_APP_PASSWORD);
+// ---- Amazon SES (28 Oct 2026): the high-volume sender. On only when SES_ACCESS_KEY_ID + SES_SECRET_ACCESS_KEY
+// (Pages secrets) and MAIL_FROM (an address on a domain verified in SES) exist; then every LOCKqz email goes
+// through SES ($0.10 per 1,000) and the Gmail account above is only the fallback if SES refuses a send.
+const sesOn = env => !!(env.SES_ACCESS_KEY_ID && env.SES_SECRET_ACCESS_KEY && env.MAIL_FROM);
+const sesMax = env => Math.max(1, Number(env.SES_DAILY_MAX || 50000));   // your SES account's 24 h sending quota
+const SES_BCC = 50;                                                      // SES: at most 50 recipients per message
+const hexOf = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+async function hmacRaw(key, data) {
+  const k = await crypto.subtle.importKey("raw", typeof key === "string" ? new TextEncoder().encode(key) : key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return crypto.subtle.sign("HMAC", k, new TextEncoder().encode(data));
+}
+// AWS Signature Version 4 (header form). headers: the extra headers to sign (host + x-amz-date are added).
+async function sigv4({ method, host, path, query = "", headers = {}, body = "", region, service, key, secret, amzDate }) {
+  const day = amzDate.slice(0, 8), h = { host, "x-amz-date": amzDate };
+  for (const [n, v] of Object.entries(headers)) h[n.toLowerCase()] = v;
+  const names = Object.keys(h).sort();
+  const canon = [method, path, query, names.map(n => n + ":" + String(h[n]).trim().replace(/\s+/g, " ") + "\n").join(""), names.join(";"),
+    hexOf(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body)))].join("\n");
+  const scope = `${day}/${region}/${service}/aws4_request`;
+  const sts = ["AWS4-HMAC-SHA256", amzDate, scope, hexOf(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canon)))].join("\n");
+  let k = await hmacRaw("AWS4" + secret, day);
+  for (const part of [region, service, "aws4_request"]) k = await hmacRaw(k, part);
+  return { authorization: `AWS4-HMAC-SHA256 Credential=${key}/${scope}, SignedHeaders=${names.join(";")}, Signature=${hexOf(await hmacRaw(k, sts))}`, signed: names };
+}
+// One SES API v2 SendEmail call per <= 50 recipients (a list goes as Bcc, so no student sees another's address).
+async function sesSend(env, to, subject, text, opts = {}) {
+  const region = String(env.SES_REGION || "us-east-1"), host = `email.${region}.amazonaws.com`, path = "/v2/email/outbound-emails";
+  const from = String(env.MAIL_FROM), list = Array.isArray(to) ? to : [to];
+  const go = typeof env.SES_FETCH === "function" ? env.SES_FETCH : fetch;   // tests: fake SES
+  for (let i = 0; i < list.length; i += SES_BCC) {
+    const part = list.slice(i, i + SES_BCC);
+    const msg = { FromEmailAddress: `${env.MAIL_FROM_NAME || "LOCKqz"} <${from}>`,
+      Destination: Array.isArray(to) ? { ToAddresses: [from], BccAddresses: part } : { ToAddresses: part },
+      Content: { Simple: { Subject: { Data: subject, Charset: "UTF-8" },
+        Body: { Text: { Data: String(text || ""), Charset: "UTF-8" }, ...(opts.html ? { Html: { Data: opts.html, Charset: "UTF-8" } } : {}) } } },
+      ...(opts.replyTo ? { ReplyToAddresses: [opts.replyTo] } : {}),
+      ...(env.SES_CONFIG_SET ? { ConfigurationSetName: String(env.SES_CONFIG_SET) } : {}) };
+    const body = JSON.stringify(msg), amzDate = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+    const { authorization } = await sigv4({ method: "POST", host, path, headers: { "content-type": "application/json" }, body, region, service: "ses",
+      key: String(env.SES_ACCESS_KEY_ID), secret: String(env.SES_SECRET_ACCESS_KEY), amzDate });
+    const r = await go(`https://${host}${path}`, { method: "POST", headers: { "Content-Type": "application/json", "X-Amz-Date": amzDate, Authorization: authorization }, body });
+    if (!r.ok) { let t = ""; try { t = (await r.text()).slice(0, 200); } catch {} const e = new Error(`ses ${r.status} ${t}`); e.ses = r.status; throw e; }
+  }
+  return true;
+}
+const mailOn = env => sesOn(env) || typeof env.MAIL_SINK === "function" || !!(env.MAIL_USER && env.MAIL_APP_PASSWORD);
+const gmailOn = env => typeof env.MAIL_SINK === "function" || !!(env.MAIL_USER && env.MAIL_APP_PASSWORD);
 
 // ---- Email templates (27 Oct 2026): text + HTML, the LOCKqz look (cardinal header, logo, 560px) ----
 const SITE_URL = "https://lockqz.pages.dev", DASH_URL = "https://prof.lockqz.pages.dev", BS_URL = "https://brightspace.usc.edu";
@@ -457,7 +510,7 @@ export async function onRequest(context) {
   if (!body || typeof body !== "object" || Array.isArray(body)) body = {};
   const strict = String(env.REQUIRE_SIGNED || "").trim() === "1";
   const PEPPER = String(env.PW_PEPPER || "");
-  const codesOn = typeof env.MAIL_SINK === "function" || !!(env.MAIL_USER && env.MAIL_APP_PASSWORD);
+  const codesOn = mailOn(env);
   const denied = (v, extra = {}) => json({ error: "unauthorized device", why: v.why, server_time: unixNow(), ...extra }, 401);
 
   // ---- who is calling? admin (master key) | teacher (session token) | nobody ----
@@ -598,12 +651,24 @@ export async function onRequest(context) {
   const mailRoom = async (n, cls) => (await mailUsed()) + n <= (cls === "auto" ? MAIL_AUTO_MAX : MAIL_HARD_MAX);
   const mailCount = n => db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('_all','total',?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(hourKey(), n, now()).run();
   // cls: "essential" (codes, receipts, pay links, payment notices, gate waits) or "auto" (everything else).
-  async function mailOut(to, subject, text, opts = {}, cls = "essential") {
+  // SES (when on) has its own 24 h budget (SES_DAILY_MAX; automatic mail up to 80% of it); Gmail is the fallback.
+  const sesUsed = async () => Number((await db.prepare("SELECT COALESCE(SUM(n),0) AS n FROM mail_sent WHERE ou='_all' AND kind='ses' AND day>=?").bind(hourKey(Date.now() - 24 * 3600000)).first())?.n || 0);
+  const sesRoom = async (n, cls) => (await sesUsed()) + n <= (cls === "auto" ? Math.floor(sesMax(env) * 0.8) : sesMax(env));
+  const sesCount = n => db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('_all','ses',?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(hourKey(), n, now()).run();
+  const sesFail = e => db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("mail", null, null, "ses_failed", String(e && e.message || e).slice(0, 200), now()).run().catch(() => {});
+  // -> "ses" | "gmail"; throws { budget: true } when neither channel has room, or the Gmail error.
+  async function sendVia(to, subject, text, opts, cls) {
     const k = Array.isArray(to) ? to.length : 1;
-    if (!(await mailRoom(k, cls))) { const e = new Error("mail_budget"); e.budget = true; throw e; }
+    if (sesOn(env) && await sesRoom(k, cls)) {
+      try { await sesSend(env, to, subject, text, opts); try { await sesCount(k); } catch {} return "ses"; }
+      catch (e) { await sesFail(e); }
+    }
+    if (!gmailOn(env) || !(await mailRoom(k, cls))) { const e = new Error("mail_budget"); e.budget = true; throw e; }
     await sendMail(env, to, subject, text, opts);
     try { await mailCount(k); } catch {}
+    return "gmail";
   }
+  async function mailOut(to, subject, text, opts = {}, cls = "essential") { return sendVia(to, subject, text, opts, cls); }
   const nudgeGate = async (ou, qi) => {
     try {
       if (!codesOn) return false;
@@ -1118,7 +1183,7 @@ export async function onRequest(context) {
     return out;
   }
   async function renewalTick() {
-    if (!(env.MAIL_USER && env.MAIL_APP_PASSWORD) && typeof env.MAIL_SINK !== "function") return { sent: 0, why: "mail off" };
+    if (!mailOn(env)) return { sent: 0, why: "mail off" };
     const day = laToday(), cur = payTerm(day), [start] = termDates(cur), prev = prevTerm(cur);
     // Window: from 7 days before the term starts to 14 days after.
     const ms = d => Date.parse(d + "T12:00:00Z"), dd = (ms(day) - ms(start)) / 864e5;
@@ -1200,7 +1265,7 @@ export async function onRequest(context) {
   }
   async function cardRenewTick() {
     if (!autoRenewOn()) return { why: "off" };
-    if (!(env.MAIL_USER && env.MAIL_APP_PASSWORD) && typeof env.MAIL_SINK !== "function") return { why: "mail off" };   // never charge when email is down (confirmation + failure notices)
+    if (!mailOn(env)) return { why: "mail off" };   // never charge when email is down (confirmation + failure notices)
     const day = laToday(), R = renewTarget(day);
     if (!R) return { why: "not renewal time" };
     const out = { term: R, reminded: 0, charged: 0, failed: 0, paid: 0, retry: 0, sub: 0 };
@@ -1378,10 +1443,14 @@ export async function onRequest(context) {
     if (Number(c.dh) >= 5 || Number(c.dd) >= 15 || Number(c.eh) >= 3 || Number(c.ed) >= 5 || Number(c.ih) >= 10) return json({ error: "too_many_codes", retry_minutes: 60 }, 429);
     // The one Gmail budget: codes are essential (room is always kept for them); an email on no synced class
     // list may use only the first half, so a flood of strangers cannot starve real students.
-    const used = await mailUsed(), half = Math.floor(MAIL_HARD_MAX / 2);
-    if (used + 1 > MAIL_HARD_MAX || (used >= half && !(await db.prepare("SELECT name FROM roster WHERE email=? AND name IS NOT NULL LIMIT 1").bind(email).first()))) return json({ error: "mail_busy" }, 503);
+    // With SES on, its budget applies (and Gmail stays the fallback); otherwise the Gmail budget.
+    const ses = sesOn(env), cap = ses ? sesMax(env) : MAIL_HARD_MAX, used = ses ? await sesUsed() : await mailUsed(), half = Math.floor(cap / 2);
+    if ((used + 1 > cap && !(ses && gmailOn(env) && (await mailUsed()) + 1 <= MAIL_HARD_MAX)) || (used >= half && !(await db.prepare("SELECT name FROM roster WHERE email=? AND name IS NOT NULL LIMIT 1").bind(email).first()))) return json({ error: "mail_busy" }, 503);
     const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, "0");
-    try { await sendCode(env, email, code, web); try { await mailCount(1); } catch {} }
+    let sent = false;
+    if (ses && used + 1 <= cap) { const cm = codeMail(env, email, code, web);
+      try { await sesSend(env, email, cm.subject, cm.text); sent = true; try { await sesCount(1); } catch {} } catch (e) { await sesFail(e); } }
+    try { if (!sent) { if (!gmailOn(env)) throw new Error("no mail channel"); await sendCode(env, email, code, web); try { await mailCount(1); } catch {} } }
     catch (e) { await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(dev, email, null, "code_send_failed", String(e).slice(0, 200), now()).run(); return json({ error: "send_failed" }, 502); }
     await db.batch([
       db.prepare("INSERT OR REPLACE INTO email_codes (device_id,email,code_hash,expires,tries,created_at) VALUES (?,?,?,?,0,?)")
@@ -2134,7 +2203,7 @@ export async function onRequest(context) {
         return json({ error: "Too many messages. Try again in an hour." }, 429);
       if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='support' AND ts>?").bind(day).first()).n) >= Number(env.SUPPORT_MAX_DAY || 60))
         return json({ error: "Too many messages today. Email lockqz.app@gmail.com." }, 429);
-      const to = String(env.SUPPORT_EMAIL || env.MAIL_USER || "lockqz.app@gmail.com");
+      const to = String(env.SUPPORT_EMAIL || "lockqz.app@gmail.com");
       const name = String(body.name || "").replace(/[\r\n]/g, " ").trim().slice(0, 100);
       try { await mailOut(to, `LOCKqz support: ${name ? name + " · " : ""}${email}`, `From: ${name ? name + " <" + email + ">" : email}\n\n${msg}\n\n— Reply to this email to answer them.`, { replyTo: email }, "auto"); }
       catch (e) { return json({ error: "Could not send. Email lockqz.app@gmail.com." }, e && e.budget ? 503 : 502); }

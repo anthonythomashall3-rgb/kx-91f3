@@ -214,6 +214,18 @@ jobs:
         run: |
           if [ -n "$STRIPE_SECRET_KEY" ]; then npm ci --no-audit --no-fund; fi
           bash ../payments/stripe-setup.sh
+      - name: Email (Amazon SES keys into Cloudflare; skipped until the SES_* GitHub secrets exist)
+        if: steps.chk.outputs.ok == 'true'
+        working-directory: app/cloudflare
+        env:
+          SES_ACCESS_KEY_ID: ${{ secrets.SES_ACCESS_KEY_ID }}
+          SES_SECRET_ACCESS_KEY: ${{ secrets.SES_SECRET_ACCESS_KEY }}
+          MAIL_FROM: ${{ vars.MAIL_FROM }}
+          SES_REGION: ${{ vars.SES_REGION }}
+          SES_DAILY_MAX: ${{ vars.SES_DAILY_MAX }}
+        run: |
+          if [ -n "$SES_ACCESS_KEY_ID" ]; then npm ci --no-audit --no-fund; fi
+          bash ../payments/mail-setup.sh
       - name: Deploy (schema + migrations + site + API + teacher site + legacy forwarders)
         if: steps.chk.outputs.ok == 'true'
         working-directory: app/cloudflare

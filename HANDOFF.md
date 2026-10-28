@@ -5,6 +5,22 @@ rules: pull --rebase, claim in SESSIONS.md, `bash app/tests/run_all.sh` before e
 commit as `Claude <noreply@anthropic.com>`). The claude.ai Project "LOCKqz" has the same handoff
 (`claude/LOCKqz-HANDOFF.md`) plus topic docs (`claude/LOCKqz-payments.md` and others).
 
+## 28 Oct 2026 — high-volume email: Amazon SES (session 015umora)
+- Every LOCKqz email (codes, receipts, pay links, reminders, support) now goes through **Amazon SES** when it is
+  configured ($0.10 per 1,000; quota starts at 50,000/day once out of the sandbox), with the Gmail account as the
+  automatic fallback (SES refuses/fails -> Gmail, logged as event `ses_failed`; SES's own 24 h budget
+  SES_DAILY_MAX, automatic mail up to 80% of it; Gmail keeps its 480/250). Not configured = Gmail only, as before.
+  Code: sesOn/sesSend/sigv4 + sendVia in [[route]].js; test_mail_ses.mjs (SigV4 checked against AWS's get-vanilla vector).
+- **To turn it on (Anthony, once):**
+  1. Own domain (SES cannot send from lockqz.pages.dev). Buy one (Cloudflare Registrar ~$10/yr at cost), e.g. lockqz.app.
+  2. AWS console -> SES (us-east-1) -> Identities -> Create identity -> Domain -> add the 3 DKIM CNAME records it shows
+     (+ the custom MAIL FROM MX/TXT if offered) in the domain's DNS. Wait for "Verified".
+  3. SES -> Account dashboard -> Request production access (transactional; "students' sign-in codes and receipts").
+     Until approved SES only sends to verified addresses (LOCKqz then falls back to Gmail automatically).
+  4. IAM -> Users -> create `lockqz-ses` with only `ses:SendEmail` -> Access key.
+  5. GitHub repo -> Settings -> Secrets: SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY; Variables: MAIL_FROM
+     (e.g. no-reply@lockqz.app), SES_REGION (us-east-1), SES_DAILY_MAX (the quota SES shows). Run the Release workflow.
+
 ## 28 Oct 2026 — scale audit (session 015umora)
 - **Free-plan ceiling (the real limit today).** Workers/Pages Functions Free = 100,000 requests/day (over it: Error 1027
   until 00:00 UTC, i.e. students cannot get quiz passwords); D1 Free = 100,000 rows written/day, 5M rows read/day;
@@ -14,7 +30,7 @@ commit as `Claude <noreply@anthropic.com>`). The claude.ai Project "LOCKqz" has 
   **4,000-5,000 student exam sittings per day** on the free plan. A single university's finals week exceeds that.
   Workers Paid ($5/month: 10M requests/month included, D1 25B reads + 50M writes/month included, 30 s CPU) covers
   hundreds of thousands of students for a few dollars a month. Anthony's $0 rule blocks this — his call.
-- **Email is the second ceiling:** one consumer Gmail = 500 messages/day (LOCKqz budget 480 essential / 250 auto).
+- **Email is the second ceiling (SES now built in, see above):** one consumer Gmail = 500 messages/day (LOCKqz budget 480 essential / 250 auto).
   Every new student's email code uses one, so ~480 new students/day can confirm their email. Google sign-in (in
   progress, session 01UzHDaF) removes most codes; at real scale a transactional sender (SES / Postmark) is needed.
 - **Third: Gmail script runtime.** Google gives free accounts 90 min/day of trigger runtime; the every-minute
