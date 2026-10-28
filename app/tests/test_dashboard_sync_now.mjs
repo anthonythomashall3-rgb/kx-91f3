@@ -1,8 +1,10 @@
 // The dashboard's "Sync now" button, end to end in a REAL Chromium: the real dashboard page and the real
 // sync.js, served at their real addresses (prof.lockqz.pages.dev, brightspace.usc.edu) by request
 // interception, the REAL LOCKqz API on an in-memory database, and a simulated Brightspace API.
-//   S1 no Brightspace tab yet -> the button opens Brightspace in a new tab and says to click the bookmark once
-//   S2 the bookmark is clicked there -> it syncs and the dashboard fills in by itself
+//   W1 first visit: the welcome page (3 steps, exam-day rule, how it works); "Got it" -> home, and never again
+//   S1 no extension and no Sync tab -> Sync now shows the one setup step (Add LOCKqz to Chrome); no tab opens,
+//      no bookmark anywhere
+//   S2 an OLD Sync bookmark still open in Brightspace keeps working (nobody is cut off mid-semester)
 //   S3 the button now syncs through that tab (no bookmark click), and the dashboard says "Synced just now."
 //   S4 after the dashboard is reloaded, the button still finds the Brightspace tab and syncs
 //   S5 a professor change on the dashboard is sent to Brightspace by the button (quiz password removed)
@@ -104,22 +106,39 @@ const waitFor = async (fn, ms = 15000) => { const t0 = Date.now(); while (Date.n
 const status = () => dash.evaluate(() => [...document.querySelectorAll(".syncst")].map(e => e.textContent).join(" | "));
 
 await dash.goto("https://prof.lockqz.pages.dev/dashboard");
-await dash.waitForSelector("button:has-text('Sync now')", { timeout: 15000 });
 
-console.log("S1 no Brightspace tab yet: the button opens Brightspace for one bookmark click");
-const popP = context.waitForEvent("page");
+console.log("W1 first visit: the welcome page");
+await dash.waitForSelector("text=Welcome to LOCKqz", { timeout: 15000 });
+const wt = await dash.innerText("#app");
+check("welcome: what LOCKqz does, in one line", /blocks AI on your students' computers while your Brightspace exams are open/.test(wt), wt.slice(0, 200));
+check("welcome: the 3 steps (add to Chrome, open Brightspace, email students)", /Add LOCKqz to Chrome\./.test(wt) && /Open Brightspace in Chrome and sign in\./.test(wt) && /Email your students\./.test(wt), wt);
+check("welcome: the exam-day rule", /On exam day: keep Chrome open and signed in to Brightspace until the exam ends\./.test(wt));
+check("welcome: how it works (install once, AI off + password entered, never set a password)", /Students install LOCKqz once/.test(wt) && /enters the exam password for them/.test(wt) && /You never set or share a password/.test(wt));
+check("welcome: no bookmark", !/bookmark/i.test(wt));
+await dash.click("button:has-text('Got it')");
+await dash.waitForSelector("text=Set up — 0 of 3 done", { timeout: 15000 });
+check("Got it -> home with the Set-up checklist (step 1: Add LOCKqz to Chrome)", !(await dash.isVisible("text=Welcome to LOCKqz")) && /Add LOCKqz to Chrome/.test(await dash.innerText("#app")));
+await dash.reload(); await dash.waitForSelector("text=Set up — 0 of 3 done", { timeout: 15000 });
+check("never again after a reload", !(await dash.isVisible("text=Welcome to LOCKqz")));
+
+console.log("S1 no extension, no Sync tab: Sync now shows the one setup step");
+const pages0 = context.pages().length;
+await dash.evaluate(() => { location.hash = "connect"; });
+await dash.waitForSelector("button:has-text('Sync now')", { timeout: 15000 });
+check("the connection page: Add LOCKqz + the exam-day rule", /Add LOCKqz to Chrome\. That's the only setup\./.test(await dash.innerText("#app")) && /On exam day, keep Chrome open/.test(await dash.innerText("#app")));
 await dash.click("button:has-text('Sync now')");
-const bs = await popP;
-await bs.waitForLoadState();
-check("Brightspace opened in a new tab", new URL(bs.url()).host === "brightspace.usc.edu", bs.url());
-check("the dashboard shows the 3 setup steps (bookmarks bar, drag, click)", /Brightspace opened in a new tab[\s\S]*bookmarks bar[\s\S]*(⌘|Ctrl) Shift B[\s\S]*Drag[\s\S]*click LOCKqz Sync/.test(await status()), await status());
-check("the draggable LOCKqz Sync bookmark is right there", await dash.evaluate(() => [...document.querySelectorAll(".syncst a.bmk")].some(a => a.getAttribute("href").startsWith("javascript:") && /sync\.js\?k=/.test(a.getAttribute("href")))));
+await dash.waitForTimeout(800);
+check("the Add LOCKqz to Chrome button, right there", /Add LOCKqz to Chrome first/.test(await status()) && await dash.evaluate(() => [...document.querySelectorAll(".syncst a.btn")].some(a => /Add LOCKqz to/.test(a.textContent))), await status());
+check("no tab opened, no bookmark anywhere on the page", context.pages().length === pages0 && !(await dash.evaluate(() => /bookmark/i.test(document.body.innerText) || !!document.querySelector("a.bmk"))), context.pages().length);
 check("nothing synced yet", syncs() === 0);
 
-console.log("S2 the bookmark is clicked in that tab: it syncs and the dashboard fills in by itself");
-const bmk = await dash.evaluate(() => document.querySelector("a.bmk").getAttribute("href"));
-check("the dashboard shows a working bookmark", /^javascript:/.test(bmk) && /sync\.js\?k=/.test(bmk));
-await bs.evaluate(code => { (0, eval)(code); }, decodeURIComponent(bmk.slice("javascript:".length)));
+console.log("S2 an old Sync bookmark still open in Brightspace keeps working");
+const SK = (await api("/synckey", undefined, { "X-LOCKqz-Teacher": PROF })).data.key;
+await dash.evaluate(() => { location.hash = ""; });
+const popP = context.waitForEvent("page");
+await dash.evaluate(() => { window.open("https://brightspace.usc.edu/d2l/home", "lqzbs"); });   // the professor's own Brightspace tab, as before
+const bs = await popP; await bs.waitForLoadState();
+await bs.evaluate(src => { const s = document.createElement("script"); s.src = src; document.body.appendChild(s); }, `https://prof.lockqz.pages.dev/sync.js?k=${SK}&v=1`);
 check("Sync ran in Brightspace", await waitFor(() => syncs() === 1), lqCalls.join(","));
 check("the quiz got its LOCKqz password in Brightspace", await waitFor(() => /^LQ-/.test(BS.quizzes[0].Password || "")), BS.quizzes[0].Password);
 check("the dashboard filled in by itself (class shown)", await waitFor(async () => /ECON 203/.test(await dash.textContent("body"))));
@@ -130,7 +149,7 @@ await dash.click("button:has-text('Sync now')");
 check("the dashboard says it is syncing", /Syncing/.test(await status()) || /Synced just now/.test(await status()), await status());
 check("a sync ran", await waitFor(() => syncs() === before + 1), lqCalls.join(","));
 check("the dashboard says 'Synced just now.'", await waitFor(async () => /Synced just now\./.test(await status())), await status());
-check("no new tab opened", context.pages().length === 2, context.pages().length);
+check("no new tab opened", context.pages().length === 2 + (pages0 - 1), context.pages().length);
 
 console.log("S4 after a dashboard reload the button still finds the Brightspace tab");
 await dash.reload(); await dash.waitForSelector("button:has-text('Sync now')", { timeout: 15000 });
@@ -138,7 +157,7 @@ const b4 = syncs();
 await dash.click("button:has-text('Sync now')");
 check("a sync ran", await waitFor(() => syncs() === b4 + 1), lqCalls.join(","));
 check("'Synced just now.'", await waitFor(async () => /Synced just now\./.test(await status())), await status());
-check("still only the two tabs", context.pages().length === 2, context.pages().length);
+check("still only the two tabs", context.pages().length === 2 + (pages0 - 1), context.pages().length);
 check("Brightspace was not reloaded (the Sync panel is still there)", await bs.evaluate(() => !!document.getElementById("lqz-sync")));
 
 console.log("S5 a change made on the dashboard goes to Brightspace with the button");

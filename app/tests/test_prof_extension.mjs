@@ -142,7 +142,7 @@ const PORT = server.address().port;
 const context = await chromium.launchPersistentContext(join(tmp, "profile"), { channel: "chromium", headless: true, ignoreHTTPSErrors: true,
   args: [`--disable-extensions-except=${EXTDIR}`, `--load-extension=${EXTDIR}`, "--ignore-certificate-errors", "--no-proxy-server",
     `--host-resolver-rules=MAP brightspace.usc.edu 127.0.0.1:${PORT}, MAP prof.lockqz.pages.dev 127.0.0.1:${PORT}, MAP lockqz.pages.dev 127.0.0.1:${PORT}, MAP * ~NOTFOUND`] });
-await context.addInitScript(t => { if (location.host === "prof.lockqz.pages.dev") { localStorage.setItem("lockqz_token", t); localStorage.setItem("lockqz_tour_prof@usc.edu", "1"); } }, PROF);
+await context.addInitScript(t => { if (location.host === "prof.lockqz.pages.dev") { localStorage.setItem("lockqz_token", t); localStorage.setItem("lockqz_tour_prof@usc.edu", "1"); localStorage.setItem("lockqz_welcome_prof@usc.edu", "1"); } }, PROF);
 let sw = context.serviceWorkers()[0] || await context.waitForEvent("serviceworker", { timeout: 15000 });
 const syncs = () => lqCalls.filter(c => c === "/sync").length;
 const waitFor = async (fn, ms = 20000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return true; await new Promise(r => setTimeout(r, 250)); } return false; };
@@ -167,7 +167,7 @@ check("the dashboard filled in by itself", await waitFor(async () => /ECON 203/.
 
 console.log("E2 connect page");
 await dash.evaluate(() => { location.hash = "connect"; });
-check("'Connected automatically', no bookmark steps", await waitFor(async () => { const t = await dash.innerText("body"); return /Connected automatically/.test(t) && !/Drag this button/.test(t); }));
+check("'Connected.', the exam-day rule, no bookmark steps", await waitFor(async () => { const t = await dash.innerText("body"); return /Connected\./.test(t) && /On exam day, keep Chrome open and signed in to Brightspace until the exam ends\./.test(t) && !/bookmark/i.test(t); }));
 
 console.log("E3 Sync now through the extension");
 const b3 = syncs();

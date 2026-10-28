@@ -222,7 +222,7 @@ check("a synced quiz: password given, no email", /^LQ-/.test(r.data?.password ||
 r = await open(333);
 check("unknown quiz: no password (nothing to give)", r.status === 200 && r.data?.password === null, JSON.stringify(r.data));
 check("its professor got one email", MAIL.length === 1 && MAIL[0].to === "prof@usc.edu", JSON.stringify(MAIL));
-check("email names the course and says what to do", /ECON 203/.test(MAIL[0]?.text || "") && /LOCKqz Sync/.test(MAIL[0]?.text || ""), MAIL[0]?.text);
+check("email names the course and says what to do (open Brightspace in Chrome)", /ECON 203/.test(MAIL[0]?.text || "") && /Open Brightspace in Chrome/.test(MAIL[0]?.text || ""), MAIL[0]?.text);
 await open(333); await open(333);
 check("asking again: no second email", MAIL.length === 1, MAIL.length);
 await open(444);

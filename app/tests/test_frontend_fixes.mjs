@@ -161,7 +161,7 @@ function dashTab(w, { token = "", hash = "", now = null } = {}) {
   tab.loc = { hash, search: "", pathname: "/", origin: ORIGIN, reload() { tab.reloads++; } };
   const ctx = { document: { getElementById: el, querySelector: s => el("qs:" + s), querySelectorAll: () => [], addEventListener() {}, activeElement: null },
     window: { addEventListener() {} }, location: tab.loc, history: { replaceState() {} },
-    localStorage: { getItem: k => (ls.has(k) ? ls.get(k) : null), setItem: (k, v) => ls.set(k, String(v)), removeItem: k => ls.delete(k) },
+    localStorage: { getItem: k => (ls.has(k) ? ls.get(k) : /^lockqz_welcome_/.test(k) ? "1" : null), setItem: (k, v) => ls.set(k, String(v)), removeItem: k => ls.delete(k) },
     fetch: (u, o) => w.fetchApi(ORIGIN + u, o), alert: m => tab.alerts.push(String(m)), prompt: () => (tab.prompts.length ? tab.prompts.shift() : null), confirm: () => true,
     navigator: { clipboard: { writeText: async s => { tab.clip = s; } } },
     setInterval: (fn, ms) => { tab.intervals.push({ fn, ms }); return tab.intervals.length; }, clearInterval() {},
@@ -267,7 +267,7 @@ check("5 new session token stored and valid", !!tok && tok !== w.PROF && (await 
 check("5 new password signs in", (await w.api("/login", { email: "prof@usc.edu", password: "newpass123" })).status === 200);
 const sk = w.q("SELECT sync_key FROM teachers WHERE email='prof@usc.edu'").sync_key;
 check("5 dashboard holds the new Sync key", !!sk && sk !== w.KEY && d.run("SYNCKEY") === sk);
-check("5 told to drag the new bookmark", d.alerts.some(a => /bookmark/i.test(a)), d.alerts.join(" | "));
+check("5 'Password changed.' and no bookmark to drag (the extension gets the new key by itself)", d.alerts.some(a => a === "Password changed.") && !d.alerts.some(a => /bookmark/i.test(a)), d.alerts.join(" | "));
 
 console.log("6 data never runs as code in onclick");
 w = await world(); const EVIL = "x');alert(1);//@a.b";
@@ -368,7 +368,7 @@ check("17 lockout text shown", /too many attempts/.test(d.el("lerr").textContent
 d = dashTab(w); d.el("email").value = "admin@usc.edu"; d.el("pw").value = "nope-nope"; await d.run("go()"); await w.idle();
 check("17 wrong password says 'Incorrect password \u2014 try again.'", d.el("lerr").textContent === "Incorrect password \u2014 try again.", d.el("lerr").textContent);
 
-console.log("low: Activate needs a date; a big class gets Copy emails");
+console.log("low: Activate needs a date; a big class's email goes through the professor's own mail app");
 w = await world(); d = dashTab(w, { token: w.ADMIN, hash: "#admin" }); await w.idle();
 const tid = w.q("SELECT id FROM teachers WHERE email='prof@usc.edu'").id;
 d.el("d_" + tid).value = ""; await d.run(`activate("prof@usc.edu","${tid}")`); await w.idle();
@@ -377,8 +377,9 @@ d.run(`ME={name:"P",email:"p@usc.edu",verified:true,active:true}; BS={courses:[{
   students:Array.from({length:120},(_,i)=>({name:"S"+i,email:"student.number"+i+"@usc.edu",installed:false})),
   quizzes:[{qi:"9",name:"Final",active:1,password:"LQ-X",bs_password_is_ours:1,start_date:"2099-01-01T00:00:00Z"}]}]}`);
 const big = d.run("viewHome()"), mails = [...big.matchAll(/href="(mailto:[^"]*)"/g)].map(m => m[1]);
-check("low big class has Copy emails", big.includes("Copy emails"));
-check("low install mailto stays under 2000 characters", mails.length > 0 && mails.every(h => h.length < 2000), mails.map(h => h.length).join(","));
+const src = readFileSync(join(CF, "public", "dashboard.html"), "utf8");
+check("low big class has its Email students button (no address list baked into the page)", /onclick="emailClass\(/.test(big) && mails.length === 0 && !big.includes("student.number1@"), big.length);
+check("low a class too big for a mailto link: addresses copied for Bcc (or shown to copy), mailto under 1900 characters", /full\.length <= 1900/.test(src) && /navigator\.clipboard\.writeText\(d\.to\.join/.test(src) && /showAddresses\(d\.to\)/.test(src));
 
 console.log("12 student pay page");
 w = await world(); let p = payTab(w, "al@usc.edu"); await w.idle();
