@@ -185,10 +185,28 @@ function Show-Pay($r) {
 # and there is nothing to do until the exam. The flag file keeps it to once (survives restarts).
 $ReadyFile = "$UserDir\ready-shown"
 $script:ReadyTold = Test-Path $ReadyFile
-function Show-Ready {
-  $script:ReadyTold = $true
-  try { Set-Content $ReadyFile ([DateTime]::UtcNow.ToString("o")) -Encoding UTF8 } catch {}
-  $text = "LOCKqz is ready. Nothing to do until your exam " + [char]0x2014 + " just open it in Brightspace."
+# The "ready" toast only after the server confirms (signed /verify status through the helper) this computer is
+# verified, paid and not revoked; otherwise "finish setup" (at most every 6 h) and no flag file, so "ready"
+# comes once setup is done. One status check per 30 min; no answer -> nothing shown.
+$script:ReadyNext = [DateTime]::MinValue
+$script:SetupTold = [DateTime]::MinValue
+function Check-Ready {
+  if ([DateTime]::UtcNow -lt $script:ReadyNext) { return }
+  $script:ReadyNext = [DateTime]::UtcNow.AddMinutes(30)
+  $st = $null
+  try { $st = Helper "/verify" @{ op = "status" } 15 } catch { Log "ready status: $_"; return }
+  if (-not $st -or -not $st.status) { return }
+  if (([int]$st.status -eq 200) -and ($st.verified -eq $true) -and ($st.paid -eq $true)) { Show-Ready $true; return }
+  if ([DateTime]::UtcNow -lt $script:SetupTold.AddHours(6)) { return }
+  $script:SetupTold = [DateTime]::UtcNow
+  Show-Ready $false
+}
+function Show-Ready($ok) {
+  if ($ok) {
+    $script:ReadyTold = $true
+    try { Set-Content $ReadyFile ([DateTime]::UtcNow.ToString("o")) -Encoding UTF8 } catch {}
+    $text = "LOCKqz is ready. Nothing to do until your exam " + [char]0x2014 + " just open it in Brightspace."
+  } else { $text = "LOCKqz is installed. Finish setup before your exam: open https://lockqz.pages.dev" }
   # A toast through WinRT, in its own hidden process (never stalls the watch loop); a message box if toasts are off.
   $cmd = @"
 try {
@@ -529,7 +547,7 @@ function Send-Unlock($quiz, $reason) {
 while ($true) {
   try {
     $wins = @(Get-BrowserWindows)
-    if ((-not $ReadyTold) -and (@($wins | Where-Object { $_.Url -match '/d2l/' }).Count -gt 0)) { Show-Ready }
+    if ((-not $ReadyTold) -and (@($wins | Where-Object { $_.Url -match '/d2l/' }).Count -gt 0)) { Check-Ready }
     $quizWin = $wins | Where-Object { Is-Quiz $_.Url } | Select-Object -First 1
     $openId = if ($quizWin) { Lock-Id $quizWin.Url } else { $null }
     Step-Caps $openId $(if ($quizWin) { $quizWin.Url } else { "" })

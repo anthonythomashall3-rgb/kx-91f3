@@ -24,6 +24,8 @@ TOKEN_DIR = os.environ.get("LOCKQZ_TOKEN_DIR") or "/Library/Application Support/
 USER_DIR = os.path.expanduser("~/Library/Application Support/LOCKqz")
 READY_FLAG = os.path.join(USER_DIR, "ready-shown")   # written once the "LOCKqz is ready" notice was shown
 READY_TEXT = "LOCKqz is ready. Nothing to do until your exam \u2014 just open it in Brightspace."
+# Shown instead while the server does not confirm this computer is verified, paid and not revoked.
+SETUP_TEXT = "LOCKqz is installed. Finish setup before your exam: open https://lockqz.pages.dev"
 USER_CONF = os.path.join(USER_DIR, "student.json")
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -976,15 +978,30 @@ class Agent:
 
     def ready_notice(self, urls):
         """Once ever: the first time a Brightspace tab is seen after install, a notification says LOCKqz is
-        ready and there is nothing to do until the exam. The flag file keeps it to once."""
+        ready and there is nothing to do until the exam -- but ONLY after the server confirms (signed /verify
+        status) this computer is verified, paid and not revoked. Otherwise "finish setup" (at most every 6 h)
+        and the flag is not written, so "ready" comes once setup is done. No answer -> nothing shown."""
         if self.ready_told or not any("/d2l/" in (u or "") for u in urls): return
-        self.ready_told = True
-        try:
-            os.makedirs(USER_DIR, exist_ok=True)
-            with open(READY_FLAG, "w") as f: f.write(time.strftime("%Y-%m-%dT%H:%M:%S"))
-        except Exception as e: log("ready flag: %s" % e)
-        try: subprocess.run(["osascript", "-e", 'display notification "%s" with title "LOCKqz"' % READY_TEXT], timeout=10, capture_output=True)
-        except Exception as e: log("ready notice: %s" % e)
+        now = time.time()
+        if getattr(self, "ready_busy", False) or now < getattr(self, "ready_next", 0.0): return
+        self.ready_busy, self.ready_next = True, now + 1800   # one status check per 30 min at most
+        def run():
+            try:
+                st = self.verify_call("status")
+                if not st: return                                  # helper / network trouble: claim nothing
+                ok = st.get("status") == 200 and st.get("verified") is True and st.get("paid") is True
+                if ok:
+                    self.ready_told = True
+                    try:
+                        os.makedirs(USER_DIR, exist_ok=True)
+                        with open(READY_FLAG, "w") as f: f.write(time.strftime("%Y-%m-%dT%H:%M:%S"))
+                    except Exception as e: log("ready flag: %s" % e)
+                elif now - getattr(self, "setup_told", 0.0) < 6 * 3600: return
+                else: self.setup_told = now
+                try: subprocess.run(["osascript", "-e", 'display notification "%s" with title "LOCKqz"' % (READY_TEXT if ok else SETUP_TEXT)], timeout=10, capture_output=True)
+                except Exception as e: log("ready notice: %s" % e)
+            finally: self.ready_busy = False
+        threading.Thread(target=run, daemon=True).start()
 
     def tick(self, tabs=None, dev=None):
         # Developer mode (admin only): same quiz flow (gate password, start/end reporting) but the

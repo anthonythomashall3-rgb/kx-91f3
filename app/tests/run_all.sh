@@ -50,6 +50,7 @@ run "Front-end audit regressions (dashboard + Sync panel)" node --no-warnings te
 run "Sync panel = dashboard (same classes, same on/off, class switch + Send email on every class)" node --no-warnings test_class_parity.mjs
 run "Professor zero-effort: default on, password rewrite, HTML emails + cron reminders + T-70 check-in, popup/field lock/notices" node --no-warnings test_prof_zero_effort.mjs
 run "Past exams: 'was protected' only on proof from Brightspace (prot_at / unprot_at)" node --no-warnings test_protected_history.mjs
+run "Status truth: ready/installed, protected counts, live labels, check-in, agent ready notice" node --no-warnings test_status_truth.mjs
 run "OSAS accommodations + quiz timing (extra time, makeups, mid-gate special access, DST, assistive tools)" node --no-warnings test_osas.mjs
 if command -v xvfb-run >/dev/null 2>&1 && [ "$(id -u)" = 0 ]; then run "Real Chromium loads the quiz policy (AI refused, Web search + notes allowed, extensions off)" xvfb-run -a node --no-warnings test_chrome_policy_real.mjs; fi
 if command -v pwsh >/dev/null 2>&1; then

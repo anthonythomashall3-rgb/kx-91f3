@@ -220,7 +220,7 @@ sqlite.prepare("UPDATE teachers SET ext_seen=? WHERE email='prof@usc.edu'").run(
 setStart(113, 0.9); MAILS.length = 0; await api("/cron", {}, CRON);
 check("extension checked in within 6 h -> no check-in email", mailsTo("prof@usc.edu").length === 0, JSON.stringify(MAILS.map(m => [m.to, m.subject])));
 r = await api("/ext-status", undefined, { "X-LOCKqz-Sync": KEY });
-check("/ext-status (popup): name, counts, next exam with installed/total, no student data", r.data && r.data.name === "Duke Bristow" && r.data.classes === 2 && r.data.exams >= 3 && r.data.next && r.data.next.total === 3 && r.data.next.ready === 1 && !JSON.stringify(r.data).includes("al@usc.edu"), JSON.stringify(r.data));
+check("/ext-status (popup): name, counts, next exam with installed/total, no student data", r.data && r.data.name === "Duke Bristow" && r.data.classes === 2 && r.data.exams + r.data.waiting >= 3 && r.data.next && r.data.next.total === 3 && r.data.next.ready === 1 && !JSON.stringify(r.data).includes("al@usc.edu"), JSON.stringify(r.data));
 check("/pay/tick runs the same exam tick", (await api("/pay/tick", {}, CRON)).data.exams !== undefined);
 
 console.log("Z5 SMTP: multipart/alternative, Reply-To, RFC 2047 subject, several recipients");
@@ -266,8 +266,8 @@ check("content-bs: the one-time first-visit card (Syncing your classes… -> Don
 check("build.sh packages the popup", /popup\.html popup\.js/.test(readFileSync(join(EXT, "build.sh"), "utf8")));
 const dash = readFileSync(join(CF, "public", "dashboard.html"), "utf8");
 check("dashboard: one store-link config block (CHROME/EDGE/FIREFOX) with the fill-in comment; zip fallback + load-unpacked line", /const EXT_STORE = \{ CHROME: "", EDGE: "", FIREFOX: "" \};\s*\/\/ fill in when store listing is live/.test(dash) && /lockqz-prof-chromium\.zip/.test(dash) && /Load unpacked/.test(dash));
-check("dashboard: Set up — N of 3 done, the three steps with their exact buttons", /Set up — \$\{done\} of 3 done/.test(dash) && /Add LOCKqz to \$\{BROWSER_NAME\}/.test(dash) && />Open Brightspace</.test(dash) && /Email students/.test(dash) && /Remind the \$\{s\.missing\.length\} who haven't installed/.test(dash));
-check("dashboard: Email students opens the professor's own mail app (mailto Bcc, copy-to-Bcc for big classes), per-exam 'Nothing to do' line, reminders switch", /location\.href = full/.test(dash) && /mailto:\?bcc=/.test(dash) && /Paste them into Bcc/.test(dash) && /Nothing to do — LOCKqz sets the password and opens the exam for installed students\./.test(dash) && /setReminders/.test(dash));
+check("dashboard: Set up — N of 3 done, the three steps with their exact buttons", /Set up — \$\{done\} of 3 done/.test(dash) && /Add LOCKqz to \$\{BROWSER_NAME\}/.test(dash) && />Open Brightspace</.test(dash) && /Email students/.test(dash) && /Remind the \$\{s\.missing\.length\} who aren't ready/.test(dash) && /Emailed \$\{esc\(when\(c\.mailed_at\)\)\}/.test(dash));
+check("dashboard: Email students opens the professor's own mail app (mailto Bcc, copy-to-Bcc for big classes), per-exam 'Nothing to do' line, reminders switch", /location\.href = full/.test(dash) && /mailto:\?bcc=/.test(dash) && /Paste them into Bcc/.test(dash) && /Nothing to do\. LOCKqz sets the password and, while your browser is open, lets in students who have LOCKqz\./.test(dash) && !/opens the exam for installed students/.test(dash) && /setReminders/.test(dash));
 check("dashboard: no bookmark anywhere a professor can see (no drag button, no bookmarks-bar steps)", !/class="bmk"/.test(dash) && !/bookmarks bar/i.test(dash) && !/Drag this button/.test(dash));
 check("dashboard: welcome page (3 steps, exam-day rule, how it works) shown first, and from the menu", /Welcome to LOCKqz/.test(dash) && /What you do — once/.test(dash) && /On exam day: keep \$\{BROWSER_NAME\} open and signed in to Brightspace until the exam ends\./.test(dash) && /How it works/.test(dash) && /v==="" && !welcomed\(\)/.test(dash) && /How LOCKqz works/.test(dash));
 check("dashboard: exam-day banner (protected exam within 24 h) says keep the browser open", /examday/.test(dash) && /Keep \$\{BROWSER_NAME\} open and signed in to Brightspace until it ends\./.test(dash));
@@ -275,8 +275,8 @@ check("dashboard: Safari gets 'works in Chrome, Edge or Firefox'", /LOCKqz works
 check("extension popup: the exam-day line", /On exam day:<\/b> keep this browser open and signed in to Brightspace until the exam ends/.test(readFileSync(join(EXT, "popup.html"), "utf8")));
 check("the logo is served at lockqz.pages.dev/icon128.png (emails)", existsSync(join(CF, "public", "icon128.png")));
 const mac = readFileSync(join(APP, "mac", "lockqz-agent.py"), "utf8"), win = readFileSync(join(APP, "windows", "lockqz-agent.ps1"), "utf8");
-check("Mac agent: the one-time ready notice (display notification, flag file)", /display notification/.test(mac) && /LOCKqz is ready\. Nothing to do until your exam/.test(mac) && /ready-shown/.test(mac));
-check("Windows agent: the one-time ready toast (flag file)", /ToastNotification/.test(win) && /LOCKqz is ready\. Nothing to do until your exam/.test(win) && /ready-shown/.test(win));
+check("Mac agent: the one-time ready notice (display notification, flag file)", /display notification/.test(mac) && /LOCKqz is ready\. Nothing to do until your exam/.test(mac) && /ready-shown/.test(mac) && /verify_call\("status"\)/.test(mac) && /Finish setup before your exam/.test(mac));
+check("Windows agent: the one-time ready toast (flag file)", /ToastNotification/.test(win) && /LOCKqz is ready\. Nothing to do until your exam/.test(win) && /ready-shown/.test(win) && /op = "status"/.test(win) && /Finish setup before your exam/.test(win));
 check("Gmail script calls /cron every ~10 min; wrangler.toml explains (Pages has no cron trigger)", /\/cron/.test(readFileSync(join(APP, "payments", "LOCKqz-payments.gs"), "utf8")) && /\/api\/cron/.test(readFileSync(join(CF, "wrangler.toml"), "utf8")));
 
 console.log("Z7 one Gmail budget: automatic mail stops at 250 / 24 h, sign-in codes always have room (up to 480)");

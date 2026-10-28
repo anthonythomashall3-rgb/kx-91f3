@@ -58,7 +58,7 @@ api.notifications.onClicked.addListener(async () => {
 
 async function tick() {
   const now = Date.now();
-  const st = await get(["key", "schedule", "autoGate", "gateTab", "gateOpenedAt", "gateSeen", "gates", "tmpTab", "tmpAt", "tmpAsked", "lastSync", "notedAt"]);
+  const st = await get(["key", "schedule", "autoGate", "gateTab", "gateOpenedAt", "gateSeen", "gates", "tmpTab", "tmpAt", "tmpAsked", "lastSync", "lastCheck", "notedAt"]);
   if (!st.key) return;
   const gate = await tabAlive(st.gateTab);
   const gatesRunning = Number(st.gates) > 0 && now - Number(st.gateSeen || 0) < 2 * MIN;
@@ -86,7 +86,7 @@ async function tick() {
     await set({ tmpTab: null, signin: true });
   }
   // Every 6 h while the browser is open: a quiet sync in a background tab (new quizzes, roster changes).
-  if (!tmp && !gate && now - Number(st.lastSync || 0) > BG_MS && now - Number(st.tmpAt || 0) > BG_MS) await syncNow(false);
+  if (!tmp && !gate && now - Math.max(Number(st.lastSync || 0), Number(st.lastCheck || 0)) > BG_MS && now - Number(st.tmpAt || 0) > BG_MS) await syncNow(false);
   // Every 4 h while the browser is open: "I'm here" to LOCKqz (one tiny request; the server writes at most
   // once per 4 h). Without it LOCKqz emails the professor an hour before an exam to open Chrome.
   const seen = await get(["seenAt"]);
@@ -158,7 +158,9 @@ async function handle(msg, sender) {
       setTimeout(() => serial(tick), 0);   // after this message is answered (one event at a time)
       return;
     }
-    if (m.lqz === "synced") { await set({ lastSync: now, signin: false, statusAt: 0 }); badge(""); }
+    // lastSync = a real sync with LOCKqz; the "nothing changed in Brightspace" skip only records a check.
+    // ok:false (some exams could not be updated in Brightspace) keeps the "!" badge.
+    if (m.lqz === "synced") { await set(m.unchanged ? { lastCheck: now, signin: false } : { lastSync: now, signin: false, statusAt: 0 }); badge(m.ok === false ? "!" : ""); }
     if (m.lqz === "failed") badge("!");
     if ((m.lqz === "synced" || m.lqz === "failed") && tab != null && tab === st.tmpTab) {
       await set({ tmpTab: null });

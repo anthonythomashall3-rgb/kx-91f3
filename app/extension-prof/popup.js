@@ -20,9 +20,10 @@
     if (st.signin) setStatus("Sign in to Brightspace to sync", "warn");
     else setStatus("Connected" + (s.name ? " · Prof. " + lastName(s.name) : ""), "ok");
     $("synced").textContent = "Last synced " + ago(st.lastSync);
-    if (s.classes != null) $("counts").textContent = `${s.classes} class${s.classes === 1 ? "" : "es"} · ${s.exams} exam${s.exams === 1 ? "" : "s"} protected`;
+    // Protected = LOCKqz's password confirmed in Brightspace; the rest are shown as waiting.
+    if (s.classes != null) $("counts").textContent = `${s.classes} class${s.classes === 1 ? "" : "es"} · ${s.exams} exam${s.exams === 1 ? "" : "s"} protected` + (s.waiting ? ` · ${s.waiting} waiting to be set in Brightspace` : "");
     if (s.next) { $("next").hidden = false; $("next").innerHTML = ""; const b = document.createElement("b"); b.textContent = "Next exam: " + (s.next.course ? s.next.course + " · " : "") + s.next.name;
-      $("next").append(b, document.createTextNode(when(s.next.start) + " · " + s.next.ready + "/" + s.next.total + " students installed")); }
+      $("next").append(b, document.createTextNode(when(s.next.start) + " · " + s.next.ready + "/" + s.next.total + " students ready" + (s.next.unpaid ? " · " + s.next.unpaid + " installed, not paid" : ""))); }
     else $("next").hidden = true;
     $("sync").disabled = false;
   }
@@ -40,8 +41,8 @@
     try { await api.runtime.sendMessage({ t: "sync" }); } catch {}
     const t0 = Date.now();
     const wait = setInterval(async () => {
-      const n = await api.storage.local.get(["lastSync", "signin"]);
-      if (Number(n.lastSync) > t0) { clearInterval(wait); await api.storage.local.set({ statusAt: 0 }); $("sync").textContent = "Synced"; await draw(); await fetchStatus(); setTimeout(() => { $("sync").textContent = "Sync now"; }, 2500); }
+      const n = await api.storage.local.get(["lastSync", "lastCheck", "signin"]);
+      if (Number(n.lastSync) > t0 || Number(n.lastCheck) > t0) { clearInterval(wait); await api.storage.local.set({ statusAt: 0 }); $("sync").textContent = "Synced"; await draw(); await fetchStatus(); setTimeout(() => { $("sync").textContent = "Sync now"; }, 2500); }
       else if (n.signin || Date.now() - t0 > 180000) { clearInterval(wait); $("sync").textContent = "Sync now"; await draw(); }
     }, 1000);
   };

@@ -362,8 +362,16 @@ const MAIL = {
     return { subject, text, html };
   },
   // To the students who have not installed (kind "missing", and the automatic 48 h / 3 h reminders).
-  reminder({ course, code, prof, last, exam, when, start_date }) {
+  // unpaid: LOCKqz is installed on a confirmed computer but this term's fee is not paid.
+  reminder({ course, code, prof, last, exam, when, start_date, unpaid }) {
     const label = courseLabel({ name: course, code }), date = mailWhen(start_date);
+    if (unpaid) {
+      const PAYLINE = `LOCKqz is installed but your semester fee is not paid \u2014 pay at ${SITE_URL} before the exam.`;
+      const subject = `Reminder: ${exam}${date ? " on " + date : ""} \u2014 your LOCKqz fee is not paid`;
+      const text = `Hi,\n\n${exam} for ${label} is ${when}.\n\n${PAYLINE}\n\n${signTxt(prof, label)}\n\n--\nSent by LOCKqz on behalf of Professor ${last}. Replies go to your professor. ${SITE_URL}/privacy`;
+      const html = mailWrap(P("Hi,") + P(`<b>${hesc(exam)}</b> for ${hesc(label)} is <b>${hesc(when)}</b>.`) + P(`<b>LOCKqz is installed but your semester fee is not paid</b> \u2014 pay at <a href="${SITE_URL}" style="color:#990000">lockqz.pages.dev</a> before the exam.`) + signHtml(prof, label), studentFooter(last));
+      return { subject, text, html };
+    }
     const subject = `Reminder: install LOCKqz before ${exam}${date ? " on " + date : ""}`;
     const text = `Hi,\n\nLOCKqz is not installed on your computer yet, and ${exam} for ${label} is ${when}. Without it the exam will not open.\n\n${STEPS_TXT}\n\n${signTxt(prof, label)}\n\n--\nSent by LOCKqz on behalf of Professor ${last}. Replies go to your professor. ${SITE_URL}/privacy`;
     const html = mailWrap(P("Hi,") + P(`<b>LOCKqz is not installed on your computer yet</b>, and <b>${hesc(exam)}</b> for ${hesc(label)} is <b>${hesc(when)}</b>. Without it the exam will not open.`) + STEPS_HTML + signHtml(prof, label), studentFooter(last));
@@ -1286,17 +1294,32 @@ export async function onRequest(context) {
   const withOrig = row => { let o = {}; try { o = JSON.parse(row.orig || "{}") || {}; } catch {}
     const { orig, ...r } = row;
     return { ...r, orig_password: "pw" in o ? o.pw : null, orig_password_saved: "pw" in o, orig_hidden: "hidden" in o ? !!o.hidden : null, orig_hidden_saved: "hidden" in o }; };
+  // "Ready" for an exam = what /password would admit, time and gate aside (27 Oct: no status shown may be
+  // false): a LOCKqz device for the email that is not revoked, was seen in the last 30 days and (email codes
+  // or the fee on) has a CONFIRMED email -- plus this term's fee paid (paidEmails, the gate's own rule).
+  const READY_DAYS = 30;
+  async function liveDevices(ems) {
+    if (!ems.length) return [];
+    const since = new Date(Date.now() - READY_DAYS * 864e5).toISOString();
+    return (await db.prepare("SELECT d.device_id, d.student AS who, d.platform, d.version, d.last_seen FROM json_each(?) j JOIN devices d ON d.student=j.value WHERE (d.student_verified=1 OR ?=0) AND COALESCE(d.revoked,0)=0 AND COALESCE(d.last_seen,d.installed_at)>?")
+      .bind(JSON.stringify(ems), (codesOn || feeOn()) ? 1 : 0, since).all()).results;
+  }
   // A class's students' emails (Learners and TAs, never instructors, never the admin). kind "missing": only
-  // those with no (verified) LOCKqz device. Same rule as /bs's installed flag.
+  // those NOT ready (see liveDevices). Same rule as /bs's ready flag. kind "split" -> { all, missing, unpaid }
+  // (unpaid: installed and confirmed, fee not paid -- a subset of missing).
   async function classRecipients(ou, kind) {
     const snaps = await rosterSnaps([ou]);
     const rows = snaps.get(String(ou)) || (await db.prepare("SELECT ou,user_id,name,email,username,role FROM roster WHERE ou=?").bind(String(ou)).all()).results;
     const admins = new Set(((await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin'").all()).results).map(x => x.e));
     let ems = [...new Set(rows.filter(r => takesQuizzes(r.role) && r.email && EMAIL_OK(String(r.email).toLowerCase())).map(r => String(r.email).toLowerCase()))].filter(e => !admins.has(e));
-    if (kind === "missing" && ems.length) {
-      const have = new Set((await db.prepare("SELECT DISTINCT d.student AS e FROM json_each(?) j JOIN devices d ON d.student=j.value WHERE (d.student_verified=1 OR ?=0)").bind(JSON.stringify(ems), codesOn ? 1 : 0).all()).results.map(x => String(x.e).toLowerCase()));
-      ems = ems.filter(e => !have.has(e));
+    if ((kind === "missing" || kind === "split") && ems.length) {
+      const have = new Set((await liveDevices(ems)).map(x => String(x.who).toLowerCase()));
+      const paid = have.size ? await paidEmails([...have]) : new Set();
+      const missing = ems.filter(e => !(have.has(e) && paid.has(e)));
+      if (kind === "split") return { all: ems, missing, unpaid: missing.filter(e => have.has(e)) };
+      ems = missing;
     }
+    if (kind === "split") return { all: ems, missing: [], unpaid: [] };
     return ems;
   }
   async function classOff(ous) {
@@ -1395,7 +1418,8 @@ export async function onRequest(context) {
       const vtokenFor = async em => vSecret ? (await hmacHex(String(vSecret), "lqz-verified:" + em)).slice(0, 40) : null;
       if (op === "status") {
         const ver = Number(d?.student_verified) === 1 && !!d?.student;
-        return json({ student: d?.student || null, verified: ver, codes: codesOn, ...(ver ? { vtoken: await vtokenFor(String(d.student).toLowerCase()) } : {}) });
+        // paid: this term's fee (the agent's one-time "LOCKqz is ready" notice waits for verified + paid).
+        return json({ student: d?.student || null, verified: ver, codes: codesOn, paid: ver ? await studentPaid(String(d.student).toLowerCase()) : !feeOn(), ...(ver ? { vtoken: await vtokenFor(String(d.student).toLowerCase()) } : {}) });
       }
       if (!EMAIL_OK(email)) return json({ error: "bad_email" }, 400);
       const rosterName = async () => (await db.prepare("SELECT name FROM roster WHERE email=? AND name IS NOT NULL LIMIT 1").bind(email).first())?.name || null;
@@ -2166,17 +2190,19 @@ export async function onRequest(context) {
           const m = MAIL.checkin({ exam });
           try { await mailOut(r.email, m.subject, m.text, { html: m.html }, "auto"); sends++; out.checkins++; await record(String(r.ou), ck, 1); } catch { out.skipped++; }
         }
-        // Reminders to students who have not installed (2 days and 3 hours before), from the automatic budget.
+        // Reminders to students who are not ready (2 days and 3 hours before), from the automatic budget:
+        // not installed -> the install reminder; installed on a confirmed computer but fee unpaid -> the pay line.
         const kind = lead <= 3 * 3600000 ? "r3:" + r.qi : lead <= 48 * 3600000 ? "r48:" + r.qi : null;
         if (kind && Number(r.reminders ?? 1) !== 0 && !sent.has(r.ou + "|" + kind)) {
-          const list = await classRecipients(String(r.ou), "missing");
+          const sp = await classRecipients(String(r.ou), "split"), list = sp.missing, unp = new Set(sp.unpaid);
           if (!list.length) { sent.add(r.ou + "|" + kind); await record(String(r.ou), kind, 0); }
           else if (!(await mailRoom(list.length, "auto"))) out.skipped++;   // not marked sent: a later tick retries if room frees up
           else {
             sent.add(r.ou + "|" + kind);
-            const m = MAIL.reminder({ course: r.course, code: r.code, prof, last, exam, when: inWords(lead), start_date: r.start_date });
+            const base = { course: r.course, code: r.code, prof, last, exam, when: inWords(lead), start_date: r.start_date };
             let done = 0;
-            try { for (const part of chunk(list, MAIL_BATCH)) { await mailOut(part, m.subject, m.text, { html: m.html, replyTo: r.email }, "auto"); sends++; done += part.length; } } catch { out.skipped++; }
+            try { for (const [grp, m] of [[list.filter(e => !unp.has(e)), MAIL.reminder(base)], [sp.unpaid, MAIL.reminder({ ...base, unpaid: true })]])
+                for (const part of chunk(grp, MAIL_BATCH)) { await mailOut(part, m.subject, m.text, { html: m.html, replyTo: r.email }, "auto"); sends++; done += part.length; } } catch { out.skipped++; }
             out.reminders += done; if (done) await record(String(r.ou), kind, done);
           }
         }
@@ -2530,7 +2556,7 @@ export async function onRequest(context) {
           // A password in LOCKqz's own format (lq_password: "LQ-" + 8 of rid()'s letters, or a gate code
           // "LQ-" + 10 hex) is ours, never the professor's: e.g. a course copied from a term LOCKqz
           // protected keeps the old code, which nobody can hand out any more -> auto-protect replaces it.
-          const v = [str(q.name), q.active ? 1 : 0, str(q.start, 40), str(q.end, 40), str(q.due, 40), q.has_password ? 1 : 0, (q.has_password && ((o && Number(o.bs_password_is_ours) === 1) || q.lq_password === true)) ? 1 : 0, overMinOf(q, ACCOM)];
+          const v = [str(q.name), q.active ? 1 : 0, str(q.start, 40), str(q.end, 40), str(q.due, 40), q.has_password ? 1 : 0, (q.has_password && (typeof q.lq_password === "boolean" ? q.lq_password : (o && Number(o.bs_password_is_ours) === 1))) ? 1 : 0, overMinOf(q, ACCOM)];
           if (v[5] === 1 && v[6] === 0) { ownPw.add(`${ou}-${qi}`); own.push(qi); }
           if (!o || !same(o.name, v[0]) || Number(o.active) !== v[1] || !same(o.start_date, v[2]) || !same(o.end_date, v[3]) || !same(o.due_date, v[4]) || Number(o.bs_has_password) !== v[5] || Number(o.bs_password_is_ours) !== v[6] || !same(o.over_min, v[7])) up.push([ou, qi, ...v, t]);
         }
@@ -2663,23 +2689,24 @@ export async function onRequest(context) {
     if (p === "/ext-status") {
       const cs = (await db.prepare("SELECT ou,name,code,synced_at FROM teacher_courses WHERE teacher_id=? AND COALESCE(in_sync,1)<>0 ORDER BY name LIMIT 200").bind(me.id).all()).results;
       const ous = cs.map(c => String(c.ou));
-      let exams = 0, next = null;
+      let exams = 0, waiting = 0, next = null;
       if (ous.length) {
         const off = await classOff(ous), live = ous.filter(o => !off.has(o)), nowIso = now();
         for (const part of chunk(live, 98)) {
-          const rows = (await db.prepare(`SELECT b.ou AS ou, b.qi AS qi, b.name AS name, b.start_date AS start_date FROM bs_quizzes b JOIN quizzes q ON q.ou=b.ou AND q.qi=b.qi WHERE b.ou IN (${placeholders(part.length)}) AND (b.end_date IS NULL OR b.end_date>?)`).bind(...part, nowIso).all()).results;
-          exams += rows.length;
+          const rows = (await db.prepare(`SELECT b.ou AS ou, b.qi AS qi, b.name AS name, b.start_date AS start_date, b.bs_password_is_ours AS ours FROM bs_quizzes b JOIN quizzes q ON q.ou=b.ou AND q.qi=b.qi WHERE b.ou IN (${placeholders(part.length)}) AND (b.end_date IS NULL OR b.end_date>?)`).bind(...part, nowIso).all()).results;
+          // Protected = LOCKqz's password confirmed in Brightspace; the rest are waiting to be set there.
+          for (const r of rows) { if (Number(r.ours) === 1) exams++; else waiting++; }
           for (const r of rows) if (r.start_date && r.start_date > nowIso && (!next || r.start_date < next.start_date)) next = r;
         }
         if (next) {
-          const all = await classRecipients(String(next.ou), "all"), miss = await classRecipients(String(next.ou), "missing");
+          const sp = await classRecipients(String(next.ou), "split");
           const c = cs.find(x => String(x.ou) === String(next.ou)) || {};
-          next = { course: String(c.name || "").replace(/^\d+_\w+\s*/, "").slice(0, 120), name: String(next.name || "").slice(0, 120), start: next.start_date, total: all.length, ready: all.length - miss.length };
+          next = { course: String(c.name || "").replace(/^\d+_\w+\s*/, "").slice(0, 120), name: String(next.name || "").slice(0, 120), start: next.start_date, total: sp.all.length, ready: sp.all.length - sp.missing.length, unpaid: sp.unpaid.length };
         }
       }
       if (!me.admin) { const cut = new Date(Date.now() - 4 * 3600000).toISOString();
         await db.prepare("UPDATE teachers SET ext_seen=? WHERE id=? AND (ext_seen IS NULL OR ext_seen<?)").bind(now(), me.id, cut).run(); }
-      return json({ name: me.name || null, classes: cs.length, exams, next, last_sync: cs.map(c => c.synced_at).filter(Boolean).sort().pop() || null });
+      return json({ name: me.name || null, classes: cs.length, exams, waiting, next, last_sync: cs.map(c => c.synced_at).filter(Boolean).sort().pop() || null });
     }
     // Automatic reminders (48 h / 3 h before each exam, to students without LOCKqz) on or off for a class.
     if (p === "/class-mail" && request.method === "POST") {
@@ -2700,14 +2727,19 @@ export async function onRequest(context) {
       if (!/^\d+$/.test(ou)) return json({ error:"bad class" }, 400);
       if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this class can email it." }, 403);
       const c = await db.prepare("SELECT name, code FROM teacher_courses WHERE ou=? ORDER BY teacher_id=? DESC LIMIT 1").bind(ou, me.id).first() || {};
-      const list = await classRecipients(ou, kind);
+      const sp = kind === "missing" ? await classRecipients(ou, "split") : null, list = sp ? sp.missing : await classRecipients(ou, kind);
       if (!list.length) return json({ to: [], kind, none: true });
       const prof = String(me.name || me.email).trim(), last = lastName(prof) || prof;
-      const fe = await db.prepare("SELECT b.name AS name, b.start_date AS start_date FROM bs_quizzes b JOIN quizzes q ON q.ou=b.ou AND q.qi=b.qi WHERE b.ou=? AND b.start_date>? ORDER BY b.start_date LIMIT 1").bind(ou, now()).first();
+      // The first exam LOCKqz actually covers: a protected quiz (password set or waiting) in a class that is
+      // covered (on, signed-up professor). A class LOCKqz does not cover names no exam.
+      const fe = (await courseCovered(ou)) ? await db.prepare("SELECT b.name AS name, b.start_date AS start_date FROM bs_quizzes b JOIN quizzes q ON q.ou=b.ou AND q.qi=b.qi WHERE b.ou=? AND b.start_date>? ORDER BY b.start_date LIMIT 1").bind(ou, now()).first() : null;
       let m;
       if (kind === "all") m = MAIL.student({ course: c.name, code: c.code, prof, last, firstExam: fe });
-      else { const lead = fe && fe.start_date ? Date.parse(fe.start_date) - Date.now() : NaN;
-        m = MAIL.reminder({ course: c.name, code: c.code, prof, last, exam: fe && fe.name ? fe.name : "your next exam", when: isNaN(lead) ? "coming up" : inWords(lead), start_date: fe ? fe.start_date : null }); }
+      else { const lead = fe && fe.start_date ? Date.parse(fe.start_date) - Date.now() : NaN, unp = new Set(sp.unpaid), notInst = list.some(e => !unp.has(e));
+        // One draft: install wording when anyone has not installed; the pay line when anyone installed but has not paid.
+        m = MAIL.reminder({ course: c.name, code: c.code, prof, last, exam: fe && fe.name ? fe.name : "your next exam", when: isNaN(lead) ? "coming up" : inWords(lead), start_date: fe ? fe.start_date : null, unpaid: !notInst });
+        if (notInst && unp.size) m = { ...m, text: String(m.text).replace("LOCKqz is not installed on your computer yet", "LOCKqz is not ready on your computer yet")
+          .replace("Without it the exam will not open.", `Without it the exam will not open.\n\nAlready installed LOCKqz? Then your semester fee is not paid \u2014 pay at ${SITE_URL} before the exam.`) }; }
       // The professor sends it themselves: drop LOCKqz's "sent on behalf of" footer from the draft.
       const text = String(m.text).replace(/\n\n--\nSent by LOCKqz on behalf of[^\n]*$/, "");
       await db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, kind, laToday(), list.length, now()).run();
@@ -2883,9 +2915,10 @@ export async function onRequest(context) {
         // Installed devices by email through devices(student) -- no scan of every device (I-B3). Each
         // distinct email once (the join read every class-list row of every course again).
         const ems = [...new Set(rows.map(r => r.email).filter(e => e != null))];
-        if (ems.length) devs.push(...(await db.prepare(`SELECT d.device_id, d.student AS who, d.platform, d.version, d.last_seen FROM json_each(?) j JOIN devices d ON d.student=j.value WHERE (d.student_verified=1 OR ?=0)`).bind(JSON.stringify(ems), codesOn ? 1 : 0).all()).results);
-        // Old installs that typed a name (only while email codes are off).
-        if (!codesOn) devs.push(...(await db.prepare(`SELECT device_id, lower(student) AS who, platform, version, last_seen FROM devices WHERE lower(student) IN (SELECT lower(name) FROM roster WHERE ou IN (${ph}))`).bind(...part).all()).results);
+        // Only devices /password would admit (not revoked, seen in 30 days, confirmed email): liveDevices.
+        if (ems.length) devs.push(...await liveDevices(ems));
+        // Old installs that typed a name (only while email codes and the fee are off).
+        if (!codesOn && !feeOn()) devs.push(...(await db.prepare(`SELECT device_id, lower(student) AS who, platform, version, last_seen FROM devices WHERE lower(student) IN (SELECT lower(name) FROM roster WHERE ou IN (${ph})) AND COALESCE(revoked,0)=0 AND COALESCE(last_seen,installed_at)>?`).bind(...part, new Date(Date.now() - READY_DAYS * 864e5).toISOString()).all()).results);
       }
       // Two plain reads matched here (the LEFT JOIN + ORDER BY read ~4 rows per quiz).
       const lq = new Map((await db.prepare(`SELECT ou,qi,password,lock_id,gated FROM quizzes WHERE ou IN (${sub}) AND qi IS NOT NULL`).bind(me.id).all()).results.map(q => [String(q.ou) + "\u0000" + String(q.qi), q]));
@@ -2894,13 +2927,16 @@ export async function onRequest(context) {
       const qz = bq.map(b => { const q = lq.get(String(b.ou) + "\u0000" + String(b.qi)); return { ...b, password: q ? q.password : null, lock_id: q ? q.lock_id : null, gated: q ? q.gated : null }; })
         .map(q => own.has(String(q.ou)) ? withOrig(q) : withOrig({ ...q, orig: null, password: null, lock_id: null, gated: null }));
       const by = {}; devs.forEach(d => { (by[d.who] = by[d.who] || []).push(d); });
+      // Installed but this term's fee not paid -> "Installed · not paid", never counted ready (the gate's rule).
+      const paidSet = feeOn() ? await paidEmails([...new Set(devs.map(d => String(d.who || "").toLowerCase()))]) : null;
       const adminEmails = new Set(((await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin'").all()).results).map(x => x.e));
       return json({ mail_on: mailOn(env), courses: cs.map(c => ({ ...c, roster_hidden: !own.has(String(c.ou)), off: offOus.has(String(c.ou)), mailed_at: mailedAt.get(String(c.ou)) || null, reminders: !remOff.has(String(c.ou)),
         // Everyone LOCKqz locks: Learners AND TAs (any non-instructor role). The admin is the one
         // exempt person (developer mode), so he is never listed as someone who must install.
         students: roster.filter(r => r.ou === c.ou && takesQuizzes(r.role) && !adminEmails.has((r.email||"").toLowerCase())).map(r => {
           const d = by[(r.email||"").toLowerCase()] || by[(r.name||"").toLowerCase()] || [];
-          return { name:r.name, email:r.email, assist: assist.get(String(r.ou) + "|" + String(r.email||"").toLowerCase()) || [], ta: !/learner|student/i.test(r.role||""), installed: d.length > 0, platform: d[0]?.platform||null, last_seen: d[0]?.last_seen||null }; }),
+          const installed = d.length > 0, paid = !paidSet || paidSet.has(String(r.email||"").toLowerCase());
+          return { name:r.name, email:r.email, assist: assist.get(String(r.ou) + "|" + String(r.email||"").toLowerCase()) || [], ta: !/learner|student/i.test(r.role||""), installed, paid, ready: installed && paid, platform: d[0]?.platform||null, last_seen: d[0]?.last_seen||null }; }),
         // has_own_password: the professor's own Brightspace password is on it (auto-protect skips it).
         quizzes: qz.filter(q => q.ou === c.ou).map(q => ({ ...q, has_own_password: Number(q.bs_has_password) === 1 && Number(q.bs_password_is_ours) !== 1 && !q.lock_id })) })) });
     }
@@ -3046,7 +3082,7 @@ export async function onRequest(context) {
       rl.forEach(x => { if (x.e) byEmail[x.e] = x; if (x.n) byName[x.n] = x; if (x.u) byUser[x.u] = x; });
       rows.forEach(r => {
         // Once email codes are on, only a CONFIRMED email (typed code) admits a student.
-        if (codesOn && !r.sv) { r.user_id = null; r.email = null; return; }
+        if (codesOn && !r.sv) { r.user_id = null; r.email = null; r.unverified = true; return; }
         const who = String(r.student||"").toLowerCase();
         const hit = byEmail[who] || byName[who] || byUser[who];
         if (hit) { r.user_id = hit.user_id || null; if (hit.display) r.student = hit.display; }

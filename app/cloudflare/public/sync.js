@@ -235,10 +235,12 @@
     // Nothing changed in Brightspace since the last sync (and it was under an hour ago): an auto re-check
     // stops here, without a single LOCKqz request. Only a fingerprint is kept (no class data, no key).
     var hashStr = function (s) { var a = 0x811c9dc5, b = 0x1b873593; for (var i = 0; i < s.length; i++) { var c = s.charCodeAt(i); a = Math.imul(a ^ c, 16777619) >>> 0; b = Math.imul(b ^ c, 2246822519) >>> 0; } return a.toString(16) + "." + b.toString(16); };
-    // The fingerprint leaves out the password flags: LOCKqz itself sets them during the sync, and a
-    // password changed by hand in Brightspace is put right by the hourly sync.
+    // The fingerprint leaves out has_password but keeps lq_password (is LOCKqz's password on it?), so a
+    // password changed or removed by hand in Brightspace triggers a sync that puts it right. After this
+    // sync's own writes the fingerprint is re-taken with the results (no extra sync for LOCKqz's changes).
     var FPK = "lqz.sync." + hashStr(KEY), prev = null;
-    var FP = hashStr(JSON.stringify(courses, function (k, v) { return k === "has_password" || k === "lq_password" ? undefined : v; }));
+    var fpOf = function () { return hashStr(JSON.stringify(courses, function (k, v) { return k === "has_password" ? undefined : v; })); };
+    var FP = fpOf();
     try { prev = JSON.parse(localStorage.getItem(FPK) || "null"); } catch (e) { prev = null; }
     var autoLine = function () { return "Re-syncs by itself every 15 min while this tab is open · checked " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); };
     // The extension's background sync, no panel yet: nothing changed in Brightspace within the hour -> no
@@ -338,6 +340,12 @@
       catch (e) { if (e.expired) throw e; results.push({ ou: y.ou, qi: y.qi, status: "error", msg: e.message }); errors.push(y.qi + ": " + e.message); }
     }
     if (results.length) await lq("/sync-result", { results: results });
+    results.forEach(function (r) {
+      var on = r.status === "set" || r.status === "already" ? true : r.status === "cleared" ? false : null;
+      if (on === null) return;
+      courses.forEach(function (c) { if (String(c.ou) === String(r.ou)) (c.quizzes || []).forEach(function (q) { if (String(q.qi) === String(r.qi)) q.lq_password = on; }); });
+    });
+    FP = fpOf();
     try { localStorage.setItem(FPK, JSON.stringify({ fp: FP, at: Date.now() })); } catch (e) {}
     tell({ lqz: "synced", ok: !errors.length, courses: courses.length, errors: errors.length });
 

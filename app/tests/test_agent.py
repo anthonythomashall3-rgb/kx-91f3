@@ -249,7 +249,9 @@ class FakeHelper:
         if path == "/status": return dict(self.status)
         return {"ok": True}
 def agent():
-    g = A.Agent(); h = FakeHelper(); g.helper = h; g.verified = True; return g, h
+    g = A.Agent(); h = FakeHelper(); g.helper = h; g.verified = True
+    g.ready_told = True   # the one-time ready notice asks the helper for /verify status: kept out of these call logs
+    return g, h
 tab = lambda u: ("Google Chrome", 0, 0, u)
 def T(g, tabs):
     """One agent tick with the given open tabs (works with any Agent.tick signature)."""

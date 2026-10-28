@@ -56,7 +56,9 @@
     if (!d || typeof d !== "object" || d.lqzExt !== 1 || typeof d.lqz !== "string") return;
     if (firstWaiting && (d.lqz === "synced" || d.lqz === "failed")) {
       firstWaiting = false;
-      if (d.lqz === "synced") doneCard(Number(d.courses) || 0);
+      if (d.lqz === "synced" && d.ok === false) { const n = Number(d.errors) || 0;
+        showCard(`Synced. ${n} exam${n === 1 ? "" : "s"} could not be updated in Brightspace — <a href="${dashUrl()}" style="color:${RED};font-weight:700">open the LOCKqz dashboard</a>.`, 12000); }
+      else if (d.lqz === "synced") doneCard(Number(d.courses) || 0);
       else showCard(`Could not sync yet: ${String(d.error || "").replace(/[<>]/g, "").slice(0, 140)}`, 12000);
     }
     api.runtime.sendMessage({ t: "from-sync", m: d }).catch(() => {});
@@ -80,7 +82,7 @@
     if (document.getElementById("lqz-managed")) return;
     const n = document.createElement("div"); n.id = "lqz-managed"; n.setAttribute("role", "note");
     n.style.cssText = `position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:2147483646;max-width:560px;width:calc(100% - 32px);box-sizing:border-box;padding:10px 40px 10px 12px;border:1px solid ${RED};border-radius:10px;background:#fff;box-shadow:0 6px 24px rgba(0,0,0,.18);font:13px/1.4 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1a1a1a`;
-    n.innerHTML = `<span style="display:flex;gap:8px;align-items:flex-start">${SHIELD(RED, 18)}<span><b>LOCKqz protects this exam.</b> Leave its password as it is: LOCKqz sets it and gives it to students who have LOCKqz. Special access and extra time work as usual.</span></span>` +
+    n.innerHTML = `<span style="display:flex;gap:8px;align-items:flex-start">${SHIELD(RED, 18)}<span><b>LOCKqz protects this exam.</b> Leave its password as it is: LOCKqz sets it and gives it only to students LOCKqz lets in. Special access and extra time work as usual.</span></span>` +
       `<button type="button" aria-label="Close" style="position:absolute;top:6px;right:8px;border:0;background:none;font-size:18px;line-height:1;cursor:pointer;color:#555">&times;</button>`;
     n.querySelector("button").onclick = () => n.remove();
     (document.body || document.documentElement).appendChild(n);
