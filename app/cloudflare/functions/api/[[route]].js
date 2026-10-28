@@ -1969,7 +1969,7 @@ export async function onRequest(context) {
           renew = { on: Number(cr.autorenew) === 1, brand: cr.brand || "card", last4: cr.last4 || "", amount: ((live && cr.amount) || cardFullCents()) / 100,
                     next_term: termName(nx.term), next_day: nx.day, failed: live && cr.state === "failed" ? (cr.fail_msg || "declined") : null };
         }
-        const devs = (await db.prepare("SELECT device_id, platform, version, installed_at, last_seen FROM devices WHERE student=? AND student_verified=1 AND COALESCE(revoked,0)=0 ORDER BY last_seen DESC LIMIT 10").bind(email).all()).results;
+        const devs = (await db.prepare("SELECT device_id, platform, version, installed_at, last_seen FROM devices WHERE student=? AND student_verified=1 AND COALESCE(revoked,0)=0 ORDER BY last_seen DESC, device_id LIMIT 10").bind(email).all()).results;
         return json({ email, required: feeOn(), paid, term: termName(paid ? upTerm : st.term), until: paid ? termEndOf(upTerm) : null, pay_url: paid ? null : await payLink(email),
           renew, devices: devs.map(d => ({ id: d.device_id, os: /win/i.test(String(d.platform || "")) ? "Windows" : /mac|darwin/i.test(String(d.platform || "")) ? "Mac" : (d.platform || "Computer"), version: d.version || null, last_seen: d.last_seen || d.installed_at || null })) });
       }

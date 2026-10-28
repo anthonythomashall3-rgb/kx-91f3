@@ -5,6 +5,32 @@ rules: pull --rebase, claim in SESSIONS.md, `bash app/tests/run_all.sh` before e
 commit as `Claude <noreply@anthropic.com>`). The claude.ai Project "LOCKqz" has the same handoff
 (`claude/LOCKqz-HANDOFF.md`) plus topic docs (`claude/LOCKqz-payments.md` and others).
 
+## 28 Oct 2026 — scale audit (session 015umora)
+- **Free-plan ceiling (the real limit today).** Workers/Pages Functions Free = 100,000 requests/day (over it: Error 1027
+  until 00:00 UTC, i.e. students cannot get quiz passwords); D1 Free = 100,000 rows written/day, 5M rows read/day;
+  10 ms CPU per request. LOCKqz traffic: idle student ~0 (blocklist/update are static files); one student-exam
+  ~16 requests + ~16 rows written (password 1-2, lock 1, helper heartbeat every 5 min, unlock 1); one gated exam's
+  professor tab ~6 requests/min (/live every 10 s, /rotating every 5 min) = ~900 per 2.5 h exam. => roughly
+  **4,000-5,000 student exam sittings per day** on the free plan. A single university's finals week exceeds that.
+  Workers Paid ($5/month: 10M requests/month included, D1 25B reads + 50M writes/month included, 30 s CPU) covers
+  hundreds of thousands of students for a few dollars a month. Anthony's $0 rule blocks this — his call.
+- **Email is the second ceiling:** one consumer Gmail = 500 messages/day (LOCKqz budget 480 essential / 250 auto).
+  Every new student's email code uses one, so ~480 new students/day can confirm their email. Google sign-in (in
+  progress, session 01UzHDaF) removes most codes; at real scale a transactional sender (SES / Postmark) is needed.
+- **Third: Gmail script runtime.** Google gives free accounts 90 min/day of trigger runtime; the every-minute
+  script used ~50 min/day. Bank-question search now runs every 5 min (payment alerts stay every minute). If it
+  ever exceeds 90 min, Zelle matching + /cron (reminders, T-70, renewals) stop until the next day.
+- **Fixed now:** migrate_037_scale_indexes.sql — 11 indexes for queries that read a whole table on hot paths
+  (/register per-IP limit, /password class-coverage check, class lists' "who has LOCKqz", sign-in by email,
+  dashboard quizzes, support limits, cleanups). New test test_scale_indexes.mjs plans every plain-string API query
+  against schema + migrations and fails on any full scan of a big table (bounded/admin-only exceptions listed).
+  Don't add these indexes to schema.sql (older-schema tests and fresh DBs build tables in migrations).
+- **Not built for nationwide yet (product scope, not tuning):** USC Brightspace only (host permissions, URL
+  parsing, USC terms/sections, USC roster trust); Mac + Windows only (K-12 is mostly Chromebooks/iPads — the
+  hosts-file approach cannot run there; needs managed Chrome policy via the school's Google Admin); Canvas /
+  Schoology / Google Classroom / Moodle need their own connectors; one D1 database (single writer) — at hundreds
+  of thousands of simultaneous exam starts, shard per institution.
+
 ## 28 Oct 2026 — health audit (session 015umora)
 - **Deploys were silently failing.** Release #90-#92 (20b217f, c097c45, 042702e) died in "Build the signed update
   manifest": the agents (`lockqz-agent.py` / `lockqz-agent.ps1`, status-truth ready notice) changed while the version

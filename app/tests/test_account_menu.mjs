@@ -38,8 +38,8 @@ const api = async (path, body) => { const res = await onRequest({ request: new R
 const st = await api("/pay/start", { email: "cy@usc.edu", t: payT(env, "cy@usc.edu") });
 sqlite.prepare("INSERT INTO payments (txn,code,amount,via,payer,note,term,received_at) VALUES ('stripe:pi_cy',?,280,'stripe-card','','',?,?)").run(st.code, st.term, new Date().toISOString());
 sqlite.prepare("INSERT INTO card_renew (email,customer,pm,brand,last4,autorenew,created_at) VALUES ('cy@usc.edu','cus_cy','pm_cy','visa','4242',1,?)").run(new Date().toISOString());
-for (const [id, pl] of [["mac-aaa111", "mac"], ["win-bbb222", "windows"]])
-  sqlite.prepare("INSERT INTO devices (device_id,student,platform,version,installed_at,last_seen,student_verified) VALUES (?,?,?,?,?,?,1)").run(id, "cy@usc.edu", pl, "0.5.1", new Date().toISOString(), new Date().toISOString());
+for (const [id, pl, ago] of [["mac-aaa111", "mac", 60e3], ["win-bbb222", "windows", 120e3]])   // Mac seen most recently -> listed first
+  sqlite.prepare("INSERT INTO devices (device_id,student,platform,version,installed_at,last_seen,student_verified) VALUES (?,?,?,?,?,?,1)").run(id, "cy@usc.edu", pl, "0.5.1", new Date(Date.now() - ago).toISOString(), new Date(Date.now() - ago).toISOString());
 
 const FILES = { "/": ["index.html", "text/html"], "/account.js": ["account.js", "application/javascript"], "/lq.js": ["lq.js", "application/javascript"], "/pay": ["pay.html", "text/html"], "/privacy": ["privacy.html", "text/html"], "/support": ["support.html", "text/html"] };
 const browser = await chromium.launch();

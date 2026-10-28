@@ -89,7 +89,12 @@ function run() {
   }
   threads.forEach(th => th.addLabel(label));
   props.setProperty("LAST_RUN", String(started));
-  try { answerBankAsks_(secret, own); } catch (e) { Logger.log("bank answers: " + e); }
+  // Bank-transfer questions every ~5 min (a second Gmail search every minute would spend Google's 90 min/day
+  // trigger-runtime allowance for free accounts; payment alerts above stay every minute).
+  if (started - Number(props.getProperty("LAST_ASK") || 0) > 4 * 60) {
+    props.setProperty("LAST_ASK", String(started));
+    try { answerBankAsks_(secret, own); } catch (e) { Logger.log("bank answers: " + e); }
+  }
   // Every ~10 min: LOCKqz's exam emails (reminders 48 h / 3 h before an exam to students without LOCKqz,
   // the professor's T-70 check-in). Pages has no cron, so this script is LOCKqz's clock ($0).
   if (started - Number(props.getProperty("LAST_CRON") || 0) > 9 * 60) {
