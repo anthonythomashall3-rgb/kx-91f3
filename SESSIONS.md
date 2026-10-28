@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-10-28 12:05 PT — 015umora: scale pass: migrate_037_scale_indexes.sql (indexes for full-table scans on hot paths), support-limit query, test_scale_indexes.mjs, HANDOFF scale notes. A parallel AI-blocklist audit will touch blocklist.txt x2, AI_DOMAINS, AI_APPS/$AiApps, test_blocklist + version bump.
 - 2026-10-27 19:40 PT — 01UzHDaF: Google sign-in (students + professors, codes as fallback) still in progress. Touches: [[route]].js (/auth/google/*), dashboard.html login form, mac+windows agents identity step, migrate_036, tests.
 
 ## Recently finished
