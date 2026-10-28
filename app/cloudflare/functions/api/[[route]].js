@@ -325,7 +325,7 @@ const mailOn = env => typeof env.MAIL_SINK === "function" || !!(env.MAIL_USER &&
 const SITE_URL = "https://lockqz.pages.dev", DASH_URL = "https://prof.lockqz.pages.dev", BS_URL = "https://brightspace.usc.edu";
 const LOGO_URL = SITE_URL + "/icon128.png";
 // Chrome Web Store listing: filled in when it is live (until then the dashboard links the extension package).
-const EXT_STORE_URL = "";
+const EXT_STORE_URL = "https://chromewebstore.google.com/detail/bidlfpkdggdpmfbfkpjcnbjhfkfligkk";
 const hesc = v => String(v == null ? "" : v).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const mailBtn = (href, label) => `<a href="${hesc(href)}" style="display:inline-block;background:#990000;color:#ffffff;text-decoration:none;font-weight:700;padding:11px 18px;border-radius:8px;font-size:15px">${hesc(label)}</a>`;
 const mailWrap = (bodyHtml, footer = "") => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head><body style="margin:0;padding:0;background:#f6f5f2;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#1a1a1a">
