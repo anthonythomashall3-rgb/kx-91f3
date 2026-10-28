@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-10-28 11:20 PT — 015umora: support page (/support + POST /api/support -> lockqz.app@gmail.com) and remove 'Email me my receipts' from the download-page gear. Touches: public/index.html, public/account.js, new public/support.html, [[route]].js (/support only), test_account_menu.mjs, new test.
 - 2026-10-27 19:40 PT — 01UzHDaF: Google sign-in (students + professors, codes as fallback) still in progress. Touches: [[route]].js (/auth/google/*), dashboard.html login form, mac+windows agents identity step, migrate_036, tests.
 
 ## Recently finished
