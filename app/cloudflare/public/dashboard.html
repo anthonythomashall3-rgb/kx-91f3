@@ -168,7 +168,7 @@ const lqL = (m, e, o) => typeof lqLoading === "function" ? lqLoading(m, e, o) : 
 const API = /\.pages\.dev$/.test(location.hostname) ? "https://lockqz.pages.dev/api" : "/api", INSTALL = "https://lockqz.pages.dev";   // one API (main site secrets)
 // ---- Professor extension store links: fill in when the store listing is live. Until a link is filled in,
 // "Add LOCKqz to <browser>" links the packaged extension (.zip) with a one-line load-unpacked fallback. ----
-const EXT_STORE = { CHROME: "", EDGE: "", FIREFOX: "" };   // fill in when store listing is live
+const EXT_STORE = { CHROME: "https://chromewebstore.google.com/detail/bidlfpkdggdpmfbfkpjcnbjhfkfligkk", EDGE: "https://chromewebstore.google.com/detail/bidlfpkdggdpmfbfkpjcnbjhfkfligkk", FIREFOX: "" };   // Chrome Web Store listing (Edge installs from it too); Firefox still uses the zip
 const EXT_ZIP = { chrome: INSTALL + "/download/lockqz-prof-chromium.zip", edge: INSTALL + "/download/lockqz-prof-chromium.zip", firefox: INSTALL + "/download/lockqz-prof-firefox.zip", other: INSTALL + "/download/lockqz-prof-chromium.zip" };
 const BS_SITE = "https://brightspace.usc.edu";
 let token = localStorage.getItem("lockqz_token") || "";
