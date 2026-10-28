@@ -184,7 +184,7 @@ function dashTab(w, { token = "", hash = "", canned = {}, email } = {}) {
   const document = { getElementById: el, querySelector: s => el("qs:" + s), querySelectorAll: () => [], activeElement: null,
     addEventListener(ev, fn) { (listeners[ev] = listeners[ev] || []).push(fn); }, get visibilityState() { return tab.hidden ? "hidden" : "visible"; } };
   const ctx = { document, window: { addEventListener() {} }, location: tab.loc, history: { replaceState() {} },
-    localStorage: { getItem: k => (ls.has(k) ? ls.get(k) : null), setItem: (k, v) => ls.set(k, String(v)), removeItem: k => ls.delete(k) },
+    localStorage: { getItem: k => (ls.has(k) ? ls.get(k) : /^lockqz_welcome_/.test(k) ? "1" : null), setItem: (k, v) => ls.set(k, String(v)), removeItem: k => ls.delete(k) },
     fetch: (u, o = {}) => { const path = String(u).replace(/^\/api/, "").split("?")[0]; tab.fetched.push(String(u));
       if (o.method === "POST") tab.posts.push({ path, body: JSON.parse(o.body || "{}") });
       if (tab.canned[path] !== undefined) return Promise.resolve(jr(typeof tab.canned[path] === "function" ? tab.canned[path]() : tab.canned[path]));

@@ -3,8 +3,8 @@
 //   Z1 default ON: a paid professor's Sync auto-protects every quiz in a class that is not turned off;
 //      a class turned off gets no new protection.
 //   Z2 a password changed by hand in Brightspace is written back on the next Sync.
-//   Z3 emails: welcome on sign-up (HTML, subject); /email/students kind all -> every learner, Reply-To the
-//      professor, signed; kind missing -> only students without a (verified) device; daily cap -> "limit".
+//   Z3 emails: welcome on sign-up (HTML, subject); /email/students = a DRAFT for the professor's own mailbox
+//      (LOCKqz sends nothing): kind all -> every learner; kind missing -> only students without a device.
 //   Z4 cron: reminder 48 h / 3 h before an exam to non-installed students, once each; reminders off ->
 //      none; T-70 check-in to the professor when the extension has not checked in, quiet after /ext-seen.
 //   Z5 SMTP: multipart/alternative with text + html, Reply-To, RFC 2047 subject, several RCPT TO.
@@ -141,35 +141,26 @@ console.log("Z2 a password changed by hand in Brightspace comes back on the next
   check("the panel ticks the Midterm as protected (default on)", /data-qi="111" checked/.test(current.B.innerHTML), current.B.innerHTML.slice(0, 300));
 }
 
-console.log("Z3 /email/students");
+console.log("Z3 /email/students: a draft the professor sends from their own mailbox (LOCKqz's Gmail sends nothing)");
 // Al has a verified LOCKqz device; Bo and Cy (a TA) do not.
 sqlite.prepare("INSERT INTO devices (device_id,student,platform,device_key,student_verified,installed_at) VALUES ('dev-al','al@usc.edu','mac-15','k',1,datetime('now'))").run();
-MAILS.length = 0;
+const budget = () => sqlite.prepare("SELECT COALESCE(SUM(n),0) AS n FROM mail_sent WHERE ou='_all'").get().n;
+MAILS.length = 0; const b0 = budget();
 let r = await api("/email/students", { ou: String(OU), kind: "all" }, { "X-LOCKqz-Teacher": PROF });
-check("kind all -> sent to the 3 students (Al, Bo, TA Cy), never the professor", r.data && r.data.sent === 3 && rcpts(MAILS[0]).sort().join() === "al@usc.edu,bo@usc.edu,cy@usc.edu", JSON.stringify(r.data) + " " + JSON.stringify(MAILS.map(m => m.to)));
-let m = MAILS[0];
-check("subject: FBE-437: install LOCKqz before your first exam", m && m.subject === "FBE-437: install LOCKqz before your first exam", m && m.subject);
-check("Reply-To the professor; signed Professor Duke Bristow / course; first exam named", m && m.replyTo === "prof@usc.edu" && /Respectfully,\nProfessor Duke Bristow\nFBE-437 – Recession Economics/.test(m.text) && /First exam: Midterm, /.test(m.text), m && m.text.slice(-260));
-check("HTML: logo, Download + Open Brightspace buttons, footer with privacy link", m && /icon128\.png/.test(m.html) && /Download LOCKqz/.test(m.html) && /Open Brightspace/.test(m.html) && /on behalf of Professor Bristow/.test(m.html) && /lockqz\.pages\.dev\/privacy/.test(m.html));
-check("text: the 3 steps, 'If LOCKqz is not installed, the exam will not open'", m && /1\. Download LOCKqz/.test(m.text) && /3\. Open Brightspace once/.test(m.text) && /the exam will not open/.test(m.text));
+check("kind all -> the 3 students (Al, Bo, TA Cy), never the professor", r.data && Array.isArray(r.data.to) && r.data.to.slice().sort().join() === "al@usc.edu,bo@usc.edu,cy@usc.edu", JSON.stringify(r.data && r.data.to));
+check("LOCKqz sent NOTHING (no email, no Gmail budget used)", MAILS.length === 0 && budget() === b0, MAILS.length + " / " + budget());
+check("subject: FBE-437: install LOCKqz before your first exam", r.data.subject === "FBE-437: install LOCKqz before your first exam", r.data.subject);
+check("text: the 3 steps, signed Professor Duke Bristow / course, first exam named, no 'sent by LOCKqz on behalf' footer", /1\. Download LOCKqz/.test(r.data.text) && /the exam will not open/.test(r.data.text) && /Respectfully,\nProfessor Duke Bristow\nFBE-437 – Recession Economics/.test(r.data.text) && /First exam: Midterm, /.test(r.data.text) && !/on behalf of/.test(r.data.text), r.data.text.slice(-200));
 bs = (await api("/bs", undefined, { "X-LOCKqz-Teacher": PROF })).data;
-check("/bs now shows mailed_at for that class", !!bs.courses.find(c => c.ou === String(OU)).mailed_at);
-MAILS.length = 0;
+check("/bs now shows mailed_at for that class (Set-up step 3 done, Remind button next)", !!bs.courses.find(c => c.ou === String(OU)).mailed_at);
 r = await api("/email/students", { ou: String(OU), kind: "missing" }, { "X-LOCKqz-Teacher": PROF });
-check("kind missing -> only Bo and Cy (Al has LOCKqz)", r.data && r.data.sent === 2 && rcpts(MAILS[0]).sort().join() === "bo@usc.edu,cy@usc.edu", JSON.stringify(r.data) + " " + JSON.stringify(MAILS.map(m => m.to)));
-check("reminder subject names the exam", /^Reminder: install LOCKqz before Midterm on /.test(MAILS[0].subject), MAILS[0].subject);
-check("reminder says when: in 10 days", /Midterm for FBE-437 – Recession Economics is in 10 days/.test(MAILS[0].text), MAILS[0].text.slice(0, 200));
+check("kind missing -> only Bo and Cy (Al has LOCKqz)", r.data && r.data.to.slice().sort().join() === "bo@usc.edu,cy@usc.edu", JSON.stringify(r.data && r.data.to));
+check("reminder subject names the exam; says when", /^Reminder: install LOCKqz before Midterm on /.test(r.data.subject) && /Midterm for FBE-437 – Recession Economics is in 10 days/.test(r.data.text), r.data.subject);
 r = await api("/email/students", { ou: String(OU2), kind: "all" }, { "X-LOCKqz-Teacher": "bogus-token" });
-check("a stranger cannot email a class", r.status === 401 || r.status === 403, r.status);
-// Daily cap: 400 a day in all.
-sqlite.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('1','all',?,398,datetime('now'))").run(new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date()));
-MAILS.length = 0;
-r = await api("/email/students", { ou: String(OU2), kind: "all" }, { "X-LOCKqz-Teacher": PROF });
-check("over the daily cap (400) -> error 'limit', nothing sent", r.status === 429 && r.data.error === "limit" && MAILS.length === 0, JSON.stringify(r.data));
-sqlite.prepare("DELETE FROM mail_sent WHERE ou='1'").run();
+check("a stranger cannot get a class's addresses", r.status === 401 || r.status === 403, r.status);
 const offEnv = { ...env, MAIL_SINK: undefined };
-r = await api("/email/students", { ou: String(OU2), kind: "all" }, { "X-LOCKqz-Teacher": PROF }, offEnv);
-check("mail not set up -> mail_off (503), the dashboard falls back to a mailto link", r.status === 503 && r.data.error === "mail_off", JSON.stringify(r.data));
+r = await api("/email/students", { ou: String(OU), kind: "all" }, { "X-LOCKqz-Teacher": PROF }, offEnv);
+check("works with LOCKqz email not set up at all (the professor's mailbox sends it)", r.status === 200 && r.data.to.length === 3, JSON.stringify(r.data && r.data.error));
 
 console.log("Z4 cron: automatic reminders + the T-70 check-in");
 const CRON = { "X-LOCKqz-Pay": env.PAY_SECRET };
@@ -191,7 +182,11 @@ r = await api("/cron", {}, CRON);
 check("the next tick sends nothing again (once per exam)", MAILS.length === 0 && r.data.exams.reminders === 0, JSON.stringify(r.data));
 setStart(111, 2.5); MAILS.length = 0;
 await api("/cron", {}, CRON);
-check("2.5 h before: the 3-hour reminder, once", MAILS.length === 1 && /is in 3 hours|is in 2 hours/.test(MAILS[0].text), JSON.stringify(MAILS.map(m => [m.to, m.subject])));
+const stu = () => MAILS.filter(m => Array.isArray(m.to) || m.to !== "prof@usc.edu");
+check("2.5 h before: the 3-hour reminder to the students, once", stu().length === 1 && /is in 3 hours|is in 2 hours/.test(stu()[0].text), JSON.stringify(MAILS.map(m => [m.to, m.subject])));
+const ix = mailsTo("prof@usc.edu");
+check("…and the professor, who never added the extension, gets ONE 'add LOCKqz to Chrome' email (exam within a day)", ix.length === 1 && /add LOCKqz to Chrome$/.test(ix[0].subject), JSON.stringify(ix.map(m => m.subject)));
+check("it says keep Chrome open until the exam ends, and that students wait without it", ix[0] && /keep Chrome open until the exam ends/.test(ix[0].text) && /students wait at the start/.test(ix[0].text) && /Respectfully,\nThe LOCKqz Team/.test(ix[0].text), ix[0] && ix[0].text);
 MAILS.length = 0; await api("/cron", {}, CRON);
 check("…and not again", MAILS.length === 0);
 // Reminders off for a class: nothing.
@@ -204,10 +199,10 @@ check("reminders off -> no reminder for that class", MAILS.length === 0, JSON.st
 await api("/class-mail", { ou: String(OU2), reminders: true }, { "X-LOCKqz-Teacher": PROF });
 MAILS.length = 0; await api("/cron", {}, CRON);
 check("reminders back on -> the 48 h reminder goes out", MAILS.length === 1 && /Quiz B/.test(MAILS[0].subject), JSON.stringify(MAILS.map(m => [m.to, m.subject])));
-// T-70 check-in. A professor whose extension has never checked in (bookmark only) is never nagged.
+// Never added the extension: the 'add LOCKqz to Chrome' email went once today already (above); no T-70 check-in.
 setStart(112, 1); MAILS.length = 0;
 r = await api("/cron", {}, CRON);
-check("exam in 60 min, extension never checked in (bookmark professor) -> no email", mailsTo("prof@usc.edu").length === 0 && r.data.exams.checkins === 0, JSON.stringify(MAILS.map(m => [m.to, m.subject])));
+check("another exam in 60 min the same day -> no second 'add LOCKqz' email, no check-in (it never checked in)", mailsTo("prof@usc.edu").length === 0 && r.data.exams.checkins === 0, JSON.stringify(MAILS.map(m => [m.to, m.subject])));
 // The extension checked in once, 7 h ago: stale -> ONE check-in email.
 r = await api("/ext-seen", {}, { "X-LOCKqz-Sync": KEY });
 check("/ext-seen through the Sync key: ok, ext_seen set", r.data && r.data.ok && !!sqlite.prepare("SELECT ext_seen FROM teachers WHERE email='prof@usc.edu'").get().ext_seen);
@@ -216,7 +211,7 @@ MAILS.length = 0; r = await api("/cron", {}, CRON);
 const ck = mailsTo("prof@usc.edu");
 check("checked in 7 h ago, exam in 60 min -> ONE email to the professor", ck.length === 1 && r.data.exams.checkins === 1, JSON.stringify(MAILS.map(m => [m.to, m.subject])));
 check("subject: Final starts in about an hour — open Chrome", ck[0] && ck[0].subject === "Final starts in about an hour — open Chrome", ck[0] && ck[0].subject);
-check("body: open Chrome so LOCKqz can watch Final; students can still open it; Respectfully", ck[0] && /Open Chrome \(any page\) so LOCKqz can watch Final\./.test(ck[0].text) && /can still open the exam either way/.test(ck[0].text) && /Respectfully,\nThe LOCKqz Team/.test(ck[0].text));
+check("body: open Chrome, sign in to Brightspace, keep it open; students wait without it (the truth); Respectfully", ck[0] && /Open Chrome on a computer that's on, sign in to Brightspace, and keep it open until the exam ends\./.test(ck[0].text) && /students wait at the start of the exam/.test(ck[0].text) && !/either way/.test(ck[0].text) && /Respectfully,\nThe LOCKqz Team/.test(ck[0].text), ck[0] && ck[0].text);
 MAILS.length = 0; await api("/cron", {}, CRON);
 check("not again for the same exam", mailsTo("prof@usc.edu").length === 0);
 // Fresh check-in: no email for the next exam.
@@ -242,8 +237,10 @@ console.log("Z5 SMTP: multipart/alternative, Reply-To, RFC 2047 subject, several
   const OK = ["220 smtp.gmail.com ESMTP\r\n", "250-smtp.gmail.com\r\n250 SMTPUTF8\r\n", "235 2.7.0 Accepted\r\n", "250 OK\r\n", "250 OK\r\n", "250 OK\r\n", "354 Go\r\n", "250 2.0.0 queued\r\n"];
   const smtpEnv = { ...env, MAIL_SINK: undefined, MAIL_USER: "lockqz.app@gmail.com", MAIL_APP_PASSWORD: "abcd efgh ijkl mnop", MAIL_OPEN: fakeSmtp(OK) };
   sqlite.prepare("DELETE FROM mail_sent").run();
-  r = await api("/email/students", { ou: String(OU), kind: "missing" }, { "X-LOCKqz-Teacher": PROF }, smtpEnv);
-  check("sent through the fake Gmail", r.data && r.data.sent === 2, JSON.stringify(r.data) + " " + JSON.stringify(said.slice(0, 6)));
+  [112, 113, 221, 222].forEach(q => setStart(q, 400));
+  setStart(111, 30);   // only the Midterm in the window (30 h away): its 48 h reminder goes to Bo and Cy through the fake Gmail
+  r = await api("/cron", {}, CRON, smtpEnv);
+  check("sent through the fake Gmail", r.data && r.data.exams && r.data.exams.reminders === 2, JSON.stringify(r.data) + " " + JSON.stringify(said.slice(0, 6)));
   check("one session, two RCPT TO", said.filter(x => x.startsWith("RCPT TO:")).length === 2, JSON.stringify(said.filter(x => x.startsWith("RCPT"))));
   const body = said.find(x => x.startsWith("MSG:")) || "";
   check("From: LOCKqz, Reply-To the professor, recipients not listed in To:", /From: LOCKqz <lockqz\.app@gmail\.com>/.test(body) && /Reply-To: <prof@usc\.edu>/.test(body) && !/To: <bo@usc\.edu>/.test(body), body.slice(0, 300));
@@ -264,18 +261,65 @@ check("popup.html + popup.js exist; the popup shows status, last synced, counts,
 const bg = readFileSync(join(EXT, "background.js"), "utf8");
 check("background: no action.onClicked (the popup replaced it); checks in with /ext-seen; first-visit flag once", !/action\.onClicked/.test(bg) && /\/ext-seen/.test(bg) && /welcomed/.test(bg));
 const cb = readFileSync(join(EXT, "content-bs.js"), "utf8");
-check("content-bs: the branded note on password / special-access fields of a protected exam", /Managed by LOCKqz/.test(cb) && /nothing to set here/.test(cb) && /special\\s\*access/.test(cb) && cb.includes("quizzing\\/admin"));
+check("content-bs: protected exam's quiz settings -> one notice, NOTHING disabled (special access / extra time keep working)", /LOCKqz protects this exam/.test(cb) && /Special access and extra time work as usual/.test(cb) && cb.includes("quizzing\\/admin") && !/\.disabled\s*=\s*true/.test(cb) && !/setAttribute\("disabled"/.test(cb) && !/pointerEvents/.test(cb));
 check("content-bs: the one-time first-visit card (Syncing your classes… -> Done — N classes synced)", /Syncing your classes/.test(cb) && /Open dashboard/.test(cb) && /12000/.test(cb));
 check("build.sh packages the popup", /popup\.html popup\.js/.test(readFileSync(join(EXT, "build.sh"), "utf8")));
 const dash = readFileSync(join(CF, "public", "dashboard.html"), "utf8");
 check("dashboard: one store-link config block (CHROME/EDGE/FIREFOX) with the fill-in comment; zip fallback + load-unpacked line", /const EXT_STORE = \{ CHROME: "", EDGE: "", FIREFOX: "" \};\s*\/\/ fill in when store listing is live/.test(dash) && /lockqz-prof-chromium\.zip/.test(dash) && /Load unpacked/.test(dash));
 check("dashboard: Set up — N of 3 done, the three steps with their exact buttons", /Set up — \$\{done\} of 3 done/.test(dash) && /Add LOCKqz to \$\{BROWSER_NAME\}/.test(dash) && />Open Brightspace</.test(dash) && /Email students/.test(dash) && /Remind the \$\{s\.missing\.length\} who haven't installed/.test(dash));
-check("dashboard: toast 'Sent to N students', per-exam 'Nothing to do' line, reminders switch", /Sent to \$\{d\.sent\} student/.test(dash) && /Nothing to do — LOCKqz sets the password and opens the exam for installed students\./.test(dash) && /setReminders/.test(dash));
+check("dashboard: Email students opens the professor's own mail app (mailto Bcc, copy-to-Bcc for big classes), per-exam 'Nothing to do' line, reminders switch", /location\.href = full/.test(dash) && /mailto:\?bcc=/.test(dash) && /Paste them into Bcc/.test(dash) && /Nothing to do — LOCKqz sets the password and opens the exam for installed students\./.test(dash) && /setReminders/.test(dash));
+check("dashboard: no bookmark anywhere a professor can see (no drag button, no bookmarks-bar steps)", !/class="bmk"/.test(dash) && !/bookmarks bar/i.test(dash) && !/Drag this button/.test(dash));
+check("dashboard: welcome page (3 steps, exam-day rule, how it works) shown first, and from the menu", /Welcome to LOCKqz/.test(dash) && /What you do — once/.test(dash) && /On exam day: keep \$\{BROWSER_NAME\} open and signed in to Brightspace until the exam ends\./.test(dash) && /How it works/.test(dash) && /v==="" && !welcomed\(\)/.test(dash) && /How LOCKqz works/.test(dash));
+check("dashboard: exam-day banner (protected exam within 24 h) says keep the browser open", /examday/.test(dash) && /Keep \$\{BROWSER_NAME\} open and signed in to Brightspace until it ends\./.test(dash));
+check("dashboard: Safari gets 'works in Chrome, Edge or Firefox'", /LOCKqz works in Chrome, Edge or Firefox/.test(dash));
+check("extension popup: the exam-day line", /On exam day:<\/b> keep this browser open and signed in to Brightspace until the exam ends/.test(readFileSync(join(EXT, "popup.html"), "utf8")));
 check("the logo is served at lockqz.pages.dev/icon128.png (emails)", existsSync(join(CF, "public", "icon128.png")));
 const mac = readFileSync(join(APP, "mac", "lockqz-agent.py"), "utf8"), win = readFileSync(join(APP, "windows", "lockqz-agent.ps1"), "utf8");
 check("Mac agent: the one-time ready notice (display notification, flag file)", /display notification/.test(mac) && /LOCKqz is ready\. Nothing to do until your exam/.test(mac) && /ready-shown/.test(mac));
 check("Windows agent: the one-time ready toast (flag file)", /ToastNotification/.test(win) && /LOCKqz is ready\. Nothing to do until your exam/.test(win) && /ready-shown/.test(win));
 check("Gmail script calls /cron every ~10 min; wrangler.toml explains (Pages has no cron trigger)", /\/cron/.test(readFileSync(join(APP, "payments", "LOCKqz-payments.gs"), "utf8")) && /\/api\/cron/.test(readFileSync(join(CF, "wrangler.toml"), "utf8")));
+
+console.log("Z7 one Gmail budget: automatic mail stops at 250 / 24 h, sign-in codes always have room (up to 480)");
+{
+  const hour = () => new Date().toISOString().slice(0, 13);
+  const setUsed = k => { sqlite.prepare("DELETE FROM mail_sent WHERE ou='_all'").run(); if (k) sqlite.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('_all','total',?,?,datetime('now'))").run(hour(), k); };
+  const used = () => sqlite.prepare("SELECT COALESCE(SUM(n),0) AS n FROM mail_sent WHERE ou='_all'").get().n;
+  const code = async em => api("/account", { op: "send", email: em }, {});
+  // every send is counted: one sign-in code = +1
+  setUsed(0); MAILS.length = 0;
+  r = await code("al@usc.edu");
+  check("a sign-in code is counted in the one budget (+1)", r.data && r.data.sent === true && used() === 1, JSON.stringify(r.data) + " used=" + used());
+  // automatic budget spent: a reminder is held (not marked sent), the professor's T-70 too, but codes still go
+  sqlite.prepare("DELETE FROM mail_sent WHERE kind LIKE 'r48:%' OR kind LIKE 'r3:%' OR kind LIKE 'ck:%' OR kind LIKE 'ix:%'").run();
+  sqlite.prepare("DELETE FROM events WHERE event='code_sent'").run();
+  [112, 113, 221, 222].forEach(q => setStart(q, 400));
+  setStart(111, 30); setUsed(249); MAILS.length = 0;
+  r = await api("/cron", {}, CRON);
+  check("249 used: the 2-student reminder does not fit under 250 -> held, nothing sent", MAILS.length === 0 && r.data.exams.reminders === 0 && r.data.exams.skipped >= 1, JSON.stringify(r.data) + JSON.stringify(MAILS.map(m => m.subject)));
+  check("…and NOT marked sent (a later tick sends it once there is room)", !sqlite.prepare("SELECT 1 AS x FROM mail_sent WHERE kind LIKE 'r48:111'").get());
+  r = await code("bo@usc.edu");
+  check("249 used: a student's sign-in code STILL goes (codes are essential, up to 480)", r.data && r.data.sent === true && MAILS.length === 1, JSON.stringify(r.data));
+  setUsed(400); MAILS.length = 0;
+  sqlite.prepare("DELETE FROM events WHERE event='code_sent'").run();
+  r = await code("cy@usc.edu");
+  check("400 used: a code for a student on a class list still goes", r.data && r.data.sent === true, JSON.stringify(r.data));
+  sqlite.prepare("DELETE FROM events WHERE event='code_sent'").run();
+  r = await code("stranger@usc.edu");
+  check("400 used: an email on no class list is refused (the second half is kept for real students)", r.status === 503 && r.data.error === "mail_busy", JSON.stringify(r.data));
+  setUsed(480); sqlite.prepare("DELETE FROM events WHERE event='code_sent'").run();
+  r = await code("al@usc.edu");
+  check("480 used: nothing more today (Gmail's 500 is never crossed)", r.status === 503 && r.data.error === "mail_busy", JSON.stringify(r.data));
+  // rolling 24 h: what was sent 26 h ago no longer counts
+  sqlite.prepare("DELETE FROM mail_sent WHERE ou='_all'").run();
+  sqlite.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('_all','total',?,480,datetime('now'))").run(new Date(Date.now() - 26 * 3600e3).toISOString().slice(0, 13));
+  sqlite.prepare("DELETE FROM events WHERE event='code_sent'").run();
+  r = await code("al@usc.edu");
+  check("rolling 24 h: 480 sent 26 hours ago does not block today", r.data && r.data.sent === true, JSON.stringify(r.data));
+  // room again -> the held reminder goes on the next tick, once
+  setUsed(0); MAILS.length = 0;
+  r = await api("/cron", {}, CRON);
+  check("room again -> the held reminder goes on the next tick (2 students), counted +2", r.data.exams.reminders === 2 && used() === 2, JSON.stringify(r.data) + " used=" + used());
+}
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

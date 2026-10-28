@@ -146,7 +146,7 @@ function dashTab() {
   const ls = new Map([["lockqz_token", PROF]]);
   const ctx = { document: { getElementById: el, querySelector: s => el("qs:" + s), querySelectorAll: () => [], addEventListener() {}, activeElement: null, visibilityState: "visible" },
     window: { addEventListener() {} }, location: loc, history: { replaceState() {} },
-    localStorage: { getItem: k => (ls.has(k) ? ls.get(k) : null), setItem: (k, v) => ls.set(k, String(v)), removeItem: k => ls.delete(k) },
+    localStorage: { getItem: k => (ls.has(k) ? ls.get(k) : /^lockqz_welcome_/.test(k) ? "1" : null), setItem: (k, v) => ls.set(k, String(v)), removeItem: k => ls.delete(k) },
     fetch: (u, o) => fetchApi(ORIGIN + u, o), alert: () => {}, prompt: () => null, confirm: () => true, navigator: { clipboard: { writeText: async () => {} } },
     setInterval: () => 1, clearInterval() {}, URLSearchParams, console, setTimeout };
   vm.createContext(ctx); vm.runInContext(DASH_SRC, ctx);
@@ -189,11 +189,11 @@ check("panel email never includes the professor", !/prof%40usc\.edu/.test(r.P.ma
 let cards = homeCards(D);
 check("dashboard home: one card per class", cards.length === 3, cards.length);
 check("dashboard home: a class switch on every card (also the class with no exams)", cards.every(c => /aria-label="LOCKqz on for this class"/.test(c)), cards.map(c => /aria-label="LOCKqz on for this class"/.test(c)).join());
-check("dashboard home: Send email on every card (missing students or not)", cards.every(c => />Send email<\/a>/.test(c)), cards.map(c => />Send email<\/a>/.test(c)).join());
+check("dashboard home: an email button on every card (missing students or not)", cards.every(c => /class="btn[^"]*mailbtn"[^>]*onclick="emailClass\(/.test(c)), cards.map(c => /mailbtn/.test(c)).join());
 const fbe = cards.find(c => /Recession Economics/.test(c));
-check("FBE 437: the email goes to the student who still needs LOCKqz (Bo), not Al", /bcc=bo%40usc\.edu/.test(fbe) && !/al%40usc/.test(fbe.match(/href="mailto:[^"]*"/)[0]));
+check("FBE 437: the email goes to the students who still need LOCKqz (kind missing), not the whole class", /data-kind="missing"/.test(fbe), fbe.match(/<button[^>]*mailbtn[^>]*>/)?.[0]);
 for (const ou of ["1001", "1002", "1003"]) { await D.go("#class/" + ou); const a = D.app();
-  check(`dashboard class page ${ou}: class switch + Send email`, /aria-label="LOCKqz on for this class"/.test(a) && />Send email<\/a>/.test(a)); }
+  check(`dashboard class page ${ou}: class switch + email button`, /aria-label="LOCKqz on for this class"/.test(a) && /mailbtn/.test(a)); }
 await D.go("");
 
 console.log("P3 exams: hidden quiz has a switch on both; ended quiz is 'past' on both");

@@ -189,7 +189,7 @@ sqlite.prepare("UPDATE devices SET student_verified=1").run();   // email codes 
 await lock(BO);
 r = await pw(BO);
 check("gate off -> no password, reason gate_off", r.status === 402 && r.data?.reason === "gate_off" && !r.data?.password, JSON.stringify(r.data));
-check("professor emailed to open the Sync tab", MAILS.some(m => m.to === "prof@usc.edu" && /Sync/.test(m.text)), JSON.stringify(MAILS.map(m => m.to)));
+check("professor emailed: open Chrome, sign in to Brightspace, keep it open", MAILS.some(m => m.to === "prof@usc.edu" && /Open Chrome/.test(m.text) && /keep it open until the quiz ends/.test(m.text)), JSON.stringify(MAILS.map(m => m.to)));
 const nMail = MAILS.length; await pw(BO);
 check("no second email within the hour", MAILS.length === nMail);
 page = makePage(SRC); await page.done; await settle(); await page.tick(); await settle(); await page.tick();

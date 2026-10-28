@@ -341,11 +341,12 @@ const MAIL = {
   welcome({ last, storeUrl }) {
     const store = storeUrl || EXT_STORE_URL || (SITE_URL + "/download/lockqz-prof-chromium.zip");
     const subject = "Welcome to LOCKqz \u2014 2 steps and you're done";
-    const text = `Hi Professor ${last},\n\nYour LOCKqz account is ready. Two steps, about one minute:\n\n1. Add LOCKqz to Chrome: ${store} \u2014 click Add to Chrome, then Add extension.\n2. Open Brightspace: ${BS_URL} \u2014 and sign in as usual. Your classes appear on your LOCKqz dashboard within a minute.\n\nThat's it. From then on LOCKqz protects every exam in every class automatically \u2014 you never set a password and never do anything on exam day.\n\nWhen your classes appear, click Email students on each class so students install LOCKqz before the first exam. Students who don't install can't open the exam.\n\nDashboard: ${DASH_URL}\n\nRespectfully,\nThe LOCKqz Team`;
+    const text = `Hi Professor ${last},\n\nYour LOCKqz account is ready. Two steps, about one minute:\n\n1. Add LOCKqz to Chrome: ${store} \u2014 click Add to Chrome, then Add extension.\n2. Open Brightspace: ${BS_URL} \u2014 and sign in as usual. Your classes appear on your LOCKqz dashboard within a minute.\n\nFrom then on LOCKqz protects every exam in every class automatically. You never set a password.\n\nOn exam day: keep Chrome open and signed in to Brightspace on a computer that's on, until the exam ends. LOCKqz runs the exam from there. If Chrome is closed, students wait at the start of the exam until you open it.\n\nWhen your classes appear, click Email students on each class so students install LOCKqz before the first exam. Students who don't install can't open the exam.\n\nDashboard: ${DASH_URL}\n\nRespectfully,\nThe LOCKqz Team`;
     const html = mailWrap(P(`Hi Professor ${hesc(last)},`) + P("Your LOCKqz account is ready. Two steps, about one minute:") +
       `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 16px"><tr><td style="padding:6px 0;font-size:15px"><b>1.</b> ${mailBtn(store, "Add LOCKqz to Chrome")} <span style="color:#5c5952">\u2014 click <b>Add to Chrome</b>, then <b>Add extension</b>.</span></td></tr>
 <tr><td style="padding:6px 0;font-size:15px"><b>2.</b> ${mailBtn(BS_URL, "Open Brightspace")} <span style="color:#5c5952">and sign in as usual. Your classes appear on your LOCKqz dashboard within a minute.</span></td></tr></table>` +
-      P("<b>That's it.</b> From then on LOCKqz protects every exam in every class automatically \u2014 you never set a password and never do anything on exam day.") +
+      P("From then on LOCKqz protects every exam in every class automatically. You never set a password.") +
+      P("<b>On exam day: keep Chrome open and signed in to Brightspace</b> on a computer that's on, until the exam ends. LOCKqz runs the exam from there. If Chrome is closed, students wait at the start of the exam until you open it.") +
       P("When your classes appear, click <b>Email students</b> on each class so students install LOCKqz before the first exam. Students who don't install can't open the exam.") +
       P(`Dashboard: <a href="${DASH_URL}" style="color:#990000">prof.lockqz.pages.dev</a>`) + P("Respectfully,<br>The LOCKqz Team"));
     return { subject, text, html };
@@ -368,19 +369,34 @@ const MAIL = {
     const html = mailWrap(P("Hi,") + P(`<b>LOCKqz is not installed on your computer yet</b>, and <b>${hesc(exam)}</b> for ${hesc(label)} is <b>${hesc(when)}</b>. Without it the exam will not open.`) + STEPS_HTML + signHtml(prof, label), studentFooter(last));
     return { subject, text, html };
   },
+  // To a professor who never added the LOCKqz extension, once, when a protected exam is within a day.
+  install({ exam, when, storeUrl }) {
+    const store = storeUrl || EXT_STORE_URL || (SITE_URL + "/download/lockqz-prof-chromium.zip");
+    const subject = `${exam} is ${when} \u2014 add LOCKqz to Chrome`;
+    const text = `${exam} is ${when} and protected by LOCKqz, but LOCKqz isn't in your Chrome yet.\n\n1. Add LOCKqz to Chrome: ${store}\n2. Open Brightspace in Chrome and sign in.\n3. On exam day, keep Chrome open until the exam ends.\n\nWithout it, students wait at the start of the exam.\n\nRespectfully,\nThe LOCKqz Team`;
+    const html = mailWrap(P(`<b>${hesc(exam)}</b> is ${hesc(when)} and protected by LOCKqz, but LOCKqz isn't in your Chrome yet.`) +
+      `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 16px"><tr><td style="padding:6px 0;font-size:15px"><b>1.</b> ${mailBtn(store, "Add LOCKqz to Chrome")}</td></tr>
+<tr><td style="padding:6px 0;font-size:15px"><b>2.</b> Open Brightspace in Chrome and sign in.</td></tr><tr><td style="padding:6px 0;font-size:15px"><b>3.</b> On exam day, keep Chrome open until the exam ends.</td></tr></table>` +
+      P("Without it, students wait at the start of the exam.") + P("Respectfully,<br>The LOCKqz Team"));
+    return { subject, text, html };
+  },
   // To the professor, ~70 min before an exam, when the extension has not checked in for 6 h.
   checkin({ exam }) {
     const subject = `${exam} starts in about an hour \u2014 open Chrome`;
-    const text = `LOCKqz hasn't heard from your browser extension today. Open Chrome (any page) so LOCKqz can watch ${exam}.\n\nStudents who installed LOCKqz can still open the exam either way.\n\nRespectfully,\nThe LOCKqz Team`;
-    const html = mailWrap(P(`LOCKqz hasn't heard from your browser extension today. <b>Open Chrome</b> (any page) so LOCKqz can watch <b>${hesc(exam)}</b>.`) + P("Students who installed LOCKqz can still open the exam either way.") + P("Respectfully,<br>The LOCKqz Team"));
+    const text = `${exam} starts in about an hour, and LOCKqz hasn't heard from Chrome today.\n\nOpen Chrome on a computer that's on, sign in to Brightspace, and keep it open until the exam ends. LOCKqz runs the exam from there. If Chrome is closed, students wait at the start of the exam until you open it.\n\nRespectfully,\nThe LOCKqz Team`;
+    const html = mailWrap(P(`<b>${hesc(exam)}</b> starts in about an hour, and LOCKqz hasn't heard from Chrome today.`) + P("<b>Open Chrome</b> on a computer that's on, sign in to Brightspace, and keep it open until the exam ends. LOCKqz runs the exam from there. If Chrome is closed, students wait at the start of the exam until you open it.") + P("Respectfully,<br>The LOCKqz Team"));
     return { subject, text, html };
   },
 };
 // "in N days" / "tomorrow" / "in 3 hours" for the reminder.
 const inWords = ms => { const h = ms / 3600000; if (h <= 1.5) return "in about an hour"; if (h < 24) return `in ${Math.round(h)} hours`; const d = Math.round(h / 24); return d <= 1 ? "tomorrow" : `in ${d} days`; };
-// Gmail sends at most 500 messages a day (recipients count): LOCKqz keeps the student emails + reminders
-// under MAIL_DAY_MAX a day in all, so the email codes always have room.
-const MAIL_DAY_MAX = 400, MAIL_BATCH = 90;   // Gmail: at most 100 recipients per message
+// ONE Gmail account sends everything LOCKqz sends, and Gmail allows 500 recipients per rolling 24 h. Every
+// send is counted in one place (mailOut: hour buckets in mail_sent, ou '_all'). Automatic mail (reminders,
+// check-ins, welcome, renewal notices) stops at MAIL_AUTO_MAX; essential mail (sign-in codes, receipts, pay
+// links, payment notices, a student waiting at a gate) may go up to MAIL_HARD_MAX. So however much automatic
+// mail goes out, at least MAIL_HARD_MAX - MAIL_AUTO_MAX (230) sends a day stay free for sign-in codes.
+// Professors email their own students from their OWN mailbox (dashboard: Email students = their mail app).
+const MAIL_HARD_MAX = 480, MAIL_AUTO_MAX = 250, MAIL_BATCH = 90;   // Gmail: at most 100 recipients per message
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -514,7 +530,8 @@ export async function onRequest(context) {
     return [db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE event IN ('login_fail','pay_code_new','pay_start','pay_stripe','pay_bank','signup','stripe_sess','code_sent','code_send_failed') AND " + RL_EV + " AND ts<? LIMIT 300)").bind(ago(2)),
       db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE event='reset_request' AND " + RL_EV + " AND ts<? LIMIT 100)").bind(ago(30)),
       db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id LIMIT (CASE WHEN (SELECT ts FROM events ORDER BY id LIMIT 1) < ? THEN 300 ELSE 0 END)) AND ts<?").bind(ago(EVENT_DAYS), ago(EVENT_DAYS)),
-      db.prepare("DELETE FROM email_codes WHERE expires<?").bind(Date.now() - 86400000)];
+      db.prepare("DELETE FROM email_codes WHERE expires<?").bind(Date.now() - 86400000),
+      db.prepare("DELETE FROM mail_sent WHERE ou='_all' AND day<?").bind(new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 13))];
   };
   // REQUIRE_GATE=1: every LOCKqz-protected quiz is gated (the Sync tab hides it and admits only students
   // LOCKqz is locking, and starts the gate by itself), and no password is given for a protected quiz
@@ -541,6 +558,18 @@ export async function onRequest(context) {
       .bind(o, o, o, d, d, ...ex).first();
     return !!r;
   };
+  // ---- the one Gmail budget (see MAIL_HARD_MAX above) ----
+  const hourKey = (ms = Date.now()) => new Date(ms).toISOString().slice(0, 13);
+  const mailUsed = async () => Number((await db.prepare("SELECT COALESCE(SUM(n),0) AS n FROM mail_sent WHERE ou='_all' AND kind='total' AND day>=?").bind(hourKey(Date.now() - 24 * 3600000)).first())?.n || 0);
+  const mailRoom = async (n, cls) => (await mailUsed()) + n <= (cls === "auto" ? MAIL_AUTO_MAX : MAIL_HARD_MAX);
+  const mailCount = n => db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('_all','total',?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(hourKey(), n, now()).run();
+  // cls: "essential" (codes, receipts, pay links, payment notices, gate waits) or "auto" (everything else).
+  async function mailOut(to, subject, text, opts = {}, cls = "essential") {
+    const k = Array.isArray(to) ? to.length : 1;
+    if (!(await mailRoom(k, cls))) { const e = new Error("mail_budget"); e.budget = true; throw e; }
+    await sendMail(env, to, subject, text, opts);
+    try { await mailCount(k); } catch {}
+  }
   const nudgeGate = async (ou, qi) => {
     try {
       if (!codesOn) return false;
@@ -554,8 +583,8 @@ export async function onRequest(context) {
       const ins = await db.prepare("INSERT OR IGNORE INTO sync_nudges (ou,qi,at) VALUES (?,?,?)").bind(ou, key, now()).run();
       if (!ins.meta.changes) return false;
       const course = String(t.course || "your class").replace(/^\d+_\d+\s*/, "").slice(0, 120);
-      const text = `A student is waiting to start a LOCKqz quiz in ${course}, but its gate is not running, so LOCKqz is holding the password.\n\nOpen Brightspace and click your LOCKqz Sync bookmark, and leave that tab open during the quiz. The gate starts by itself and the student gets in.\n\nLOCKqz`;
-      const go = sendMail(env, t.email, "LOCKqz: open your Sync tab — a student is waiting", text).catch(() => {});
+      const text = `A student is waiting to start a LOCKqz quiz in ${course}, and LOCKqz can't open it yet because your Chrome isn't connected.\n\nOpen Chrome on a computer that's on, sign in to Brightspace, and keep it open until the quiz ends. The student gets in by themselves within a minute.\n\nLOCKqz`;
+      const go = mailOut(t.email, "LOCKqz: a student is waiting — open Chrome", text, {}, "essential").catch(() => {});
       if (typeof context.waitUntil === "function") context.waitUntil(go); else await go;
       return true;
     } catch { return false; }
@@ -574,8 +603,8 @@ export async function onRequest(context) {
       const ins = await db.prepare("INSERT OR IGNORE INTO sync_nudges (ou,qi,at) VALUES (?,?,?)").bind(ou, qi, now()).run();
       if (!ins.meta.changes) return false;
       const course = String(t.course || "your class").replace(/^\d+_\d+\s*/, "").slice(0, 120);
-      const text = `A student just opened a quiz in ${course} that LOCKqz has not seen yet, so it has no LOCKqz password.\n\nOpen Brightspace and click your LOCKqz Sync bookmark. (A Sync tab left open re-syncs by itself every 15 minutes.)\n\nLOCKqz`;
-      const go = sendMail(env, t.email, "LOCKqz: click Sync for your new quiz", text).catch(() => {});
+      const text = `A student just opened a quiz in ${course} that LOCKqz has not seen yet, so it has no LOCKqz password.\n\nOpen Brightspace in Chrome (with LOCKqz) once. LOCKqz picks up the new quiz by itself.\n\nLOCKqz`;
+      const go = mailOut(t.email, "LOCKqz: open Brightspace in Chrome for your new quiz", text, {}, "auto").catch(() => {});
       if (typeof context.waitUntil === "function") context.waitUntil(go); else await go;
       return true;
     } catch { return false; }
@@ -1072,9 +1101,7 @@ export async function onRequest(context) {
       const link = r.kind === "student" ? await payLink(email) : "https://prof.lockqz.pages.dev/";
       const text = `LOCKqz renews for the new semester.\n\n${r.kind === "student" ? `Pay $${amt.toLocaleString("en-US")}${taxOn() ? ` (includes ${taxInfo().label.toLowerCase()})` : ""} with memo ${r.code}:\n${link}\n\nZelle ${stuZelle()||""} (paste ${r.code} in the Zelle memo/note)${stripeOn() ? "  ·  Card" : ""}${stuVenmo() ? `  ·  Venmo @${stuVenmo()}` : ""}  ·  Bank transfer: email ${stuBank()||""}` : `Pay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nVenmo @${(env.VENMO_HANDLE||"").replace(/^@/,"")}  ·  Zelle ${env.ZELLE_TO||""}`}\n\nAccess turns on as soon as the payment arrives and lasts until ${termEndOf(cur)}.\n\nStop these emails: ${await payLink(email, "&renew=off")}`;
       try {
-        if (typeof env.MAIL_SINK === "function") await env.MAIL_SINK({ to: email, subject: "Renew LOCKqz", text });
-        else await smtpSend(async () => (await import("cloudflare:sockets")).connect({ hostname: env.MAIL_HOST || "smtp.gmail.com", port: Number(env.MAIL_PORT || 465) }, { secureTransport: "on", allowHalfOpen: false }),
-                            { user: env.MAIL_USER, pass: String(env.MAIL_APP_PASSWORD).replace(/\s+/g, ""), to: email, subject: "Renew LOCKqz", text });
+        await mailOut(email, "Renew LOCKqz", text, {}, "auto");
         await db.prepare("INSERT OR IGNORE INTO renew_sent (email,term,at) VALUES (?,?,?)").bind(email, cur, now()).run();
         sent++;
       } catch (e) { break; }
@@ -1135,7 +1162,7 @@ export async function onRequest(context) {
       + `Your card (${cardName({ brand, last4 })}) renews automatically each semester at ${usd(amt)}.\n`
       + `Next renewal: about ${fmtDay(nx.day)}, for ${termName(nx.term)}.\n\n`
       + `Cancel anytime: ${CANCEL_HOW}.\nIf you cancel, your current semester stays active and the card is not charged again.`;
-    try { await sendMail(env, email, `LOCKqz paid · renews each semester at ${usd(amt)}`, text); } catch {}
+    try { await mailOut(email, `LOCKqz paid · renews each semester at ${usd(amt)}`, text, {}, "essential"); } catch {}
   }
   async function cardRenewTick() {
     if (!autoRenewOn()) return { why: "off" };
@@ -1191,7 +1218,7 @@ export async function onRequest(context) {
           + `Pay here to keep LOCKqz working next semester:\n${await payLink(r.email)}\n\n`
           + (n < RENEW_TRIES ? "LOCKqz tries the card once more tomorrow. If you pay first, it does not.\n" : "")
           + `Cancel auto-renew: ${CANCEL_HOW}.`;
-        try { out.sub++; await sendMail(env, r.email, "LOCKqz renewal did not go through", text); } catch {}
+        try { out.sub++; await mailOut(r.email, "LOCKqz renewal did not go through", text, {}, "essential"); } catch {}
       }
     }
     if (credits.length) await applyPayments(credits);
@@ -1300,10 +1327,12 @@ export async function onRequest(context) {
     const c = await db.prepare("SELECT COALESCE(SUM(ts>=? AND device_id=?),0) AS dh, COALESCE(SUM(device_id=?),0) AS dd, COALESCE(SUM(ts>=? AND student=?),0) AS eh, COALESCE(SUM(student=?),0) AS ed, COALESCE(SUM(ts>=? AND detail=?),0) AS ih, COUNT(*) AS total FROM events WHERE event='code_sent' AND " + RL_EV + " AND ts>=?")
       .bind(hr, dev, dev, hr, email, email, hr, "ip:" + clientIp, since(86400000)).first();
     if (Number(c.dh) >= 5 || Number(c.dd) >= 15 || Number(c.eh) >= 3 || Number(c.ed) >= 5 || Number(c.ih) >= 10) return json({ error: "too_many_codes", retry_minutes: 60 }, 429);
-    const max = Number(env.MAIL_DAILY_MAX || 480);
-    if (Number(c.total) >= max || (Number(c.total) >= max / 2 && !(await db.prepare("SELECT name FROM roster WHERE email=? AND name IS NOT NULL LIMIT 1").bind(email).first()))) return json({ error: "mail_busy" }, 503);
+    // The one Gmail budget: codes are essential (room is always kept for them); an email on no synced class
+    // list may use only the first half, so a flood of strangers cannot starve real students.
+    const used = await mailUsed(), half = Math.floor(MAIL_HARD_MAX / 2);
+    if (used + 1 > MAIL_HARD_MAX || (used >= half && !(await db.prepare("SELECT name FROM roster WHERE email=? AND name IS NOT NULL LIMIT 1").bind(email).first()))) return json({ error: "mail_busy" }, 503);
     const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, "0");
-    try { await sendCode(env, email, code, web); }
+    try { await sendCode(env, email, code, web); try { await mailCount(1); } catch {} }
     catch (e) { await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(dev, email, null, "code_send_failed", String(e).slice(0, 200), now()).run(); return json({ error: "send_failed" }, 502); }
     await db.batch([
       db.prepare("INSERT OR REPLACE INTO email_codes (device_id,email,code_hash,expires,tries,created_at) VALUES (?,?,?,?,0,?)")
@@ -1718,7 +1747,7 @@ export async function onRequest(context) {
           .bind(id, email, String(body.name||"").trim()||null, await hashPw(pw,salt,PEPPER), salt, token, now(), n===0?"admin":"teacher", inv ? inv.active_until : null, vouched).run();
       // Welcome email (HTML): the two steps. Sent in the background; sign-up never waits for Gmail.
       if (mailOn(env)) { const w = MAIL.welcome({ last: lastName(body.name) || email.split("@")[0] });
-        const go = sendMail(env, email, w.subject, w.text, { html: w.html }).catch(() => {});
+        const go = mailOut(email, w.subject, w.text, { html: w.html }, "auto").catch(() => {});
         if (typeof context.waitUntil === "function") context.waitUntil(go); else await go; }
       return json({ token, email, name: body.name||null });
     }
@@ -1924,7 +1953,7 @@ export async function onRequest(context) {
         const rows = c ? (await db.prepare("SELECT amount, via, term, received_at, matched FROM payments WHERE code=? AND COALESCE(matched,'')<>'review' ORDER BY received_at DESC LIMIT 50").bind(c.code).all()).results : [];
         const lines = rows.map(x => `${String(x.received_at || "").slice(0, 10)}  ${usd(Math.round(Number(x.amount) * 100))}  ${VIA_NAME[String(x.via || "").toLowerCase()] || "Zelle"}  ${x.term ? termName(x.term) : ""}${x.matched === "void" ? "  (refunded / cancelled)" : ""}`);
         const text = `LOCKqz receipts for ${email}${c ? ` (memo ${c.code})` : ""}\n\n` + (lines.length ? lines.join("\n") : "No payments yet.") + "\n\nQuestions: reply to this email.";
-        try { await sendMail(env, email, "Your LOCKqz receipts", text); } catch { return json({ error: "send_failed", message: "Could not send the email. Try again in a minute." }, 502); }
+        try { await mailOut(email, "Your LOCKqz receipts", text, {}, "essential"); } catch { return json({ error: "send_failed", message: "Could not send the email. Try again in a minute." }, 502); }
         await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("acct:" + email, email, null, "receipts_sent", String(rows.length), now()).run();
         return json({ ok: true, sent: true, to: email, count: rows.length });
       }
@@ -1946,7 +1975,7 @@ export async function onRequest(context) {
         const recent = await db.prepare("SELECT 1 FROM events WHERE device_id=? AND quiz_id IS NULL AND event='pay_link' AND ts>?").bind("mail:" + email, new Date(Date.now() - 600000).toISOString()).first();
         if (!recent) {
           await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("mail:" + email, null, null, "pay_link", clientIp, now()).run();
-          try { await sendMail(env, email, "Your LOCKqz pay link", `Open your LOCKqz pay page:\n${await payLink(email)}\n\nThis link is only for ${email}. If you did not ask for it, ignore this email.`); } catch {}
+          try { await mailOut(email, "Your LOCKqz pay link", `Open your LOCKqz pay page:\n${await payLink(email)}\n\nThis link is only for ${email}. If you did not ask for it, ignore this email.`); } catch {}
         }
         return json({ link_sent: true, to: email, required: true });
       }
@@ -2080,9 +2109,9 @@ export async function onRequest(context) {
         + `Access turns on by itself within a minute of the money arriving (ACH usually 1–3 business days, wire same day).\n`
         + (stuZelle() ? `Faster: Zelle ${m(w.total)} to ${stuZelle()} with memo ${code}. It arrives in minutes.\n` : "")
         + `\nQuestions: reply to this email.`;
-      try { await sendMail(env, email, `LOCKqz bank transfer details · ${code}`, text); }
+      try { await mailOut(email, `LOCKqz bank transfer details · ${code}`, text, {}, "essential"); }
       catch (e) { return json({ error: "Could not send the email. Try again in a minute." }, 502); }
-      if (!details && env.ADMIN_EMAIL) try { await sendMail(env, String(env.ADMIN_EMAIL), `Send bank details: ${email} (${code})`, `${email} asked to pay ${m(w.total)} by bank transfer (memo ${code}).\nReply to them with LOCKqz's bank details.\nTo answer automatically: set the Pages secret BANK_DETAILS.`); } catch {}
+      if (!details && env.ADMIN_EMAIL) try { await mailOut(String(env.ADMIN_EMAIL), `Send bank details: ${email} (${code})`, `${email} asked to pay ${m(w.total)} by bank transfer (memo ${code}).\nReply to them with LOCKqz's bank details.\nTo answer automatically: set the Pages secret BANK_DETAILS.`); } catch {}
       return json(seeAll ? { ok: true, sent: true, to: email, amount: w.total } : { ok: true, sent: true, to: email });
     }
     if (p === "/pay/renew" && request.method === "POST") {
@@ -2101,7 +2130,7 @@ export async function onRequest(context) {
     // Pages Functions have no cron trigger, so an outside clock calls this (the Gmail script, $0).
     // One mail_sent row per exam per kind, ever; the daily cap keeps Gmail's 500/day safe.
     async function examMailTick() {
-      const out = { reminders: 0, checkins: 0, skipped: 0 };
+      const out = { reminders: 0, checkins: 0, installs: 0, skipped: 0 };
       if (!mailOn(env)) return { ...out, why: "mail off" };
       const nowMs = Date.now(), from = new Date(nowMs).toISOString(), to = new Date(nowMs + 49 * 3600000).toISOString();
       const rows = (await db.prepare(`SELECT q.ou AS ou, q.qi AS qi, b.name AS name, b.start_date AS start_date, tc.code AS code, tc.name AS course,
@@ -2112,34 +2141,44 @@ export async function onRequest(context) {
         WHERE q.qi IS NOT NULL AND b.start_date>? AND b.start_date<? AND NOT EXISTS (SELECT 1 FROM course_off co WHERE co.ou=q.ou)
         ORDER BY b.start_date, t.role='admin' LIMIT 120`).bind(from, to).all()).results;
       const seenQ = new Set(), day = laToday();
-      let used = Number((await db.prepare("SELECT COALESCE(SUM(n),0) AS n FROM mail_sent WHERE day=?").bind(day).first()).n) || 0;
-      const sent = new Set((await db.prepare("SELECT ou||'|'||kind AS k FROM mail_sent WHERE kind LIKE 'r48:%' OR kind LIKE 'r3:%' OR kind LIKE 'ck:%'").all()).results.map(r => r.k));
+      // ix:<teacher> rows: the "add LOCKqz to Chrome" email goes to a professor at most once a day (any exam).
+      const sent = new Set((await db.prepare("SELECT ou||'|'||kind AS k FROM mail_sent WHERE (kind LIKE 'r48:%' OR kind LIKE 'r3:%' OR kind LIKE 'ck:%') OR (kind LIKE 'ix:%' AND day=?)").bind(day).all()).results.map(r => r.k));
       const record = (ou, kind, n) => db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, kind, day, n, now()).run();
       let sends = 0;
+      // Soonest exam first (ORDER BY start_date): when the automatic budget runs low, the most urgent mail goes.
       for (const r of rows) {
         const key = String(r.ou) + "-" + String(r.qi); if (seenQ.has(key)) continue; seenQ.add(key);   // one professor per exam (the first non-admin)
         if (sends >= 12) break;   // Workers subrequest budget per call; the next tick continues
         const lead = Date.parse(r.start_date) - nowMs; if (isNaN(lead) || lead <= 0) continue;
         const exam = String(r.name || "your exam").slice(0, 120), prof = String(r.tname || r.email).trim(), last = lastName(prof) || prof;
-        // Reminders to students who have not installed.
-        const kind = lead <= 3 * 3600000 ? "r3:" + r.qi : lead <= 48 * 3600000 ? "r48:" + r.qi : null;
-        if (kind && Number(r.reminders ?? 1) !== 0 && !sent.has(r.ou + "|" + kind)) {
-          sent.add(r.ou + "|" + kind);
-          const list = await classRecipients(String(r.ou), "missing");
-          if (!list.length) await record(String(r.ou), kind, 0);
-          else if (used + list.length > MAIL_DAY_MAX) out.skipped++;
-          else {
-            const m = MAIL.reminder({ course: r.course, code: r.code, prof, last, exam, when: inWords(lead), start_date: r.start_date });
-            try { for (const part of chunk(list, MAIL_BATCH)) { await sendMail(env, part, m.subject, m.text, { html: m.html, replyTo: r.email }); sends++; }
-              used += list.length; out.reminders += list.length; await record(String(r.ou), kind, list.length); } catch { out.skipped++; }
-          }
+        // To the professor first (one email; their whole class depends on it).
+        // A professor who never added the extension: once a day while a protected exam is within 24 h.
+        const ix = "ix:" + r.tid;
+        if (!r.ext_seen && r.email && lead <= 24 * 3600000 && !sent.has("_prof|" + ix)) {
+          sent.add("_prof|" + ix);
+          const m = MAIL.install({ exam, when: inWords(lead) });
+          try { await mailOut(r.email, m.subject, m.text, { html: m.html }, "auto"); sends++; out.installs++; await record("_prof", ix, 1); } catch { out.skipped++; }
         }
-        // T-70 check-in to the professor.
+        // T-70: the extension has checked in before but not for 6 h (Chrome closed / computer asleep).
         const ck = "ck:" + r.qi;
-        if (lead <= 70 * 60000 && !sent.has(r.ou + "|" + ck) && r.email && r.ext_seen && nowMs - Date.parse(r.ext_seen) > 6 * 3600000   /* bookmark-only professors (never checked in) are not nagged */) {
+        if (lead <= 70 * 60000 && !sent.has(r.ou + "|" + ck) && r.email && r.ext_seen && nowMs - Date.parse(r.ext_seen) > 6 * 3600000) {
           sent.add(r.ou + "|" + ck);
           const m = MAIL.checkin({ exam });
-          try { await sendMail(env, r.email, m.subject, m.text, { html: m.html }); sends++; used++; out.checkins++; await record(String(r.ou), ck, 1); } catch { out.skipped++; }
+          try { await mailOut(r.email, m.subject, m.text, { html: m.html }, "auto"); sends++; out.checkins++; await record(String(r.ou), ck, 1); } catch { out.skipped++; }
+        }
+        // Reminders to students who have not installed (2 days and 3 hours before), from the automatic budget.
+        const kind = lead <= 3 * 3600000 ? "r3:" + r.qi : lead <= 48 * 3600000 ? "r48:" + r.qi : null;
+        if (kind && Number(r.reminders ?? 1) !== 0 && !sent.has(r.ou + "|" + kind)) {
+          const list = await classRecipients(String(r.ou), "missing");
+          if (!list.length) { sent.add(r.ou + "|" + kind); await record(String(r.ou), kind, 0); }
+          else if (!(await mailRoom(list.length, "auto"))) out.skipped++;   // not marked sent: a later tick retries if room frees up
+          else {
+            sent.add(r.ou + "|" + kind);
+            const m = MAIL.reminder({ course: r.course, code: r.code, prof, last, exam, when: inWords(lead), start_date: r.start_date });
+            let done = 0;
+            try { for (const part of chunk(list, MAIL_BATCH)) { await mailOut(part, m.subject, m.text, { html: m.html, replyTo: r.email }, "auto"); sends++; done += part.length; } } catch { out.skipped++; }
+            out.reminders += done; if (done) await record(String(r.ou), kind, done);
+          }
         }
       }
       return out;
@@ -2650,28 +2689,26 @@ export async function onRequest(context) {
     }
     // Email the class (kind "all") or only the students who have not installed LOCKqz (kind "missing"),
     // from LOCKqz, signed by the professor, Reply-To the professor. One row per class per kind per day.
+    // Email students: the professor sends it from their OWN mailbox (their mail app opens with this draft),
+    // so it costs LOCKqz's Gmail nothing and students see their professor's name. LOCKqz only returns the
+    // addresses + message and remembers that the class was emailed (the Set-up step and "Remind" button).
     if (p === "/email/students" && request.method === "POST") {
       const ou = String(body.ou||""), kind = body.kind === "missing" ? "missing" : "all";
       if (!/^\d+$/.test(ou)) return json({ error:"bad class" }, 400);
       if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this class can email it." }, 403);
-      if (!mailOn(env)) return json({ error:"mail_off", message: "Email is not set up on LOCKqz yet." }, 503);
       const c = await db.prepare("SELECT name, code FROM teacher_courses WHERE ou=? ORDER BY teacher_id=? DESC LIMIT 1").bind(ou, me.id).first() || {};
       const list = await classRecipients(ou, kind);
-      if (!list.length) return json({ sent: 0, kind, none: true });
-      const day = laToday();
-      const used = Number((await db.prepare("SELECT COALESCE(SUM(n),0) AS n FROM mail_sent WHERE day=?").bind(day).first()).n) || 0;
-      if (used + list.length > MAIL_DAY_MAX) return json({ error: "limit", message: `LOCKqz can send ${Math.max(0, MAIL_DAY_MAX - used)} more emails today. Try again tomorrow.`, left: Math.max(0, MAIL_DAY_MAX - used) }, 429);
+      if (!list.length) return json({ to: [], kind, none: true });
       const prof = String(me.name || me.email).trim(), last = lastName(prof) || prof;
       const fe = await db.prepare("SELECT b.name AS name, b.start_date AS start_date FROM bs_quizzes b JOIN quizzes q ON q.ou=b.ou AND q.qi=b.qi WHERE b.ou=? AND b.start_date>? ORDER BY b.start_date LIMIT 1").bind(ou, now()).first();
       let m;
       if (kind === "all") m = MAIL.student({ course: c.name, code: c.code, prof, last, firstExam: fe });
       else { const lead = fe && fe.start_date ? Date.parse(fe.start_date) - Date.now() : NaN;
         m = MAIL.reminder({ course: c.name, code: c.code, prof, last, exam: fe && fe.name ? fe.name : "your next exam", when: isNaN(lead) ? "coming up" : inWords(lead), start_date: fe ? fe.start_date : null }); }
-      let sent = 0;
-      try { for (const part of chunk(list, MAIL_BATCH)) { await sendMail(env, part, m.subject, m.text, { html: m.html, replyTo: me.email }); sent += part.length; } }
-      catch (e) { if (!sent) return json({ error: "send_failed", message: "Could not send the email. Try again in a minute." }, 502); }
-      await db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, kind, day, sent, now()).run();
-      return json({ sent, kind, to: list.length });
+      // The professor sends it themselves: drop LOCKqz's "sent on behalf of" footer from the draft.
+      const text = String(m.text).replace(/\n\n--\nSent by LOCKqz on behalf of[^\n]*$/, "");
+      await db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, kind, laToday(), list.length, now()).run();
+      return json({ to: list, kind, subject: m.subject, text });
     }
     if (p === "/class" && request.method === "POST") {
       const ou = String(body.ou||"");
