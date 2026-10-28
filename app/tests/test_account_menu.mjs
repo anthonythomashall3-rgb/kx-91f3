@@ -1,7 +1,7 @@
 // Download page gear icon (Account + Settings) and the pay page's renewal wording, in a REAL browser
 // (headless Chromium via Playwright; skipped where Playwright is not installed). Real API (in-memory SQLite),
 // email + Stripe mocked. Checks: install steps unchanged, keyboard (Enter / Esc), sign in with the emailed
-// code, paid status + Pay link, cancel subscription / turn auto-renew back on with the confirm step, computers (read-only), receipts,
+// code, paid status + Pay link, cancel subscription / turn auto-renew back on with the confirm step, computers (read-only), support page,
 // sign out, storage blocked, phone width (16px gutters, no horizontal scroll).
 import { createRequire } from "node:module";
 import { DatabaseSync } from "node:sqlite";
@@ -41,7 +41,7 @@ sqlite.prepare("INSERT INTO card_renew (email,customer,pm,brand,last4,autorenew,
 for (const [id, pl] of [["mac-aaa111", "mac"], ["win-bbb222", "windows"]])
   sqlite.prepare("INSERT INTO devices (device_id,student,platform,version,installed_at,last_seen,student_verified) VALUES (?,?,?,?,?,?,1)").run(id, "cy@usc.edu", pl, "0.5.1", new Date().toISOString(), new Date().toISOString());
 
-const FILES = { "/": ["index.html", "text/html"], "/account.js": ["account.js", "application/javascript"], "/lq.js": ["lq.js", "application/javascript"], "/pay": ["pay.html", "text/html"], "/privacy": ["privacy.html", "text/html"] };
+const FILES = { "/": ["index.html", "text/html"], "/account.js": ["account.js", "application/javascript"], "/lq.js": ["lq.js", "application/javascript"], "/pay": ["pay.html", "text/html"], "/privacy": ["privacy.html", "text/html"], "/support": ["support.html", "text/html"] };
 const browser = await chromium.launch();
 async function ctx(opts = {}, init = null) {
   const c = await browser.newContext(opts);
@@ -77,13 +77,13 @@ try {
   await pg.keyboard.press("Enter");
   check("Enter opens it: Account + Settings, aria-expanded", await pg.locator("#lqmenu").isVisible() && await pg.getAttribute("#lqgearbtn", "aria-expanded") === "true" && /Account[\s\S]*Settings/.test(await pg.textContent("#lqmenu")));
   check("focus moves into the menu (Sign in)", await pg.evaluate(() => document.activeElement.textContent) === "Sign in");
-  check("Settings: receipts, privacy /privacy, support mailto", await pg.getAttribute("a.lqm-set >> text=Privacy policy", "href") === "/privacy" && await pg.getAttribute("a.lqm-set >> text=Contact support", "href") === "mailto:lockqz.app@gmail.com" && await pg.isVisible("text=Email me my receipts"));
+  check("Settings: privacy /privacy + Contact support /support; no receipts button", await pg.getAttribute("a.lqm-set >> text=Privacy policy", "href") === "/privacy" && await pg.getAttribute("a.lqm-set >> text=Contact support", "href") === "/support" && !(await pg.$("#lqm-rcpt")) && !/receipt/i.test(await pg.textContent("#lqmenu")));
   await pg.keyboard.press("Escape");
   check("Esc closes and returns focus to the gear", await pg.locator("#lqmenu").isHidden() && await pg.evaluate(() => document.activeElement.id) === "lqgearbtn");
 
-  console.log("B2 receipts before sign-in asks to sign in");
-  await pg.click("#lqgearbtn"); await pg.click("#lqm-rcpt");
-  check("'Sign in first' + the email box opens", /Sign in first/.test(await pg.textContent("#lqm-rcpt-msg")) && await pg.isVisible("#lqm-em"));
+  console.log("B2 Sign in opens the email box");
+  await pg.click("#lqgearbtn"); await pg.click("#lqm-acc >> text=Sign in");
+  check("email box shown", await pg.isVisible("#lqm-em"));
 
   console.log("B3 sign in with the emailed code (keyboard only)");
   await pg.fill("#lqm-em", "cy@usc.edu"); await pg.keyboard.press("Enter");
@@ -115,9 +115,12 @@ try {
   check("tells the student to email support to free a computer", /email lockqz\.app@gmail\.com/.test(await pg.textContent("#lqm-acc")));
   check("nothing revoked", sqlite.prepare("SELECT COUNT(*) AS n FROM devices WHERE COALESCE(revoked,0)=1").get().n === 0);
 
-  console.log("B6 receipts");
-  mails.length = 0; await pg.click("#lqm-rcpt");
-  check("'Sent to cy@usc.edu' + email with the card payment", await waitFor(async () => /Sent to cy@usc\.edu/.test(await pg.textContent("#lqm-rcpt-msg"))) && /\$280\s+Card/.test(mails.at(-1)?.text || ""), mails.at(-1)?.text);
+  console.log("B6 Contact support opens the support page (signed-in email filled in)");
+  if (await pg.locator("#lqmenu").isHidden()) await pg.click("#lqgearbtn");
+  await pg.click("a.lqm-set >> text=Contact support");
+  await pg.waitForSelector("#ms");
+  check("support page: email prefilled from the account", await pg.inputValue("#em") === "cy@usc.edu");
+  await pg.goto("https://lockqz.pages.dev/");
 
   console.log("B7 reload keeps the sign-in; sign out forgets it");
   await pg.reload(); await pg.click("#lqgearbtn");
@@ -148,6 +151,32 @@ try {
   check("line: 'Renews automatically each semester at $280. Cancel anytime: gear icon → Account.'", line === "Renews automatically each semester at $280. Cancel anytime: gear icon → Account.", line);
   const sty = await pg.$eval("#crenew", e => { const s = getComputedStyle(e); return { fs: parseFloat(s.fontSize), c: s.color, v: e.offsetParent !== null }; });
   check("line is normal body text (16px, near-black), visible", sty.v && sty.fs >= 16 && sty.c === "rgb(17, 17, 17)", JSON.stringify(sty));
+  await c.close();
+
+  console.log("B11 support page: form sends to LOCKqz's inbox with Reply-To = sender; errors; bot trap; limits; works with no mail app");
+  c = await ctx({ userAgent: MAC, viewport: { width: 1280, height: 800 } });
+  pg = await c.newPage(); const errs3 = []; pg.on("pageerror", e => errs3.push(e.message));
+  await pg.goto("https://lockqz.pages.dev/support");
+  check("no mailto anywhere on the page; address shown with Copy", !(await pg.$("a[href^=mailto]")) && await pg.textContent("#addr") === "lockqz.app@gmail.com" && await pg.isVisible("#cp"));
+  await pg.click("#go");
+  check("empty form: 'Enter your email.'", await pg.textContent("#out") === "Enter your email.");
+  await pg.fill("#em", "zed@usc.edu"); await pg.click("#go");
+  check("no message: 'Write your message.'", await pg.textContent("#out") === "Write your message.");
+  mails.length = 0;
+  await pg.fill("#nm", "Zed Q"); await pg.fill("#ms", "LOCKqz won't open my quiz.\nMac, Chrome."); await pg.click("#go");
+  check("sent: 'Sent. We'll reply to zed@usc.edu.'", await waitFor(async () => /Sent\. We'll reply to zed@usc\.edu\./.test(await pg.textContent("#out"))), await pg.textContent("#out"));
+  const sm = mails.at(-1) || {};
+  check("email to lockqz.app@gmail.com, Reply-To the sender, message + name inside", sm.to === "lockqz.app@gmail.com" && sm.replyTo === "zed@usc.edu" && /Zed Q/.test(sm.subject) && /won't open my quiz\.\nMac, Chrome\./.test(sm.text), JSON.stringify(sm));
+  check("message text not stored", !sqlite.prepare("SELECT COUNT(*) AS n FROM events WHERE detail LIKE '%quiz%' AND event='support'").get().n && sqlite.prepare("SELECT COUNT(*) AS n FROM events WHERE event='support'").get().n === 1);
+  mails.length = 0;
+  let r = await api("/support", { email: "bot@x.com", message: "buy now buy now", website: "http://spam" });
+  check("bot trap: answers ok, sends nothing", r.ok === true && mails.length === 0, JSON.stringify(r));
+  for (let k = 0; k < 4; k++) await api("/support", { email: "zed@usc.edu", message: "again " + k });
+  r = await api("/support", { email: "zed@usc.edu", message: "sixth" });
+  check("6th message in an hour refused (429 text)", /Too many messages/.test(r.error || ""), JSON.stringify(r));
+  const sendsBefore = mails.length; r = await api("/support", { email: "zed", message: "hello there" });
+  check("bad email refused, nothing sent", r.error === "Enter your email." && mails.length === sendsBefore);
+  check("no page errors on the support page", errs3.length === 0, errs3.join(" | "));
   await c.close();
 
   console.log("B10 phone width: 16px gutters, no horizontal scroll, menu inside the screen");

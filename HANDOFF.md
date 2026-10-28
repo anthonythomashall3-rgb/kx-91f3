@@ -25,6 +25,7 @@ commit as `Claude <noreply@anthropic.com>`). The claude.ai Project "LOCKqz" has 
   Branch `cws-live` (tests green) points the dashboard's Chrome + Edge buttons and the welcome email at
   https://chromewebstore.google.com/detail/bidlfpkdggdpmfbfkpjcnbjhfkfligkk — merge it to master ONLY once that page
   is live (before approval the link is a dead page). Edge installs from the Chrome Web Store, so no Edge listing is needed.
+- **Support:** gear → Contact support opens lockqz.pages.dev/support; messages arrive in lockqz.app@gmail.com (Reply-To = the sender, so just hit Reply). 'Email me my receipts' is gone from the gear.
 - Reminder: /etc/hosts entries are exact names (+www.); subdomains are covered only inside Chromium/Firefox (URLBlocklist)
   and by the agent. Known gaps list below (27 Oct) still stands.
 

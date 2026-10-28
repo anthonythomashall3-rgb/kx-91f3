@@ -2107,6 +2107,27 @@ export async function onRequest(context) {
     // answers anyone who emails LOCKqz about a bank transfer). BANK_DETAILS = a Pages secret (several lines:
     // bank, account holder, routing, account number); until it is set, the payer is told the details follow
     // and the admin is emailed to send them.
+    // Support form (lockqz.pages.dev/support): the message goes to LOCKqz's own inbox with Reply-To = the sender,
+    // so it works for people with no mail app. Message text is never stored; one event row per message for limits.
+    if (p === "/support" && request.method === "POST") {
+      const email = String(body.email || "").trim().toLowerCase().slice(0, 200);
+      const msg = String(body.message || "").replace(/\r/g, "").trim().slice(0, 5000);
+      if (String(body.website || "").trim()) return json({ ok: true });   // bot trap (hidden field)
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: "Enter your email." }, 400);
+      if (msg.length < 5) return json({ error: "Write your message." }, 400);
+      const hr = new Date(Date.now() - 3600000).toISOString(), day = new Date(Date.now() - 86400000).toISOString();
+      if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='support' AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 5
+       || Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='support' AND ts>? AND student=?").bind(hr, email).first()).n) >= 5)
+        return json({ error: "Too many messages. Try again in an hour." }, 429);
+      if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='support' AND ts>?").bind(day).first()).n) >= Number(env.SUPPORT_MAX_DAY || 60))
+        return json({ error: "Too many messages today. Email lockqz.app@gmail.com." }, 429);
+      const to = String(env.SUPPORT_EMAIL || env.MAIL_USER || "lockqz.app@gmail.com");
+      const name = String(body.name || "").replace(/[\r\n]/g, " ").trim().slice(0, 100);
+      try { await mailOut(to, `LOCKqz support: ${name ? name + " · " : ""}${email}`, `From: ${name ? name + " <" + email + ">" : email}\n\n${msg}\n\n— Reply to this email to answer them.`, { replyTo: email }, "auto"); }
+      catch (e) { return json({ error: "Could not send. Email lockqz.app@gmail.com." }, e && e.budget ? 503 : 502); }
+      await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + clientIp, email, null, "support", null, now()).run();
+      return json({ ok: true });
+    }
     if (p === "/pay/bank" && request.method === "POST") {
       const sec = await paySecret(), script = sec.length >= 16 && sameHex(String(request.headers.get("X-LOCKqz-Pay") || ""), sec);
       const email = String(body.email || "").trim().toLowerCase();

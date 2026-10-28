@@ -1,7 +1,7 @@
 /* LOCKqz download page: gear icon (top right) -> Account + Settings.
    Account: sign in with an emailed 6-digit code (token kept in this browser for 30 days), then this
    semester's payment, subscription (cancel auto-renew / turn back on), your computers (view only), sign out.
-   Settings: email me my receipts, privacy policy, contact support.
+   Settings: privacy policy, contact support (/support).
    Everything here is separate from the install steps: if this file fails, the page still installs. */
 (function () {
   "use strict";
@@ -157,14 +157,4 @@
     });
   }
 
-  // ---- Settings ----
-  var rc = document.getElementById("lqm-rcpt"), rcm = document.getElementById("lqm-rcpt-msg");
-  if (rc) rc.addEventListener("click", function () {
-    if (!saved()) { rcm.textContent = "Sign in first (Account above)."; if (state.step === "out") { state.step = "email"; render(); } focusIn(); return; }
-    rc.disabled = true; rcm.textContent = "Sending…";
-    authed({ op: "receipts" }).then(function (d) {
-      rc.disabled = false;
-      rcm.textContent = d.sent ? (d.again ? "Already sent to " + d.to + " in the last 10 minutes." : "Sent to " + d.to + ".") : d._status === 401 ? "Sign in first (Account above)." : (d.message || "Try again.");
-    });
-  });
 })();
