@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- (none)
+- 2026-10-27 18:25 PT — 01UzHDaF: extension-only professor path (bookmark UI removed), welcome page, 'keep Chrome open on exam day' everywhere, field lock -> warning only, automatic-email budget (sign-in codes always have room), professor emails from their own mailbox, Google sign-in (students + professors, codes as fallback), v0.5.3. Touches: [[route]].js, dashboard.html, sync.js, extension-prof/*, mac+windows agents, schema/migrate_035, tests. Please don't edit these until this line is gone.
 
 ## Recently finished
 - 2026-10-27 16:30 PT — 01UzHDaEFMdZeBAv2CYUsUjv: professor zero-effort pass. Brightspace field lock (password + special access greyed out for protected exams, extension content-bs.js), extension popup (status/next exam/Sync now), professor first-visit card in Brightspace, student one-time ready notice (mac/windows agents), dashboard Set-up checklist (vanishes when done) + compact class rows (Email students / Remind the N who haven't installed / reminders toggle), HTML emails from LOCKqz Gmail (welcome, student, reminder, T-70 open-Chrome check-in — only for professors whose extension has checked in at least once), /email/students + /class-mail + /ext-seen + /ext-status + /cron (Gmail script is the clock — Anthony must re-paste LOCKqz-payments.gs), migrate_034, EXT_STORE config block in dashboard.html (fill in when store listing is live). test_prof_zero_effort.mjs 64/64.
