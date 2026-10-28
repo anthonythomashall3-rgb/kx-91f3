@@ -74,6 +74,13 @@ commit as `Claude <noreply@anthropic.com>`). The claude.ai Project "LOCKqz" has 
   (api.cloudflare.com, shared); AI inside kept-open notes apps (Notion, Canva, Acrobat, Slack, Goodnotes); the Mac's
   built-in AirPlay receiver (a phone mirrored to the Mac has no process to kill - candidate: turn the receiver off
   during the quiz, not yet checked).
+- **In-app AI (v0.5.6):** Acrobat/Reader AI Assistant off during quizzes (Adobe's AI-only hosts + FeatureLockDown
+  bEnableGentech on Mac /Library/Preferences and Windows HKLM Policies, restored exactly); Mac AirPlay Receiver off
+  (console user's com.apple.controlcenter AirplayRecieverEnabled + ControlCenter restart, + allowAirPlayIncomingRequests;
+  restored exactly) - VERIFY on a real Mac: `lsof -i :7000` before/after lock. Office Copilot, M365 web, Google Gemini
+  panels already covered. Notion AI, Canva Magic, Quizlet AI, Slack AI, Evernote AI, Goodnotes AI run on the same
+  host as the notes: only (a) a force-installed blocking extension published in the Chrome Web Store (unlisted is fine)
+  with declarativeNetRequest rules for their AI paths, or (b) the school/workspace admin's switch, can stop them.
 - Reminder: /etc/hosts entries are exact names (+www.); subdomains are covered only inside Chromium/Firefox (URLBlocklist)
   and by the agent. Known gaps list below (27 Oct) still stands.
 

@@ -2,8 +2,9 @@
 # LOCKqz extra blockers (macOS). Sourced by lockqz.sh. Everything here is applied ONLY while a
 # quiz is locked and fully undone at unlock. It closes the non-browser routes to AI and to a human
 # helper: VPNs, virtual machines, remote-desktop/screen-share tools, invisible-overlay cheat apps,
-# local AI model servers, and Apple Intelligence (Writing Tools / Genmoji / Image Playground / Siri
-# ChatGPT). Nothing is merely logged -- each route is closed. Honour LOCKQZ_DRYRUN=1 to preview.
+# local AI model servers, Apple Intelligence (Writing Tools / Genmoji / Image Playground / Siri
+# ChatGPT) and the Mac's built-in AirPlay Receiver (a phone mirrored to the Mac has no process to
+# kill). Nothing is merely logged -- each route is closed. Honour LOCKQZ_DRYRUN=1 to preview.
 
 # --- app/process kill lists (name-matched, case-insensitive) ---
 VM_APPS=("Parallels Desktop" "prl_vm_app" "UTM" "VirtualBox" "VirtualBoxVM" "VBoxHeadless" \
@@ -109,7 +110,10 @@ keys = {"allowAppleIntelligenceReport": False, "allowGenmoji": False, "allowImag
         "allowImageWand": False, "allowWritingTools": False, "allowExternalIntelligenceIntegrations": False,
         "allowExternalIntelligenceIntegrationsSignIn": False, "allowMailSummary": False,
         "allowMailSmartReplies": False, "allowSafariSummary": False, "allowNotesTranscriptionSummary": False,
-        "allowNotificationsSummary": False, mark: True}
+        "allowNotificationsSummary": False,
+        # AirPlay Receiver (an iPhone's screen mirrored onto the Mac): same restriction the CIS / DISA
+        # STIG macOS benchmarks set (com.apple.applicationaccess allowAirPlayIncomingRequests = false).
+        "allowAirPlayIncomingRequests": False, mark: True}
 try:
     with open(path, "rb") as f: cur = plistlib.load(f)
     if not isinstance(cur, dict): cur = {}
@@ -185,6 +189,59 @@ proxies_restore() {
   rm -f "$PROXY_STATE"
 }
 
+# AirPlay Receiver (macOS 12+): a phone mirrored onto the Mac shows the phone's AI apps (over the
+# phone's own network) on the quiz screen, and there is no process to close - the receiver runs inside
+# ControlCenter. During a quiz the console user's own switch (System Settings > General > AirDrop &
+# Handoff > AirPlay Receiver = the per-host pref com.apple.controlcenter AirplayRecieverEnabled - Apple's
+# spelling, as in the CIS benchmark) is turned off and ControlCenter is restarted (launchd relaunches it at
+# once; a running mirror session ends). The value it had - true, false or never set - is saved per user
+# and put back exactly at unlock. Re-checked on every lock pass, so switching it back on mid-quiz is undone.
+AIRPLAY_STATE="${LOCKQZ_AIRPLAY_STATE:-${STATE:-/Library/Application Support/LOCKqz}/airplay.state}"
+_cc_user() { [ "$(uname)" = Darwin ] && stat -f %Su /dev/console 2>/dev/null; }   # tests replace the _cc_* functions
+_cc_exists() { id -u "$1" >/dev/null 2>&1; }
+_cc_get() {   # _cc_get user -> 1 | 0 | absent
+  local v; v="$(sudo -u "$1" /usr/bin/defaults -currentHost read com.apple.controlcenter AirplayRecieverEnabled 2>/dev/null)" || { echo absent; return 0; }
+  case "$v" in 1|true|YES) echo 1 ;; 0|false|NO) echo 0 ;; *) echo absent ;; esac
+}
+_cc_set() {   # _cc_set user 1|0|absent
+  case "$2" in
+    absent) sudo -u "$1" /usr/bin/defaults -currentHost delete com.apple.controlcenter AirplayRecieverEnabled 2>/dev/null || true ;;
+    1) sudo -u "$1" /usr/bin/defaults -currentHost write com.apple.controlcenter AirplayRecieverEnabled -bool true ;;
+    *) sudo -u "$1" /usr/bin/defaults -currentHost write com.apple.controlcenter AirplayRecieverEnabled -bool false ;;
+  esac
+}
+_cc_restart() { killall -u "$1" ControlCenter 2>/dev/null || true; }
+_cc_ok_user() { case "$1" in ""|root|loginwindow|_*) return 1 ;; *[!A-Za-z0-9._-]*) return 1 ;; esac; return 0; }
+airplay_receiver_off() {
+  local u cur
+  u="$(_cc_user)"; _cc_ok_user "$u" || return 0   # nobody signed in at the screen: nothing to mirror to
+  if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would turn AirPlay Receiver off for $u (restored at unlock)"; return 0; fi
+  cur="$(_cc_get "$u")"
+  mkdir -p "$(dirname "$AIRPLAY_STATE")" 2>/dev/null || true
+  # Remember the value from BEFORE the quiz, once per user (a re-run must never save our own "0").
+  grep -q "^$u|" "$AIRPLAY_STATE" 2>/dev/null || echo "$u|$cur" >> "$AIRPLAY_STATE" || return 1
+  [ "$cur" = 0 ] && return 0   # already off: no restart (this runs every few seconds)
+  _cc_set "$u" 0 || return 1
+  _cc_restart "$u"
+  return 0
+}
+airplay_receiver_restore() {
+  [ -f "$AIRPLAY_STATE" ] || return 0
+  if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would put AirPlay Receiver back as it was"; return 0; fi
+  local line u prev rc=0
+  while IFS= read -r line; do
+    u="${line%%|*}"; prev="${line#*|}"
+    _cc_ok_user "$u" && _cc_exists "$u" || continue   # an account deleted mid-quiz has nothing to restore
+    case "$prev" in 1|0|absent) ;; *) continue ;; esac
+    if [ "$(_cc_get "$u")" != "$prev" ]; then
+      _cc_set "$u" "$prev" || { rc=1; continue; }
+      _cc_restart "$u"
+    fi
+  done < "$AIRPLAY_STATE"
+  [ "$rc" = 0 ] && rm -f "$AIRPLAY_STATE"
+  return $rc
+}
+
 extra_lock() {
   if [ "$DRYRUN" = "1" ]; then
     xb_say "[dry-run] extra blockers:"
@@ -192,7 +249,7 @@ extra_lock() {
     _kill_list "remote-desktop" "${REMOTE_APPS[@]}"; _kill_list "overlay" "${OVERLAY_APPS[@]}"
     _kill_list "local-model" "${LOCAL_MODEL_PROCS[@]}"; _kill_cmd_res "${LOCAL_MODEL_CMD_RES[@]}"
     _kill_if_tunnel "${VPN_IF_TUNNEL[@]}"; _kill_list "Apple Intelligence" "${APPLE_AI_APPS[@]}"
-    apple_intelligence_off; proxies_off
+    apple_intelligence_off; proxies_off; airplay_receiver_off
     echo "    [dry-run] pf already blocks local-model + VPN ports (com.lockqz.pf.conf)"
     return 0
   fi
@@ -206,6 +263,7 @@ extra_lock() {
   _kill_list "Apple Intelligence" "${APPLE_AI_APPS[@]}"
   local rc=0
   apple_intelligence_off || rc=1
+  airplay_receiver_off || rc=1
   proxies_off || true
   return $rc
 }
@@ -215,6 +273,7 @@ extra_unlock() {
   # OS-level Apple Intelligence policy and the proxies must be actively restored.
   local rc=0
   apple_intelligence_on || rc=1
+  airplay_receiver_restore || rc=1
   proxies_restore || true
   rm -f "$PROXY_KEPT" 2>/dev/null || true
   return $rc

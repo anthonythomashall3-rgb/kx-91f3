@@ -18,6 +18,9 @@ While locked, per browser:
     still cannot open an AI site; Brave Tor windows + Brave VPN and Firefox's built-in VPN off
 Also Microsoft Office: "connected experiences that analyze content" off (Microsoft: Copilot is then
 unavailable in Word, Excel, PowerPoint, OneNote, Outlook) - Office reads it when an app starts.
+And Adobe Acrobat / Reader: AI Assistant off (FeatureLockdown bEnableGentech = false in the machine-level
+/Library/Preferences/com.adobe.{Acrobat.Pro,Reader}.plist - Adobe reads it there, not from managed
+preferences); also read when the app starts. Backed up and restored byte-for-byte like the browser files.
 
 A managed-preferences file that already exists (a school MDM profile, the student's own policies)
 is backed up to a root-only folder before LOCKqz adds its keys, and put back byte-for-byte at
@@ -51,6 +54,13 @@ GECKO = ["org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition", "org.mozi
          "org.waterfoxproject.waterfox", "one.ablaze.floorp", "app.zen-browser.zen", "app.zen_browser.zen",
          "net.mullvad.mullvadbrowser", "org.torproject.torbrowser"]
 OFFICE = "com.microsoft.office"   # Word/Excel/PowerPoint/OneNote/Outlook read this managed domain
+# Adobe Acrobat (Pro/Standard) and Acrobat Reader: their lockable settings live in the MACHINE-level
+# preferences folder (not Managed Preferences). Fixed ids only.
+ADOBE = ["com.adobe.Acrobat.Pro", "com.adobe.Reader"]
+def prefs_dir():
+    # Real runs: /Library/Preferences. Tests (LOCKQZ_POLICY_DIR / P.DIR pointed at a temp folder) never
+    # touch the machine: the Adobe files then go to that same temp folder unless LOCKQZ_PREFS_DIR says.
+    return os.environ.get("LOCKQZ_PREFS_DIR") or ("/Library/Preferences" if DIR == "/Library/Managed Preferences" else DIR)
 MARK = "LOCKqzManaged"
 # Written by extra-block.sh when the network only works through the student's proxy (campus /
 # workplace proxy): then the browsers keep their proxy setting so Brightspace still loads.
@@ -190,6 +200,10 @@ def office_policy():
     # Microsoft: with this FALSE, Copilot is unavailable in Word, Excel, PowerPoint, OneNote, Outlook.
     return {MARK: True, "OfficeExperiencesAnalyzingContentPreference": False}
 
+def adobe_policy():
+    # FeatureLockdown (track "DC") bEnableGentech = false: generative AI (AI Assistant) off and locked.
+    return {MARK: True, "DC": {"FeatureLockdown": {"bEnableGentech": False}}}
+
 def firefox_family_ids():
     """Bundle ids that get the Firefox policy: the fixed GECKO list. LOCKQZ_FF_IDS (comma list,
     tests) can only choose among the fixed ids or ids of the same reverse-DNS shape."""
@@ -245,6 +259,16 @@ def merge_chromium(base, ours):
 def merge_plain(base, ours):
     out = dict(base or {}); out.update(ours); return out
 
+def merge_adobe(base, ours):
+    """Their Acrobat machine prefs with only DC/FeatureLockdown/bEnableGentech (+ our mark) set on top."""
+    out = dict(base or {}); out[MARK] = True
+    dc = out.get("DC") if isinstance(out.get("DC"), dict) else {}
+    dc = dict(dc)
+    fl = dc.get("FeatureLockdown") if isinstance(dc.get("FeatureLockdown"), dict) else {}
+    fl = dict(fl); fl.update(ours["DC"]["FeatureLockdown"])
+    dc["FeatureLockdown"] = fl; out["DC"] = dc
+    return out
+
 def merge_firefox(base, ours):
     out = dict(base or {})
     out.update({k: v for k, v in ours.items() if k not in ("WebsiteFilter", "Preferences", "AIControls", "GenerativeAI")})
@@ -260,7 +284,7 @@ def merge_firefox(base, ours):
     prefs.update(ours["Preferences"]); out["Preferences"] = prefs
     return out
 
-def path(domain): return os.path.join(DIR, domain + ".plist")
+def path(domain): return os.path.join(prefs_dir() if domain in ADOBE else DIR, domain + ".plist")
 def bpath(domain): return os.path.join(BACKUP, domain + ".plist")
 
 def _read(p):
@@ -310,13 +334,14 @@ def _candidates():
     except Exception: present = []
     try: saved = [f[:-6] for f in os.listdir(BACKUP) if f.endswith(".plist")]
     except Exception: saved = []
-    return sorted(d for d in set(CHROMIUM + GECKO + [OFFICE] + firefox_family_ids() + present + saved) if ID_RE.fullmatch(d))
+    return sorted(d for d in set(CHROMIUM + GECKO + [OFFICE] + ADOBE + firefox_family_ids() + present + saved) if ID_RE.fullmatch(d))
 
 def lock():
     changed, failed, extra, hosts = False, False, path_entries(), host_entries()
     jobs = [(d, chromium_policy(d), merge_chromium) for d in CHROMIUM] + \
            [(d, firefox_policy(), merge_firefox) for d in firefox_family_ids()] + \
-           [(OFFICE, office_policy(), merge_plain)]
+           [(OFFICE, office_policy(), merge_plain)] + \
+           [(d, adobe_policy(), merge_adobe) for d in ADOBE]
     for d, pol, merge in jobs:
         if "URLBlocklist" in pol:   # Chromium: <= 1000 entries (ours ~330)
             pol["URLBlocklist"] = _union(pol["URLBlocklist"], extra + hosts)

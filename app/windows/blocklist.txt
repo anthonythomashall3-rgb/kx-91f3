@@ -628,3 +628,11 @@ bedrock-runtime.eu-west-1.amazonaws.com
 bedrock-runtime.eu-west-2.amazonaws.com
 bedrock-runtime.ap-northeast-1.amazonaws.com
 bedrock-runtime.ap-southeast-2.amazonaws.com
+# 28 Oct in-app AI: Adobe Acrobat / Reader AI Assistant back ends (Adobe's own endpoint list, "AI Assistant"
+# section: generative assistant, feedback, access + metering, persistence, content platform). AI-only hosts:
+# Acrobat itself, sign-in, Document Cloud storage and sharing (acrobat.adobe.com, *.adobe.io others) stay open.
+senseicore.adobe.io
+senseicore-ue1.adobe.io
+dc-genai-access-provisioning-api.adobe.io
+dc-genai-persistence.adobe.io
+dc-genai-content-platform.adobe.io

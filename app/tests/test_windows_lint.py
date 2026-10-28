@@ -150,6 +150,8 @@ ok("browser policy: Dark Reader / High Contrast / OpenDyslexic always allowed") 
 ok("helper writes only known keys from /password, re-applies the policy, clears on a new quiz") if "Set-Assist $State.quiz_id $r.data.assist" in dmn and "Policy-Relock" in dmn and "Set-Assist $null @()" in dmn and '$AssistKeys = @("readwrite","equatio","cowriter","snapread","readaloud")' in dmn else bad("helper assist handling missing")
 ok("helper: no end from the server any more (accommodation added) -> cap never below the 6 h failsafe") if "elseif (($null -eq $r.data.end) -and $State.end_known" in dmn and "[Math]::Max([int64]$State.cap_at" in dmn else bad("end-null cap reset missing")
 ok("engine unlock removes the allowance") if 'Remove-Item -LiteralPath "$StateDir\\assist.json"' in eng_src else bad("allowance survives unlock")
+# 28 Oct in-app AI: Acrobat / Reader AI Assistant off through the backed-up plan (V op = saved + restored exactly)
+ok("browser policy: Acrobat + Reader FeatureLockDown bEnableGentech = 0 via the restorable plan") if 'foreach ($prod in @("Adobe Acrobat","Acrobat Reader")) { V "$PolicyRoot\\Adobe\\$prod\\DC\\FeatureLockDown" "bEnableGentech" 0 }' in pol_src else bad("Acrobat AI Assistant policy missing / not in the plan")
 for f in sorted(os.listdir(WIN)):
     if f.endswith(".ps1"):
         b = open(os.path.join(WIN, f), "rb").read()

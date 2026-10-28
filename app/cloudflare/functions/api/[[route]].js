@@ -73,7 +73,8 @@ const AI_DOMAINS = [
   "inference.poolside.ai","api.minimax.io","api.moonshot.cn","open.bigmodel.cn","api.stepfun.com","api.stepfun.ai","api.xiaomimimo.com","api.longcat.chat",
   "api.kimi.com","token.sensenova.cn","api.siliconflow.cn","us-central1-aiplatform.googleapis.com","us-east1-aiplatform.googleapis.com","us-east4-aiplatform.googleapis.com","us-east5-aiplatform.googleapis.com","us-west1-aiplatform.googleapis.com",
   "us-west4-aiplatform.googleapis.com","us-south1-aiplatform.googleapis.com","northamerica-northeast1-aiplatform.googleapis.com","europe-west1-aiplatform.googleapis.com","europe-west4-aiplatform.googleapis.com","aiplatform.us.rep.googleapis.com","aiplatform.eu.rep.googleapis.com","bedrock-runtime.us-east-2.amazonaws.com",
-  "bedrock-runtime.ca-central-1.amazonaws.com","bedrock-runtime.eu-central-1.amazonaws.com","bedrock-runtime.eu-west-1.amazonaws.com","bedrock-runtime.eu-west-2.amazonaws.com","bedrock-runtime.ap-northeast-1.amazonaws.com","bedrock-runtime.ap-southeast-2.amazonaws.com"
+  "bedrock-runtime.ca-central-1.amazonaws.com","bedrock-runtime.eu-central-1.amazonaws.com","bedrock-runtime.eu-west-1.amazonaws.com","bedrock-runtime.eu-west-2.amazonaws.com","bedrock-runtime.ap-northeast-1.amazonaws.com","bedrock-runtime.ap-southeast-2.amazonaws.com",
+  "senseicore.adobe.io","senseicore-ue1.adobe.io","dc-genai-access-provisioning-api.adobe.io","dc-genai-persistence.adobe.io","dc-genai-content-platform.adobe.io"
 ];
 const now = () => new Date().toISOString();
 // "Today" in America/Los_Angeles as YYYY-MM-DD, so a professor stays active through the end of their

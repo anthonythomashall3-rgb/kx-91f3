@@ -101,6 +101,48 @@ check "MacWhisper not on the AI app list" '! sed -n "/^AI_APPS=(/,/)\$/p" "$HERE
 check "python-run model tools matched by command line" 'echo "/opt/homebrew/bin/python3 /opt/homebrew/bin/mlx_lm.chat --model x" | grep -qEf "$TMP/cr" && echo "python3 -m vllm.entrypoints.openai.api_server" | grep -qEf "$TMP/cr"'
 check "... but not an unrelated python program" '! echo "python3 /Users/s/notes/mlx_notes.py" | grep -qEf "$TMP/cr"'
 
+echo "T14 28 Oct: AirPlay Receiver off during the quiz (a mirrored phone), put back exactly at unlock"
+AP="$TMP/ap"; mkdir -p "$AP"
+run_ap() {   # run_ap <value before: 1|0|absent> [console user]  -> $AP/out: one line per step
+  rm -rf "$AP"/*; mkdir -p "$AP/v"
+  [ "$1" = absent ] || echo "$1" > "$AP/v/stu"
+  echo "${2:-stu}" > "$AP/user"
+  ( DRYRUN=0; STATE="$AP"; LOCKQZ_AIRPLAY_STATE="$AP/airplay.state"; LOCKQZ_AI_MDM="$AP/aa.plist"; LOCKQZ_AI_BACKUP="$AP/aa.bak"
+    export LOCKQZ_AIRPLAY_STATE LOCKQZ_AI_MDM LOCKQZ_AI_BACKUP
+    source "$HERE/../mac/extra-block.sh"
+    pkill(){ :; }; killall(){ :; }   # never signal real processes from a test
+    _cc_user() { cat "$AP/user"; }
+    _cc_exists() { :; }
+    _cc_get() { if [ -f "$AP/v/$1" ]; then cat "$AP/v/$1"; else echo absent; fi; }
+    _cc_set() { if [ "$2" = absent ]; then rm -f "$AP/v/$1"; else echo "$2" > "$AP/v/$1"; fi; }
+    _cc_restart() { echo "$1" >> "$AP/restarts"; }
+    val() { if [ -f "$AP/v/stu" ]; then cat "$AP/v/stu"; else echo absent; fi; }
+    n() { [ -f "$AP/restarts" ] && wc -l < "$AP/restarts" | tr -d ' ' || echo 0; }
+    airplay_receiver_off; echo "lock rc=$? val=$(val) restarts=$(n)" >> "$AP/out"
+    airplay_receiver_off; echo "relock val=$(val) restarts=$(n) saved=$(cat "$AP/airplay.state" 2>/dev/null | tr '\n' ' ')" >> "$AP/out"
+    [ -f "$AP/v/stu" ] && [ "$(cat "$AP/v/stu")" = 0 ] && { echo 1 > "$AP/v/stu"; airplay_receiver_off; echo "switched-back-on val=$(val) saved=$(cat "$AP/airplay.state" | tr '\n' ' ')" >> "$AP/out"; }
+    apple_intelligence_off >/dev/null 2>&1
+    python3 -c "import plistlib,sys;d=plistlib.load(open('$AP/aa.plist','rb'));sys.exit(0 if d.get('allowAirPlayIncomingRequests') is False else 1)" 2>/dev/null && echo "restriction=off" >> "$AP/out"
+    extra_unlock >/dev/null 2>&1; echo "unlock rc=$? val=$(val) state=$([ -e "$AP/airplay.state" ] && echo left || echo gone) aa=$([ -e "$AP/aa.plist" ] && echo left || echo gone)" >> "$AP/out"
+  ) >/dev/null 2>&1
+}
+run_ap absent; O="$(cat "$AP/out")"
+check "never set before: switched off at lock, ControlCenter restarted once" 'grep -qx "lock rc=0 val=0 restarts=1" <<<"$O"'
+check "re-lock every few seconds: no second restart, the pre-quiz value is never overwritten" 'grep -qx "relock val=0 restarts=1 saved=stu|absent " <<<"$O"'
+check "switched back on mid-quiz -> off again, saved value still the original" 'grep -qx "switched-back-on val=0 saved=stu|absent " <<<"$O"'
+check "managed restriction allowAirPlayIncomingRequests=false with Apple Intelligence" 'grep -qx "restriction=off" <<<"$O"'
+check "unlock: setting removed again (never set before), state + restriction file gone" 'grep -qx "unlock rc=0 val=absent state=gone aa=gone" <<<"$O"'
+run_ap 1; O="$(cat "$AP/out")"
+check "was ON -> off during the quiz -> ON again after" 'grep -qx "lock rc=0 val=0 restarts=1" <<<"$O" && grep -qx "unlock rc=0 val=1 state=gone aa=gone" <<<"$O"'
+run_ap 0; O="$(cat "$AP/out")"
+check "was already OFF -> left alone (no restart), still OFF after" 'grep -qx "lock rc=0 val=0 restarts=0" <<<"$O" && grep -qx "unlock rc=0 val=0 state=gone aa=gone" <<<"$O"'
+run_ap 1 loginwindow; O="$(cat "$AP/out")"
+check "nobody at the screen (login window): nothing changed, nothing saved" 'grep -qx "lock rc=0 val=1 restarts=0" <<<"$O" && grep -qx "unlock rc=0 val=1 state=gone aa=gone" <<<"$O"'
+( DRYRUN=1; STATE="$AP"; LOCKQZ_AIRPLAY_STATE="$AP/dry.state"; export LOCKQZ_AIRPLAY_STATE
+  source "$HERE/../mac/extra-block.sh"; _cc_user() { echo stu; }; _cc_set() { echo SET >> "$AP/dry.set"; }
+  airplay_receiver_off ) > "$AP/dry.out" 2>&1
+check "dry-run only previews (no write, no state)" 'grep -q "would turn AirPlay Receiver off" "$AP/dry.out" && [ ! -e "$AP/dry.set" ] && [ ! -e "$AP/dry.state" ]'
+
 echo ""
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

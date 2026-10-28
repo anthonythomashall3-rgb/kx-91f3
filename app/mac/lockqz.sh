@@ -126,7 +126,7 @@ do_lock() {
   close_ai_apps || true   # ALWAYS: close AI apps reopened mid-quiz
   extra_lock || rc=1      # ALWAYS: re-close VPN/VM/remote/overlay/local-model, keep Apple Intelligence off
   write_status locked || true
-  [ "$already" = 1 ] || say "LOCKED. AI domains blackholed; firewall up (incl. local-model + VPN ports); browser AI off; AI apps, VPNs, VMs, remote-desktop and overlay tools closed; Apple Intelligence off."
+  [ "$already" = 1 ] || say "LOCKED. AI domains blackholed; firewall up (incl. local-model + VPN ports); browser AI off; AI apps, VPNs, VMs, remote-desktop and overlay tools closed; Apple Intelligence + AirPlay Receiver off."
   return $rc
 }
 
@@ -134,7 +134,7 @@ do_lock() {
 # so the helper keeps its record and retries instead of believing AI is back.
 do_unlock() {
   need_root
-  if [ "$DRYRUN" = "1" ]; then say "[dry-run] would strip LOCKqz block, flush pf, flush DNS, restore Apple Intelligence."; extra_unlock; return 0; fi
+  if [ "$DRYRUN" = "1" ]; then say "[dry-run] would strip LOCKqz block, flush pf, flush DNS, restore Apple Intelligence + AirPlay Receiver."; extra_unlock; return 0; fi
   local rc=0
   if is_locked; then
     hosts_writable
@@ -145,7 +145,7 @@ do_unlock() {
   is_locked && { say "hosts block could not be removed"; rc=1; }
   unload_pf || { say "firewall anchor could not be emptied"; rc=1; }
   policy unlock || { say "browser policy could not be fully restored"; rc=1; }
-  extra_unlock || { say "Apple Intelligence / proxy settings could not be fully restored"; rc=1; }
+  extra_unlock || { say "Apple Intelligence / AirPlay Receiver / proxy settings could not be fully restored"; rc=1; }
   write_status unlocked || true
   if [ "$rc" = 0 ]; then say "UNLOCKED. AI access restored."; else say "UNLOCK INCOMPLETE - the helper will retry."; fi
   return $rc

@@ -167,5 +167,22 @@ const winEng2 = readFileSync(join(DIR, "../windows/lockqz.ps1"), "utf8");
 ['"codex"','"doubao"','"quillbot"','"fellou"','"raycast"'].every(a => winEng2.includes(a)) ? ok("windows closes codex / doubao / quillbot / fellou / raycast") : bad("windows AiApps missing an audit-2 app");
 ['"scrcpy"','"Vysor"','"AirDroid"','"LetsView"','"lemonade-server"'].every(a => macXb2.includes(a) && winEng2.includes(a)) ? ok("both close phone-mirroring apps (scrcpy / Vysor / AirDroid / LetsView) and Lemonade Server") : bad("phone mirroring / Lemonade missing on a platform");
 
+console.log("T16 28 Oct in-app AI: AI-only back ends of kept-open notes apps (Acrobat AI Assistant), never the notes hosts themselves");
+const need6 = ["senseicore.adobe.io","senseicore-ue1.adobe.io","dc-genai-access-provisioning-api.adobe.io","dc-genai-persistence.adobe.io","dc-genai-content-platform.adobe.io"];
+const miss6 = need6.filter(d => !mac.includes(d) || !win.includes(d) || !(served || []).includes(d));
+miss6.length === 0 ? ok(`all ${need6.length} in-app AI hosts in both blocklists + AI_DOMAINS`) : bad("missing: " + miss6.join(", "));
+// whole-host entries match subdomains in Chromium: none may cover a notes / editor host
+const notes2 = ["notion.so", "www.notion.so", "docs.google.com", "drive.google.com", "mail.google.com", "classroom.google.com",
+  "canva.com", "www.canva.com", "quizlet.com", "office.com", "www.office.com", "m365.cloud.microsoft", "slack.com", "app.slack.com",
+  "evernote.com", "www.evernote.com", "web.goodnotes.com", "acrobat.adobe.com", "adobe.com", "adobe.io", "dc-api.adobe.io", "sensei.adobe.io"];
+const hits2 = notes2.filter(n => hostsE.some(e => n === e || n.endsWith("." + e)));
+hits2.length === 0 ? ok(`none of ${notes2.length} notes hosts (Notion, Docs, Canva, Quizlet, Office, Slack, Acrobat web) is blocked`) : bad("over-block: " + hits2.join(", "));
+const pyPol2 = readFileSync(join(DIR, "../mac/browser-policy.py"), "utf8");
+pyPol2.includes('"bEnableGentech": False') && pyPol2.includes('"com.adobe.Acrobat.Pro", "com.adobe.Reader"') ? ok("mac: Acrobat/Reader FeatureLockdown bEnableGentech off during the quiz") : bad("mac Acrobat policy missing");
+psPol.includes('"bEnableGentech" 0') ? ok("windows: Acrobat/Reader FeatureLockDown bEnableGentech = 0") : bad("windows Acrobat policy missing");
+const macXb3 = readFileSync(join(DIR, "../mac/extra-block.sh"), "utf8");
+macXb3.includes("AirplayRecieverEnabled") && macXb3.includes('"allowAirPlayIncomingRequests": False') && macXb3.includes("airplay_receiver_restore || rc=1")
+  ? ok("mac: AirPlay Receiver off during the quiz and restored at unlock") : bad("mac AirPlay Receiver handling missing");
+
 console.log(`RESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

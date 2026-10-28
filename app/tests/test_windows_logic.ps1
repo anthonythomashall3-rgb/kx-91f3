@@ -260,6 +260,18 @@ Check "user who signs in mid-quiz: Office Copilot off for them too, and in the b
 $out = Do-Unlock
 Check "unlock restores everything incl. the school's allowlist and both users' Office keys" (((Dump) -eq $orig) -and -not (Test-Path $BackupFile))
 
+Write-Host "   28 Oct in-app AI: Acrobat / Reader AI Assistant off at lock (FeatureLockDown bEnableGentech = 0), restored exactly"
+Seed
+$AA = "HKLM:\SOFTWARE\Policies\Adobe\Adobe Acrobat\DC\FeatureLockDown"; $AR = "HKLM:\SOFTWARE\Policies\Adobe\Acrobat Reader\DC\FeatureLockDown"
+foreach ($k in @("HKLM:\SOFTWARE\Policies\Adobe", "HKLM:\SOFTWARE\Policies\Adobe\Adobe Acrobat", "HKLM:\SOFTWARE\Policies\Adobe\Adobe Acrobat\DC", $AA)) { $script:REG[$k] = @{} }
+$script:REG[$AA]["bProtectedMode"] = @{ kind = "DWord"; value = 1 }   # the school's own Acrobat lockdown
+$script:REG[$AA]["bEnableGentech"] = @{ kind = "DWord"; value = 1 }
+$orig = Dump; $script:Sids = @($SID1)
+$out = Do-Lock
+Check "Acrobat + Reader: bEnableGentech = 0 during the quiz, the school's lockdown kept" (((RG-Read $AA "bEnableGentech").value -eq 0) -and ((RG-Read $AR "bEnableGentech").value -eq 0) -and ((RG-Read $AA "bProtectedMode").value -eq 1))
+$out = Do-Unlock
+Check "unlock: Acrobat back to the school's 1, the Reader keys LOCKqz created removed" (((Dump) -eq $orig) -and -not (RG-KeyExists "HKLM:\SOFTWARE\Policies\Adobe\Acrobat Reader") -and -not (Test-Path $BackupFile))
+
 Write-Host "   network that only works through its proxy: proxy policy left alone (quiz must load)"
 Seed
 $script:REG["Registry::HKEY_USERS\$SID1\Software\Microsoft"] = @{}

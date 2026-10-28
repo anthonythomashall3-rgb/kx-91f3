@@ -2,7 +2,8 @@
 # Writes HKLM policies that Chrome, Edge, Brave and Firefox honour on any PC, ONLY while a
 # quiz is locked, plus Windows Copilot / Recall / Click to Do / Notepad AI off, and (per signed-in
 # user, HKU) Office "connected experiences that analyze content" off = Copilot off in Word, Excel,
-# PowerPoint, OneNote, Outlook (Office reads it when an app starts).
+# PowerPoint, OneNote, Outlook (Office reads it when an app starts), and Adobe Acrobat / Reader
+# AI Assistant off (FeatureLockDown bEnableGentech = 0; Acrobat reads it when it starts).
 # Every blocklist host is also blocked inside the browsers (URLBlocklist / WebsiteFilter), so a
 # browser-level bypass of the hosts file (--host-resolver-rules, proxy add-on, Tor) still fails.
 #   powershell -ExecutionPolicy Bypass -File .\browser-policy.ps1 lock|unlock|status
@@ -206,6 +207,10 @@ function Get-PolicyPlan([bool]$KeepProxy = $false) {
   V "$PolicyRoot\Microsoft\Windows\WindowsAI" "DisableClickToDo" 1
   # Notepad Write / Rewrite / Summarize (policy DisableAIFeaturesInNotepad, Notepad 11.2503.16+).
   V "$PolicyRoot\WindowsNotepad" "DisableAIFeatures" 1
+  # Adobe Acrobat (Pro / Standard / the unified 64-bit Reader) and the classic Acrobat Reader: generative AI
+  # (AI Assistant) off and locked - FeatureLockDown bEnableGentech = 0 (Adobe community answer; same key
+  # Intune / GPO guides deploy). Saved and restored exactly like every other value here.
+  foreach ($prod in @("Adobe Acrobat","Acrobat Reader")) { V "$PolicyRoot\Adobe\$prod\DC\FeatureLockDown" "bEnableGentech" 0 }
   # Office Copilot (per user): "connected experiences that analyze content" = 2 (disabled).
   foreach ($sid in Get-ConsoleUserSids) {
     if (RG-KeyExists "Registry::HKEY_USERS\$sid\Software") {

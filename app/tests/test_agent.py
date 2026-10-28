@@ -551,4 +551,28 @@ A._moved.clear()
 ok("Firefox: the frame's current page (submitted) is read from the session store") if A.firefox_urls(fx) == [SUBM] else bad("firefox: %r" % A.firefox_urls(fx))
 """)
 
+_section(r"""
+print("T24 28 Oct in-app AI: Acrobat / Reader AI Assistant off during the quiz (machine prefs), restored exactly")
+pd, bk, mp = tempfile.mkdtemp(), tempfile.mkdtemp(), tempfile.mkdtemp()
+P.DIR, P.BACKUP = pd, bk
+os.environ["LOCKQZ_PREFS_DIR"] = mp; os.environ["LOCKQZ_FF_IDS"] = "org.mozilla.firefox"
+ok("Adobe files go to the machine Preferences folder, never Managed Preferences") if P.path("com.adobe.Reader") == os.path.join(mp, "com.adobe.Reader.plist") and P.path("com.google.Chrome") == os.path.join(pd, "com.google.Chrome.plist") else bad("adobe path %s" % P.path("com.adobe.Reader"))
+theirs = {"DC": {"FeatureLockdown": {"bProtectedMode": True, "bEnableGentech": True}, "Other": 1}, "Track": "DC"}
+with open(os.path.join(mp, "com.adobe.Acrobat.Pro.plist"), "wb") as f: plistlib.dump(theirs, f, fmt=plistlib.FMT_BINARY)
+orig = open(os.path.join(mp, "com.adobe.Acrobat.Pro.plist"), "rb").read()
+ok("lock succeeds") if P.lock() else bad("lock failed")
+ac = plistlib.load(open(os.path.join(mp, "com.adobe.Acrobat.Pro.plist"), "rb"))
+ok("Acrobat: DC/FeatureLockdown/bEnableGentech = false, their lockdown + other keys kept") if ac["DC"]["FeatureLockdown"] == {"bProtectedMode": True, "bEnableGentech": False} and ac["DC"]["Other"] == 1 and ac["Track"] == "DC" else bad("acrobat merge wrong: %r" % ac)
+rd = plistlib.load(open(os.path.join(mp, "com.adobe.Reader.plist"), "rb"))
+ok("Reader (no file before): bEnableGentech = false") if rd["DC"]["FeatureLockdown"]["bEnableGentech"] is False and rd.get(P.MARK) is True else bad("reader wrong: %r" % rd)
+ok("nothing Adobe written into Managed Preferences") if not [f for f in os.listdir(pd) if f.startswith("com.adobe.")] else bad("adobe file in managed prefs")
+m1 = os.path.getmtime(os.path.join(mp, "com.adobe.Reader.plist")); _t.sleep(0.05); P.lock()
+ok("re-lock leaves the Adobe files alone (backup is theirs, not ours)") if os.path.getmtime(os.path.join(mp, "com.adobe.Reader.plist")) == m1 and plistlib.load(open(os.path.join(bk, "com.adobe.Acrobat.Pro.plist"), "rb")) == theirs else bad("re-lock rewrote / re-backed-up")
+ok("status counts Adobe as ours while locked") if P.ours("com.adobe.Acrobat.Pro") and P.ours("com.adobe.Reader") else bad("not ours")
+ok("unlock succeeds") if P.unlock() else bad("unlock failed")
+ok("Acrobat prefs restored byte-for-byte (binary plist kept binary)") if open(os.path.join(mp, "com.adobe.Acrobat.Pro.plist"), "rb").read() == orig else bad("acrobat not restored")
+ok("Reader file LOCKqz created is gone; nothing else left") if os.listdir(mp) == ["com.adobe.Acrobat.Pro.plist"] and not os.listdir(pd) else bad("left: %r %r" % (os.listdir(mp), os.listdir(pd)))
+os.environ.pop("LOCKQZ_PREFS_DIR", None); os.environ.pop("LOCKQZ_FF_IDS", None)
+""")
+
 print(""); print(f"RESULT: {passed} passed, {failed} failed"); sys.exit(0 if failed == 0 else 1)
