@@ -21,6 +21,10 @@ commit as `Claude <noreply@anthropic.com>`). The claude.ai Project "LOCKqz" has 
   Paraphrasingtool.ai, Editpad, essay writers, Textero, Samwell, Yomu, Writefull, Trinka, Walter Writes, Phrasly, Ryne,
   Twixify, AIHumanizer, HumanizeAI.io), ChatGPT wrappers. Quizlet / Studocu / Knowt deliberately stay open (notes +
   flashcards, test T10). AI_DOMAINS must stay plain JSON (no comments inside the array): deploy.sh JSON.parses it.
+- **Chrome Web Store:** "LOCKqz for Professors" item `bidlfpkdggdpmfbfkpjcnbjhfkfligkk` submitted 28 Oct, Unlisted, **pending review**.
+  Branch `cws-live` (tests green) points the dashboard's Chrome + Edge buttons and the welcome email at
+  https://chromewebstore.google.com/detail/bidlfpkdggdpmfbfkpjcnbjhfkfligkk — merge it to master ONLY once that page
+  is live (before approval the link is a dead page). Edge installs from the Chrome Web Store, so no Edge listing is needed.
 - Reminder: /etc/hosts entries are exact names (+www.); subdomains are covered only inside Chromium/Firefox (URLBlocklist)
   and by the agent. Known gaps list below (27 Oct) still stands.
 
