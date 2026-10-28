@@ -4,7 +4,7 @@
 // the tab the extension opened for an exam it runs the full panel, which gates the exam.
 // Also: (1) the one-time "Syncing your classes" card on the professor's first visit after install;
 // (2) on the quiz edit / restrictions / special-access pages of an exam LOCKqz protects, the password
-// field and the special-access controls are disabled with a short note (LOCKqz manages them).
+// LOCKqz shows one notice (nothing is disabled: special access / extra time must keep working).
 (() => {
   if (window.top !== window) return;
   const api = globalThis.browser ?? chrome;
@@ -70,50 +70,27 @@
     }
   });
 
-  // ---- (2) Brightspace quiz settings of a protected exam: password + special access are LOCKqz's ----
+  // ---- (2) Brightspace quiz settings of a protected exam: a notice, never a lock ----
+  // Nothing on the page is disabled or changed: special access (OSAS extra time) must keep working, and a
+  // guessed selector must never grey out the wrong control. One dismissible banner at the top says what
+  // LOCKqz manages. (27 Oct 2026: replaces the field lock, which disabled password + special-access controls.)
   const QADMIN = /\/d2l\/lms\/quizzing\/admin\//i.test(location.pathname);
   const qiHere = () => { try { return new URL(location.href).searchParams.get("qi") || ""; } catch { return ""; } };
-  const NOTE = `<span style="display:inline-flex;align-items:center;gap:6px;vertical-align:middle">${SHIELD(RED, 16)}<b>Managed by LOCKqz</b> — nothing to set here. Students who have LOCKqz open this exam automatically.</span>`;
-  const PW_RE = /password/i, SA_RE = /special\s*access/i;
-  // Every element on the page, through open shadow roots (Brightspace is built from web components).
-  function* walk(root, depth) {
-    if (depth > 40) return;
-    const els = root.querySelectorAll ? root.querySelectorAll("*") : [];
-    for (const el of els) { yield el; if (el.shadowRoot) yield* walk(el.shadowRoot, depth + 1); }
-  }
-  const text = el => ((el.getAttribute && (el.getAttribute("aria-label") || el.getAttribute("placeholder") || el.getAttribute("name") || el.getAttribute("label"))) || "") + " " + (el.id || "") + " " + String(el.textContent || "").slice(0, 80);
-  function noteAfter(el) {
-    const host = el.getRootNode && el.getRootNode().host ? el.getRootNode().host : el;   // the note goes beside the component, in the page
-    const target = host.closest ? (host.closest("d2l-input-text, d2l-labs-input-text, .d2l-field, fieldset, div") || host) : host;
-    if (target.__lqzNoted) return; target.__lqzNoted = true;
-    const n = document.createElement("div"); n.className = "lqz-managed";
-    n.style.cssText = `margin:6px 0 10px;padding:8px 10px;border:1px solid ${RED};border-radius:8px;background:#fff;font:13px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1a1a1a`;
-    n.innerHTML = NOTE;
-    target.insertAdjacentElement("afterend", n);
-  }
-  function lockFields() {
-    let hits = 0;
-    for (const el of walk(document, 0)) {
-      if (hits > 40) break;
-      const tag = el.tagName ? el.tagName.toLowerCase() : "";
-      const t = text(el);
-      if ((tag === "input" || tag === "d2l-input-text" || tag === "d2l-labs-input-text") && PW_RE.test(t) && !/confirm|login|current|new password/i.test(t)) {
-        if (!el.disabled) { el.disabled = true; el.setAttribute("disabled", ""); el.setAttribute("title", "Managed by LOCKqz"); if (tag === "input") el.style.opacity = ".55"; hits++; noteAfter(el); }
-      } else if ((tag === "button" || tag === "d2l-button" || tag === "d2l-button-subtle" || tag === "a" || tag === "d2l-menu-item" || tag === "input" && /checkbox|radio/i.test(el.type || "")) && SA_RE.test(t) && !el.__lqzLocked) {
-        el.__lqzLocked = true; el.disabled = true; el.setAttribute("disabled", ""); el.setAttribute("aria-disabled", "true"); el.style.pointerEvents = "none"; el.style.opacity = ".55"; hits++; noteAfter(el);
-      }
-    }
+  function showNotice() {
+    if (document.getElementById("lqz-managed")) return;
+    const n = document.createElement("div"); n.id = "lqz-managed"; n.setAttribute("role", "note");
+    n.style.cssText = `position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:2147483646;max-width:560px;width:calc(100% - 32px);box-sizing:border-box;padding:10px 40px 10px 12px;border:1px solid ${RED};border-radius:10px;background:#fff;box-shadow:0 6px 24px rgba(0,0,0,.18);font:13px/1.4 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1a1a1a`;
+    n.innerHTML = `<span style="display:flex;gap:8px;align-items:flex-start">${SHIELD(RED, 18)}<span><b>LOCKqz protects this exam.</b> Leave its password as it is: LOCKqz sets it and gives it to students who have LOCKqz. Special access and extra time work as usual.</span></span>` +
+      `<button type="button" aria-label="Close" style="position:absolute;top:6px;right:8px;border:0;background:none;font-size:18px;line-height:1;cursor:pointer;color:#555">&times;</button>`;
+    n.querySelector("button").onclick = () => n.remove();
+    (document.body || document.documentElement).appendChild(n);
   }
   async function maybeLock() {
     if (!QADMIN) return;
     const qi = qiHere(); if (!qi) return;
     let sched = []; try { sched = (await api.storage.local.get("schedule")).schedule || []; } catch {}
     if (!sched.some(q => q && String(q.qi) === String(qi))) return;   // not a LOCKqz-protected exam
-    let busy = false;
-    const run = () => { if (busy) return; busy = true; setTimeout(() => { busy = false; try { lockFields(); } catch {} }, 400); };
-    run();
-    new MutationObserver(run).observe(document.documentElement, { childList: true, subtree: true, attributes: false });
-    setInterval(run, 3000);   // shadow-root changes do not always reach the document observer
+    showNotice();
   }
   maybeLock();
 })();
