@@ -37,7 +37,8 @@ AI_APPS=("ChatGPT" "Claude" "Copilot" "Perplexity" "Ollama" "LM Studio" \
          "AnythingLLM" "Chatbox" "Cherry Studio" "Enchanted" "Ollamac" "BoltAI" "MindMac" \
          "Private LLM" "Backyard AI" "Faraday" "LlamaChat" "FreeChat" "Sanctum" "Msty Studio" \
          "Open WebUI" "Pinokio" "Witsy" "Reor" \
-         "Grok" "Kimi" "Qwen" "Microsoft 365 Copilot")   # local-model chat apps (their servers: extra-block.sh); xAI / Kimi / Qwen / M365 Copilot desktop apps
+         "Grok" "Kimi" "Qwen" "Microsoft 365 Copilot" \
+         "Codex" "Doubao" "QuillBot" "Elephas" "Highlight" "Fellou" "BrowserOS" "Opera Neon")   # local-model chat apps (their servers: extra-block.sh); xAI / Kimi / Qwen / M365 Copilot desktop apps
 
 say() { echo "LOCKqz: $*"; }
 

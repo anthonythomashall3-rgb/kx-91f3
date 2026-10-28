@@ -153,5 +153,19 @@ let served = null; try { served = JSON.parse(aiM[1]); } catch (e) {}
 served ? ok("AI_DOMAINS parses as plain JSON (no comments inside the array)") : bad("AI_DOMAINS is not plain JSON - deploy.sh would fail to build blocklist.json");
 served && JSON.stringify(served) === JSON.stringify(mac) ? ok(`AI_DOMAINS == blocklist.txt (${served.length} entries)`) : bad("AI_DOMAINS and blocklist.txt differ");
 
+console.log("T15 28 Oct audit 2: LMS quiz-solver back ends, interview copilots, AI browsers, writers/humanizers, coding agents, model gateways, regional Vertex/Bedrock");
+const need5 = ["examclutch.com","getquizsolve.com","getanswerlyai.com","upstudy.ai","finalroundai.com","lockedinai.com","fellou.ai","alexa.com",
+  "scribbr.com/paraphrasing-tool","stealthwriter.ai","cline.bot","opencode.ai","integrate.api.nvidia.com","ai-gateway.vercel.sh","open.bigmodel.cn",
+  "us-central1-aiplatform.googleapis.com","bedrock-runtime.eu-west-1.amazonaws.com"];
+const miss5 = need5.filter(d => !mac.includes(d));
+miss5.length === 0 ? ok(`all ${need5.length} 28-Oct audit-2 entries present`) : bad("missing: " + miss5.join(", "));
+// scribbr.com / ahrefs.com stay open (citation guides, notes); only their AI tool pages are blocked
+!hostsE.includes("scribbr.com") && !hostsE.includes("ahrefs.com") ? ok("scribbr.com / ahrefs.com not whole-host blocked") : bad("scribbr.com or ahrefs.com over-blocked");
+const macAi2 = readFileSync(join(DIR, "../mac/lockqz.sh"), "utf8"), macXb2 = readFileSync(join(DIR, "../mac/extra-block.sh"), "utf8");
+const winEng2 = readFileSync(join(DIR, "../windows/lockqz.ps1"), "utf8");
+['"Codex"','"Doubao"','"QuillBot"','"Fellou"','"Opera Neon"'].every(a => macAi2.includes(a)) ? ok("mac closes Codex / Doubao / QuillBot / Fellou / Opera Neon") : bad("mac AI_APPS missing an audit-2 app");
+['"codex"','"doubao"','"quillbot"','"fellou"','"raycast"'].every(a => winEng2.includes(a)) ? ok("windows closes codex / doubao / quillbot / fellou / raycast") : bad("windows AiApps missing an audit-2 app");
+['"scrcpy"','"Vysor"','"AirDroid"','"LetsView"','"lemonade-server"'].every(a => macXb2.includes(a) && winEng2.includes(a)) ? ok("both close phone-mirroring apps (scrcpy / Vysor / AirDroid / LetsView) and Lemonade Server") : bad("phone mirroring / Lemonade missing on a platform");
+
 console.log(`RESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

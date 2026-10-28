@@ -26,16 +26,18 @@ $AiApps = @("chatgpt","claude","copilot","perplexity","ollama","lmstudio","LM St
             "AnythingLLM","Chatbox","Cherry Studio","M365Copilot",
             # local-model chat apps (their servers: $ModelProcs)
             "Msty Studio","Backyard AI","Faraday","Sanctum","Open WebUI","Pinokio","Witsy","Reor","ollama app",
-            "grok","kimi","qwen")   # xAI / Kimi / Qwen desktop apps
+            "grok","kimi","qwen",   # xAI / Kimi / Qwen desktop apps
+            "codex","doubao","quillbot","highlight","fellou","browseros","raycast")   # OpenAI Codex, Doubao, QuillBot, Highlight AI, AI browsers, Raycast AI
 # Non-browser routes to AI or a human helper, all closed during the quiz:
 $VmApps     = @("Parallels","prl_vm_app","vmware","vmware-vmx","VirtualBox","VirtualBoxVM","VBoxHeadless","qemu-system-x86_64","qemu-system-aarch64","vmwp","vmms","Docker Desktop","com.docker.backend",
                 "WindowsSandbox","WindowsSandboxClient","WindowsSandboxServer","WindowsSandboxRemoteSession","wsl","wslhost","wslrelay")
 $RemoteApps = @("TeamViewer","AnyDesk","RustDesk","remoting_host","ScreenConnect","ConnectWiseControl","LogMeIn","Splashtop","SRServer","vncserver","winvnc","tvnserver","Parsec","GoToMyPC",
                 "mstsc","msrdc","QuickAssist",
-                "PhoneExperienceHost","nxplayer","ZohoAssist")   # Phone Link = the phone's apps (and its network) on the PC screen; NoMachine; Zoho Assist
-$OverlayApps= @("Cluely","InterviewCoder","Interview Coder","LockedInAI","FinalRound","Ohmni","Sensei","UltraCode","Pieces")
+                "PhoneExperienceHost","nxplayer","ZohoAssist",
+                "scrcpy","escrcpy","QtScrcpy","Vysor","AirDroid","ApowerMirror","LetsView","AirServer","AnyViewer")   # Phone Link = the phone's apps (and its network) on the PC screen; NoMachine; Zoho Assist
+$OverlayApps= @("Cluely","InterviewCoder","Interview Coder","LockedInAI","FinalRound","Ohmni","Sensei","UltraCode","Pieces","Verve AI","Parakeet AI","Beyz AI","Interview Solver")
 $ModelProcs = @("ollama","llama-server","llama-cli","llama-run","llamafile","koboldcpp","localai","local-ai","jan","gpt4all","text-generation-webui","vllm",
-                "ollama_llama_server","lms","llama-mtmd-cli","koboldcpp_cu12","koboldcpp_nocuda","cortex","cortex-server","open-webui","lmdeploy","text-generation-launcher")
+                "ollama_llama_server","lms","llama-mtmd-cli","koboldcpp_cu12","koboldcpp_nocuda","cortex","cortex-server","open-webui","lmdeploy","text-generation-launcher","lemonade-server","lemonade-app")
 # tor = the Tor Browser's network daemon (Tor resolves names remotely, past the hosts block).
 $VpnApps    = @("nordvpn","expressvpn","surfshark","protonvpn","mullvad","pia","piaservice","Cloudflare WARP","warp-svc","openvpn","wireguard","windscribe","tunnelbear","hssvpn","cyberghost","tor")
 $ModelPorts = @(11434,1234,4891,1337,7860)

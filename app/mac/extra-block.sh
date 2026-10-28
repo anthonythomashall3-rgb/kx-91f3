@@ -13,12 +13,14 @@ REMOTE_APPS=("TeamViewer" "AnyDesk" "RustDesk" "remoting_host" "chrome_remote_de
              "ScreenConnect" "ConnectWiseControl" "LogMeIn" "Splashtop" "SplashtopStreamer" \
              "RealVNC" "vncserver" "TigerVNC" "jump" "Jump Desktop" "GoToMyPC" "Parsec" "Moonlight" \
              "Screen Sharing" "Microsoft Remote Desktop" "Windows App" "Chrome Remote Desktop Host" \
-             "iPhone Mirroring" "Screens" "Screens 5" "NoMachine" "Zoho Assist")   # iPhone Mirroring = the phone's apps (and its network) on the Mac screen
+             "iPhone Mirroring" "Screens" "Screens 5" "NoMachine" "Zoho Assist" \
+             "scrcpy" "Escrcpy" "QtScrcpy" "Vysor" "AirDroid" "AirDroid Cast" "ApowerMirror" "LetsView" "AirServer" "X-Mirage" "AnyViewer")   # iPhone Mirroring = the phone's apps (and its network) on the Mac screen
 OVERLAY_APPS=("Cluely" "Interview Coder" "InterviewCoder" "LockedIn AI" "LockedInAI" "Final Round" \
-              "FinalRound" "Ohmni" "Sensei" "Leetcode Wizard" "UltraCode" "ExamShield helper" "Pieces")
+              "FinalRound" "Ohmni" "Sensei" "Leetcode Wizard" "UltraCode" "ExamShield helper" "Pieces" \
+              "Verve AI" "Parakeet AI" "Beyz AI" "Interview Solver")
 LOCAL_MODEL_PROCS=("ollama" "llama-server" "llama-cli" "llama-run" "llama_cpp" "llamafile" "koboldcpp" \
                    "text-generation" "localai" "local-ai" "lm-studio-server" "jan-server" "gpt4all" "mlx_lm" "vllm" \
-                   "lms" "ollama_llama_server" "llama-mtmd-cli" "cortex" "cortex-server" "open-webui" "mlc_llm" "lmdeploy" "sglang")
+                   "lms" "ollama_llama_server" "llama-mtmd-cli" "cortex" "cortex-server" "open-webui" "mlc_llm" "lmdeploy" "sglang" "lemonade-server" "lemonade-app")
 # Model tools that run as "python3 ..." (their process name is python3): matched on their own
 # script/module name in the command line only (extended regex, pkill -f).
 LOCAL_MODEL_CMD_RES=('/bin/mlx_lm[._][a-z_]+( |$)' ' -m mlx_lm([. ]|$)' '/bin/vllm( |$)' ' -m vllm[. ]' \

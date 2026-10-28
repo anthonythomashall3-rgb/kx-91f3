@@ -60,7 +60,20 @@ const AI_DOMAINS = [
   "languagetool.org","prowritingaid.com","hemingwayapp.com","wordvice.ai","paraphrasingtool.ai","editpad.org","essaygenius.ai","myessaywriter.ai",
   "essaywriter.ai","perfectessaywriter.ai","textero.ai","samwell.ai","yomu.ai","writefull.com","trinka.ai","walterwrites.ai",
   "phrasly.ai","ryne.ai","twixify.com","aihumanizer.com","humanizeai.io",
-  "chatgot.io","chatbotapp.ai","aichatting.net","talkai.info","gptgo.ai","chatgptfree.ai","writingmate.ai","copilot.live"
+  "chatgot.io","chatbotapp.ai","aichatting.net","talkai.info","gptgo.ai","chatgptfree.ai","writingmate.ai","copilot.live",
+  "examclutch.com","getquizsolve.com","cheatly.vercel.app","quizsolve.vercel.app","quizsolver.ai","getanswerlyai.com","quizace.ai","answerai.pro",
+  "upstudy.ai","edubrain.ai","studymonkey.ai","nerdai.app","youlearn.ai","paperguide.ai","chatdoc.com","finalroundai.com",
+  "lockedinai.com","interviewcoder.co","vervecopilot.com","interviewsolver.com","ultracode.ai","parakeet-ai.com","beyz.ai","app.beyz.ai",
+  "fellou.ai","browseros.com","operaneon.com","sigmabrowser.com","strawberrybrowser.com","alexa.com","chat.olakrutrim.com","olakrutrim.com",
+  "longcat.chat","skywork.ai","heyalice.app","nomi.ai","kindroid.ai","hyperwriteai.com","linguix.com","paraphraser.io",
+  "prepostseo.com","scribbr.com/paraphrasing-tool","ahrefs.com/writing-tools","grubby.ai","bypass.hix.ai","rephrasy.ai","hastewire.com","humanizerpro.ai",
+  "aiseo.ai","writehuman.ai","humanize.io","stealthwriter.ai","naturalwrite.com","cline.bot","api.cline.bot","opencode.ai",
+  "ampcode.com","factory.ai","app.factory.ai","blink.new","integrate.api.nvidia.com","build.nvidia.com","ai-gateway.vercel.sh",
+  "api.inference.net","us.api.inference.net","api.parasail.io","zenmux.ai","api.302.ai","api.aimlapi.com","aimlapi.com","api.synthetic.new",
+  "inference.poolside.ai","api.minimax.io","api.moonshot.cn","open.bigmodel.cn","api.stepfun.com","api.stepfun.ai","api.xiaomimimo.com","api.longcat.chat",
+  "api.kimi.com","token.sensenova.cn","api.siliconflow.cn","us-central1-aiplatform.googleapis.com","us-east1-aiplatform.googleapis.com","us-east4-aiplatform.googleapis.com","us-east5-aiplatform.googleapis.com","us-west1-aiplatform.googleapis.com",
+  "us-west4-aiplatform.googleapis.com","us-south1-aiplatform.googleapis.com","northamerica-northeast1-aiplatform.googleapis.com","europe-west1-aiplatform.googleapis.com","europe-west4-aiplatform.googleapis.com","aiplatform.us.rep.googleapis.com","aiplatform.eu.rep.googleapis.com","bedrock-runtime.us-east-2.amazonaws.com",
+  "bedrock-runtime.ca-central-1.amazonaws.com","bedrock-runtime.eu-central-1.amazonaws.com","bedrock-runtime.eu-west-1.amazonaws.com","bedrock-runtime.eu-west-2.amazonaws.com","bedrock-runtime.ap-northeast-1.amazonaws.com","bedrock-runtime.ap-southeast-2.amazonaws.com"
 ];
 const now = () => new Date().toISOString();
 // "Today" in America/Los_Angeles as YYYY-MM-DD, so a professor stays active through the end of their
