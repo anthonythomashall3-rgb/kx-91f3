@@ -1,0 +1,25 @@
+// Wrong-computer guard for the student installers (functions/download/[[path]].js).
+import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { join, dirname } from "node:path"; import { tmpdir } from "node:os"; import { fileURLToPath, pathToFileURL } from "node:url";
+const HERE = dirname(fileURLToPath(import.meta.url)), tmp = mkdtempSync(join(tmpdir(), "lqz-dl-"));
+writeFileSync(join(tmp, "g.mjs"), readFileSync(join(HERE, "..", "cloudflare", "functions", "download", "[[path]].js")));
+const { onRequest } = await import(pathToFileURL(join(tmp, "g.mjs")).href);
+let pass = 0, fail = 0; const check = (m, c) => { c ? pass++ : fail++; console.log(c ? "  ok:" : "  FAIL:", m); };
+const MAC = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
+const WIN = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
+const IPH = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148";
+const NEXT = new Response("FILE");
+const go = async (path, ua) => { const r = await onRequest({ request: new Request("https://lockqz.pages.dev" + path, { headers: ua ? { "User-Agent": ua } : {} }), next: async () => NEXT }); return r === NEXT ? "FILE" : await r.text(); };
+check("Mac + Mac installer -> the file", await go("/download/lockqz-mac.pkg", MAC) === "FILE");
+check("Windows + Windows installer -> the file", await go("/download/lockqz-win.exe", WIN) === "FILE");
+let t = await go("/download/lockqz-win.exe", MAC);
+check("Mac + Windows installer -> page: wrong computer, Mac download button", /This is the Windows installer, but this computer is a Mac/.test(t) && /href="\/download\/lockqz-mac\.pkg">Download LOCKqz for Mac/.test(t));
+check("... with 'download anyway' for a different computer", /href="\/download\/lockqz-win\.exe\?anyway=1"/.test(t));
+t = await go("/download/lockqz-mac.pkg", WIN);
+check("Windows + Mac installer -> page with the Windows download", /This is the Mac installer, but this computer is a Windows/.test(t) && /lockqz-win\.exe">Download LOCKqz for Windows/.test(t));
+check("?anyway=1 -> the file", await go("/download/lockqz-win.exe?anyway=1", MAC) === "FILE");
+check("phone -> 'open this on your computer'", /Open this on your computer/.test(await go("/download/lockqz-mac.pkg", IPH)));
+check("curl (helper self-update / install script) -> the file", await go("/download/lockqz-mac.pkg", "curl/8.7.1") === "FILE" && await go("/download/lockqz-win.exe", "") === "FILE");
+check("PowerShell on Windows -> the file", await go("/download/lockqz-win.exe", "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-US) WindowsPowerShell/5.1") === "FILE");
+check("other downloads (zips, update files) untouched", await go("/download/lockqz-prof-chromium.zip", MAC) === "FILE" && await go("/download/update.json", WIN) === "FILE");
+console.log(`\nRESULT: ${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
