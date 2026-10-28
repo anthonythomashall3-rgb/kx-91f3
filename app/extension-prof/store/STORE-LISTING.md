@@ -57,5 +57,7 @@ Unlisted (only people with the link can install it; your dashboard and welcome e
 
 ## Files in this folder
 - screenshot-1280x800.png — the store screenshot
+- promo-small-440x280.png — Small promo tile
+- promo-marquee-1400x560.png — Marquee promo tile (optional)
 - the extension itself: ../dist/lockqz-prof-chromium.zip (Chrome and Edge), ../dist/lockqz-prof-firefox.zip (Firefox)
 - icon: ../icon128.png
