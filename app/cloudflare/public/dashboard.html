@@ -353,6 +353,16 @@ const ended = q => (q.end_date && Date.parse(q.end_date) < now()) || (q.due_date
 const current = c => c.quizzes.filter(q => !ended(q) || Number(q.gated) === 1);   // a running gate stays listed until it stops
 // Brightspace does not match LOCKqz yet: on but our password not there, or off but our password still there.
 const pend = q => q.password ? !q.bs_password_is_ours : !!q.bs_password_is_ours;
+// A past exam is called protected ONLY on proof: Brightspace showed LOCKqz's password going on (prot_at)
+// before the exam opened and not coming off (unprot_at) before it closed. No proof -> no claim.
+function protPast(q){
+  const t = x => x ? Date.parse(x) : NaN, on = t(q.prot_at), off = t(q.unprot_at), st = t(q.start_date), en = t(q.end_date || q.due_date);
+  if (isNaN(on) || isNaN(en) || on >= en) return "";
+  if (!isNaN(off) && off <= (isNaN(st) ? on : st)) return "";
+  if (!isNaN(st) && on <= st && (isNaN(off) || off >= en)) return `<span class="st ok">was protected</span>`;
+  const bits = [(!isNaN(st) && on > st) || isNaN(st) ? "from " + when(q.prot_at) : "", !isNaN(off) && off < en ? "until " + when(q.unprot_at) : ""].filter(Boolean).join(" ");
+  return `<span class="st warn" title="LOCKqz's password was not on this exam for the whole time it was open">partly protected${bits ? " · " + bits : ""}</span>`;
+}
 const pendingSync = () => BS.courses.some(c => c.quizzes.some(pend));
 function classStats(c){
   const cur = current(c), prot = cur.filter(q=>q.password), ready = c.students.filter(s=>s.installed).length;
@@ -511,7 +521,7 @@ function viewClass(ou){
     <section class="card"><div class="hrow"><h2>Exams</h2><span>every exam starts protected</span></div>
       ${s.cur.length ? `<p class="muted" style="margin:6px 0 0">Nothing to do — LOCKqz sets the password and opens the exam for installed students.</p>` : ""}
       <ul class="list">${s.cur.map(row).join("") || `<li class="d">No upcoming exams in Brightspace.</li>`}</ul>
-      ${past.length ? `<details class="past"><summary>${past.length} past</summary><ul class="list">${past.map(q=>`<li><div class="grow"><span class="t" style="color:#6b6861">${esc(q.name)}</span><span class="d">${q.end_date?"ended "+when(q.end_date):q.due_date?"due "+when(q.due_date):""}</span></div><span class="st">${q.password?"was protected":""}</span></li>`).join("")}</ul></details>` : ""}
+      ${past.length ? `<details class="past"><summary>${past.length} past</summary><ul class="list">${past.map(q=>`<li><div class="grow"><span class="t" style="color:#6b6861">${esc(q.name)}</span><span class="d">${q.end_date?"ended "+when(q.end_date):q.due_date?"due "+when(q.due_date):""}</span></div>${protPast(q)}</li>`).join("")}</ul></details>` : ""}
     </section>
     <section class="card"><div class="hrow"><h2>Students</h2><span><b style="color:var(--ok)">${s.ready} ready</b>${s.missing.length?` · <b style="color:var(--warn)">${s.missing.length} not yet</b>`:""}</span></div>
       ${s.missing.length ? `<div class="note warn"><span>${s.missing.length} student${s.missing.length===1?" has":"s have"} not installed LOCKqz. They cannot open a protected exam until they do.</span>${mailBtns(c,s)}</div>` : `<div class="note ok"><span>${c.students.length?"Every student has LOCKqz installed.":"No students on the Brightspace roster yet."}</span>${mailBtns(c,s)}</div>`}

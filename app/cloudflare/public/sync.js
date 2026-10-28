@@ -401,7 +401,7 @@
           "</div>";
       });
       if (past.length) html += '<details style="margin-top:6px;color:#888;font-size:13px"><summary>' + past.length + " past</summary>" +
-        past.map(function (q) { return '<div style="padding:4px 0">' + esc(q.name) + (prot[String(q.qi)] ? " · was protected" : "") + "</div>"; }).join("") + "</details>";
+        past.map(function (q) { return '<div style="padding:4px 0">' + esc(q.name) + "</div>"; }).join("") + "</details>";
     });
     say('<style>.lqsw{position:relative;display:inline-block;width:40px;height:24px;flex:none}.lqsw input{position:absolute;opacity:0;width:0;height:0;margin:0}.lqsl{position:absolute;inset:0;background:#ccc;border-radius:24px;transition:.15s;cursor:pointer}.lqsl:before{content:"";position:absolute;height:18px;width:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.15s}.lqsw input:checked+.lqsl{background:#990000}.lqsw input:checked+.lqsl:before{transform:translateX(16px)}.lqsw input:disabled+.lqsl{opacity:.55;cursor:default}</style><div style="background:#eafbea;padding:8px 10px;border-radius:8px">Synced ' + view.length + " class" + (view.length === 1 ? "" : "es") +
       ", " + students + " students, " + nq + " quizzes.</div>" +

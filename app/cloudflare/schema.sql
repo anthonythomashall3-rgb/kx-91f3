@@ -119,7 +119,7 @@ CREATE TABLE IF NOT EXISTS course_off (ou TEXT PRIMARY KEY, teacher_id TEXT, at 
 CREATE TABLE IF NOT EXISTS roster (ou TEXT, user_id TEXT, name TEXT, email TEXT, username TEXT, org_id TEXT, role TEXT, synced_at TEXT, PRIMARY KEY (ou, user_id));
 CREATE INDEX IF NOT EXISTS idx_roster_email ON roster(email);
 -- orig = the professor's own settings before LOCKqz changed the quiz: JSON {"pw":..., "hidden":...} (migrate_024)
-CREATE TABLE IF NOT EXISTS bs_quizzes (ou TEXT, qi TEXT, name TEXT, active INTEGER, start_date TEXT, end_date TEXT, due_date TEXT, bs_has_password INTEGER, bs_password_is_ours INTEGER, synced_at TEXT, orig TEXT, over_min INTEGER, PRIMARY KEY (ou, qi));
+CREATE TABLE IF NOT EXISTS bs_quizzes (ou TEXT, qi TEXT, name TEXT, active INTEGER, start_date TEXT, end_date TEXT, due_date TEXT, bs_has_password INTEGER, bs_password_is_ours INTEGER, synced_at TEXT, orig TEXT, over_min INTEGER, prot_at TEXT, unprot_at TEXT, PRIMARY KEY (ou, qi));  -- prot_at/unprot_at: migrate_035
 CREATE TABLE IF NOT EXISTS pending_clear (ou TEXT, qi TEXT, password TEXT, PRIMARY KEY (ou, qi));
 
 -- One pending email code per device (hash only; 15 min; 5 tries). See migrate_014.

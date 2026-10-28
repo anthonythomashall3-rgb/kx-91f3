@@ -2538,7 +2538,10 @@ export async function onRequest(context) {
         const drop = byOu.get(ou).quizzes.length > 1000 ? [] : oldBq.filter(r => String(r.ou) === ou && !keep.has(String(r.qi))).map(r => String(r.qi));
         for (const part of chunk(drop, 98)) g.push(db.prepare(`DELETE FROM bs_quizzes WHERE ou=? AND qi IN (${placeholders(part.length)})`).bind(ou, ...part));
         g.push(...multiInsert(db, "INSERT INTO bs_quizzes (ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours,over_min,synced_at)", 11, up,
-          "ON CONFLICT(ou,qi) DO UPDATE SET name=excluded.name,active=excluded.active,start_date=excluded.start_date,end_date=excluded.end_date,due_date=excluded.due_date,bs_has_password=excluded.bs_has_password,bs_password_is_ours=excluded.bs_password_is_ours,over_min=excluded.over_min,synced_at=excluded.synced_at"));
+          "ON CONFLICT(ou,qi) DO UPDATE SET name=excluded.name,active=excluded.active,start_date=excluded.start_date,end_date=excluded.end_date,due_date=excluded.due_date,bs_has_password=excluded.bs_has_password,bs_password_is_ours=excluded.bs_password_is_ours,over_min=excluded.over_min,synced_at=excluded.synced_at," +
+          // prot_at / unprot_at: when Brightspace showed LOCKqz's password go on / come off (the only proof an exam was protected).
+          "prot_at=CASE WHEN excluded.bs_password_is_ours=1 AND (COALESCE(bs_password_is_ours,0)<>1 OR prot_at IS NULL) THEN excluded.synced_at ELSE prot_at END," +
+          "unprot_at=CASE WHEN excluded.bs_password_is_ours=1 THEN NULL WHEN COALESCE(bs_password_is_ours,0)=1 THEN excluded.synced_at ELSE unprot_at END"));
         const gone = oldQh.has(ou) ? db.prepare("DELETE FROM bsq_hash WHERE ou=?").bind(ou) : null;
         if (qNorm.get(ou)) g.push(db.prepare("INSERT INTO bsq_hash (ou,hash,own) VALUES (?,?,?) ON CONFLICT(ou) DO UPDATE SET hash=excluded.hash,own=excluded.own").bind(ou, qNorm.get(ou), JSON.stringify(own)));
         else if (gone) g.push(gone);
@@ -2633,10 +2636,10 @@ export async function onRequest(context) {
             st.push(db.prepare("UPDATE bs_quizzes SET orig=json_set(COALESCE(orig,'{}'),'$.hidden',json(?)) WHERE ou=? AND qi=? AND json_type(COALESCE(orig,'{}'),'$.hidden') IS NULL").bind(r.orig_hidden ? "true" : "false", ou, qi));
         }
         if (r.status === "set" || r.status === "already")
-          st.push(db.prepare("UPDATE bs_quizzes SET bs_password_is_ours=1, bs_has_password=1 WHERE ou=? AND qi=? AND NOT (COALESCE(bs_password_is_ours,0)=1 AND COALESCE(bs_has_password,0)=1)").bind(ou, qi));
+          st.push(db.prepare("UPDATE bs_quizzes SET prot_at=CASE WHEN COALESCE(bs_password_is_ours,0)=1 AND prot_at IS NOT NULL THEN prot_at ELSE ? END, unprot_at=NULL, bs_password_is_ours=1, bs_has_password=1 WHERE ou=? AND qi=? AND NOT (COALESCE(bs_password_is_ours,0)=1 AND COALESCE(bs_has_password,0)=1 AND prot_at IS NOT NULL AND unprot_at IS NULL)").bind(now(), ou, qi));
         else if (r.status === "cleared") {
           st.push(db.prepare("DELETE FROM pending_clear WHERE ou=? AND qi=?").bind(ou, qi));
-          st.push(db.prepare("UPDATE bs_quizzes SET bs_password_is_ours=0, orig=NULL WHERE ou=? AND qi=? AND (COALESCE(bs_password_is_ours,0)<>0 OR orig IS NOT NULL)").bind(ou, qi));
+          st.push(db.prepare("UPDATE bs_quizzes SET unprot_at=CASE WHEN COALESCE(bs_password_is_ours,0)=1 THEN ? ELSE unprot_at END, bs_password_is_ours=0, orig=NULL WHERE ou=? AND qi=? AND (COALESCE(bs_password_is_ours,0)<>0 OR orig IS NOT NULL)").bind(now(), ou, qi));
         } else if (r.status === "error")
           st.push(db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(null, null, `${ou}-${qi}`, "brightspace_sync_error", String(r.msg||"").slice(0,300), now()));
       }
@@ -2886,7 +2889,7 @@ export async function onRequest(context) {
       }
       // Two plain reads matched here (the LEFT JOIN + ORDER BY read ~4 rows per quiz).
       const lq = new Map((await db.prepare(`SELECT ou,qi,password,lock_id,gated FROM quizzes WHERE ou IN (${sub}) AND qi IS NOT NULL`).bind(me.id).all()).results.map(q => [String(q.ou) + "\u0000" + String(q.qi), q]));
-      const bq = (await db.prepare(`SELECT ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours,orig FROM bs_quizzes WHERE ou IN (${sub})`).bind(me.id).all()).results;
+      const bq = (await db.prepare(`SELECT ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours,orig,prot_at,unprot_at FROM bs_quizzes WHERE ou IN (${sub})`).bind(me.id).all()).results;
       bq.sort((a, b) => binCmp(a.name, b.name));
       const qz = bq.map(b => { const q = lq.get(String(b.ou) + "\u0000" + String(b.qi)); return { ...b, password: q ? q.password : null, lock_id: q ? q.lock_id : null, gated: q ? q.gated : null }; })
         .map(q => own.has(String(q.ou)) ? withOrig(q) : withOrig({ ...q, orig: null, password: null, lock_id: null, gated: null }));
