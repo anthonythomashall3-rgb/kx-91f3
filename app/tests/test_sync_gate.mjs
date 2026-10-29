@@ -35,7 +35,7 @@ const db = { prepare(sql) { const st = sqlite.prepare(sql); let args = [];
     first: async () => st.get(...args) ?? null, all: async () => ({ results: st.all(...args) }),
     run: async () => ({ meta: { changes: Number(st.run(...args).changes) } }), _run() { st.run(...args); } }; return o; },
   async batch(sts) { for (const s of sts) s._run(); } };
-const env = { DB: db, TEACHER_KEY: "admin-key", REQUIRE_SIGNED: "1", LIVE_CACHE_MS: "0" };   // edits the DB between /live calls
+const env = { DB: db, TEACHER_KEY: "admin-key", REQUIRE_SIGNED: "1", BEAT_S: "300" /* staleness logic at 5-min pings; 600 s default: test_heartbeat_pace */, LIVE_CACHE_MS: "0" };   // edits the DB between /live calls
 const API = "https://lockqz.test/api";
 async function api(path, body, headers = {}) {
   const raw = JSON.stringify(body ?? {});

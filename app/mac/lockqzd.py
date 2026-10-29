@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.5.6"
+VERSION = "0.5.7"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -106,6 +106,9 @@ BEAT    = max(1, _int(CONF.get("beat_cycles", 60), 60))
 # Helper liveness ping, timed on the WALL CLOCK (a watcher cycle can take far longer than 5 s while
 # the engine closes apps): ~300 s apart (free-plan budget); the server's STALE is 660 s.
 BEAT_SECS = min(300, BEAT * 5)
+# The server may set the ping interval (its reply carries beat_s, 60-900 s; LOCKqz's free-plan budget). Tests that
+# set beat_cycles keep their own fast interval.
+BEAT_FROM_SERVER = "beat_cycles" not in CONF
 DRYRUN  = os.environ.get("LOCKQZ_DRYRUN", "0")
 # Admin developer mode: AI stays available during quizzes ONLY on a Mac that holds the
 # matching developer key. The code ships with the key's SHA-256 only — a student install
@@ -526,6 +529,9 @@ def report(event, extra=None):
             "student": STATE["student"], "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     if extra: body.update(extra)
     code, j = call("/report", body)
+    global BEAT_SECS
+    if BEAT_FROM_SERVER and event in ("heartbeat", "lock") and isinstance(j, dict) and isinstance(j.get("beat_s"), int) and not isinstance(j.get("beat_s"), bool):
+        BEAT_SECS = max(60, min(900, j["beat_s"]))
     if event not in ("unlock", "install", "update") and isinstance(j, dict) and j.get("unlock") is True:
         server_release(body.get("quiz_id"), j.get("reason"))
     return code, j

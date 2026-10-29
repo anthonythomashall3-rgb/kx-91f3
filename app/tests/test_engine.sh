@@ -62,7 +62,7 @@ check "homework AI blackholed (gauthmath.com, chegg.com)" 'grep -qx "0.0.0.0 gau
 check "coding AI API blackholed (api2.cursor.sh, api.githubcopilot.com)" 'grep -qx "0.0.0.0 api2.cursor.sh" <<<"$BLOCK" && grep -qx ":: api.githubcopilot.com" <<<"$BLOCK"'
 check "every block line is '0.0.0.0|:: <host>' (no path entry, no junk)" '[ "$(grep -vxF "$MARK_START" <<<"$BLOCK" | grep -vxF "$MARK_END" | grep -cvE "^(0\.0\.0\.0|::) [a-z0-9-]+(\.[a-z0-9-]+)+$")" = 0 ]'
 check "Microsoft 365 home (m365.cloud.microsoft) NOT blocked" '! grep -qE " (www\.)?m365\.cloud\.microsoft$" <<<"$BLOCK"'
-check "notes hosts never blocked (docs.google.com, quizlet.com, studocu.com, knowunity.com)" '! grep -qE " (www\.)?(docs\.google\.com|quizlet\.com|studocu\.com|knowunity\.com)$" <<<"$BLOCK"'
+check "notes hosts never blocked (docs.google.com, studocu.com, knowunity.com)" '! grep -qE " (www\.)?(docs\.google\.com|studocu\.com|knowunity\.com)$" <<<"$BLOCK"'
 
 echo "T12 proxies: forced off for the quiz, but KEPT when the network only works through its proxy"
 PX="$TMP/px"; mkdir -p "$PX"

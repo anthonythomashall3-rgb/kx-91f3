@@ -37,7 +37,7 @@ function d1(sqlite) {
 const sqlite = new DatabaseSync(":memory:");
 sqlite.exec(readFileSync(join(CF, "schema.sql"), "utf8"));
 const MAILS = [];
-const env = { DB: d1(sqlite), TEACHER_KEY: "admin-key-audit", REQUIRE_SIGNED: "1", ADMIN_EMAIL: "admin@usc.edu", ROT_SECRET: "rot-secret-audit", LIVE_CACHE_MS: "0",
+const env = { DB: d1(sqlite), TEACHER_KEY: "admin-key-audit", REQUIRE_SIGNED: "1", BEAT_S: "300" /* staleness logic at 5-min pings; 600 s default: test_heartbeat_pace */, ADMIN_EMAIL: "admin@usc.edu", ROT_SECRET: "rot-secret-audit", LIVE_CACHE_MS: "0",
               MAIL_SINK: async m => { MAILS.push(m); return true; } };
 const BASE = "https://lockqz.test";
 const sign = (key, path, ts, raw) => createHmac("sha256", key).update(`POST\n${path}\n${ts}\n${createHash("sha256").update(raw).digest("hex")}`).digest("hex");

@@ -39,42 +39,44 @@ const AI_DOMAINS = [
   "mask.icloud.com","mask-h2.icloud.com","cloudflare-dns.com","chrome.cloudflare-dns.com","mozilla.cloudflare-dns.com","dns.google","dns.google.com","dns.quad9.net",
   "doh.opendns.com","dns.nextdns.io","firefox.dns.nextdns.io","chromium.dns.nextdns.io","doh.xfinity.com","private.canadianshield.cira.ca","wikimedia-dns.org","dns.adguard-dns.com",
   "doh.mullvad.net","freedns.controld.com","dns.alidns.com","doh.pub","appsgenaiserver-pa.clients6.google.com","appsgenaiserver-pa.googleapis.com","chat.learnwise.ai","learnwise.ai",
-  "blackbox.ai","www.blackbox.ai","hf.space","translate.goog","lens.google.com","abacus.ai","chatllm.abacus.ai","anakin.ai","notegpt.io","perchance.org/ai-chat",
-  "augloop.office.com","bing.com/copilotsearch","duckduckgo.com/aichat","kagi.com/assistant","ai-chat.bsg.brave.com","llm.zed.dev","cloud.zed.dev","tabnine.com",
-  "supermaven.com","grazie.ai","grazie.aws.intellij.net","codewhisperer.us-east-1.amazonaws.com","q.us-east-1.amazonaws.com","openai.azure.com","services.ai.azure.com","aiplatform.googleapis.com",
-  "bedrock-runtime.us-east-1.amazonaws.com","bedrock-runtime.us-west-2.amazonaws.com","api-inference.huggingface.co","llama-api.com","api.lepton.ai","siliconflow.cn","siliconflow.com","ark.cn-beijing.volces.com",
-  "proxy.runpod.net","modal.run","baseten.co","api.studio.nebius.com","inference.friendli.ai","backend.raycast.com","replika.com","qwenlm.ai",
-  "askyourpdf.com","humata.ai","pdf.ai","bartleby.com","numerade.com","socratic.org","wolframalpha.com","deepl.com/write",
-  "writer.com","sudowrite.com","textcortex.com","humbot.ai","bypassgpt.ai","gptinf.com","netus.ai","base44.com",
-  "emergent.sh","same.new","create.xyz","a0.dev","rork.com","tempolabs.ai","databutton.com","softgen.ai",
-  "wiseone.io","compose.ai","tinamind.com",
-  "smartsolve.ai","app.smartsolve.ai","homeworkify.st","quizard.ai","quizgecko.com",
-  "cymath.com","mathsolver.microsoft.com","cameramath.com","mathgpt.ai","mathful.com","turbolearn.ai","mindgrasp.ai","coconote.app",
-  "scholarcy.com","explainpaper.com","gizmo.ai",
-  "replit.com","sourcegraph.com","devin.ai","app.devin.ai","augmentcode.com","app.augmentcode.com","qodo.ai","app.qodo.ai",
-  "bito.ai","app.warp.dev","continue.dev","api.continue.dev","trypear.ai","codegpt.co","app.codegpt.co","firebase.studio",
-  "studio.firebase.google.com","idx.google.com","opal.withgoogle.com","stitch.withgoogle.com",
-  "chat.com","ai.azure.com","oai.azure.com","copilotstudio.microsoft.com","nova.amazon.com","ernie.baidu.com","chat.baidu.com","alice.yandex.ru",
-  "clova-x.naver.com","kilocode.ai","api.kilocode.ai","requesty.ai","glama.ai","nano-gpt.com","portkey.ai","api.portkey.ai",
-  "chutes.ai","featherless.ai","api.featherless.ai","lambda.ai","api.lambda.ai","exa.ai","morphic.sh",
+  "blackbox.ai","www.blackbox.ai","hf.space","translate.goog","lens.google.com","abacus.ai","chatllm.abacus.ai","anakin.ai",
+  "notegpt.io","perchance.org/ai-chat","augloop.office.com","bing.com/copilotsearch","duckduckgo.com/aichat","kagi.com/assistant","ai-chat.bsg.brave.com","llm.zed.dev",
+  "cloud.zed.dev","tabnine.com","supermaven.com","grazie.ai","grazie.aws.intellij.net","codewhisperer.us-east-1.amazonaws.com","q.us-east-1.amazonaws.com","openai.azure.com",
+  "services.ai.azure.com","aiplatform.googleapis.com","bedrock-runtime.us-east-1.amazonaws.com","bedrock-runtime.us-west-2.amazonaws.com","api-inference.huggingface.co","llama-api.com","api.lepton.ai","siliconflow.cn",
+  "siliconflow.com","ark.cn-beijing.volces.com","proxy.runpod.net","modal.run","baseten.co","api.studio.nebius.com","inference.friendli.ai","backend.raycast.com",
+  "replika.com","qwenlm.ai","askyourpdf.com","humata.ai","pdf.ai","bartleby.com","numerade.com","socratic.org",
+  "wolframalpha.com","deepl.com/write","writer.com","sudowrite.com","textcortex.com","humbot.ai","bypassgpt.ai","gptinf.com",
+  "netus.ai","base44.com","emergent.sh","same.new","create.xyz","a0.dev","rork.com","tempolabs.ai",
+  "databutton.com","softgen.ai","wiseone.io","compose.ai","tinamind.com","smartsolve.ai","app.smartsolve.ai","homeworkify.st",
+  "quizard.ai","quizgecko.com","cymath.com","mathsolver.microsoft.com","cameramath.com","mathgpt.ai","mathful.com","turbolearn.ai",
+  "mindgrasp.ai","coconote.app","scholarcy.com","explainpaper.com","gizmo.ai","replit.com","sourcegraph.com","devin.ai",
+  "app.devin.ai","augmentcode.com","app.augmentcode.com","qodo.ai","app.qodo.ai","bito.ai","app.warp.dev","continue.dev",
+  "api.continue.dev","trypear.ai","codegpt.co","app.codegpt.co","firebase.studio","studio.firebase.google.com","idx.google.com","opal.withgoogle.com",
+  "stitch.withgoogle.com","chat.com","ai.azure.com","oai.azure.com","copilotstudio.microsoft.com","nova.amazon.com","ernie.baidu.com","chat.baidu.com",
+  "alice.yandex.ru","clova-x.naver.com","kilocode.ai","api.kilocode.ai","requesty.ai","glama.ai","nano-gpt.com","portkey.ai",
+  "api.portkey.ai","chutes.ai","featherless.ai","api.featherless.ai","lambda.ai","api.lambda.ai","exa.ai","morphic.sh",
   "languagetool.org","prowritingaid.com","hemingwayapp.com","wordvice.ai","paraphrasingtool.ai","editpad.org","essaygenius.ai","myessaywriter.ai",
   "essaywriter.ai","perfectessaywriter.ai","textero.ai","samwell.ai","yomu.ai","writefull.com","trinka.ai","walterwrites.ai",
-  "phrasly.ai","ryne.ai","twixify.com","aihumanizer.com","humanizeai.io",
-  "chatgot.io","chatbotapp.ai","aichatting.net","talkai.info","gptgo.ai","chatgptfree.ai","writingmate.ai","copilot.live",
-  "examclutch.com","getquizsolve.com","cheatly.vercel.app","quizsolve.vercel.app","quizsolver.ai","getanswerlyai.com","quizace.ai","answerai.pro",
-  "upstudy.ai","edubrain.ai","studymonkey.ai","nerdai.app","youlearn.ai","paperguide.ai","chatdoc.com","finalroundai.com",
-  "lockedinai.com","interviewcoder.co","vervecopilot.com","interviewsolver.com","ultracode.ai","parakeet-ai.com","beyz.ai","app.beyz.ai",
-  "fellou.ai","browseros.com","operaneon.com","sigmabrowser.com","strawberrybrowser.com","alexa.com","chat.olakrutrim.com","olakrutrim.com",
-  "longcat.chat","skywork.ai","heyalice.app","nomi.ai","kindroid.ai","hyperwriteai.com","linguix.com","paraphraser.io",
-  "prepostseo.com","scribbr.com/paraphrasing-tool","ahrefs.com/writing-tools","grubby.ai","bypass.hix.ai","rephrasy.ai","hastewire.com","humanizerpro.ai",
-  "aiseo.ai","writehuman.ai","humanize.io","stealthwriter.ai","naturalwrite.com","cline.bot","api.cline.bot","opencode.ai",
-  "ampcode.com","factory.ai","app.factory.ai","blink.new","integrate.api.nvidia.com","build.nvidia.com","ai-gateway.vercel.sh",
-  "api.inference.net","us.api.inference.net","api.parasail.io","zenmux.ai","api.302.ai","api.aimlapi.com","aimlapi.com","api.synthetic.new",
-  "inference.poolside.ai","api.minimax.io","api.moonshot.cn","open.bigmodel.cn","api.stepfun.com","api.stepfun.ai","api.xiaomimimo.com","api.longcat.chat",
-  "api.kimi.com","token.sensenova.cn","api.siliconflow.cn","us-central1-aiplatform.googleapis.com","us-east1-aiplatform.googleapis.com","us-east4-aiplatform.googleapis.com","us-east5-aiplatform.googleapis.com","us-west1-aiplatform.googleapis.com",
-  "us-west4-aiplatform.googleapis.com","us-south1-aiplatform.googleapis.com","northamerica-northeast1-aiplatform.googleapis.com","europe-west1-aiplatform.googleapis.com","europe-west4-aiplatform.googleapis.com","aiplatform.us.rep.googleapis.com","aiplatform.eu.rep.googleapis.com","bedrock-runtime.us-east-2.amazonaws.com",
-  "bedrock-runtime.ca-central-1.amazonaws.com","bedrock-runtime.eu-central-1.amazonaws.com","bedrock-runtime.eu-west-1.amazonaws.com","bedrock-runtime.eu-west-2.amazonaws.com","bedrock-runtime.ap-northeast-1.amazonaws.com","bedrock-runtime.ap-southeast-2.amazonaws.com",
-  "senseicore.adobe.io","senseicore-ue1.adobe.io","dc-genai-access-provisioning-api.adobe.io","dc-genai-persistence.adobe.io","dc-genai-content-platform.adobe.io"
+  "phrasly.ai","ryne.ai","twixify.com","aihumanizer.com","humanizeai.io","chatgot.io","chatbotapp.ai","aichatting.net",
+  "talkai.info","gptgo.ai","chatgptfree.ai","writingmate.ai","copilot.live","examclutch.com","getquizsolve.com","cheatly.vercel.app",
+  "quizsolve.vercel.app","quizsolver.ai","getanswerlyai.com","quizace.ai","answerai.pro","upstudy.ai","edubrain.ai","studymonkey.ai",
+  "nerdai.app","youlearn.ai","paperguide.ai","chatdoc.com","finalroundai.com","lockedinai.com","interviewcoder.co","vervecopilot.com",
+  "interviewsolver.com","ultracode.ai","parakeet-ai.com","beyz.ai","app.beyz.ai","fellou.ai","browseros.com","operaneon.com",
+  "sigmabrowser.com","strawberrybrowser.com","alexa.com","chat.olakrutrim.com","olakrutrim.com","longcat.chat","skywork.ai","heyalice.app",
+  "nomi.ai","kindroid.ai","hyperwriteai.com","linguix.com","paraphraser.io","prepostseo.com","scribbr.com/paraphrasing-tool","ahrefs.com/writing-tools",
+  "grubby.ai","bypass.hix.ai","rephrasy.ai","hastewire.com","humanizerpro.ai","aiseo.ai","writehuman.ai","humanize.io",
+  "stealthwriter.ai","naturalwrite.com","cline.bot","api.cline.bot","opencode.ai","ampcode.com","factory.ai","app.factory.ai",
+  "blink.new","integrate.api.nvidia.com","build.nvidia.com","ai-gateway.vercel.sh","api.inference.net","us.api.inference.net","api.parasail.io","zenmux.ai",
+  "api.302.ai","api.aimlapi.com","aimlapi.com","api.synthetic.new","inference.poolside.ai","api.minimax.io","api.moonshot.cn","open.bigmodel.cn",
+  "api.stepfun.com","api.stepfun.ai","api.xiaomimimo.com","api.longcat.chat","api.kimi.com","token.sensenova.cn","api.siliconflow.cn","us-central1-aiplatform.googleapis.com",
+  "us-east1-aiplatform.googleapis.com","us-east4-aiplatform.googleapis.com","us-east5-aiplatform.googleapis.com","us-west1-aiplatform.googleapis.com","us-west4-aiplatform.googleapis.com","us-south1-aiplatform.googleapis.com","northamerica-northeast1-aiplatform.googleapis.com","europe-west1-aiplatform.googleapis.com",
+  "europe-west4-aiplatform.googleapis.com","aiplatform.us.rep.googleapis.com","aiplatform.eu.rep.googleapis.com","bedrock-runtime.us-east-2.amazonaws.com","bedrock-runtime.ca-central-1.amazonaws.com","bedrock-runtime.eu-central-1.amazonaws.com","bedrock-runtime.eu-west-1.amazonaws.com","bedrock-runtime.eu-west-2.amazonaws.com",
+  "bedrock-runtime.ap-northeast-1.amazonaws.com","bedrock-runtime.ap-southeast-2.amazonaws.com","senseicore.adobe.io","senseicore-ue1.adobe.io","dc-genai-access-provisioning-api.adobe.io","dc-genai-persistence.adobe.io","dc-genai-content-platform.adobe.io","notion.so",
+  "www.notion.so","notion.com","www.notion.com","notion.site","api.notion.com","msgstore.www.notion.so","exp.notion.so","file.notion.so",
+  "mail.notion.so","calendar.notion.so","canva.com","www.canva.com","static.canva.com","canva.cn","quizlet.com","www.quizlet.com",
+  "assets.quizlet.com","api.quizlet.com","slack.com","app.slack.com","edgeapi.slack.com","wss-primary.slack.com","wss-backup.slack.com","slack-edge.com",
+  "a.slack-edge.com","slack-msgs.com","files.slack.com","evernote.com","www.evernote.com","update.evernote.com","goodnotes.com","www.goodnotes.com",
+  "web.goodnotes.com"
 ];
 const now = () => new Date().toISOString();
 // "Today" in America/Los_Angeles as YYYY-MM-DD, so a professor stays active through the end of their
@@ -109,7 +111,11 @@ const binCmp = (a, b) => {
 // this list (migrate_029), so the high-volume lock/unlock/install/password events write one index row less.
 // A query can use it only when it repeats this exact term: every (event, ts) query adds " AND " + RL_EV.
 const RL_EV = "event IN ('login_fail','pay_code_new','pay_start','pay_stripe','pay_bank','signup','stripe_sess','code_sent','code_send_failed','reset_request','email_verified')";
-const STALE_MS = 660000;   // live monitor: helpers ping every ~300 s, so a lock not refreshed for 11 minutes "went dark"
+// Helper heartbeat (28 Oct 2026, free-plan scale): the server tells each helper how often to ping (BEAT_S, default
+// 600 s = one request + one row a student every 10 min of a quiz; was 300). The live monitor calls a lock "dark"
+// after two missed pings + 1 min. Old helpers keep pinging every 300 s, well inside that window.
+const beatSecs = env => Math.max(120, Math.min(900, Number(env.BEAT_S || 600) || 600));
+const staleMsFor = env => (2 * beatSecs(env) + 60) * 1000;
 const EVENT_DAYS = 120;    // retention: activity events are deleted after 120 days (privacy.html)
 const rid = (n=6) => Array.from(crypto.getRandomValues(new Uint8Array(n))).map(b=>"ABCDEFGHJKMNPQRSTUVWXYZ23456789"[b%30]).join("");
 const hex = a => Array.from(new Uint8Array(a)).map(b=>b.toString(16).padStart(2,"0")).join("");
@@ -488,6 +494,7 @@ const MAIL_HARD_MAX = 480, MAIL_AUTO_MAX = 250, MAIL_BATCH = 90;   // Gmail: at 
 
 export async function onRequest(context) {
   const { request, env } = context;
+  const STALE_MS = staleMsFor(env);
   const url = new URL(request.url);
   const p = url.pathname.replace(/^\/api/, "") || "/";
   const db = env.DB;
@@ -1662,7 +1669,8 @@ export async function onRequest(context) {
       // the helper to unlock now. Only for the helper's own signed lock/heartbeat (old clients ignore it).
       if (v.ok && qidOk && (ev === "lock" || (ev === "heartbeat" && !agentBeat))) {
         const u = await serverUnlock(dev, device_id, qidOk);
-        if (u) return json({ ok: true, unlock: true, reason: u });
+        if (u) return json({ ok: true, unlock: true, reason: u, beat_s: beatSecs(env) });
+        return json({ ok: true, beat_s: beatSecs(env) });
       }
       return json({ ok: true });
     }

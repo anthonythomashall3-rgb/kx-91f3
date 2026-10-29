@@ -31,7 +31,7 @@ const db = { prepare(sql) { const st = sqlite.prepare(sql); let args = [];
     run: async () => ({ meta: { changes: Number(st.run(...args).changes) } }), _run: () => st.run(...args) };
   return s; }, async batch(sts) { for (const s of sts) s._run(); } };
 // LIVE_CACHE_MS=0: this suite edits the database directly between /live calls (no shared cache).
-const env = { DB: db, TEACHER_KEY: "live-admin-key", REQUIRE_SIGNED: "1", LIVE_CACHE_MS: "0" };
+const env = { DB: db, TEACHER_KEY: "live-admin-key", REQUIRE_SIGNED: "1", BEAT_S: "300" /* staleness logic at 5-min pings; 600 s default: test_heartbeat_pace */, LIVE_CACHE_MS: "0" };
 const sign = (key, path, ts, raw) => createHmac("sha256", key).update(`POST\n${path}\n${ts}\n${createHash("sha256").update(raw).digest("hex")}`).digest("hex");
 async function api(path, body, dev) {
   const raw = JSON.stringify(body ?? {}), h = { "Content-Type": "application/json" };

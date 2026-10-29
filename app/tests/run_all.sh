@@ -43,6 +43,7 @@ run "Gmail payment script parser (forged alerts refused)" node test_pay_script.m
 run "26 Oct fixes: one Stripe checkout per code, overpayments carried, unexpected local unlocks red, course password retired" node --no-warnings test_oct26_fixes.mjs
 run "Helper hardening: fast user switching, per-user tokens, Windows monotonic cap, local-model apps" bash test_helper_hardening.sh
 run "Scale guard: no API query reads a whole big table (every statement planned against the real schema)" node --no-warnings test_scale_indexes.mjs
+run "Free-plan scale: server-paced helper heartbeat (BEAT_S, default 600 s) + matching live-monitor window" node --no-warnings test_heartbeat_pace.mjs
 run "API audit regressions (query/row budgets, auth, identity)" node --no-warnings test_api_audit.mjs
 run "Round-2 API regressions (verify, FERPA, capacity, submissions, payments, deploy contracts)" node --no-warnings test_round2_api.mjs
 run "Round-3 API regressions (email-code brute force, Sync-key scope, FERPA scope, big class lists, sign-up + mail caps)" node --no-warnings test_round3_api.mjs

@@ -95,10 +95,10 @@ badPath.length === 0 ? ok(`all ${pathsE.length} path entries are routed to the b
   : bad("path entries the policies would drop: " + badPath.join(", "));
 
 console.log("T10 open-note resources are never blocked (hosts entries also match subdomains in Chromium)");
-const notes = ["docs.google.com", "drive.google.com", "www.google.com", "quizlet.com", "studocu.com", "www.studocu.com",
+const notes = ["docs.google.com", "drive.google.com", "www.google.com", "studocu.com", "www.studocu.com",
   "knowunity.com", "onedrive.live.com", "www.office.com", "m365.cloud.microsoft", "www.onenote.com", "github.com",
   "huggingface.co", "www.bing.com", "x.com", "brightspace.usc.edu", "usc.brightspace.com", "www.khanacademy.org",
-  "www.desmos.com", "en.wikipedia.org", "www.notion.so", "outlook.office.com", "www.icloud.com", "superhuman.com"];
+  "www.desmos.com", "en.wikipedia.org", "outlook.office.com", "www.icloud.com", "superhuman.com"];
 const hits = notes.filter(n => hostsE.some(e => n === e || n.endsWith("." + e)));
 hits.length === 0 ? ok(`none of ${notes.length} notes/Brightspace hosts is blocked`) : bad("over-block: " + hits.join(", "));
 !hostsE.includes("m365.cloud.microsoft") && pathsE.includes("m365.cloud.microsoft/chat")
@@ -172,17 +172,24 @@ const need6 = ["senseicore.adobe.io","senseicore-ue1.adobe.io","dc-genai-access-
 const miss6 = need6.filter(d => !mac.includes(d) || !win.includes(d) || !(served || []).includes(d));
 miss6.length === 0 ? ok(`all ${need6.length} in-app AI hosts in both blocklists + AI_DOMAINS`) : bad("missing: " + miss6.join(", "));
 // whole-host entries match subdomains in Chromium: none may cover a notes / editor host
-const notes2 = ["notion.so", "www.notion.so", "docs.google.com", "drive.google.com", "mail.google.com", "classroom.google.com",
-  "canva.com", "www.canva.com", "quizlet.com", "office.com", "www.office.com", "m365.cloud.microsoft", "slack.com", "app.slack.com",
-  "evernote.com", "www.evernote.com", "web.goodnotes.com", "acrobat.adobe.com", "adobe.com", "adobe.io", "dc-api.adobe.io", "sensei.adobe.io"];
+const notes2 = ["docs.google.com", "drive.google.com", "mail.google.com", "classroom.google.com",
+  "office.com", "www.office.com", "m365.cloud.microsoft", "onedrive.live.com", "www.onenote.com", "acrobat.adobe.com", "adobe.com", "adobe.io", "dc-api.adobe.io", "sensei.adobe.io"];
 const hits2 = notes2.filter(n => hostsE.some(e => n === e || n.endsWith("." + e)));
-hits2.length === 0 ? ok(`none of ${notes2.length} notes hosts (Notion, Docs, Canva, Quizlet, Office, Slack, Acrobat web) is blocked`) : bad("over-block: " + hits2.join(", "));
+hits2.length === 0 ? ok(`none of ${notes2.length} notes hosts (Docs, Drive, Gmail, Classroom, Office, OneDrive, OneNote, Acrobat web) is blocked`) : bad("over-block: " + hits2.join(", "));
 const pyPol2 = readFileSync(join(DIR, "../mac/browser-policy.py"), "utf8");
 pyPol2.includes('"bEnableGentech": False') && pyPol2.includes('"com.adobe.Acrobat.Pro", "com.adobe.Reader"') ? ok("mac: Acrobat/Reader FeatureLockdown bEnableGentech off during the quiz") : bad("mac Acrobat policy missing");
 psPol.includes('"bEnableGentech" 0') ? ok("windows: Acrobat/Reader FeatureLockDown bEnableGentech = 0") : bad("windows Acrobat policy missing");
 const macXb3 = readFileSync(join(DIR, "../mac/extra-block.sh"), "utf8");
 macXb3.includes("AirplayRecieverEnabled") && macXb3.includes('"allowAirPlayIncomingRequests": False') && macXb3.includes("airplay_receiver_restore || rc=1")
   ? ok("mac: AirPlay Receiver off during the quiz and restored at unlock") : bad("mac AirPlay Receiver handling missing");
+
+console.log("T17 owner decision 28 Oct: Notion, Canva, Quizlet, Slack, Evernote, Goodnotes blocked during quizzes (their AI cannot be separated from the notes)");
+const need7 = ["notion.so","www.notion.so","notion.com","api.notion.com","canva.com","www.canva.com","quizlet.com","www.quizlet.com","slack.com","app.slack.com","slack-edge.com","evernote.com","www.evernote.com","goodnotes.com","web.goodnotes.com"];
+const miss7 = need7.filter(d => !mac.includes(d) || !win.includes(d) || !(served || []).includes(d));
+miss7.length === 0 ? ok(`all ${need7.length} hosts in both blocklists + AI_DOMAINS`) : bad("missing: " + miss7.join(", "));
+const macApps7 = readFileSync(join(DIR, "../mac/lockqz.sh"), "utf8"), winApps7 = readFileSync(join(DIR, "../windows/lockqz.ps1"), "utf8");
+['"Notion"','"Canva"','"Slack"','"Evernote"','"Goodnotes"'].every(a => macApps7.includes(a)) ? ok("mac closes the Notion / Canva / Slack / Evernote / Goodnotes apps") : bad("mac AI_APPS missing a notes app");
+['"Notion"','"Canva"','"slack"','"Evernote"','"GoodNotes"'].every(a => winApps7.includes(a)) ? ok("windows closes the Notion / Canva / Slack / Evernote / Goodnotes apps") : bad("windows $AiApps missing a notes app");
 
 console.log(`RESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

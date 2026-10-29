@@ -350,7 +350,7 @@ ff_orig = open(os.path.join(pd, "org.mozilla.firefox.plist"), "rb").read(); off_
 ok("lock succeeds") if P.lock() else bad("lock failed")
 ch = plistlib.load(open(os.path.join(pd, "com.google.Chrome.plist"), "rb"))
 ok("Chrome URLBlocklist: every blocklist host + path, under the 1000 limit") if all(h in ch["URLBlocklist"] for h in hosts) and all(x in ch["URLBlocklist"] for x in paths) and len(ch["URLBlocklist"]) <= 1000 else bad("URLBlocklist incomplete (%d)" % len(ch["URLBlocklist"]))
-ok("Chrome: no notes host blocked (docs.google.com, quizlet.com, m365.cloud.microsoft)") if not [x for x in ch["URLBlocklist"] if x in ("google.com", "docs.google.com", "quizlet.com", "studocu.com", "knowunity.com", "m365.cloud.microsoft", "github.com", "office.com")] else bad("notes host in URLBlocklist")
+ok("Chrome: no notes host blocked (docs.google.com, m365.cloud.microsoft)") if not [x for x in ch["URLBlocklist"] if x in ("google.com", "docs.google.com", "studocu.com", "knowunity.com", "m365.cloud.microsoft", "github.com", "office.com")] else bad("notes host in URLBlocklist")
 ok("Chrome: only the fixed safe extensions stay on (password managers, Docs Offline, Zotero)") if ch["ExtensionInstallAllowlist"] == P.SAFE_EXTENSIONS and ch["ExtensionInstallBlocklist"] == ["*"] else bad("extension allowlist wrong: %r" % ch.get("ExtensionInstallAllowlist"))
 ok("Chrome: DuckDuckGo no-AI site allowed, AI Mode links blocked") if "noai.duckduckgo.com" in ch["URLAllowlist"] and "google.com/ai" in ch["URLBlocklist"] and "duckduckgo.com" in ch["URLBlocklist"] else bad("ddg/ai-mode lists wrong")
 ok("Chrome: proxy forced direct (network works without it)") if ch.get("ProxyMode") == "direct" else bad("ProxyMode missing")

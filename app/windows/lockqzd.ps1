@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.5.6"
+$Version = "0.5.7"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = if ($env:LOCKQZ_CONFIG) { $env:LOCKQZ_CONFIG } else { "$env:ProgramData\LOCKqz\config.json" }
@@ -130,6 +130,11 @@ function LQ-CapForEnd([int64]$lockedSince, [int64]$endUnix, [int64]$now, [int64]
   $localEnd = $endUnix - $skew
   if (($localEnd + 900) -le $now) { return [int64]0 }
   return [int64][Math]::Min($lockedSince + 86400, $localEnd + 900)
+}
+function LQ-BeatSecs($data, [int]$cur) {
+  # The ping interval the server sent (beat_s) when it is sane, else the current one.
+  if ($data -and ($data.beat_s -is [int] -or $data.beat_s -is [long] -or $data.beat_s -is [double])) { return [int][Math]::Max(60, [Math]::Min(900, [int]$data.beat_s)) }
+  return $cur
 }
 function LQ-ServerReason($data) {
   # C9: the server reply to a helper heartbeat/lock may say {unlock:true, reason}. -> reason or $null.
@@ -414,7 +419,7 @@ $watcher.AddScript({
     }
     return $did
   }
-  $cycles = 0; $lastBeat = 0; $lastSweep = 0; $storeMiss = 0
+  $cycles = 0; $lastBeat = 0; $lastSweep = 0; $storeMiss = 0; $script:BeatSecs = 300
   while ($true) {
     Start-Sleep -Seconds 5; $cycles++
     $now = [int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
@@ -442,10 +447,12 @@ $watcher.AddScript({
           }
         } finally { WUnlockMx $got }
         if ($tamper) { WReport "tamper" "hosts_block_removed" $null | Out-Null }
-        # liveness ping every 300 s of wall time, whatever a cycle costs (server: stale after 660 s)
-        if (($State.state -eq "locked") -and (LQ-Due $lastBeat $now 300)) {
+        # liveness ping on wall time, whatever a cycle costs; the server sets the interval (beat_s, 60-900 s;
+        # default 300 until its first answer) and calls a lock dark after two missed pings
+        if (($State.state -eq "locked") -and (LQ-Due $lastBeat $now $script:BeatSecs)) {
           $lastBeat = $now; $hq = $State.quiz_id
           $hr = WReport "heartbeat" $null "helper"
+          $script:BeatSecs = LQ-BeatSecs $hr.data $script:BeatSecs
           $why = LQ-ServerReason $hr.data   # C9: the server says this student's quiz is over
           if ($why) { WRelease $hq $why $null | Out-Null }
         }

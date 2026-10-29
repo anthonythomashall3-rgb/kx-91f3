@@ -27,7 +27,8 @@ $AiApps = @("chatgpt","claude","copilot","perplexity","ollama","lmstudio","LM St
             # local-model chat apps (their servers: $ModelProcs)
             "Msty Studio","Backyard AI","Faraday","Sanctum","Open WebUI","Pinokio","Witsy","Reor","ollama app",
             "grok","kimi","qwen",   # xAI / Kimi / Qwen desktop apps
-            "codex","doubao","quillbot","highlight","fellou","browseros","raycast")   # OpenAI Codex, Doubao, QuillBot, Highlight AI, AI browsers, Raycast AI
+            "codex","doubao","quillbot","highlight","fellou","browseros","raycast",
+            "Notion","Notion Mail","Notion Calendar","Canva","slack","Evernote","GoodNotes")   # OpenAI Codex, Doubao, QuillBot, Highlight AI, AI browsers, Raycast AI
 # Non-browser routes to AI or a human helper, all closed during the quiz:
 $VmApps     = @("Parallels","prl_vm_app","vmware","vmware-vmx","VirtualBox","VirtualBoxVM","VBoxHeadless","qemu-system-x86_64","qemu-system-aarch64","vmwp","vmms","Docker Desktop","com.docker.backend",
                 "WindowsSandbox","WindowsSandboxClient","WindowsSandboxServer","WindowsSandboxRemoteSession","wsl","wslhost","wslrelay")

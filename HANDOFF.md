@@ -5,6 +5,18 @@ rules: pull --rebase, claim in SESSIONS.md, `bash app/tests/run_all.sh` before e
 commit as `Claude <noreply@anthropic.com>`). The claude.ai Project "LOCKqz" has the same handoff
 (`claude/LOCKqz-HANDOFF.md`) plus topic docs (`claude/LOCKqz-payments.md` and others).
 
+## 28 Oct 2026 evening — $0 confirmed; v0.5.7 (session 015umora)
+- **Owner: no paid services.** SES stays built in but dormant (no keys = Gmail only). Workers Paid not bought.
+- **Blocked during quizzes (owner decision):** Notion, Canva, Quizlet, Slack, Evernote, Goodnotes — web hosts +
+  desktop apps closed, because their AI cannot be separated from the notes. Open-note still means Google Docs/Drive,
+  OneNote/OneDrive/Office, Acrobat, local files, Studocu, Knowunity, Wikipedia, etc.
+- **Free-plan headroom:** helper heartbeat now server-paced (BEAT_S var, default 600 s; 120-900 clamp). The live
+  monitor calls a lock dark after 2 missed pings + 1 min (21 min at 600 s). Student traffic during a quiz ~ -40%
+  (a 60-min exam: ~10 requests/writes per student instead of ~16). Under load, BEAT_S can go to 900 with no app update.
+- Remaining free levers, not done: professor gate polling (/live every 10 s ~ 500 requests per exam) could be
+  server-paced the same way, but sync.js ships inside the Chrome Web Store extension (re-upload resets review);
+  Google sign-in (01UzHDaF) removes most email codes.
+
 ## 28 Oct 2026 — high-volume email: Amazon SES (session 015umora)
 - Every LOCKqz email (codes, receipts, pay links, reminders, support) now goes through **Amazon SES** when it is
   configured ($0.10 per 1,000; quota starts at 50,000/day once out of the sandbox), with the Gmail account as the

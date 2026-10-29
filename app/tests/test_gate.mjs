@@ -87,7 +87,7 @@ async function getc(env, path, { teacher=null, sync=null } = {}) {
 async function suite(label, oldSchema) {
   console.log(`\n== ${label} ==`);
   const sqlite = makeDb(oldSchema);
-  const env = { DB: d1real(sqlite), TEACHER_KEY: ADMIN, REQUIRE_SIGNED: "1", LIVE_CACHE_MS: "0", PAID_CACHE_MS: "0" };   // edits the DB between /live calls
+  const env = { DB: d1real(sqlite), TEACHER_KEY: ADMIN, REQUIRE_SIGNED: "1", BEAT_S: "300" /* staleness logic at 5-min pings; 600 s default: test_heartbeat_pace */, LIVE_CACHE_MS: "0", PAID_CACHE_MS: "0" };   // edits the DB between /live calls
 
   // First account becomes admin; make it so the teacher under test is a normal teacher.
   const ADMIN_TOK = (await call(env, "/signup", { email: "admin@usc.edu", password: "adminpass1" })).data.token;
