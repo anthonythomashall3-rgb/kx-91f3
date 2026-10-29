@@ -16,7 +16,8 @@ h1{font-size:20px;margin:0}p{margin:0}.btn{display:inline-block;background:#9900
 export function osOf(ua) {
   ua = String(ua || "");
   if (!/Mozilla\//.test(ua)) return null;                                   // not a browser: never interfere
-  if (/iPhone|iPad|iPod|Android/.test(ua)) return "phone";
+  if (/Android/.test(ua)) return "android";
+  if (/iPhone|iPad|iPod/.test(ua)) return "phone";
   if (/Windows/.test(ua) && !/Windows Phone/.test(ua)) return "win";
   if (/Macintosh|Mac OS X/.test(ua)) return "mac";                          // iPadOS desktop UA: page handles it
   return null;                                                              // Linux / ChromeOS: let it through
@@ -24,14 +25,14 @@ export function osOf(ua) {
 
 export async function onRequest(ctx) {
   const url = new URL(ctx.request.url), f = url.pathname.split("/").pop() || "";
-  const want = /\.pkg$/i.test(f) ? "mac" : /\.exe$/i.test(f) ? "win" : null;
+  const want = /\.pkg$/i.test(f) ? "mac" : /\.exe$/i.test(f) ? "win" : /\.apk$/i.test(f) ? "android" : null;
   if (!want || url.searchParams.has("anyway")) return ctx.next();
   const os = osOf(ctx.request.headers.get("user-agent"));
   if (!os || os === want) return ctx.next();
-  const name = { mac: "Mac", win: "Windows" };
-  if (os === "phone") return PAGE("Open this on your computer",
-    `<p>LOCKqz installs on the Mac or Windows computer you take exams on, not on a phone or tablet.</p><p>On that computer, go to <b>${url.host}</b>.</p>`);
-  const right = os === "mac" ? "/download/lockqz-mac.pkg" : "/download/lockqz-win.exe";
+  const name = { mac: "Mac", win: "Windows", android: "Android" };
+  if (os === "phone") return PAGE("Open this on your computer or Android phone",
+    `<p>LOCKqz installs on the Mac, Windows or Linux computer, or the Android phone, you take exams on. It cannot run on an iPhone or iPad.</p><p>On that device, go to <b>${url.host}</b>.</p>`);
+  const right = os === "mac" ? "/download/lockqz-mac.pkg" : os === "win" ? "/download/lockqz-win.exe" : "/download/lockqz-android.apk";
   return PAGE(`This is the ${name[want]} installer, but this computer is a ${name[os]}`,
     `<p>It would not open here. Download the ${name[os]} version instead:</p><a class="btn" href="${right}">Download LOCKqz for ${name[os]}</a>` +
     `<p class="m">Installing on a different ${name[want]} computer? <a href="${url.pathname}?anyway=1">Download the ${name[want]} installer anyway</a></p>`);

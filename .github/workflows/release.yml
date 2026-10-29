@@ -36,6 +36,7 @@ jobs:
       mac: ${{ steps.chg.outputs.mac }}
       win: ${{ steps.chg.outputs.win }}
       linux: ${{ steps.chg.outputs.linux }}
+      android: ${{ steps.chg.outputs.android }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -49,17 +50,18 @@ jobs:
           if [ -n "$live" ] && git cat-file -e "$live^{commit}" 2>/dev/null; then base=$(git rev-parse "$live"); echo "live: $live"; fi
           if [ -z "$base" ] && [ "${{ github.event_name }}" = "push" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then base="$BEFORE"; fi
           if [ -z "$base" ]; then
-            echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "mac=true" >> "$GITHUB_OUTPUT"; echo "win=true" >> "$GITHUB_OUTPUT"; echo "linux=true" >> "$GITHUB_OUTPUT"; echo "full build"; exit 0; fi
+            echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "mac=true" >> "$GITHUB_OUTPUT"; echo "win=true" >> "$GITHUB_OUTPUT"; echo "linux=true" >> "$GITHUB_OUTPUT"; echo "android=true" >> "$GITHUB_OUTPUT"; echo "full build"; exit 0; fi
           files=$(git diff --name-only "$base" "$GITHUB_SHA")
           echo "$files"
           docs='(^|/)[^/]*\.md$|^0[0-9]*_[^/]*/|^LOCKqz-USC/|^[^/]*\.(pdf|xlsx)$'
           if [ "${{ github.event_name }}" = "push" ] && ! echo "$files" | grep -v -E "$docs" | grep -q .; then
-            echo "deploy=false" >> "$GITHUB_OUTPUT"; echo "mac=false" >> "$GITHUB_OUTPUT"; echo "win=false" >> "$GITHUB_OUTPUT"; echo "linux=false" >> "$GITHUB_OUTPUT"; echo "nothing deployable changed since $base"; exit 0; fi
+            echo "deploy=false" >> "$GITHUB_OUTPUT"; echo "mac=false" >> "$GITHUB_OUTPUT"; echo "win=false" >> "$GITHUB_OUTPUT"; echo "linux=false" >> "$GITHUB_OUTPUT"; echo "android=false" >> "$GITHUB_OUTPUT"; echo "nothing deployable changed since $base"; exit 0; fi
           echo "deploy=true" >> "$GITHUB_OUTPUT"
           common='^(app/release/|app/VERSION$|\.github/)'
           echo "$files" | grep -qE "$common|^app/mac/|^app/tests/test_mac_" && echo "mac=true" >> "$GITHUB_OUTPUT" || echo "mac=false" >> "$GITHUB_OUTPUT"
           echo "$files" | grep -qE "$common|^app/windows/|^app/tests/test_windows_" && echo "win=true" >> "$GITHUB_OUTPUT" || echo "win=false" >> "$GITHUB_OUTPUT"
           # Linux shares lockqzd.py / lockqz-agent.py / browser-policy.py / lockqz-core.sh / blocklist.txt with the Mac.
+          echo "$files" | grep -qE "^app/android/|^app/VERSION$|^\.github/" && echo "android=true" >> "$GITHUB_OUTPUT" || echo "android=false" >> "$GITHUB_OUTPUT"
           echo "$files" | grep -qE "$common|^app/linux/|^app/mac/(lockqzd\.py|lockqz-agent\.py|browser-policy\.py|lockqz-core\.sh|blocklist\.txt)$|^app/tests/test_linux_" && echo "linux=true" >> "$GITHUB_OUTPUT" || echo "linux=false" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         if: steps.chg.outputs.deploy == 'true'
@@ -107,6 +109,36 @@ jobs:
           cat "$RUNNER_TEMP/linux.log"
           if [ "$rc" -ne 0 ]; then grep -E '^FAIL|^INSTALL-LOG|^JOURNAL|Error|error:|Traceback' "$RUNNER_TEMP/linux.log" | head -60 | sed 's/^/::error title=Linux install test::/'; fi
           exit $rc
+
+  android:
+    name: Build + unit-test the Android app (signed APK)
+    needs: test
+    if: needs.test.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - name: Unit tests + signed release APK
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          LOCKQZ_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+        run: |
+          cd app/android
+          if [ -n "$ANDROID_KEYSTORE_B64" ]; then
+            umask 077; echo "$ANDROID_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/lockqz.jks"; export LOCKQZ_KEYSTORE="$RUNNER_TEMP/lockqz.jks"
+          else
+            echo "::warning::no ANDROID_KEYSTORE_B64 secret: APK signed with the debug key (see app/android/README.md to add the real key)"
+          fi
+          gradle -q testDebugUnitTest assembleRelease --no-daemon
+          rm -f "$RUNNER_TEMP/lockqz.jks"
+          cp app/build/outputs/apk/release/app-release.apk ../../lockqz-android.apk
+          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | tail -1)/apksigner" verify --print-certs ../../lockqz-android.apk | head -2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lockqz-android
+          path: lockqz-android.apk
+          if-no-files-found: error
 
   windows:
     name: Build + install-test the Windows installer
@@ -187,7 +219,7 @@ jobs:
 
   deploy:
     name: Sign the release + deploy to Cloudflare
-    needs: [test, mac, windows, linux]
+    needs: [test, mac, windows, linux, android]
     runs-on: ubuntu-latest
     # Runs when tests passed and each platform build either passed or was skipped (nothing changed).
     if: >-
@@ -195,7 +227,8 @@ jobs:
       needs.test.result == 'success' && needs.test.outputs.deploy == 'true' &&
       (needs.mac.result == 'success' || needs.mac.result == 'skipped') &&
       (needs.windows.result == 'success' || needs.windows.result == 'skipped') &&
-      (needs.linux.result == 'success' || needs.linux.result == 'skipped')
+      (needs.linux.result == 'success' || needs.linux.result == 'skipped') &&
+      (needs.android.result == 'success' || needs.android.result == 'skipped')
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -224,6 +257,11 @@ jobs:
         with:
           name: lockqz-win
           path: app/cloudflare/public/download
+      - uses: actions/download-artifact@v4
+        if: steps.chk.outputs.ok == 'true' && needs.android.result == 'success'
+        with:
+          name: lockqz-android
+          path: app/cloudflare/public/download
       - name: Reuse the live installers for any platform that was not rebuilt
         if: steps.chk.outputs.ok == 'true'
         run: |
@@ -234,6 +272,7 @@ jobs:
                  echo "reused live $1"; }
           get lockqz-mac.pkg xar!
           get lockqz-win.exe MZ
+          get lockqz-android.apk PK || true   # none live before the first Android build
       - name: Build the signed update manifest + one-line installers
         if: steps.chk.outputs.ok == 'true'
         env:
@@ -285,6 +324,7 @@ jobs:
                    if echo "$ct" | grep -qi 'text/html'; then echo "::error::$1 served as HTML"; exit 1; fi; echo "ok $1 ($ct)"; }
           magic https://lockqz.pages.dev/download/lockqz-mac.pkg 'xar!' "a .pkg"
           magic https://lockqz.pages.dev/download/lockqz-win.exe 'MZ' "an .exe"
+          magic https://lockqz.pages.dev/download/lockqz-android.apk 'PK' "an .apk"
           magic https://lockqz.pages.dev/install.sh '#!' "a shell script"
           for f in install.ps1 uninstall.sh uninstall.ps1 install-linux.sh uninstall-linux.sh; do curl -fsSL -A "LOCKqz/ci" -o "$t/f" "https://lockqz.pages.dev/$f"; ! grep -qi '<html' "$t/f" || { echo "::error::$f is HTML"; exit 1; }; done
           curl -fsS -A "LOCKqz/ci" -o "$t/u.json" https://lockqz.pages.dev/download/update.json

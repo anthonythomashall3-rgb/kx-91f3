@@ -14,6 +14,8 @@ run "5/18  Windows scripts structural lint"                python3 test_windows_
 run "6/18  Edge cases (power loss, messy data, custom hosts)" bash test_edge_cases.sh
 run "Gaps pass: messaging AI bots, warm AI connections, wildcard AI domains, pay page after install" bash test_gaps.sh
 run "Linux port: policies, resolver, agent session parsing, engine, installer" python3 test_linux.py
+run "Android app: project, manifest, rules, DNS filter, site + CI" python3 test_android.py
+run "Download guard: wrong computer / phone / Android" node --no-warnings test_download_guard.mjs
 run "7/18  Brightspace URL parsing (all quiz URL shapes)"  node   test_url_parsing.mjs
 run "8/18  Live quiz-monitor status + heartbeat logic"     node   test_live_status.mjs
 run "9/18 Daemon reporting end-to-end (real HTTP, mock backend)" bash test_daemon_reporting.sh

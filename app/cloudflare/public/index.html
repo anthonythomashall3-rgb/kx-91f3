@@ -98,7 +98,7 @@
       </div>
     </div>
 
-    <p class="none" id="nope" hidden>Open this page on the Mac, Windows or Linux computer you take quizzes on.<br><span style="font-size:13px">Phones, iPads and Chromebooks can't run LOCKqz.</span></p>
+    <p class="none" id="nope" hidden>Open this page on the Mac, Windows or Linux computer you take quizzes on.<br><span style="font-size:13px">Android phones: download the app on the phone. iPhones, iPads and Chromebooks can't run LOCKqz.</span></p>
 
     <footer><a href="/privacy.html">Privacy</a></footer>
   </div>
@@ -107,14 +107,21 @@
   var ipad = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
   var win = /Windows/.test(ua) && !/Windows Phone/.test(ua);
   var mac = /Macintosh|Mac OS X/.test(ua) && !ipad && !/iPhone|iPad|iPod/.test(ua);
+  var android = /Android/.test(ua);
   var linux = /Linux|X11/.test(ua) && !/Android|CrOS/.test(ua) && !mac && !win;
   var site = location.origin;
   var STORE_ID = "";   // Microsoft Store product id (Partner Center -> Product identity), e.g. "9NXXXXXXXXXX"
   var $ = function (id) { return document.getElementById(id); };
 
-  if (mac || win || linux) {
+  if (mac || win || linux || android) {
     $("install").hidden = false;
-    if (linux) {
+    if (android) {
+      $("os").textContent = "for Android";
+      document.querySelector(".opt").hidden = true; $("orline").hidden = true;   // one way on a phone: the app
+      $("dl").href = "/download/lockqz-android.apk";
+      $("dl").textContent = "Download for Android";
+      $("dlol").innerHTML = ["Open the downloaded <b>lockqz-android.apk</b> (notification or Files).", "If asked, allow this browser to <b>install unknown apps</b>, then tap <b>Install</b>.", "Open LOCKqz and do its 4 steps (email, quiz detection, AI block, fee)."].map(function (x) { return "<li>" + x + "</li>"; }).join("");
+    } else if (linux) {
       $("os").textContent = "for Linux";
       $("how").innerHTML = "Open a terminal (<b>Ctrl Alt T</b>).";
       $("enter").textContent = "Enter";
@@ -149,8 +156,8 @@
       fetch(path, { method: "HEAD", cache: "no-store" }).then(function (r) { cb(r.ok && !/text\/html/i.test(r.headers.get("Content-Type") || "")); }, function () { cb(true); });
     };
     var one = linux ? "install-linux.sh" : mac ? "install.sh" : "install.ps1", rel = "/download/" + (linux ? "linux/install.sh" : (mac ? "mac/" : "windows/") + one);
-    served("/" + one, function (ok) { if (!ok) served(rel, function (ok2) { if (ok2) $("cmd").textContent = $("cmd").textContent.replace(site + "/" + one, site + rel); }); });
-    if (!linux) served($("dl").getAttribute("href"), function (ok) { if (!ok) { $("dlbox").hidden = true; $("orline").hidden = true; } });
+    if (!android) served("/" + one, function (ok) { if (!ok) served(rel, function (ok2) { if (ok2) $("cmd").textContent = $("cmd").textContent.replace(site + "/" + one, site + rel); }); });
+    if (!linux) served($("dl").getAttribute("href"), function (ok) { if (!ok) { $("dlbox").hidden = true; $("orline").hidden = true; if (android) $("nope").hidden = false; } });
   } else {
     $("nope").hidden = false;
   }

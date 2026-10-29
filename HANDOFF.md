@@ -112,6 +112,16 @@ commit as `Claude <noreply@anthropic.com>`). The claude.ai Project "LOCKqz" has 
   results by the agent + Chromium/Firefox policies; AI Overviews cannot be removed without blocking Google search
   (left open by design); DoH/DoT, Tor, VPNs, system proxies, VMs, remote desktop, overlays, local models (apps +
   ports), Apple Intelligence, Gemini in Workspace (`appsgenaiserver-pa.*` blocked).
+- **29 Oct 2026 Android (stage 1, session 01UUDg7b):** `app/android/` - native Kotlin app, no libraries, sideloaded from
+  the site (`/download/lockqz-android.apk`, built + signed by the CI `android` job with `app/android/keystore/lockqz.jks` -
+  move that key to a GitHub secret before any Play listing). AI block = local VPN as the phone's only DNS server
+  (`DnsVpnService`: blocklisted names -> 0.0.0.0/::, DoH addresses routed into the tunnel and dropped, block only while
+  locked, revoke reported as tamper). Quiz watcher = Accessibility Service reading the browsers' address bars
+  (`QuizAccessibilityService`: lock report -> /password -> notification + clipboard; submission / 30 s gone -> unlock;
+  AI + messaging apps sent home while locked). Setup = 4 taps (email code via /verify, Accessibility, VPN consent, pay).
+  Same device-key protocol as the helpers (`Api.kt`). Unit tests (JUnit 7) + structural suite test_android.py. Not yet:
+  AI-address drop routes (warm connections), Brightspace Pulse app, emulator tests, on-device Gemini/Galaxy AI. iPhone /
+  iPad: impossible without MDM (Writing Tools cannot be switched off by an app) - the site says so.
 - **29 Oct 2026 Linux (v0.5.9, session 01UUDg7b):** `app/linux/` - LOCKqz installs and locks on Linux (systemd + python3):
   `curl -fsSL https://lockqz.pages.dev/install-linux.sh | sudo bash`. The helper is the shared `lockqzd.py` with
   `LOCKQZ_PLATFORM=linux` (logind sessions, `linux-<distro>` platform tag, update section by platform - self-update

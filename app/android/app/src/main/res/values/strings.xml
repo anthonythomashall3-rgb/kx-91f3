@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">LOCKqz</string>
+    <string name="a11y_description">LOCKqz watches your browser\'s address bar to see when a Brightspace quiz starts and ends, and sends AI apps to the home screen during the quiz. It never types, taps or records anything.</string>
+</resources>

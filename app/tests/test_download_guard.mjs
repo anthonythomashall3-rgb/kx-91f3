@@ -22,4 +22,10 @@ check("phone -> 'open this on your computer'", /Open this on your computer/.test
 check("curl (helper self-update / install script) -> the file", await go("/download/lockqz-mac.pkg", "curl/8.7.1") === "FILE" && await go("/download/lockqz-win.exe", "") === "FILE");
 check("PowerShell on Windows -> the file", await go("/download/lockqz-win.exe", "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-US) WindowsPowerShell/5.1") === "FILE");
 check("other downloads (zips, update files) untouched", await go("/download/lockqz-prof-chromium.zip", MAC) === "FILE" && await go("/download/update.json", WIN) === "FILE");
+const AND = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36";
+check("Android phone fetching the Mac installer -> offered the Android app", /Download LOCKqz for Android/.test(await go("/download/lockqz-mac.pkg", AND)));
+check("Android phone fetching the APK -> the file", (await go("/download/lockqz-android.apk", AND)) === "FILE");
+check("Mac fetching the APK -> offered the Mac installer", /Download LOCKqz for Mac/.test(await go("/download/lockqz-android.apk", MAC)));
+check("iPhone -> told no iPhone/iPad, Android phone is fine", /cannot run on an iPhone or iPad/.test(await go("/download/lockqz-android.apk", IPH)));
+
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
