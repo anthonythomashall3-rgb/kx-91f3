@@ -33,7 +33,8 @@ command -v python3 >/dev/null 2>&1 || { echo "LOCKqz: python3 is needed (sudo ap
 command -v systemctl >/dev/null 2>&1 || { echo "LOCKqz: systemd is needed."; exit 1; }
 
 # Remote mode: nothing next to this script -> fetch the signed release from the site.
-if [ ! -f "$APP/lockqzd.py" ] || [ -n "$FETCH_ONLY" ]; then
+# Local mode = a fetched release (lockqzd.py next to this script) or a source checkout (app/linux + app/mac).
+if { [ ! -f "$APP/lockqzd.py" ] && [ ! -f "$APP/../mac/lockqzd.py" ]; } || [ -n "$FETCH_ONLY" ]; then
   echo "== fetching LOCKqz from $SITE =="
   WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
   printf '%s\n' "$UPDATE_PUB" > "$WORK/update.pub"

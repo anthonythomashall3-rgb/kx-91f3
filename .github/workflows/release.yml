@@ -105,7 +105,7 @@ jobs:
         run: |
           rc=0; bash app/tests/test_linux_install.sh > "$RUNNER_TEMP/linux.log" 2>&1 || rc=$?
           cat "$RUNNER_TEMP/linux.log"
-          if [ "$rc" -ne 0 ]; then grep -E '^FAIL|Error|error:|Traceback' "$RUNNER_TEMP/linux.log" | head -25 | sed 's/^/::error title=Linux install test::/'; fi
+          if [ "$rc" -ne 0 ]; then grep -E '^FAIL|^INSTALL-LOG|^JOURNAL|Error|error:|Traceback' "$RUNNER_TEMP/linux.log" | head -60 | sed 's/^/::error title=Linux install test::/'; fi
           exit $rc
 
   windows:

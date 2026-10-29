@@ -10,6 +10,7 @@ DEST=/usr/local/lib/lockqz; STATE=/var/lib/lockqz
 export LOCKQZ_NO_BROWSER=1
 sudo -E bash install.sh --api https://lockqz.pages.dev/api > /tmp/install.log 2>&1
 check "installer succeeded" "grep -q 'Installed. Device id: linux-' /tmp/install.log"
+grep -q 'Installed. Device id: linux-' /tmp/install.log || { echo "--- install.log ---"; sed 's/^/INSTALL-LOG: /' /tmp/install.log | tail -40; }
 for f in lockqz.sh lockqz-core.sh lockqzd.py lockqz-agent.py agent-mac.py browser-policy.py policy-mac.py blocklist.txt config.json update.pub uninstall.sh; do
   check "installed $f" "[ -f $DEST/$f ]"
 done
@@ -73,4 +74,4 @@ sudo bash uninstall.sh > /dev/null 2>&1
 check "uninstall removed the helper service" "! systemctl is-enabled lockqzd.service"
 check "uninstall removed files" "[ ! -d $DEST ] && [ ! -d $STATE ]"
 check "hosts clean after uninstall" "! grep -q 'LOCKqz START' /etc/hosts"
-echo; [ $FAIL -eq 0 ] && echo "ALL CHECKS PASSED" || { echo "$FAIL CHECK(S) FAILED"; sudo journalctl -u lockqzd --no-pager | tail -30; exit 1; }
+echo; [ $FAIL -eq 0 ] && echo "ALL CHECKS PASSED" || { echo "$FAIL CHECK(S) FAILED"; sudo journalctl -u lockqzd --no-pager 2>/dev/null | tail -30 | sed 's/^/JOURNAL: /'; exit 1; }
