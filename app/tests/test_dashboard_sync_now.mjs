@@ -111,6 +111,7 @@ console.log("W1 first visit: the welcome page");
 await dash.waitForSelector("text=Welcome to LOCKqz", { timeout: 15000 });
 const wt = await dash.innerText("#app");
 check("welcome: what LOCKqz does, in one line", /blocks AI on your students' computers while your Brightspace exams are open/.test(wt), wt.slice(0, 200));
+check("welcome: store steps + Proceed with caution -> Continue to install + the store link", /Continue to install/.test(wt) && /chromewebstore\.google\.com\/detail\/bidlfpkdggdpmfbfkpjcnbjhfkfligkk/.test(wt), wt);
 check("welcome: the 3 steps (add to Chrome, open Brightspace, email students)", /Add LOCKqz to Chrome\./.test(wt) && /Open Brightspace in Chrome and sign in\./.test(wt) && /Email your students\./.test(wt), wt);
 check("welcome: the exam-day rule", /On exam day: keep Chrome open and signed in to Brightspace until the exam ends\./.test(wt));
 check("welcome: how it works (install once, AI off + password entered, never set a password)", /Students install LOCKqz once/.test(wt) && /enters the exam password for them/.test(wt) && /You never set or share a password/.test(wt));

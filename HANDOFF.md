@@ -79,6 +79,10 @@ commit as `Claude <noreply@anthropic.com>`). The claude.ai Project "LOCKqz" has 
   Dashboard Chrome + Edge buttons and the welcome email go to https://chromewebstore.google.com/detail/bidlfpkdggdpmfbfkpjcnbjhfkfligkk
   (cws-live merged). Edge installs from the Chrome Web Store. Firefox keeps the zip. A new extension version = bump
   manifest version, upload the new zip in the developer dashboard (review again).
+  Chrome shows "Proceed with caution / not trusted by Enhanced Safe Browsing" to Enhanced-Safe-Browsing users for a new
+  developer's extension; Google drops it by itself after a few months of policy compliance (nothing to change on our side).
+  Dashboard, invite text and both professor emails tell professors: Add to Chrome -> Add extension -> Continue to install
+  (Edge: Allow extensions from other stores first), with the store link shown.
 - **Support:** gear → Contact support opens lockqz.pages.dev/support; messages arrive in lockqz.app@gmail.com (Reply-To = the sender, so just hit Reply). 'Email me my receipts' is gone from the gear.
 - **AI audit 2 (v0.5.5):** +101 hosts and Mac/Windows app additions (see SESSIONS.md). Gaps host/app blocking can't
   close: per-customer subdomains (<resource>.openai.azure.com, *.workers.dev / *.vercel.app / *.hf.space proxies) for

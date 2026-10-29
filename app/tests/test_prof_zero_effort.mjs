@@ -59,6 +59,7 @@ check("one welcome email to the professor", mailsTo("prof@usc.edu").length === 1
 check("subject: Welcome to LOCKqz — 2 steps and you're done", w && w.subject === "Welcome to LOCKqz — 2 steps and you're done", w && w.subject);
 check("HTML: logo, cardinal header, Add to Chrome + Open Brightspace buttons, 560px", w && /icon128\.png/.test(w.html) && /#990000/.test(w.html) && /Add LOCKqz to Chrome/.test(w.html) && /Open Brightspace/.test(w.html) && /max-width:560px/.test(w.html));
 check("text: Hi Professor Bristow, the two steps, Respectfully", w && /^Hi Professor Bristow,/.test(w.text) && /1\. Add LOCKqz to Chrome/.test(w.text) && /2\. Open Brightspace/.test(w.text) && /Respectfully,\nThe LOCKqz Team/.test(w.text));
+check("store link + Proceed with caution -> Continue to install (text + HTML)", w && /chromewebstore\.google\.com\/detail\/bidlfpkdggdpmfbfkpjcnbjhfkfligkk/.test(w.text) && /Continue to install/.test(w.text) && /Continue to install/.test(w.html));
 sqlite.prepare("UPDATE teachers SET verified=1, active_until='2099-12-31', bs_user_id='4000' WHERE email='prof@usc.edu'").run();
 const KEY = (await api("/synckey", undefined, { "X-LOCKqz-Teacher": PROF })).data.key;
 const OU = 98765, OU2 = 98766;

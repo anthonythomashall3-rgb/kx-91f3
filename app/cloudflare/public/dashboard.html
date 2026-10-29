@@ -166,8 +166,8 @@
 // The red lock loader from /lq.js (plain text if it did not load).
 const lqL = (m, e, o) => typeof lqLoading === "function" ? lqLoading(m, e, o) : m + "…";
 const API = /\.pages\.dev$/.test(location.hostname) ? "https://lockqz.pages.dev/api" : "/api", INSTALL = "https://lockqz.pages.dev";   // one API (main site secrets)
-// ---- Professor extension store links: fill in when the store listing is live. Until a link is filled in,
-// "Add LOCKqz to <browser>" links the packaged extension (.zip) with a one-line load-unpacked fallback. ----
+// ---- Professor extension store links (Chrome Web Store, live 29 Oct 2026; Edge installs from it too). A browser
+// with no link (Firefox) gets the packaged .zip with a one-line load-unpacked fallback. ----
 const EXT_STORE = { CHROME: "https://chromewebstore.google.com/detail/bidlfpkdggdpmfbfkpjcnbjhfkfligkk", EDGE: "https://chromewebstore.google.com/detail/bidlfpkdggdpmfbfkpjcnbjhfkfligkk", FIREFOX: "" };   // Chrome Web Store listing (Edge installs from it too); Firefox still uses the zip
 const EXT_ZIP = { chrome: INSTALL + "/download/lockqz-prof-chromium.zip", edge: INSTALL + "/download/lockqz-prof-chromium.zip", firefox: INSTALL + "/download/lockqz-prof-firefox.zip", other: INSTALL + "/download/lockqz-prof-chromium.zip" };
 const BS_SITE = "https://brightspace.usc.edu";
@@ -289,7 +289,7 @@ const EXT_PAGE = { edge: "edge://extensions", firefox: "about:debugging#/runtime
 // Safari (and anything else): LOCKqz's extension is for Chrome, Edge and Firefox.
 const EXTBTN = () => BROWSER === "other" ? `<span>LOCKqz works in Chrome, Edge or Firefox. <a href="https://www.google.com/chrome/" target="_blank" rel="noopener">Get Chrome</a>, then open this page there.</span>` :
   `<a class="btn prime" href="${esc(EXT_URL())}" target="_blank" rel="noopener">Add LOCKqz to ${BROWSER_NAME}</a>` +
-  (EXT_FROM_STORE() ? "" : `<span class="muted" style="display:block;margin-top:6px;font-size:13px">Unzip it, open <b>${EXT_PAGE}</b>, turn on Developer mode, click <b>${BROWSER === "firefox" ? "Load Temporary Add-on" : "Load unpacked"}</b> and pick the folder.</span>`);
+  (EXT_FROM_STORE() ? `<span class="muted" style="display:block;margin-top:6px;font-size:13px">Opens the Chrome Web Store: ${BROWSER === "edge" ? "click <b>Allow extensions from other stores</b> → <b>Allow</b>, then " : ""}click <b>Add to Chrome</b>, then <b>Add extension</b>. If Chrome says <b>Proceed with caution</b>, click <b>Continue to install</b>. Link: <a href="${esc(EXT_URL())}" target="_blank" rel="noopener">${esc(EXT_URL().replace(/^https:\/\//, ""))}</a></span>` : `<span class="muted" style="display:block;margin-top:6px;font-size:13px">Unzip it, open <b>${EXT_PAGE}</b>, turn on Developer mode, click <b>${BROWSER === "firefox" ? "Load Temporary Add-on" : "Load unpacked"}</b> and pick the folder.</span>`);
 function syncMsg(t, help = false){ SYNCMSG = t; SYNCHELPON = help; document.querySelectorAll(".syncst").forEach(e => e.innerHTML = syncHtml(t) + (help ? SYNCHELP() : "")); }
 function askSync(w){ BS_ORIGINS.forEach(o => { try { w.postMessage({ lqz: "sync" }, o); } catch {} }); }
 // After a switch here: the open LOCKqz Sync tab puts the change into Brightspace and redraws its panel, so
@@ -753,7 +753,7 @@ function inviteMail(email, link){
   const s = "Your LOCKqz professor account";
   const b = "Hi,\n\nYou're invited to LOCKqz. It blocks AI on students' computers during your Brightspace exams, then turns AI back on when the exam ends.\n\n"
     + "1. Create your account (this link works once):\n   " + link + "\n\n"
-    + "2. Add LOCKqz to Chrome (the dashboard shows the button), then open Brightspace in Chrome. Your classes and exams fill in; every exam is protected automatically.\n\n"
+    + "2. Add LOCKqz to Chrome: " + EXT_STORE.CHROME + "\n   Click Add to Chrome, then Add extension. If Chrome says Proceed with caution, click Continue to install.\n   Then open Brightspace in Chrome. Your classes and exams fill in; every exam is protected automatically.\n\n"
     + "On exam day, keep Chrome open and signed in to Brightspace until the exam ends.\n\n"
     + "3. Students install LOCKqz once from " + INSTALL + " (the dashboard emails the ones who haven't).\n\nLOCKqz";
   return "mailto:" + (email||"") + "?subject=" + encodeURIComponent(s) + "&body=" + encodeURIComponent(b);
