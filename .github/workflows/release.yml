@@ -135,7 +135,7 @@ jobs:
           cat "$RUNNER_TEMP/gradle.log"
           if [ "$rc" -ne 0 ]; then grep -E '^e: |error|What went wrong|^> |FAILED|Exception' "$RUNNER_TEMP/gradle.log" | head -40 | cut -c1-400 | sed 's/^/::error title=Android build::/'; fi
           rm -f "$RUNNER_TEMP/lockqz.jks"
-          exit $rc
+          [ "$rc" -eq 0 ] || exit $rc
           cp app/build/outputs/apk/release/app-release.apk ../../lockqz-android.apk
           "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | tail -1)/apksigner" verify --print-certs ../../lockqz-android.apk | head -2
       - uses: actions/upload-artifact@v4
