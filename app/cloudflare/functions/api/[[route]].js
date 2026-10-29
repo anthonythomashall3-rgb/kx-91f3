@@ -2866,6 +2866,25 @@ export async function onRequest(context) {
     // so it costs LOCKqz's Gmail nothing and students see their professor's name. LOCKqz only returns the
     // addresses + message and remembers that the class was emailed (the Set-up step and "Remind" button).
     if (p === "/email/students" && request.method === "POST") {
+      // Set-up step 3: every class at once -> one draft, all their students (deduplicated) in Bcc.
+      if (Array.isArray(body.ous)) {
+        const ous = [...new Set(body.ous.map(String))].filter(o => /^\d+$/.test(o)).slice(0, 40);
+        if (!ous.length) return json({ error:"bad class" }, 400);
+        const to = new Set(), names = [];
+        for (const ou of ous) {
+          if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this class can email it." }, 403);
+          const c = await db.prepare("SELECT name, code FROM teacher_courses WHERE ou=? ORDER BY teacher_id=? DESC LIMIT 1").bind(ou, me.id).first() || {};
+          const list = await classRecipients(ou, "all"); if (!list.length) continue;
+          list.forEach(e => to.add(e)); const nm = c.code || courseLabel(c); if (!names.includes(nm)) names.push(nm);
+          await db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, "all", laToday(), list.length, now()).run();
+        }
+        if (!to.size) return json({ to: [], kind: "all", none: true });
+        const prof = String(me.name || me.email).trim(), last = lastName(prof) || prof;
+        const label = names.length > 1 ? names.slice(0, -1).join(", ") + " and " + names[names.length - 1] : names[0];
+        const m = MAIL.student({ course: label, code: null, prof, last, firstExam: null });
+        const text = String(m.text).replace(/\n\n--\nSent by LOCKqz on behalf of[^\n]*$/, "").replace(" uses LOCKqz for exams", names.length > 1 ? " use LOCKqz for exams" : " uses LOCKqz for exams");
+        return json({ to: [...to], kind: "all", subject: "Install LOCKqz before your first exam", text });
+      }
       const ou = String(body.ou||""), kind = body.kind === "missing" ? "missing" : "all";
       if (!/^\d+$/.test(ou)) return json({ error:"bad class" }, 400);
       if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this class can email it." }, 403);

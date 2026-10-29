@@ -7,11 +7,11 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-10-29 13:20 PT — 01UUDg7b: brand on red (lq.js: LOCKqz inside red buttons/bars turns white). Touches: app/cloudflare/public/lq.js, app/extension-prof copy of lq.js, a test.
 - 2026-10-28 22:10 PT — 01UUDg7b: LINUX PORT (app/linux/: engine, browser policies, agent, install, systemd; student browser extension app/extension-student/ = the tab reader on Linux; lockqzd.py Linux shim + /tabs endpoint; make-manifest linux; release.yml Linux install test; index.html Linux option). Touches: app/linux/*, app/extension-student/*, app/mac/lockqzd.py (Linux branches only), app/release/make-manifest.py, release.yml, index.html, tests.
 - 2026-10-27 19:40 PT — 01UzHDaF: Google sign-in (students + professors, codes as fallback) still in progress. Touches: [[route]].js (/auth/google/*), dashboard.html login form, mac+windows agents identity step, migrate_036, tests.
 
 ## Recently finished
+- 2026-10-29 13:40 PT — 01UUDg7b: dashboard Set up redesigned: 3 cards always shown (number top-left, centred title/one line/button, done = green check), step 3 = ONE Email students button for every class (/email/students ous[] -> one draft, deduped Bcc, mail_sent per class). lq.js: LOCKqz on red/dark backgrounds turns white (was red qz on red buttons); extension dist rebuilt (store package not re-uploaded).
 - 2026-10-29 11:15 PT — 01UUDg7b: v0.6.0 LIVE - stress-test fixes from three red-team passes (see HANDOFF '29 Oct 2026 stress test'): server-confirmed release (hold protocol) on Mac/Windows/Android, API-IP drop, DoH lists, server event cap, Windows parity, Linux + Android fixes. run_all green; Release green on all 5 platforms.
 - 2026-10-29 10:20 PT — 01UUDg7b: professor store instructions: EXTBTN shows steps + store link (Edge: allow other stores; Proceed with caution -> Continue to install), invite mailto has the store link, welcome + add-to-Chrome emails (EXT_STORE_URL set) say Continue to install. Tests in test_prof_zero_effort + test_dashboard_sync_now.
 - 2026-10-29 09:55 PT — 01UUDg7b: Chrome Web Store item bidlfpkdggdpmfbfkpjcnbjhfkfligkk published (v1.0.0, Unlisted) -> cws-live merged: dashboard Chrome/Edge buttons + welcome email now link the store. run_all green.

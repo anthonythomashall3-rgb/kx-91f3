@@ -4,6 +4,8 @@
   if (window.lqLoading) return;
   var RED = "#990000";
   var css = ".lq-l{color:#000!important}.lq-q{color:" + RED + "!important}" +
+    // On a red (or any dark) background - buttons, red bars - the whole word takes the text colour (white).
+    ".lq.lq-inv .lq-l,.lq.lq-inv .lq-q,.prime .lq-l,.prime .lq-q{color:inherit!important}" +
     ".lqload{display:flex;flex-direction:column;align-items:center;gap:8px;padding:20px 8px;text-align:center;font-family:inherit}" +
     ".lqload .lqmsg{font-weight:600;color:#111;font-size:15px;margin:0}" +
     ".lqload.small{padding:8px 4px;gap:4px}.lqload.small .lqmsg{font-size:14px}" +
@@ -48,10 +50,22 @@
         var w = document.createElement("span"); w.className = "lq"; w.style.whiteSpace = "nowrap";
         var a = document.createElement("span"); a.className = "lq-l"; a.textContent = "LOCK";
         var b = document.createElement("span"); b.className = "lq-q"; b.textContent = "qz";
-        w.appendChild(a); w.appendChild(b); f.appendChild(w);
+        w.appendChild(a); w.appendChild(b); f.appendChild(w); if (onDark(p)) w.className += " lq-inv";
       }
     });
     p.replaceChild(f, t);
+  }
+  // True when the nearest painted background behind el is red or dark (red "qz" / black "LOCK" would vanish).
+  function onDark(el) {
+    try {
+      for (; el && el.nodeType === 1; el = el.parentElement) {
+        var m = getComputedStyle(el).backgroundColor.match(/[\d.]+/g);
+        if (!m || (m.length > 3 && +m[3] === 0)) continue;
+        var r = +m[0], g = +m[1], b = +m[2];
+        return (r > 110 && g < 80 && b < 80) || (0.299 * r + 0.587 * g + 0.114 * b) < 110;
+      }
+    } catch (e) {}
+    return false;
   }
   window.lqBrand = brand;
   // On LOCKqz's own pages: brand now and whatever is drawn later. (Inside Brightspace, sync.js brands its panel itself.)

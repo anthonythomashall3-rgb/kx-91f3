@@ -35,11 +35,12 @@
   .sw:disabled{opacity:.5;cursor:wait}
   .eyebrow{margin:0 0 -6px 4px;font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6b6861}
   /* set-up checklist: one card per step left; the whole block goes when every step is done */
-  .setup{display:flex;flex-direction:column;gap:10px;margin-top:14px}
-  .setup .step{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
-  .setup .num{flex:none;width:30px;height:30px;border-radius:50%;background:var(--usc);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center}
-  .setup .step>div:first-of-type{flex:1;min-width:200px}.setup .step b{display:block;font-size:15px}.setup .step .d{display:block;font-size:13px;color:var(--mute);margin-top:2px}
-  .setup .acts{display:flex;gap:8px;flex-wrap:wrap}
+  .setup{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:16px}
+  .setup .step{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;min-height:180px;padding:40px 18px 22px;border:1px solid var(--line);border-radius:14px;background:var(--bg)}
+  .setup .num{position:absolute;top:12px;left:12px;width:26px;height:26px;border-radius:50%;background:var(--usc);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .setup .t{font-size:16px;font-weight:700}.setup .d{font-size:13px;color:var(--mute);line-height:1.4}.setup .d b{font-weight:600;color:var(--ink)}
+  .setup .step>.t{margin-top:auto}.setup .step>:last-child{margin-top:auto}.setup .step .btn{margin-bottom:0}
+  .setup .step.done{opacity:.6}.setup .step.done .num{background:var(--ok)}.setup .ok{padding:10px 0;font-size:14px;font-weight:600;color:var(--ok)}
   .lqtoast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:9500;background:#1a1a1a;color:#fff;padding:12px 18px;border-radius:10px;font-size:14px;font-weight:600;box-shadow:0 8px 30px rgba(0,0,0,.3)}
   .cls .nx{font-size:13px;color:var(--mute);margin-top:4px}.cls .rem{font-size:12px;color:var(--faint);display:flex;align-items:center;gap:6px;margin-top:10px}
   .cls{display:flex;flex-direction:column;gap:20px}
@@ -452,12 +453,22 @@ function setupBlock(){
   if (ME.admin && !BS.courses.length) return "";
   const steps = [EXT(), BS.courses.length > 0, mailedAll()], done = steps.filter(Boolean).length;
   if (done === 3) return "";
-  const todo = BS.courses.filter(c => !c.roster_hidden && !c.mailed_at && c.students.length);
-  let h = `<section class="card" aria-label="Set up"><div class="hrow"><h2 style="margin:0">Set up — ${done} of 3 done</h2><span class="muted">About a minute. Each step disappears once it's done.</span></div><div class="setup">`;
-  if (!steps[0]) h += `<div class="step"><span class="num">1</span><div><b>Add LOCKqz to ${BROWSER_NAME}</b><span class="d">One click. After that LOCKqz syncs your classes and watches every exam by itself.</span></div><div class="acts" style="flex-direction:column;align-items:flex-start">${EXTBTN()}</div></div>`;
-  if (!steps[1]) h += `<div class="step"><span class="num">2</span><div><b>Open Brightspace once</b><span class="d">Sign in as usual. Your classes appear here within a minute.</span></div><div class="acts"><a class="btn prime" href="${BS_SITE}" target="_blank" rel="noopener">Open Brightspace</a></div></div>`;
-  if (!steps[2]) h += `<div class="step"><span class="num">3</span><div><b>Email your students</b><span class="d">Opens your own email with the install link filled in. Students without LOCKqz can't open the exam.</span></div><div class="acts">${steps[1] ? todo.map(c => `<button class="btn prime" data-ou="${esc(c.ou)}" data-kind="${classStats(c).missing.length ? "missing" : "all"}" onclick="emailClass(this.dataset.ou,this.dataset.kind,this)">Email students${todo.length>1?" · "+esc(cname(c)):""}</button>`).join("") : `<span class="muted">After step 2.</span>`}</div></div>`;
-  return h + `</div></section>`;
+  const card = (i, t, d, act) => `<div class="step${steps[i] ? " done" : ""}"><span class="num">${steps[i] ? "✓" : i + 1}</span><span class="t">${t}</span><span class="d">${d}</span>${steps[i] ? `<span class="ok">Done</span>` : act}</div>`;
+  const store = EXT_FROM_STORE(), edge = BROWSER === "edge";
+  const ext = BROWSER === "other" ? EXTBTN() : `<a class="btn prime" href="${esc(EXT_URL())}" target="_blank" rel="noopener">Add to ${BROWSER_NAME}</a>`;
+  const extD = !store ? `Unzip, open <b>${EXT_PAGE}</b>, turn on Developer mode, <b>${BROWSER === "firefox" ? "Load Temporary Add-on" : "Load unpacked"}</b>.`
+    : `${edge ? "<b>Allow</b> other stores, then " : ""}<b>Add to Chrome</b> → <b>Add extension</b>.<br>Warning? <b>Continue to install</b>.`;
+  return `<section class="card" aria-label="Set up"><h2 style="margin:0">Set up — ${done} of 3 done</h2><div class="setup">` +
+    card(0, `Add LOCKqz to ${BROWSER_NAME}`, extD, ext) +
+    card(1, "Open Brightspace", "Sign in. Your classes appear here.", `<a class="btn prime" href="${BS_SITE}" target="_blank" rel="noopener">Open Brightspace</a>`) +
+    card(2, "Email your students", "Opens your email with the install link.", steps[1] ? `<button class="btn prime" onclick="emailAll(this)">Email students</button>` : `<span class="d" style="margin-top:8px">After step 2.</span>`) +
+    `</div></section>`;
+}
+// Step 3: one email for every class not yet emailed (one draft, all their students in Bcc).
+function emailAll(b){
+  const ous = BS.courses.filter(c => !c.roster_hidden && !c.mailed_at && c.students.length).map(c => String(c.ou));
+  if (!ous.length) { toast("Nobody to email yet"); return; }
+  return ous.length === 1 ? emailClass(ous[0], "all", b) : emailClass(ous, "all", b);
 }
 // A short confirmation at the bottom of the page.
 function toast(t){ const e = document.createElement("div"); e.className = "lqtoast"; e.textContent = t; document.body.appendChild(e); setTimeout(() => e.remove(), 4000); }
@@ -467,7 +478,7 @@ function toast(t){ const e = document.createElement("div"); e.className = "lqtoa
 // clipboard (or shown to copy) and pasted into Bcc. LOCKqz's own Gmail sends nothing here.
 async function emailClass(ou, kind, b){
   if (b) b.disabled = true;
-  const d = await post("/email/students", { ou, kind });
+  const d = await post("/email/students", Array.isArray(ou) ? { ous: ou, kind } : { ou, kind });
   if (b) b.disabled = false;
   if (d.error) { alert(d.message || d.error); return; }
   if (!d.to || !d.to.length) { toast("Nobody to email yet"); return; }
