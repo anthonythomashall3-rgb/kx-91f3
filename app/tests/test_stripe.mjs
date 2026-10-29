@@ -195,7 +195,7 @@ console.log("S11a default: one Zelle price ($180) + memo; no unique amounts, no 
   const n0 = await onRequest({ request: new Request(BASE + "/api/pay/notify", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Pay": SECRET }, body: JSON.stringify({ payments: [{ txn: "zelle:ivy0", amount: 180.01, note: "", via: "zelle" }] }) }), env: DEF }).then(r => r.json());
   check("default: no-memo Zelle is not amount-matched", n0.results?.[0]?.matched === null, JSON.stringify(n0)); }
 const pz = readFileSync(join(CF, "public", "pay.html"), "utf8");
-check("pay page: Zelle steps with Copy memo, paste-into-note step and warning", /id="zcopy"/.test(pz) && /Paste the memo<\/b> into the Memo \/ Note box/.test(pz) && /No memo = LOCKqz can't tell the payment is yours/.test(pz));
+check("pay page: Zelle steps with Copy memo, memo into the Zelle Memo box, red memo bubble (Zelle/Venmo only, no access without it)", /id="zcopy"/.test(pz) && /Paste the memo<\/b> into the <b>Memo<\/b> box on the Zelle payment/.test(pz) && /class="memobox"/.test(pz) && /Zelle and Venmo only/.test(pz) && /won’t get access/.test(pz));
 console.log("S11 ZELLE_UNIQUE=1: unique Zelle amount, no memo needed");
 const notify2 = payments => onRequest({ request: new Request(BASE + "/api/pay/notify", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Pay": SECRET }, body: JSON.stringify({ payments }) }), env: ON }).then(r => r.json());
 const z1 = (await call(ON, "/pay/start", { email: "dee@usc.edu" })).data, z2 = (await call(ON, "/pay/start", { email: "eve@usc.edu" })).data;

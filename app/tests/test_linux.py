@@ -199,8 +199,8 @@ check("keeps the device id on reinstall", 'case "$OLD_DEV" in linux-*) DEVICE="$
 check("systemd: root helper + global user agent unit; Linux mode set for the helper", "WantedBy=multi-user.target" in inst and "systemctl --global enable lockqz-agent.service" in inst and "LOCKQZ_PLATFORM=linux" in inst)
 check("ends on the pay page unless LOCKQZ_NO_BROWSER", "xdg-open '$SITE/pay'" in inst and "LOCKQZ_NO_BROWSER" in inst)
 check("same release key as the Mac installer", re.search(r"-----BEGIN PUBLIC KEY-----(.*?)-----END", inst, re.S).group(1) == re.search(r"-----BEGIN PUBLIC KEY-----(.*?)-----END", open(os.path.join(MAC, "install.sh")).read(), re.S).group(1))
-check("download page: Linux gets the one-line command, no installer box; phones/Chromebooks told plainly",
-      all(x in open(os.path.join(APP, "cloudflare/public/index.html")).read() for x in ["install-linux.sh", "for Linux", "Chromebooks can't run LOCKqz"]))
+check("download page: Linux gets the one-line command, no installer box; phones/Chromebooks: open on your computer",
+      all(x in open(os.path.join(APP, "cloudflare/public/index.html")).read() for x in ["install-linux.sh", "for Linux", "Open on your computer for access."]))
 check("release.yml publishes install-linux.sh and runs the real Linux install test", "install-linux.sh" in open(os.path.join(APP, "..", ".github/workflows/release.yml")).read() and "test_linux_install.sh" in open(os.path.join(APP, "..", ".github/workflows/release.yml")).read())
 
 shutil.rmtree(TMP, ignore_errors=True)

@@ -325,17 +325,18 @@ function codeMail(env, to, code, web = false) {
   const subject = `Your LOCKqz code: ${code}`;
   const text = web ? `Your LOCKqz sign-in code is ${code}\n\nType it on lockqz.pages.dev to open your account. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`
     : (isExempt(env, to) ? WELCOME + "\n\n" : "") + `Your LOCKqz code is ${code}\n\nType it into the LOCKqz window on your computer. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
-  return { subject, text };
+  return { subject, text, html: autoHtml(text) };
 }
 async function sendCode(env, to, code, web = false) {
   const subject = `Your LOCKqz code: ${code}`;
   const text = web ? `Your LOCKqz sign-in code is ${code}\n\nType it on lockqz.pages.dev to open your account. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`
     : (isExempt(env, to) ? WELCOME + "\n\n" : "") + `Your LOCKqz code is ${code}\n\nType it into the LOCKqz window on your computer. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
-  if (typeof env.MAIL_SINK === "function") return env.MAIL_SINK({ to, subject, text, code });   // tests
+  const html = autoHtml(text);
+  if (typeof env.MAIL_SINK === "function") return env.MAIL_SINK({ to, subject, text, html, code });   // tests
   const open = typeof env.MAIL_OPEN === "function" ? env.MAIL_OPEN   // tests: fake SMTP server
     : async () => (await import("cloudflare:sockets")).connect({ hostname: env.MAIL_HOST || "smtp.gmail.com", port: Number(env.MAIL_PORT || 465) },
                                 { secureTransport: "on", allowHalfOpen: false });
-  return smtpSend(open, { user: env.MAIL_USER, pass: String(env.MAIL_APP_PASSWORD).replace(/\s+/g, ""), to, subject, text });
+  return smtpSend(open, { user: env.MAIL_USER, pass: String(env.MAIL_APP_PASSWORD).replace(/\s+/g, ""), to, subject, text, html });
 }
 
 // opts: { html, replyTo }. `to` may be a list (one SMTP session, one copy per recipient).
@@ -409,6 +410,26 @@ const mailWrap = (bodyHtml, footer = "") => `<!doctype html><html><head><meta ch
 ${footer ? `<tr><td style="padding:12px 24px 16px;border-top:1px solid #e6e3dc;font-size:12px;line-height:1.5;color:#8a877f">${footer}</td></tr>` : ""}
 </table></td></tr></table></body></html>`;
 const P = t => `<p style="margin:0 0 14px">${t}</p>`;
+// Every LOCKqz email gets the branded look (29 Oct 2026): a plain-text email is turned into the same HTML
+// (red header + logo, white card, red buttons, signature). A line ending in a LOCKqz / Brightspace / Chrome Web Store
+// link becomes a button; a 6-digit code becomes a big code box; "LOCKqz" alone at the end becomes the signature.
+const autoBtn = u => /chromewebstore\.google\.com/.test(u) ? "Add LOCKqz to Chrome" : /renew=off/.test(u) ? "Stop these emails"
+  : /lockqz\.pages\.dev\/pay\b/.test(u) ? "Open your pay page" : /^https:\/\/prof\.lockqz\.pages\.dev/.test(u) ? "Open your dashboard"
+  : /brightspace\.usc\.edu/.test(u) ? "Open Brightspace" : /^https:\/\/lockqz\.pages\.dev\/?$/.test(u) ? "Open LOCKqz" : "";
+const linkify = l => String(l).split(/(https?:\/\/[^\s<>"]+)/).map((x, i) => i % 2 ? `<a href="${hesc(x)}" style="color:#990000">${hesc(x)}</a>` : hesc(x)).join("");
+function autoHtml(text, { sign = true } = {}) {
+  const paras = String(text == null ? "" : text).replace(/\r/g, "").split(/\n{2,}/).map(x => x.trim()).filter(Boolean);
+  if (paras.length && /^(?:—\s*)?LOCKqz$|^Respectfully,\nThe LOCKqz Team$/.test(paras[paras.length - 1])) paras.pop();
+  const body = paras.map(p => {
+    const code = p.match(/^Your LOCKqz (?:sign-in )?code is (\d{6})$/);
+    if (code) return `<p style="margin:0 0 6px">Your LOCKqz code:</p><p style="margin:0 0 16px"><span style="display:inline-block;font-size:30px;font-weight:700;letter-spacing:6px;background:#f6f5f2;border:1px solid #e6e3dc;border-radius:10px;padding:10px 18px;color:#111">${code[1]}</span></p>`;
+    return P(p.split("\n").map(l => { const m = l.match(/^(.*?)(https?:\/\/\S+?)[.,]?\s*$/), lab = m && autoBtn(m[2]);
+      if (!lab) return linkify(l);
+      const pre = m[1].replace(/[\s:—-]+$/, "");
+      return (pre ? hesc(pre) + "<br>" : "") + `<span style="display:inline-block;margin:6px 0">${mailBtn(m[2], lab)}</span>`; }).join("<br>"));
+  }).join("");
+  return mailWrap(body + (sign ? P("Respectfully,<br>The LOCKqz Team") : ""));
+}
 const mailWhen = iso => { const t = iso ? Date.parse(iso) : NaN; if (isNaN(t)) return "";
   try { return new Date(t).toLocaleString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + " PT"; } catch { return new Date(t).toISOString(); } };
 const lastName = n => { const w = String(n || "").trim().split(/\s+/).filter(Boolean); return w.length ? w[w.length - 1] : ""; };
@@ -423,6 +444,23 @@ const signTxt = (prof, course) => `Respectfully,\nProfessor ${prof}\n${course}`;
 const signHtml = (prof, course) => P(`Respectfully,<br>Professor ${hesc(prof)}<br><span style="color:#5c5952">${hesc(course)}</span>`);
 const studentFooter = last => `Sent by LOCKqz on behalf of Professor ${hesc(last)}. Replies go to your professor. <a href="${SITE_URL}/privacy" style="color:#8a877f">lockqz.pages.dev/privacy</a>`;
 const MAIL = {
+  // To a professor you invite (admin page, Email it). link = the one-time sign-up link.
+  invite({ link, storeUrl }) {
+    const store = storeUrl || EXT_STORE_URL || (SITE_URL + "/download/lockqz-prof-chromium.zip");
+    const subject = "Your LOCKqz professor account";
+    const CAUTION = "If Chrome says Proceed with caution, click Continue to install.";
+    const text = `Hi,\n\nYou're invited to LOCKqz. It blocks AI on students' computers during your Brightspace exams, then turns AI back on when the exam ends.\n\n1. Create your account (this link works once): ${link}\n2. Add LOCKqz to Chrome: ${store} \u2014 click Add to Chrome, then Add extension. ${CAUTION}\n3. Open Brightspace: ${BS_URL} \u2014 sign in as usual. Your classes and exams fill in; every exam is protected automatically.\n\nOn exam day, keep Chrome open and signed in to Brightspace until the exam ends.\n\nStudents install LOCKqz once from ${SITE_URL} (your dashboard emails the ones who haven't).\n\nRespectfully,\nThe LOCKqz Team`;
+    const row = (n, btn, rest) => `<tr><td style="padding:6px 0;font-size:15px"><b>${n}.</b> ${btn} <span style="color:#5c5952">${rest}</span></td></tr>`;
+    const html = mailWrap(P("Hi,") + P("You're invited to LOCKqz. It blocks AI on students' computers during your Brightspace exams, then turns AI back on when the exam ends.") +
+      `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 16px">` +
+      row(1, mailBtn(link, "Create your account"), "\u2014 this link works once.") +
+      row(2, mailBtn(store, "Add LOCKqz to Chrome"), "\u2014 click <b>Add to Chrome</b>, then <b>Add extension</b>. If Chrome says <b>Proceed with caution</b>, click <b>Continue to install</b>.") +
+      row(3, mailBtn(BS_URL, "Open Brightspace"), "and sign in as usual. Your classes and exams fill in; every exam is protected automatically.") + `</table>` +
+      P("<b>On exam day: keep Chrome open and signed in to Brightspace</b> until the exam ends.") +
+      P(`Students install LOCKqz once from <a href="${SITE_URL}" style="color:#990000">lockqz.pages.dev</a> (your dashboard emails the ones who haven't).`) +
+      P("Respectfully,<br>The LOCKqz Team"));
+    return { subject, text, html };
+  },
   // To the professor, right after sign-up.
   welcome({ last, storeUrl }) {
     const store = storeUrl || EXT_STORE_URL || (SITE_URL + "/download/lockqz-prof-chromium.zip");
@@ -666,6 +704,7 @@ export async function onRequest(context) {
   const sesFail = e => db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("mail", null, null, "ses_failed", String(e && e.message || e).slice(0, 200), now()).run().catch(() => {});
   // -> "ses" | "gmail"; throws { budget: true } when neither channel has room, or the Gmail error.
   async function sendVia(to, subject, text, opts, cls) {
+    if (!opts || !opts.html) opts = { ...(opts || {}), html: autoHtml(text, { sign: !(opts && opts.inbox) }) };   // every email branded
     const k = Array.isArray(to) ? to.length : 1;
     if (sesOn(env) && await sesRoom(k, cls)) {
       try { await sesSend(env, to, subject, text, opts); try { await sesCount(k); } catch {} return "ses"; }
@@ -1264,12 +1303,7 @@ export async function onRequest(context) {
       ON CONFLICT(email) DO UPDATE SET customer=excluded.customer, pm=excluded.pm, brand=excluded.brand, last4=excluded.last4, autorenew=1, updated_at=excluded.updated_at,
         tries=0, fail_day=NULL, fail_msg=NULL, state=CASE WHEN card_renew.state='failed' THEN 'reminded' ELSE card_renew.state END`).bind(email, customer, id, brand, last4, t, t).run();
     if (prev && prev.pm === id && Number(prev.autorenew) === 1) return;
-    const term = (res && res.term) || (await studentStatus(email)).term, nx = nextRenewal(term), amt = cardFullCents();
-    const text = `Thank you, LOCKqz is paid for ${termName(term)} (access until ${fmtDay(termEndOf(term))}).\n\n`
-      + `Your card (${cardName({ brand, last4 })}) renews automatically each semester at ${usd(amt)}.\n`
-      + `Next renewal: about ${fmtDay(nx.day)}, for ${termName(nx.term)}.\n\n`
-      + `Cancel anytime: ${CANCEL_HOW}.\nIf you cancel, your current semester stays active and the card is not charged again.`;
-    try { await mailOut(email, `LOCKqz paid · renews each semester at ${usd(amt)}`, text, {}, "essential"); } catch {}
+    // No confirmation email (29 Oct 2026, owner): the pay page already says the card renews each semester and how to cancel.
   }
   async function cardRenewTick() {
     if (!autoRenewOn()) return { why: "off" };
@@ -1311,7 +1345,10 @@ export async function onRequest(context) {
       const d = res.d || {}, err = d.error || null, pi = String(d.id || err?.payment_intent?.id || "").slice(0, 80) || null;
       if (res.ok && d.status === "succeeded") {
         credits.push({ txn: "stripe:" + d.id, amount: Number(d.amount_received || d.amount) / 100, note: r.code, via: "stripe-card", payer: r.email, want_term: R });
-        acts.push(db.prepare("UPDATE card_renew SET state='paid', pi=?, updated_at=? WHERE email=?").bind(pi, t, r.email)); out.charged++; continue;
+        acts.push(db.prepare("UPDATE card_renew SET state='paid', pi=?, updated_at=? WHERE email=?").bind(pi, t, r.email)); out.charged++;
+        // After the card is billed for the new semester: one "you're resubscribed" email (29 Oct 2026, owner).
+        try { await mailOut(r.email, `LOCKqz renewed for ${termName(R)}`, `You're resubscribed to LOCKqz for ${termName(R)}.\n\nYour card (${cardName(r)}) was charged ${usd(Number(d.amount_received || d.amount))}. Access until ${fmtDay(termEndOf(R))}.\n\nCancel anytime: ${CANCEL_HOW}.`, {}, "essential"); out.sub++; } catch {}
+        continue;
       }
       if (res.ok && d.status === "processing") { acts.push(db.prepare("UPDATE card_renew SET state='pending', pi=?, updated_at=? WHERE email=?").bind(pi, t, r.email)); continue; }
       const definite = (err && (err.type === "card_error" || err.type === "invalid_request_error")) || (res.ok && /^requires_/.test(String(d.status || "")));
@@ -1457,7 +1494,7 @@ export async function onRequest(context) {
     const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, "0");
     let sent = false;
     if (ses && used + 1 <= cap) { const cm = codeMail(env, email, code, web);
-      try { await sesSend(env, email, cm.subject, cm.text); sent = true; try { await sesCount(1); } catch {} } catch (e) { await sesFail(e); } }
+      try { await sesSend(env, email, cm.subject, cm.text, { html: cm.html }); sent = true; try { await sesCount(1); } catch {} } catch (e) { await sesFail(e); } }
     try { if (!sent) { if (!gmailOn(env)) throw new Error("no mail channel"); await sendCode(env, email, code, web); try { await mailCount(1); } catch {} } }
     catch (e) { await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(dev, email, null, "code_send_failed", String(e).slice(0, 200), now()).run(); return json({ error: "send_failed" }, 502); }
     await db.batch([
@@ -1986,6 +2023,18 @@ export async function onRequest(context) {
       return r.meta.changes ? json({ email, password: pw, ...(gating ? { sync_key_kept: "a gate is running; the Sync bookmark keeps working until it stops" } : {}) }) : json({ error:"no such professor" }, 404);
     }
     // Admin only: invite a teacher (one-time code; optional email lock; account active until a date).
+    // Admin: LOCKqz emails the invite itself (HTML with buttons). body: { code } of a pending invite with an email.
+    if (p === "/invite/send" && request.method === "POST") {
+      if (!me?.admin) return json({ error:"admin only" }, 403);
+      const inv = await db.prepare("SELECT code,email,used_at FROM invites WHERE code=?").bind(String(body.code||"")).first();
+      if (!inv) return json({ error:"invite not found" }, 404);
+      if (inv.used_at) return json({ error:"this invite was already used" }, 409);
+      if (!inv.email) return json({ error:"this invite has no email; copy the link instead" }, 400);
+      if (!mailOn(env)) return json({ error:"email is not set up" }, 503);
+      const m = MAIL.invite({ link: DASH_URL + "/?invite=" + inv.code });
+      try { await mailOut(inv.email, m.subject, m.text, { html: m.html }, "essential"); } catch { return json({ error:"Could not send the email. Try again in a minute." }, 502); }
+      return json({ ok:true, sent:inv.email });
+    }
     if (p === "/invite" && request.method === "POST") {
       if (!me?.admin) return json({ error:"admin only" }, 403);
       const email = String(body.email||"").trim().toLowerCase() || null;
@@ -2129,7 +2178,8 @@ export async function onRequest(context) {
       if (info.limited) return json({ error:"too many requests — try again in an hour" }, 429);
       const stt = await studentStatus(email);
       const ro = await db.prepare("SELECT 1 FROM renew_optout WHERE email=?").bind(email).first().catch(() => null);
-      return json({ ...info, paid: await studentPaid(email), required: feeOn(), term: stt.term, until: termEndOf(stt.term), received: stt.received, money: stt.money, token: await statusToken(email), renew: !ro });
+      return json({ ...info, paid: await studentPaid(email), required: feeOn(), term: stt.term, until: termEndOf(stt.term), received: stt.received, money: stt.money, token: await statusToken(email), renew: !ro,
+        card_auto: !!(await db.prepare("SELECT 1 AS x FROM card_renew WHERE email=? AND autorenew=1 AND pm IS NOT NULL").bind(email).first()) });
     }
     if (p === "/pay/status") {
       const email = String(url.searchParams.get("email")||"").trim().toLowerCase();
@@ -2232,7 +2282,7 @@ export async function onRequest(context) {
         return json({ error: "Too many messages today. Email lockqz.app@gmail.com." }, 429);
       const to = String(env.SUPPORT_EMAIL || "lockqz.app@gmail.com");
       const name = String(body.name || "").replace(/[\r\n]/g, " ").trim().slice(0, 100);
-      try { await mailOut(to, `LOCKqz support: ${name ? name + " · " : ""}${email}`, `From: ${name ? name + " <" + email + ">" : email}\n\n${msg}\n\n— Reply to this email to answer them.`, { replyTo: email }, "auto"); }
+      try { await mailOut(to, `LOCKqz support: ${name ? name + " · " : ""}${email}`, `From: ${name ? name + " <" + email + ">" : email}\n\n${msg}\n\n— Reply to this email to answer them.`, { replyTo: email, inbox: true }, "auto"); }
       catch (e) { return json({ error: "Could not send. Email lockqz.app@gmail.com." }, e && e.budget ? 503 : 502); }
       await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + clientIp, email, null, "support", null, now()).run();
       return json({ ok: true });
@@ -2278,7 +2328,7 @@ export async function onRequest(context) {
         + `\nQuestions: reply to this email.`;
       try { await mailOut(email, `LOCKqz bank transfer details · ${code}`, text, {}, "essential"); }
       catch (e) { return json({ error: "Could not send the email. Try again in a minute." }, 502); }
-      if (!details && env.ADMIN_EMAIL) try { await mailOut(String(env.ADMIN_EMAIL), `Send bank details: ${email} (${code})`, `${email} asked to pay ${m(w.total)} by bank transfer (memo ${code}).\nReply to them with LOCKqz's bank details.\nTo answer automatically: set the Pages secret BANK_DETAILS.`); } catch {}
+      if (!details && env.ADMIN_EMAIL) try { await mailOut(String(env.ADMIN_EMAIL), `Send bank details: ${email} (${code})`, `${email} asked to pay ${m(w.total)} by bank transfer (memo ${code}).\nReply to them with LOCKqz's bank details.\nTo answer automatically: set the Pages secret BANK_DETAILS.`, { inbox: true }); } catch {}
       return json(seeAll ? { ok: true, sent: true, to: email, amount: w.total } : { ok: true, sent: true, to: email });
     }
     if (p === "/pay/renew" && request.method === "POST") {

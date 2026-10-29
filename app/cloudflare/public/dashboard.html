@@ -40,7 +40,7 @@
   .setup .num{position:absolute;top:12px;left:12px;width:26px;height:26px;border-radius:50%;background:var(--usc);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
   .setup .t{font-size:16px;font-weight:700}.setup .d{font-size:13px;color:var(--mute);line-height:1.4}.setup .d b{font-weight:600;color:var(--ink)}
   .setup .step>.t{margin-top:auto}.setup .step>:last-child{margin-top:auto}.setup .step .btn{margin-bottom:0}
-  .setup .step.done{opacity:.6}.setup .step.done .num{background:var(--ok)}.setup .ok{padding:10px 0;font-size:14px;font-weight:600;color:var(--ok)}
+  .setup .step.done{border-color:var(--ok);background:#f1faf3}.setup .step.done .num{background:var(--ok)}.setup .ok{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 0 0;font-size:14px;font-weight:600;color:var(--ok)}.setup .ok .ck{display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:50%;background:var(--ok);color:#fff;font-size:22px;font-weight:700}
   .lqtoast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:9500;background:#1a1a1a;color:#fff;padding:12px 18px;border-radius:10px;font-size:14px;font-weight:600;box-shadow:0 8px 30px rgba(0,0,0,.3)}
   .cls .nx{font-size:13px;color:var(--mute);margin-top:4px}.cls .rem{font-size:12px;color:var(--faint);display:flex;align-items:center;gap:6px;margin-top:10px}
   .cls{display:flex;flex-direction:column;gap:20px}
@@ -290,7 +290,7 @@ const EXT_PAGE = { edge: "edge://extensions", firefox: "about:debugging#/runtime
 // Safari (and anything else): LOCKqz's extension is for Chrome, Edge and Firefox.
 const EXTBTN = () => BROWSER === "other" ? `<span>LOCKqz works in Chrome, Edge or Firefox. <a href="https://www.google.com/chrome/" target="_blank" rel="noopener">Get Chrome</a>, then open this page there.</span>` :
   `<a class="btn prime" href="${esc(EXT_URL())}" target="_blank" rel="noopener">Add LOCKqz to ${BROWSER_NAME}</a>` +
-  (EXT_FROM_STORE() ? `<span class="muted" style="display:block;margin-top:6px;font-size:13px">Opens the Chrome Web Store: ${BROWSER === "edge" ? "click <b>Allow extensions from other stores</b> → <b>Allow</b>, then " : ""}click <b>Add to Chrome</b>, then <b>Add extension</b>. If Chrome says <b>Proceed with caution</b>, click <b>Continue to install</b>. Link: <a href="${esc(EXT_URL())}" target="_blank" rel="noopener">${esc(EXT_URL().replace(/^https:\/\//, ""))}</a></span>` : `<span class="muted" style="display:block;margin-top:6px;font-size:13px">Unzip it, open <b>${EXT_PAGE}</b>, turn on Developer mode, click <b>${BROWSER === "firefox" ? "Load Temporary Add-on" : "Load unpacked"}</b> and pick the folder.</span>`);
+  (EXT_FROM_STORE() ? `<span class="muted" style="display:block;margin-top:6px;font-size:13px">${BROWSER === "edge" ? "<b>Allow extensions from other stores</b> → " : ""}<b>Add to Chrome</b> → <b>Add extension</b>. If Chrome warns, click <b>Continue to install</b>. <a href="${esc(EXT_URL())}" target="_blank" rel="noopener">${esc(EXT_URL().replace(/^https:\/\//, ""))}</a></span>` : `<span class="muted" style="display:block;margin-top:6px;font-size:13px">Unzip it, open <b>${EXT_PAGE}</b>, turn on Developer mode, click <b>${BROWSER === "firefox" ? "Load Temporary Add-on" : "Load unpacked"}</b> and pick the folder.</span>`);
 function syncMsg(t, help = false){ SYNCMSG = t; SYNCHELPON = help; document.querySelectorAll(".syncst").forEach(e => e.innerHTML = syncHtml(t) + (help ? SYNCHELP() : "")); }
 function askSync(w){ BS_ORIGINS.forEach(o => { try { w.postMessage({ lqz: "sync" }, o); } catch {} }); }
 // After a switch here: the open LOCKqz Sync tab puts the change into Brightspace and redraws its panel, so
@@ -454,7 +454,7 @@ function setupBlock(){
   // In order: a step counts only after the one before it (Brightspace before the extension syncs nothing).
   const s1 = EXT(), s2 = s1 && BS.courses.length > 0, steps = [s1, s2, s2 && mailedAll()], done = steps.filter(Boolean).length;
   if (done === 3) return "";
-  const card = (i, t, d, act) => `<div class="step${steps[i] ? " done" : ""}"><span class="num">${steps[i] ? "✓" : i + 1}</span><span class="t">${t}</span><span class="d">${d}</span>${steps[i] ? `<span class="ok">Done</span>` : act}</div>`;
+  const card = (i, t, d, act) => `<div class="step${steps[i] ? " done" : ""}"><span class="num">${steps[i] ? "✓" : i + 1}</span><span class="t">${t}</span><span class="d">${d}</span>${steps[i] ? `<span class="ok"><span class="ck" aria-hidden="true">✓</span>Done</span>` : act}</div>`;
   const store = EXT_FROM_STORE(), edge = BROWSER === "edge";
   const ext = BROWSER === "other" ? EXTBTN() : `<a class="btn prime" href="${esc(EXT_URL())}" target="_blank" rel="noopener">Add to ${BROWSER_NAME}</a>`;
   const extD = !store ? `Unzip, open <b>${EXT_PAGE}</b>, turn on Developer mode, <b>${BROWSER === "firefox" ? "Load Temporary Add-on" : "Load unpacked"}</b>.`
@@ -627,22 +627,15 @@ const WELKEY = () => "lockqz_welcome_" + String((ME && ME.email) || "").toLowerC
 const welcomed = () => { try { return !!localStorage.getItem(WELKEY()); } catch (e) { return true; } };
 function welcomeDone(){ try { localStorage.setItem(WELKEY(), "1"); } catch (e) {} nav(""); route(); }
 function viewWelcome(){
-  return `<section class="card wel" aria-label="Welcome" style="display:flex;flex-direction:column;gap:16px;max-width:640px">
+  return `<section class="card wel" aria-label="Welcome" style="display:flex;flex-direction:column;gap:18px;max-width:560px;margin-left:auto;margin-right:auto">
     <div><h1 style="margin:0;font-size:26px;font-weight:700;letter-spacing:-.015em">Welcome to LOCKqz</h1>
-    <p class="sub" style="margin:6px 0 0">LOCKqz blocks AI on your students' computers while your Brightspace exams are open. Notes, files and the web stay open. AI comes back when they submit.</p></div>
-    <div><h2 style="margin:0 0 8px;font-size:17px">What you do — once</h2>
-    <ol class="wsteps" style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:10px">
+    <p class="sub" style="margin:6px 0 0">Blocks AI on students' computers during your Brightspace exams.</p></div>
+    <ol class="wsteps" style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:12px">
       <li><b>Add LOCKqz to ${BROWSER_NAME}.</b> ${EXT() ? `<span style="color:var(--ok)">Done ✓</span>` : `<div style="margin-top:6px">${EXTBTN()}</div>`}</li>
-      <li><b>Open Brightspace in ${BROWSER_NAME} and sign in.</b> Your classes and exams appear here by themselves, and every exam is protected. <a href="${BS_SITE}" target="_blank" rel="noopener">Open Brightspace</a></li>
-      <li><b>Email your students.</b> Click <b>Email students</b> on each class. It opens your own email with the install link filled in.</li>
-    </ol></div>
-    <div class="note warn" style="margin:0"><span><b>On exam day: keep ${BROWSER_NAME} open and signed in to Brightspace until the exam ends.</b> LOCKqz runs the exam from there. If it's closed, students wait at the start until you open it.</span></div>
-    <div><h2 style="margin:0 0 8px;font-size:17px">How it works</h2>
-    <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px">
-      <li>Students install LOCKqz once. Without it, they can't open a protected exam.</li>
-      <li>When a student opens the exam, LOCKqz turns AI off on their computer and enters the exam password for them.</li>
-      <li>You never set or share a password. Don't want LOCKqz on an exam? Switch it off here.</li>
-    </ul></div>
+      <li><b>Open Brightspace in ${BROWSER_NAME} and sign in.</b> <a href="${BS_SITE}" target="_blank" rel="noopener">Open Brightspace</a></li>
+      <li><b>Email your students.</b> Use <b>Email students</b> on each class.</li>
+    </ol>
+    <div class="note warn" style="margin:0"><span><b>Exam day:</b> keep ${BROWSER_NAME} open and signed in to Brightspace until the exam ends.</span></div>
     <div><button class="btn prime" onclick="welcomeDone()">Got it</button></div>
   </section>`;
 }
@@ -706,22 +699,24 @@ function renderPay(){ const d=PAY, el=$("pay"); if(!el||!d) return;
   const note=d.memo, got=Number(d.received)||0, base=d.amount??d.price;
   const fx = n => ({ total:n, base:n, tax:0 });
   PW = d.ways || { zelle:fx(base), bank:fx(base), venmo:fx(base), po:fx(base), card:fx(d.stripe?d.stripe.card:base) }; PT = d.tax || null;
-  const ways = [d.zelle&&["zelle","Zelle","Lowest price · arrives in minutes"], d.invoice&&["bank","Bank transfer (ACH / wire)","Bank details emailed to you"], d.venmo&&["venmo","Venmo","Memo filled in"], d.stripe&&["card","Card","Instant"], d.po&&["po","Purchase order (PO)","Your department pays"]].filter(Boolean);
+  const ways = [d.stripe&&["card","Card","Instant"], d.venmo&&["venmo","Venmo","Memo filled in"], d.zelle&&["zelle","Zelle","Lowest price · arrives in minutes"], d.invoice&&["bank","Bank transfer (ACH / wire)","Bank details emailed to you"], d.po&&["po","Purchase order (PO)","Your department pays"]].filter(Boolean);
   el.innerHTML = `<section class="card" style="display:flex;flex-direction:column;gap:16px">
     <div class="hrow"><h2>Activate LOCKqz</h2><span>${d.term?termName(d.term):""}</span></div>
-    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b id="pprice" style="font-size:44px">${money(PW.zelle.total)}</b><span class="muted">per semester · all your sections</span><b id="pincl" style="color:var(--usc)"></b>${got>0?`<b style="color:var(--warn)">${PT ? `Received ${money(d.money??got)} · ${money(PW.zelle.total)} left` : `Received ${money(got)} of ${money(base)}`}</b>`:""}</div>
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b id="pprice" style="font-size:44px">${money(PW.zelle.total)}</b><span class="muted">per semester · all your sections</span><span id="pincl" class="muted"></span>${got>0?`<b style="color:var(--warn)">${PT ? `Received ${money(d.money??got)} · ${money(PW.zelle.total)} left` : `Received ${money(got)} of ${money(base)}`}</b>`:""}</div>
     ${d.sections.length ? `<ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px">${d.sections.map(s=>`<li style="display:flex;gap:12px;align-items:center;min-height:40px;padding:0 12px;border:1px solid #e3e0d8;border-radius:10px"><b>${esc(s.course)}</b><span class="muted">Section ${esc(s.section)}</span></li>`).join("")}</ul>` : `${!usc?"":!d.term?`<p class="muted" style="margin:0">Enter your first and last name.</p>`:d.name?`<p class="muted" style="margin:0">No sections found for ${esc(d.name)}.</p>`:""}${nameBox}`}
     <div style="display:flex;flex-direction:column;gap:8px" id="pways">
       ${ways.map(([k,l,sub])=>`<button class="btn payway" data-k="${k}" aria-expanded="false" onclick="payPick('${k}')" style="justify-content:space-between;min-height:58px;text-align:left"><span style="display:flex;flex-direction:column"><span>${esc(l)}</span><small class="muted" style="font-weight:400${k==="zelle"?";color:var(--ok);font-weight:600":""}">${esc(sub)}</small></span><b>${money(PW[k].total)}</b></button><div class="paypanel hide" id="pp_${k}" style="border:2px solid var(--usc);border-radius:10px;padding:14px 16px"></div>`).join("")}
       ${!ways.length ? `<p style="margin:0">Pay ${money(base)} to the LOCKqz admin.</p>` : ""}
-    </div><p class="muted" style="margin:0">Memo: <b>${esc(note)}</b></p>
-    ${lqL("Processing your payment", "This should take no longer than a minute")}
+    </div><div style="display:flex;gap:12px;align-items:flex-start;background:#fdf0f0;border:2px solid var(--usc);border-radius:12px;padding:12px 14px"><img src="/icon128.png" alt="" width="40" height="40" style="border-radius:9px;flex:none"><div><p style="margin:0 0 4px">Memo: <b style="font-size:18px;letter-spacing:1px">${esc(note)}</b></p><p style="margin:0;font-size:14px;line-height:1.45">Zelle and Venmo only: put this memo on your payment (Zelle: <b>Memo</b> box · Venmo: <b>note</b>). Without it, LOCKqz can’t match your payment and won’t turn on. Card payments need no memo.</p></div></div>
+    <div id="pwait"></div>
     ${d.sections.length && usc ? `<details><summary class="muted">Not your sections?</summary>${nameBox}</details>` : ""}
   </section>`; }
 let PW=null, PT=null;
+// The "Processing your payment" lock shows only once the professor starts paying (memo copied, Venmo/card/bank opened).
+function payStarted(){ const w=$("pwait"); if(w && !w.innerHTML) w.innerHTML = lqL("Processing your payment", "This should take no longer than a minute"); }
 // "LOCKqz $4,875 / Tax & fees (25%) + $1,625 / Total $6,500"
 function payTax(w){ return !PT || !(w.tax>0) ? `<div class="hrow" style="font-weight:700"><span>Total</span><span>${money(w.total)}</span></div>`
-  : `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #eee"><div class="hrow"><span>LOCKqz</span><span>${money(w.base)}</span></div><div class="hrow" style="color:var(--usc);font-weight:700"><span>${esc(PT.label)} (${Math.round(PT.rate*100)}%)</span><span>+ ${money(w.tax)}</span></div><div class="hrow" style="font-weight:800;font-size:17px;border-top:1px solid #eee;padding-top:4px"><span>Total</span><span>${money(w.total)}</span></div></div>`; }
+  : `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #eee"><div class="hrow"><span>LOCKqz</span><span>${money(w.base)}</span></div><div class="hrow" style="color:#444"><span>${esc(PT.label)} (${Math.round(PT.rate*100)}%)</span><span>+ ${money(w.tax)}</span></div><div class="hrow" style="font-weight:800;font-size:17px;border-top:1px solid #eee;padding-top:4px"><span>Total</span><span>${money(w.total)}</span></div></div>`; }
 // Picking a way opens its steps; the price up top jumps to that way's total, the tax shown as its own line.
 function payPick(k){ const d=PAY, w=PW[k], box=$("pp_"+k), open=box.classList.contains("hide");
   document.querySelectorAll(".paypanel").forEach(x=>x.classList.add("hide")); document.querySelectorAll(".payway").forEach(x=>x.setAttribute("aria-expanded","false"));
@@ -730,10 +725,10 @@ function payPick(k){ const d=PAY, w=PW[k], box=$("pp_"+k), open=box.classList.co
   box.classList.remove("hide"); document.querySelector(`.payway[data-k="${k}"]`).setAttribute("aria-expanded","true");
   const memo = esc(d.memo), amt = w.total.toFixed(2);
   box.innerHTML = payTax(w) + ({
-    zelle: `<ol class="steps" style="line-height:1.7"><li><button class="btn prime" onclick="navigator.clipboard.writeText(PAY.memo);this.textContent='Memo copied ✓'">Copy memo ${memo}</button></li><li>Bank app → <b>Zelle</b> → Send to <b>${esc(d.zelle)}</b></li><li>Amount <b>${money(w.total)}</b></li><li><b>Paste the memo</b> in the Memo / Note box, send. LOCKqz turns on within a minute.</li></ol>`,
-    bank: `<button class="btn prime" style="width:100%" onclick="profBank(this)">Email me the bank details</button><p class="muted" id="pbmsg" style="margin:8px 0 0">Account, amount and memo, sent to ${esc(ME.email)} right away. LOCKqz turns on by itself when the money arrives.</p>`,
-    venmo: `<a class="btn prime" style="width:100%" href="https://venmo.com/?txn=pay&recipients=${encodeURIComponent(d.venmo||"")}&amount=${amt}&note=${encodeURIComponent(d.memo)}" target="_blank" rel="noopener">Open Venmo · ${money(w.total)}</a>`,
-    card: `<button class="btn prime" style="width:100%" onclick="stripePay('card',this)">Pay ${money(w.total)} by card</button>${d.stripe&&d.stripe.bank ? `<button class="btn" style="width:100%;margin-top:8px" onclick="stripePay('bank',this)">Bank account ${money(d.stripe.bank)}</button>` : ""}`,
+    zelle: `<ol class="steps" style="line-height:1.7"><li><button class="btn prime" onclick="navigator.clipboard.writeText(PAY.memo);this.textContent='Memo copied ✓';payStarted()">Copy memo ${memo}</button></li><li>Bank app → <b>Zelle</b> → Send to <b>${esc(d.zelle)}</b></li><li>Amount <b>${money(w.total)}</b></li><li><b>Paste the memo</b> into the <b>Memo</b> box on the Zelle payment, send. LOCKqz turns on within a minute.</li></ol>`,
+    bank: `<button class="btn prime" style="width:100%" onclick="payStarted();profBank(this)">Email me the bank details</button><p class="muted" id="pbmsg" style="margin:8px 0 0">Account, amount and memo, sent to ${esc(ME.email)} right away. LOCKqz turns on by itself when the money arrives.</p>`,
+    venmo: `<a class="btn prime" style="width:100%" href="https://venmo.com/?txn=pay&recipients=${encodeURIComponent(d.venmo||"")}&amount=${amt}&note=${encodeURIComponent(d.memo)}" target="_blank" rel="noopener" onclick="payStarted()">Open Venmo · ${money(w.total)}</a><p class="muted" style="margin:8px 0 0">Your memo is already in the Venmo <b>note</b>. Leave it there.</p>`,
+    card: `<button class="btn prime" style="width:100%" onclick="payStarted();stripePay('card',this)">Pay ${money(w.total)} by card</button>${d.stripe&&d.stripe.bank ? `<button class="btn" style="width:100%;margin-top:8px" onclick="stripePay('bank',this)">Bank account ${money(d.stripe.bank)}</button>` : ""}`,
     po: `<a class="btn prime" style="width:100%" href="mailto:${esc(d.po)}?subject=${encodeURIComponent("LOCKqz purchase order "+d.memo)}&body=${encodeURIComponent("PO number:\nBilling contact:\nAmount: "+money(w.total)+(PT&&w.tax>0?" (LOCKqz "+money(w.base)+" + "+(PT?PT.label.toLowerCase():"tax")+" "+money(w.tax)+")":"")+"\nTerm: "+termName(d.term)+"\nMemo: "+d.memo)}">Email the PO to ${esc(d.po)}</a>`
   })[k]; }
 async function profBank(b){ b.disabled=true; b.textContent="Sending…"; const r = await post("/pay/bank",{email:ME.email}); b.disabled=false;
@@ -761,24 +756,18 @@ async function activate(email,id){ const until=$("d_"+id).value; if(!until){ ale
 async function deactivate(email){ if(confirm("Turn off "+email+"?")){ const d=await post("/activate",{email,until:null}); if(d.error) alert(d.error); loadTeachers(); } }
 async function resetPw(email){ const d=await post("/reset",{email}); alert(d.error||("New password for "+email+": "+d.password+(d.sync_key_kept?"\n\n"+d.sync_key_kept:""))); }
 const inviteLink = code => location.origin + "/?invite=" + code;
-function inviteMail(email, link){
-  const s = "Your LOCKqz professor account";
-  const b = "Hi,\n\nYou're invited to LOCKqz. It blocks AI on students' computers during your Brightspace exams, then turns AI back on when the exam ends.\n\n"
-    + "1. Create your account (this link works once):\n   " + link + "\n\n"
-    + "2. Add LOCKqz to Chrome: " + EXT_STORE.CHROME + "\n   Click Add to Chrome, then Add extension. If Chrome says Proceed with caution, click Continue to install.\n   Then open Brightspace in Chrome. Your classes and exams fill in; every exam is protected automatically.\n\n"
-    + "On exam day, keep Chrome open and signed in to Brightspace until the exam ends.\n\n"
-    + "3. Students install LOCKqz once from " + INSTALL + " (the dashboard emails the ones who haven't).\n\nLOCKqz";
-  return "mailto:" + (email||"") + "?subject=" + encodeURIComponent(s) + "&body=" + encodeURIComponent(b);
-}
 async function makeInvite(){ const d = await post("/invite",{email:$("iemail").value,until:$("iuntil").value||semEnd()}); if(d.error){ alert(d.error); return; }
-  window._ilink = inviteLink(d.code); window._imail = inviteMail(d.email, window._ilink);
-  $("newinvite").innerHTML = `<div class="note ok" style="margin-top:10px"><span>Invite link (works once): <code>${esc(window._ilink)}</code></span><span style="display:flex;gap:8px"><button class="btn" onclick="navigator.clipboard.writeText(window._ilink);this.textContent='Copied'">Copy link</button><button class="btn prime" onclick="location.href=window._imail">Email it</button></span></div>`;
+  window._ilink = inviteLink(d.code); window._icode = d.code;
+  $("newinvite").innerHTML = `<div class="note ok" style="margin-top:10px"><span>Invite link (works once): <code>${esc(window._ilink)}</code></span><span style="display:flex;gap:8px"><button class="btn" onclick="navigator.clipboard.writeText(window._ilink);this.textContent='Copied'">Copy link</button>${d.email ? `<button class="btn prime" onclick="sendInvite(this)">Email it to ${esc(d.email)}</button>` : ""}</span></div>`;
   $("iemail").value=""; loadInvites(); }
+// LOCKqz sends the invite itself (buttons: Create your account, Add LOCKqz to Chrome, Open Brightspace).
+async function sendInvite(b){ b.disabled = true; b.textContent = "Sending…"; const d = await post("/invite/send",{code:window._icode});
+  if(d.error){ alert(d.error); b.disabled = false; b.textContent = "Email it"; return; } b.textContent = "Sent ✓"; }
 async function loadInvites(){ const d = await get("/invites"); const tb=document.querySelector("#invites tbody"); if(!tb) return; tb.innerHTML="";
   if(d.error){ tb.innerHTML=`<tr><td colspan="5" class="err">${esc(d.error)}</td></tr>`; return; }
   (d.invites||[]).forEach(i=>tb.insertAdjacentHTML("beforeend",`<tr style="${i.used_at?'color:#888':''}"><td>${esc(i.email||"(anyone with link)")}</td><td>${esc(i.active_until||"—")}</td><td>${when(i.created_at)}</td><td>${i.used_at?"joined":"pending"}</td><td>${i.used_at?"":`<button class="btn" style="min-height:32px;padding:4px 10px" data-code="${esc(i.code)}" onclick="cancelInvite(this.dataset.code)">Cancel</button>`}</td></tr>`));
   if(!(d.invites||[]).length) tb.innerHTML=`<tr><td colspan="5" class="muted">No invites yet.</td></tr>`; }
-async function cancelInvite(code){ if(!confirm("Cancel this invite?")) return; const d=await post("/uninvite",{code}); if(d.error){ alert(d.error); return; } if((window._ilink||"").endsWith("="+code)){ $("newinvite").innerHTML=""; window._ilink=window._imail=null; } loadInvites(); }
+async function cancelInvite(code){ if(!confirm("Cancel this invite?")) return; const d=await post("/uninvite",{code}); if(d.error){ alert(d.error); return; } if((window._ilink||"").endsWith("="+code)){ $("newinvite").innerHTML=""; window._ilink=window._icode=null; } loadInvites(); }
 
 // An invite link (/?invite=CODE or /dashboard?invite=CODE) opens the sign-up form; without one, only Sign in shows.
 (async function initInvite(){

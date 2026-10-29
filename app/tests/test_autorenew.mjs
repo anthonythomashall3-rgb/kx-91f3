@@ -91,10 +91,9 @@ try {
   check("paid for Fall 2026", r.data?.result?.paid === true && r.data.result.term === "20263", JSON.stringify(r.data));
   check("card saved: cus + pm + visa 4242, autorenew on", row?.customer === "cus_al" && row.pm === "pm_card1" && row.brand === "visa" && row.last4 === "4242" && row.autorenew === 1, JSON.stringify(row));
   let m = mails.filter(x => x.to === "al@usc.edu" && /renews each semester/.test(x.subject));
-  check("one confirmation email: renews each semester at $280, next renewal Nov 30 for Spring 2027, gear icon -> Account -> Cancel subscription, no 7-days-before line",
-    m.length === 1 && /renews automatically each semester at \$280/.test(m[0].text) && /November 30, 2026, for Spring 2027/.test(m[0].text) && /gear icon \(top right\) → Account → Cancel subscription/.test(m[0].text) && !/7 days before/.test(m[0].text), m.map(x => x.text).join("|"));
+  check("no confirmation email after a card payment (owner 29 Oct: the pay page already says it renews)", m.length === 0, m.map(x => x.subject).join("|"));
   await hook(paidEv(AL, 28000, "pi_first"));   // Stripe retries the event
-  check("retried event: no second confirmation, paid once", mails.filter(x => /renews each semester/.test(x.subject)).length === 1 && q("SELECT COUNT(*) AS n FROM payments WHERE code=?", AL).n === 1);
+  check("retried event: no email, paid once", mails.filter(x => /renews each semester/.test(x.subject)).length === 0 && q("SELECT COUNT(*) AS n FROM payments WHERE code=?", AL).n === 1);
 
   console.log("A4 second Checkout for the same email reuses the Customer");
   await call("/pay/stripe", { email: "bo@usc.edu", method: "card", t: payT(env, "bo@usc.edu") });
@@ -131,8 +130,11 @@ try {
   let pay = q("SELECT * FROM payments WHERE txn=?", "stripe:" + pi.res.body.id);
   check("credited to Spring 2027 (via stripe-card, $280)", pay?.term === "20271" && pay.code === AL && pay.amount === 280 && pay.via === "stripe-card", JSON.stringify(pay));
   check("row paid", q("SELECT state FROM card_renew WHERE email='al@usc.edu'").state === "paid");
+  { const rn = mails.filter(x => x.to === "al@usc.edu" && /^LOCKqz renewed for Spring 2027$/.test(x.subject));
+    check("after the charge: one 'resubscribed' email ($280, Visa 4242, access until, how to cancel)", rn.length === 1 && /You're resubscribed to LOCKqz for Spring 2027/.test(rn[0].text) && /\$280/.test(rn[0].text) && /4242/.test(rn[0].text) && /Cancel subscription/.test(rn[0].text), mails.map(x => x.subject).join("|")); }
   await tick(); await tick();
   check("more ticks: never charged again", intents.length === 1);
+  check("more ticks: no second 'resubscribed' email", mails.filter(x => x.to === "al@usc.edu" && /^LOCKqz renewed/.test(x.subject)).length === 1);
   r = await hook({ type: "payment_intent.succeeded", data: { object: { id: pi.res.body.id, currency: "usd", amount: 28000, amount_received: 28000, metadata: { code: AL, kind: "student", term: "20271", renew: "1" } } } });
   check("webhook for the same renewal: duplicate, still one payment", r.data?.result?.duplicate === true && q("SELECT COUNT(*) AS n FROM payments WHERE code=? AND term='20271'", AL).n === 1, JSON.stringify(r.data));
   at("2027-01-11T18:00:00Z");
@@ -251,7 +253,7 @@ try {
   at("2027-02-01T18:00:00Z"); mails.length = 0; piMode = "ok";
   r = await payStart("jo@usc.edu"); const JO = r.data.code;
   await hook(paidEv(JO, 28000, "pi_jo", { customer: "cus_jo" }));
-  check("confirmation: next renewal April 7, 2027 for Summer 2027", mails.some(x => x.to === "jo@usc.edu" && /April 7, 2027, for Summer 2027/.test(x.text)), mails.map(x => x.text).join("|"));
+  check("Spring card payment: no confirmation email", !mails.some(x => x.to === "jo@usc.edu" && /renews each semester/.test(x.subject)), mails.map(x => x.subject).join("|"));
   at("2027-03-15T18:00:00Z"); intents.length = 0; await tick();
   check("before the window: nothing charged yet", !intents.some(x => x.f.get("metadata[code]") === JO));
   at("2027-04-07T18:00:00Z"); await tick();

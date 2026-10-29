@@ -98,7 +98,7 @@
       </div>
     </div>
 
-    <p class="none" id="nope" hidden>Open this page on the Mac, Windows or Linux computer you take quizzes on.<br><span style="font-size:13px">Android phones: download the app on the phone. iPhones, iPads and Chromebooks can't run LOCKqz.</span></p>
+    <p class="none" id="nope" hidden>Open on your computer for access.</p>
 
     <footer><a href="/privacy.html">Privacy</a></footer>
   </div>
@@ -160,6 +160,7 @@
     if (!linux) served($("dl").getAttribute("href"), function (ok) { if (!ok) { $("dlbox").hidden = true; $("orline").hidden = true; if (android) $("nope").hidden = false; } });
   } else {
     $("nope").hidden = false;
+    var h = document.querySelector(".card h1"); if (h) h.insertAdjacentHTML("beforebegin", '<img src="/icon128.png" alt="" width="88" height="88" style="display:block;margin:0 auto 4px;border-radius:20px">');   // phone / tablet: lock logo, LOCKqz, one line
   }
 
   $("copy") && ($("copy").onclick = function () {

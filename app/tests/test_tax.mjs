@@ -166,6 +166,11 @@ const PT = r.data.token;
 let ms = (await getc(ON, "/my-sections", { teacher: PT })).data;
 check("professor $6,500", ms.ways?.zelle.total === 6500 && ms.ways.zelle.base === 4875 && ms.ways.zelle.tax === 1625, JSON.stringify(ms.ways?.zelle));
 check("professor card $6,700", ms.ways.card.total === 6700 && ms.stripe.card === 6700, JSON.stringify([ms.ways.card, ms.stripe]));
+check("professor Venmo $6,500 (Venmo offered)", ms.ways.venmo.total === 6500, JSON.stringify(ms.ways.venmo));
+{ const r2 = await call(ON, "/signup", { email: "prof2@usc.edu", password: "profpass2", name: "Sam Roe" }); const T2 = r2.data.token;
+  const m2 = (await getc(ON, "/my-sections", { teacher: T2 })).data;
+  const rv = await notify([{ txn: "venmo:p2", amount: 6500, note: m2.memo, via: "venmo" }]);
+  check("$6,500 by Venmo -> professor active (pays exactly $6,500)", rv.results[0].paid === true && (await getc(ON, "/me", { teacher: T2 })).data.active === true, JSON.stringify(rv)); }
 r = await notify([{ txn: "zelle:p1", amount: 5000, note: ms.memo, via: "zelle" }]);
 check("$5,000 Zelle -> not active yet", r.results[0].paid === false && (await getc(ON, "/me", { teacher: PT })).data.active === false, JSON.stringify(r));
 r = await notify([{ txn: "zelle:p2", amount: 1500, note: ms.memo, via: "zelle" }]);
@@ -173,7 +178,7 @@ check("+$1,500 -> active", r.results[0].paid === true && (await getc(ON, "/me", 
 
 console.log("T9 pages");
 const ph = readFileSync(join(CF, "public", "pay.html"), "utf8"), dh = readFileSync(join(CF, "public", "dashboard.html"), "utf8");
-check("pay page: Zelle listed before every other way", ph.indexOf('id="zelle"') > 0 && ["id=\"bank\"", "id=\"venmo\"", "id=\"card\"", "id=\"po\""].every(x => ph.indexOf(x) > ph.indexOf('id="zelle"')));
+check("pay page: Card, then Venmo, then Zelle (owner 29 Oct), bank + PO after", ph.indexOf('id="card"') > 0 && ph.indexOf('id="card"') < ph.indexOf('id="venmo"') && ph.indexOf('id="venmo"') < ph.indexOf('id="zelle"') && ["id=\"bank\"", "id=\"po\""].every(x => ph.indexOf(x) > ph.indexOf('id="zelle"')));
 check("pay page: tax line shown when a way is picked", /taxline/.test(ph) && /\/pay\/bank/.test(ph));
 check("dashboard: tax breakdown + bank details button + tour", /PT\.label/.test(dh) && /\/pay\/bank/.test(dh) && /lqTour|startTour/.test(dh));
 

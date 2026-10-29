@@ -273,10 +273,10 @@ check("dashboard: set-up step 3 = one Email students button for every class (ous
 check("dashboard: set-up steps count in order (step 2 only after the extension; step 3 only after step 2)", /s2 = s1 && BS\.courses\.length > 0, steps = \[s1, s2, s2 && mailedAll\(\)\]/.test(dash) && /After step 1\./.test(dash));
 check("lq.js: LOCKqz on a red/dark background turns white (no red qz on red buttons)", /lq-inv/.test(readFileSync(join(CF, "public", "lq.js"), "utf8")));
 check("dashboard: no bookmark anywhere a professor can see (no drag button, no bookmarks-bar steps)", !/class="bmk"/.test(dash) && !/bookmarks bar/i.test(dash) && !/Drag this button/.test(dash));
-check("dashboard: welcome page (3 steps, exam-day rule, how it works) shown first, and from the menu", /Welcome to LOCKqz/.test(dash) && /What you do — once/.test(dash) && /On exam day: keep \$\{BROWSER_NAME\} open and signed in to Brightspace until the exam ends\./.test(dash) && /How it works/.test(dash) && /v==="" && !welcomed\(\)/.test(dash) && /How LOCKqz works/.test(dash));
+check("dashboard: welcome page (3 steps, exam-day rule) shown first, and from the menu", /Welcome to LOCKqz/.test(dash) && /Exam day:<\/b> keep \$\{BROWSER_NAME\} open and signed in to Brightspace until the exam ends\./.test(dash) && /Email your students\./.test(dash) && /v==="" && !welcomed\(\)/.test(dash) && /How LOCKqz works/.test(dash));
 check("dashboard: exam-day banner (protected exam within 24 h) says keep the browser open", /examday/.test(dash) && /Keep \$\{BROWSER_NAME\} open and signed in to Brightspace until it ends\./.test(dash));
 check("dashboard: Safari gets 'works in Chrome, Edge or Firefox'", /LOCKqz works in Chrome, Edge or Firefox/.test(dash));
-check("extension popup: the exam-day line", /On exam day:<\/b> keep this browser open and signed in to Brightspace until the exam ends/.test(readFileSync(join(EXT, "popup.html"), "utf8")));
+check("extension popup: the short exam-day line", /Exam day:<\/b> keep this browser open on Brightspace\./.test(readFileSync(join(EXT, "popup.html"), "utf8")));
 check("the logo is served at lockqz.pages.dev/icon128.png (emails)", existsSync(join(CF, "public", "icon128.png")));
 const mac = readFileSync(join(APP, "mac", "lockqz-agent.py"), "utf8"), win = readFileSync(join(APP, "windows", "lockqz-agent.ps1"), "utf8");
 check("Mac agent: the one-time ready notice (display notification, flag file)", /display notification/.test(mac) && /LOCKqz is ready\. Nothing to do until your exam/.test(mac) && /ready-shown/.test(mac) && /verify_call\("status"\)/.test(mac) && /Finish setup before your exam/.test(mac));
@@ -325,5 +325,20 @@ console.log("Z7 one Gmail budget: automatic mail stops at 250 / 24 h, sign-in co
   check("room again -> the held reminder goes on the next tick (2 students), counted +2", r.data.exams.reminders === 2 && used() === 2, JSON.stringify(r.data) + " used=" + used());
 }
 
+console.log("Z9 invite email: LOCKqz sends it, with buttons");
+{
+  const inv = await api("/invite", { email: "newprof@usc.edu" }, ADMIN);
+  MAILS.length = 0;
+  const r = await api("/invite/send", { code: inv.data.code }, ADMIN);
+  const m = mailsTo("newprof@usc.edu")[0];
+  check("sent to the invited email", r.status === 200 && r.data.sent === "newprof@usc.edu" && !!m, JSON.stringify(r.data));
+  check("subject: Your LOCKqz professor account", m && m.subject === "Your LOCKqz professor account", m && m.subject);
+  check("HTML buttons: Create your account (invite link), Add LOCKqz to Chrome (store), Open Brightspace", m && m.html && new RegExp('href="https://prof\\.lockqz\\.pages\\.dev/\\?invite=' + inv.data.code + '"[^>]*>Create your account<').test(m.html) && /chromewebstore\.google\.com\/detail\/bidlfpkdggdpmfbfkpjcnbjhfkfligkk"[^>]*>Add LOCKqz to Chrome</.test(m.html) && /brightspace\.usc\.edu"[^>]*>Open Brightspace</.test(m.html) && /Continue to install/.test(m.html));
+  check("plain-text part has every link too", m && m.text.includes("?invite=" + inv.data.code) && /chromewebstore/.test(m.text));
+  check("professor can't send invites", (await api("/invite/send", { code: inv.data.code }, { "X-LOCKqz-Teacher": PROF })).status === 403);
+  const anon = await api("/invite", {}, ADMIN);
+  check("invite without an email: refused (copy the link instead)", (await api("/invite/send", { code: anon.data.code }, ADMIN)).status === 400);
+  check("unknown code: 404", (await api("/invite/send", { code: "nope" }, ADMIN)).status === 404);
+}
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

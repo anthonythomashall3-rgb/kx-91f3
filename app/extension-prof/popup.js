@@ -22,8 +22,8 @@
     $("synced").textContent = "Last synced " + ago(st.lastSync);
     // Protected = LOCKqz's password confirmed in Brightspace; the rest are shown as waiting.
     if (s.classes != null) $("counts").textContent = `${s.classes} class${s.classes === 1 ? "" : "es"} · ${s.exams} exam${s.exams === 1 ? "" : "s"} protected` + (s.waiting ? ` · ${s.waiting} waiting to be set in Brightspace` : "");
-    if (s.next) { $("next").hidden = false; $("next").innerHTML = ""; const b = document.createElement("b"); b.textContent = "Next exam: " + (s.next.course ? s.next.course + " · " : "") + s.next.name;
-      $("next").append(b, document.createTextNode(when(s.next.start) + " · " + s.next.ready + "/" + s.next.total + " students ready" + (s.next.unpaid ? " · " + s.next.unpaid + " installed, not paid" : ""))); }
+    // One line: exam · date · ready count (29 Oct 2026, owner: much less wordy).
+    if (s.next) { $("next").hidden = false; $("next").textContent = s.next.name + " · " + when(s.next.start) + " · " + s.next.ready + "/" + s.next.total + " students ready"; $("next").title = (s.next.course ? s.next.course + " · " : "") + $("next").textContent; }
     else $("next").hidden = true;
     $("sync").disabled = false;
   }
