@@ -5,7 +5,7 @@
   const BASES = ["https://prof.lockqz.pages.dev", "https://lockqz.pages.dev"];
   const $ = id => document.getElementById(id);
   const ago = t => { if (!t) return "never"; const m = Math.round((Date.now() - Number(t)) / 60000); return m < 1 ? "just now" : m < 60 ? m + " min ago" : m < 1440 ? Math.round(m / 60) + " h ago" : Math.round(m / 1440) + " d ago"; };
-  const when = iso => { const t = iso ? Date.parse(iso) : NaN; return isNaN(t) ? "" : new Date(t).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); };
+  const when = iso => { const t = iso ? Date.parse(iso) : NaN; return isNaN(t) ? "" : new Date(t).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); };
   const lastName = n => { const w = String(n || "").trim().split(/\s+/).filter(Boolean); return w.length ? w[w.length - 1] : ""; };
   let st = {};
   const base = () => (BASES.includes(st.base) ? st.base : BASES[0]);
