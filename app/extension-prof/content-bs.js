@@ -9,7 +9,7 @@
   if (window.top !== window) return;
   const api = globalThis.browser ?? chrome;
   const RED = "#990000";
-  const SHIELD = (c, s) => `<svg aria-hidden="true" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/></svg>`;
+  const SHIELD = (c, s) => `<svg aria-hidden="true" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 11V7a4 4 0 0 1 8 0v4"/><rect x="5" y="11" width="14" height="10" rx="2" fill="${c}"/><circle cx="12" cy="16" r="1.4" fill="#fff" stroke="none"/></svg>`;
   let me = null;   // { key, base, role: "gate" | "tmp" | "browse" }
   const inject = (r, force, visible) => {
     const u = new URL(api.runtime.getURL("sync.js"));

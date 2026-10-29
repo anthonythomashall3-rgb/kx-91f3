@@ -117,10 +117,9 @@ const money = n => "$" + Number(n).toLocaleString("en-US");
 const money2 = n => "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: Number(n) % 1 ? 2 : 0, maximumFractionDigits: 2 });
 let WAYS = null, TAX = null, PICKED = null, VENMO = null, PO = null, PAYING = false, RENEW = null;
 const PANEL = { zelle: "zsteps", bank: "bpanel", venmo: "vpanel", card: "cpanel", po: "ppanel" }, TAXBOX = { zelle: "ztax", bank: "btax", venmo: "vtax", card: "ctax", po: "ptax" };
-// "LOCKqz $180 / Tax & fees (25%) $60 / Total $240" for one way.
+// One line per way: "LOCKqz  $240" (the total; no tax / fees lines - owner 29 Oct).
 function taxLine(w){ if (!w) return "";
-  if (!TAX || !(w.tax > 0)) return `<div class="taxline"><div class="tot"><span>Total</span><span>${money2(w.total)}</span></div></div>`;
-  return `<div class="taxline"><div><span>LOCKqz</span><span>${money2(w.base)}</span></div><div class="tx"><span>${TAX.label} (${Math.round(TAX.rate * 100)}%)</span><span>+ ${money2(w.tax)}</span></div><div class="tot"><span>Total</span><span>${money2(w.total)}</span></div></div>`; }
+  return `<div class="taxline"><div class="tot"><span>LOCKqz</span><span>${money2(w.total)}</span></div></div>`; }
 // Prices on the buttons (before tax), amounts inside the steps (with tax), and the open way's total up top.
 function prices(){ if (!WAYS || !who) return;
   const w = WAYS, code = who.code;
@@ -131,7 +130,7 @@ function prices(){ if (!WAYS || !who) return;
   if (VENMO) { $("vgo").href = `https://venmo.com/?txn=pay&recipients=${encodeURIComponent(VENMO)}&amount=${encodeURIComponent(w.venmo.total.toFixed(2))}&note=${encodeURIComponent(code)}`; $("vgo").textContent = `Open Venmo · ${money2(w.venmo.total)} to @${VENMO}`; }
   // Card renews each semester (Fall/Spring): said plainly on the button and next to the price, at the real amount.
   $("cgo").textContent = "Pay " + money2(w.card.total) + " by card" + (RENEW ? " · renews each semester" : "");
-  if (PO) { $("pgo").href = `mailto:${PO.to}?subject=${encodeURIComponent("LOCKqz purchase order " + code)}&body=${encodeURIComponent("PO number:\nBilling contact:\nAmount: " + money2(w.po.total) + (TAX && w.po.tax > 0 ? " (LOCKqz " + money2(w.po.base) + " + " + TAX.label.toLowerCase() + " " + money2(w.po.tax) + ")" : "") + "\nMemo: " + code + " (" + PO.email + ")")}`; $("poto").textContent = "To " + PO.to; }
+  if (PO) { $("pgo").href = `mailto:${PO.to}?subject=${encodeURIComponent("LOCKqz purchase order " + code)}&body=${encodeURIComponent("PO number:\nBilling contact:\nAmount: " + money2(w.po.total) + "\nMemo: " + code + " (" + PO.email + ")")}`; $("poto").textContent = "To " + PO.to; }
   if (PICKED) { $("amt").textContent = money2(w[PICKED].total); }
 }
 // Open one way: its steps show and the big price jumps to that way's total (tax included).
@@ -141,7 +140,7 @@ function pick(k){ const open = PICKED !== k || $(PANEL[k]).hidden;
   if (open) { $(PANEL[k]).hidden = false; if ($(k).setAttribute) $(k).setAttribute("aria-expanded", "true"); }
   const w = WAYS && PICKED ? WAYS[PICKED] : null;
   $("amt").textContent = w ? money2(w.total) : money2(WAYS ? WAYS.zelle.total : who ? who.amount : 0);
-  $("incl").hidden = !(w && TAX && w.tax > 0); if (w && TAX && w.tax > 0) $("incl").textContent = `includes ${TAX.label.toLowerCase()} ${money2(w.tax)}`;
+  $("incl").hidden = true;
   const pr = $("price"); pr.className = "price"; void pr.offsetWidth; if (w && WAYS && w.total !== WAYS.zelle.total) pr.className = "price bump"; }
 // Bank transfer: LOCKqz emails the details (account, amount with tax, memo) at once.
 async function bankDetails(email){ const b = $("bsend"); b.disabled = true; b.innerHTML = '<span class="spin"></span>Sending';

@@ -149,7 +149,7 @@ mails.length = 0;
 r = await call(ON, "/pay/bank", { email: "hu@usc.edu" });
 check("sent", r.status === 200 && r.data.sent === true && r.data.amount === 240, JSON.stringify(r.data));
 const m0 = mails.find(m => m.to === "hu@usc.edu");
-check("email: amount with tax line, memo, bank details", m0 && /Amount: \$240\.00/.test(m0.text) && /tax & fees 25% \$60\.00/.test(m0.text) && /Memo \/ reference: LQS/.test(m0.text) && /Routing: 000000000/.test(m0.text), m0 && m0.text);
+check("email: amount (no tax line), memo, bank details", m0 && /Amount: \$240\.00\n/.test(m0.text) && !/tax & fees/i.test(m0.text) && /Memo \/ reference: LQS/.test(m0.text) && /Routing: 000000000/.test(m0.text), m0 && m0.text);
 r = await call(ON, "/pay/bank", { email: "hu@usc.edu" });
 check("second ask within 10 min: no second email", r.data.again === true && mails.filter(m => m.to === "hu@usc.edu").length === 1);
 r = await onRequest({ request: new Request(BASE + "/api/pay/bank", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Pay": SECRET }, body: JSON.stringify({ email: "iv@gmail.com" }) }), env: ON }).then(x => x.json());
@@ -179,8 +179,10 @@ check("+$1,500 -> active", r.results[0].paid === true && (await getc(ON, "/me", 
 console.log("T9 pages");
 const ph = readFileSync(join(CF, "public", "pay.html"), "utf8"), dh = readFileSync(join(CF, "public", "dashboard.html"), "utf8");
 check("pay page: Zelle, then Venmo, then Card (owner 29 Oct 15:46); bank + PO after", ph.indexOf('id="zelle"') > 0 && ph.indexOf('id="zelle"') < ph.indexOf('id="venmo"') && ph.indexOf('id="venmo"') < ph.indexOf('id="card"') && ["id=\"bank\"", "id=\"po\""].every(x => ph.indexOf(x) > ph.indexOf('id="card"')));
-check("pay page: tax line shown when a way is picked", /taxline/.test(ph) && /\/pay\/bank/.test(ph));
-check("dashboard: tax breakdown + bank details button + tour", /PT\.label/.test(dh) && /\/pay\/bank/.test(dh) && /lqTour|startTour/.test(dh));
+check("pay page: one 'LOCKqz <total>' line per way, no tax / fees lines anywhere (owner 29 Oct)", /taxline/.test(ph) && /\/pay\/bank/.test(ph) && !/TAX\.label|includes \$\{TAX/.test(ph));
+{ const dh = readFileSync(join(CF, "public", "dashboard.html"), "utf8");
+  check("professor payment: no tax / fees lines either", !/PT\.label/.test(dh) && /function payTax\(w\)\{ return `<div class="hrow"[^`]*<span>LOCKqz<\/span><span>\$\{money\(w\.total\)\}/.test(dh)); }
+check("dashboard: no tax / fees lines (one LOCKqz total line) + bank details button + tour", !/PT\.label/.test(dh) && /<span>LOCKqz<\/span><span>\$\{money\(w\.total\)\}/.test(dh) && /\/pay\/bank/.test(dh) && /lqTour|startTour/.test(dh));
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -1245,7 +1245,7 @@ export async function onRequest(context) {
     for (const r of due) {
       const email = String(r.email).toLowerCase(), amt = totalOf(r.kind === "student" ? "student" : "professor", "zelle");
       const link = r.kind === "student" ? await payLink(email) : "https://prof.lockqz.pages.dev/";
-      const text = `LOCKqz renews for the new semester.\n\n${r.kind === "student" ? `Pay $${amt.toLocaleString("en-US")}${taxOn() ? ` (includes ${taxInfo().label.toLowerCase()})` : ""} with memo ${r.code}:\n${link}\n\nZelle ${stuZelle()||""} (paste ${r.code} in the Zelle memo/note)${stripeOn() ? "  ·  Card" : ""}${stuVenmo() ? `  ·  Venmo @${stuVenmo()}` : ""}  ·  Bank transfer: email ${stuBank()||""}` : `Pay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nVenmo @${(env.VENMO_HANDLE||"").replace(/^@/,"")}  ·  Zelle ${env.ZELLE_TO||""}`}\n\nAccess turns on as soon as the payment arrives and lasts until ${termEndOf(cur)}.\n\nStop these emails: ${await payLink(email, "&renew=off")}`;
+      const text = `LOCKqz renews for the new semester.\n\n${r.kind === "student" ? `Pay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nZelle ${stuZelle()||""} (paste ${r.code} in the Zelle memo/note)${stripeOn() ? "  ·  Card" : ""}${stuVenmo() ? `  ·  Venmo @${stuVenmo()}` : ""}  ·  Bank transfer: email ${stuBank()||""}` : `Pay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nVenmo @${(env.VENMO_HANDLE||"").replace(/^@/,"")}  ·  Zelle ${env.ZELLE_TO||""}`}\n\nAccess turns on as soon as the payment arrives and lasts until ${termEndOf(cur)}.\n\nStop these emails: ${await payLink(email, "&renew=off")}`;
       try {
         await mailOut(email, "Renew LOCKqz", text, {}, "auto");
         await db.prepare("INSERT OR IGNORE INTO renew_sent (email,term,at) VALUES (?,?,?)").bind(email, cur, now()).run();
@@ -2320,7 +2320,7 @@ export async function onRequest(context) {
       const m = n => "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       const details = String(env.BANK_DETAILS || "").trim();
       const text = `LOCKqz — bank transfer (ACH or wire)\n\n`
-        + `Amount: ${m(w.total)}` + (w.tax > 0 ? `  (LOCKqz ${m(w.base)} + ${taxInfo().label.toLowerCase()} ${Math.round(TAX_RATE * 100)}% ${m(w.tax)})` : "") + `\n`
+        + `Amount: ${m(w.total)}\n`
         + `Memo / reference: ${code}\nPut ${code} in the memo, or LOCKqz can't tell the payment is yours.\n\n`
         + (details ? details + "\n\n" : "LOCKqz's bank account details follow in a separate email.\n\n")
         + `Access turns on by itself within a minute of the money arriving (ACH usually 1–3 business days, wire same day).\n`
