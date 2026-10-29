@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-10-28 20:45 PT — 01UUDg7b: gaps pass: messaging AI bots (WhatsApp/Telegram/Discord/Messenger closed + web hosts), warm AI connections cut at lock (Mac pf <lq_warm> table + state kill; Windows SetTcpEntry + QUIC block), wildcard AI domains (Mac /etc/resolver, Windows NRPT), installers open the pay page. Touches: mac lockqz.sh/extra-block.sh/com.lockqz.pf.conf/install.sh, windows lockqz.ps1/install.ps1/installer.iss, blocklist.txt x2, [[route]].js AI_DOMAINS, tests, VERSION.
 - 2026-10-27 19:40 PT — 01UzHDaF: Google sign-in (students + professors, codes as fallback) still in progress. Touches: [[route]].js (/auth/google/*), dashboard.html login form, mac+windows agents identity step, migrate_036, tests.
 
 ## Recently finished
