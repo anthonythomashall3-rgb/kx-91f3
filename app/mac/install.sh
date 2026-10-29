@@ -161,3 +161,7 @@ echo "Installed. Device id: $DEVICE"
 echo "Helper status:"; curl -s -m 4 -H "X-LOCKqz-Token: $TOKEN" http://127.0.0.1:8787/status || echo "  (daemon still starting — check $DEST/lockqzd.log)"
 echo ""
 echo "Done. Open a Brightspace quiz — LOCKqz asks your school email once, then locks AI automatically."
+# Last step: the semester fee. The pay page opens by itself (the page says "nothing to pay" when no
+# fee is on), so a student never has to remember to come back to the website.
+CONSOLE_USER="$(stat -f %Su /dev/console 2>/dev/null || true)"
+case "$CONSOLE_USER" in ""|root|loginwindow|_*) ;; *) sudo -u "$CONSOLE_USER" open "$SITE/pay" >/dev/null 2>&1 || true ;; esac

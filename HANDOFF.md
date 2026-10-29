@@ -112,7 +112,17 @@ commit as `Claude <noreply@anthropic.com>`). The claude.ai Project "LOCKqz" has 
   results by the agent + Chromium/Firefox policies; AI Overviews cannot be removed without blocking Google search
   (left open by design); DoH/DoT, Tor, VPNs, system proxies, VMs, remote desktop, overlays, local models (apps +
   ports), Apple Intelligence, Gemini in Workspace (`appsgenaiserver-pa.*` blocked).
-- **Known narrow gaps (honest list):**
+- **28 Oct 2026 gaps pass (v0.5.8, session 01UUDg7b):** gaps 1-3 below are CLOSED. (1) Warm connections: the
+  blocklist's hosts are resolved past the hosts block (Mac `warm_resolve`, Windows `lockqz.ps1 warm`, background,
+  12 h) and at lock every connection already open to those addresses is cut (Mac: pf table `<lq_warm>` drops
+  packets of connections pf has no state for + kills tracked states; Windows: `SetTcpEntry` DELETE_TCB) and QUIC
+  to them is dropped; new TCP connections still pass (shared CDN addresses, name lookup already refused).
+  (2) Messaging AI bots: WhatsApp / Telegram / Discord / Messenger desktop apps closed and their web hosts blocked
+  during the quiz (owner decision, same as Notion/Slack). (3) Wildcard AI domains: Mac `/etc/resolver/<domain>`
+  files -> 127.0.0.1 port 1, Windows NRPT rules -> 127.0.0.1, for openai.azure.com, workers.dev, hf.space,
+  modal.run, vercel.app, fly.dev, replit, ngrok, trycloudflare, loca.lt, serveo, pinggy, zrok (never pages.dev).
+  Installers end by opening /pay. test_gaps.sh (47).
+- **Known narrow gaps (list as of 27 Oct; 1-3 closed 28 Oct, see above):**
   1. *Warm connection:* an app LOCKqz does not close (Office, Notion, Slack ...) that already holds an open
      keep-alive HTTPS connection to an AI host when the quiz opens can reuse it until the server idles it out
      (minutes). Browsers' AI tabs are blanked and AI apps killed, so this only applies to AI embedded in a kept-open

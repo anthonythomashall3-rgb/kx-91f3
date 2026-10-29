@@ -39,7 +39,8 @@ AI_APPS=("ChatGPT" "Claude" "Copilot" "Perplexity" "Ollama" "LM Studio" \
          "Open WebUI" "Pinokio" "Witsy" "Reor" \
          "Grok" "Kimi" "Qwen" "Microsoft 365 Copilot" \
          "Codex" "Doubao" "QuillBot" "Elephas" "Highlight" "Fellou" "BrowserOS" "Opera Neon" \
-         "Notion" "Notion Mail" "Notion Calendar" "Canva" "Slack" "Evernote" "Goodnotes" "GoodNotes")   # local-model chat apps (their servers: extra-block.sh); notes apps whose AI cannot be separated (owner, 28 Oct); xAI / Kimi / Qwen / M365 Copilot desktop apps
+         "Notion" "Notion Mail" "Notion Calendar" "Canva" "Slack" "Evernote" "Goodnotes" "GoodNotes" \
+         "WhatsApp" "Telegram" "Discord" "Messenger")   # local-model chat apps (their servers: extra-block.sh); notes apps whose AI cannot be separated (owner, 28 Oct); messaging apps whose AI bots cannot be separated (Meta AI, Telegram/Discord bots; owner, 28 Oct); xAI / Kimi / Qwen / M365 Copilot desktop apps
 
 say() { echo "LOCKqz: $*"; }
 

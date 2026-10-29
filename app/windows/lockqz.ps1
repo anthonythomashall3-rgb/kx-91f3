@@ -10,7 +10,7 @@
 #   "LOCKqz: LOCK FAILED" - it is not (e.g. hosts file not writable)
 #   "LOCKqz: UNLOCKED"    - the hosts block is really gone
 #   "LOCKqz: UNLOCK FAILED"
-param([Parameter(Mandatory=$true)][ValidateSet("lock","unlock","status")]$cmd)
+param([Parameter(Mandatory=$true)][ValidateSet("lock","unlock","status","warm")]$cmd)
 $ErrorActionPreference = "SilentlyContinue"
 
 $Hosts     = "$env:WINDIR\System32\drivers\etc\hosts"
@@ -28,7 +28,8 @@ $AiApps = @("chatgpt","claude","copilot","perplexity","ollama","lmstudio","LM St
             "Msty Studio","Backyard AI","Faraday","Sanctum","Open WebUI","Pinokio","Witsy","Reor","ollama app",
             "grok","kimi","qwen",   # xAI / Kimi / Qwen desktop apps
             "codex","doubao","quillbot","highlight","fellou","browseros","raycast",
-            "Notion","Notion Mail","Notion Calendar","Canva","slack","Evernote","GoodNotes")   # OpenAI Codex, Doubao, QuillBot, Highlight AI, AI browsers, Raycast AI
+            "Notion","Notion Mail","Notion Calendar","Canva","slack","Evernote","GoodNotes",
+            "WhatsApp","Telegram","Discord","Messenger")   # messaging apps whose AI bots cannot be separated (Meta AI, Telegram/Discord bots; owner, 28 Oct). OpenAI Codex, Doubao, QuillBot, Highlight AI, AI browsers, Raycast AI
 # Non-browser routes to AI or a human helper, all closed during the quiz:
 $VmApps     = @("Parallels","prl_vm_app","vmware","vmware-vmx","VirtualBox","VirtualBoxVM","VBoxHeadless","qemu-system-x86_64","qemu-system-aarch64","vmwp","vmms","Docker Desktop","com.docker.backend",
                 "WindowsSandbox","WindowsSandboxClient","WindowsSandboxServer","WindowsSandboxRemoteSession","wsl","wslhost","wslrelay")
@@ -70,6 +71,26 @@ $FwRules = @(
   @{ n = "$FwTag-vpn-udp"; p = @{ Protocol = "UDP"; RemotePort = $VpnPorts } },
   @{ n = "$FwTag-vpn-tcp"; p = @{ Protocol = "TCP"; RemotePort = 1194 } }
 )
+# Wildcard AI domains (28 Oct 2026): the hosts file cannot block a whole domain, so a per-customer AI
+# endpoint (<name>.openai.azure.com, a chat proxy on *.workers.dev / *.hf.space / *.vercel.app, a
+# tunnel to a model at home) used by a CLI or desktop app stayed open. While locked, one NRPT rule per
+# domain sends every name under it to 127.0.0.1, where nothing answers: the lookup fails at once for
+# every program that uses Windows DNS. Browsers never needed this (their policies block the subdomains).
+# Never pages.dev (LOCKqz itself lives there). Same list as app/mac/extra-block.sh WILD_DOMAINS.
+$WildDomains = @("openai.azure.com","cognitiveservices.azure.com","services.ai.azure.com","inference.ai.azure.com","ai.azure.com",
+                 "workers.dev","hf.space","modal.run","vercel.app","fly.dev","replit.dev","replit.app","repl.co",
+                 "ngrok.io","ngrok-free.app","ngrok.app","ngrok.dev","ngrok-free.dev","trycloudflare.com","loca.lt","serveo.net",
+                 "localhost.run","pinggy.link","pinggy.io","zrok.io")
+$WildTag = "LOCKqz-wild"
+# Warm connections (28 Oct 2026): an app LOCKqz does not close (Office, a PDF reader ...) that already
+# held an open keep-alive connection to an AI host when the quiz opened could keep using it: the hosts
+# file only stops NEW name lookups. "warm" resolves the blocklist's hosts (past the hosts file) into
+# $WarmFile in the background (at most every 12 h); each lock pass kills every established IPv4 TCP
+# connection to one of those addresses (SetTcpEntry, once per list version) and blocks QUIC (UDP 443)
+# to them so browsers fall back to TCP. New TCP connections still pass: a shared CDN address also
+# serves Brightspace/LOCKqz, and a new connection needs a name lookup, which the hosts block refuses.
+$WarmFile = "$StateDir\warm_ips.txt"
+$WarmMaxAge = 43200
 # Latin-1 maps every byte to one char and back, so a hosts file in any encoding round-trips untouched.
 $Latin1 = [Text.Encoding]::GetEncoding(28591)
 
@@ -122,6 +143,87 @@ function Ensure-FirewallRules {
     New-NetFirewallRule -DisplayName $r.n -Direction Outbound -Action Block @p | Out-Null
   }
 }
+function Wild-On {
+  $have = @(Get-DnsClientNrptRule -ErrorAction SilentlyContinue | Where-Object { $_.Comment -eq $WildTag } | ForEach-Object { $_.Namespace })
+  foreach ($d in $WildDomains) {
+    if ($d -like "*pages.dev") { continue }
+    if ($have -contains ".$d") { continue }
+    Add-DnsClientNrptRule -Namespace ".$d" -NameServers "127.0.0.1" -Comment $WildTag -ErrorAction SilentlyContinue | Out-Null
+  }
+}
+function Wild-Off {
+  Get-DnsClientNrptRule -ErrorAction SilentlyContinue | Where-Object { $_.Comment -eq $WildTag } | Remove-DnsClientNrptRule -Force -ErrorAction SilentlyContinue
+}
+function Warm-Resolve {   # writes $WarmFile atomically; runs in the background (lockqz.ps1 warm)
+  $ips = New-Object System.Collections.Generic.HashSet[string]
+  foreach ($d in (Get-Domains)) {
+    foreach ($t in "A","AAAA") {
+      foreach ($r in (Resolve-DnsName -Name $d -Type $t -NoHostsFile -DnsOnly -QuickTimeout -ErrorAction SilentlyContinue)) {
+        $ip = [string]$r.IPAddress
+        if (-not $ip) { continue }
+        if ($ip -match '^(0\.|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.)' -or $ip -eq '::1' -or $ip -match '^(fe80|fc|fd)') { continue }
+        [void]$ips.Add($ip)
+      }
+    }
+  }
+  if ($ips.Count -eq 0) { return }
+  New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
+  $tmp = "$WarmFile.tmp"
+  [IO.File]::WriteAllLines($tmp, [string[]]($ips | Sort-Object))
+  Move-Item -Force $tmp $WarmFile
+}
+function Warm-KillTcp($ips) {   # established IPv4 TCP connections to $ips -> closed (MIB_TCP_STATE_DELETE_TCB)
+  if (-not ("LOCKqz.Tcp" -as [type])) {
+    Add-Type -Namespace LOCKqz -Name Tcp -MemberDefinition @"
+[StructLayout(LayoutKind.Sequential)] public struct MIB_TCPROW { public int dwState; public int dwLocalAddr; public int dwLocalPort; public int dwRemoteAddr; public int dwRemotePort; }
+[DllImport("iphlpapi.dll")] public static extern int SetTcpEntry(ref MIB_TCPROW row);
+"@ -ErrorAction SilentlyContinue
+  }
+  $set = New-Object System.Collections.Generic.HashSet[string]
+  foreach ($ip in $ips) { [void]$set.Add([string]$ip) }
+  $n = 0
+  foreach ($c in (Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue)) {
+    if (-not $set.Contains([string]$c.RemoteAddress)) { continue }
+    if ($c.RemoteAddress -notmatch '^\d+\.\d+\.\d+\.\d+$') { continue }
+    try {
+      $row = New-Object LOCKqz.Tcp+MIB_TCPROW
+      $row.dwState = 12
+      $row.dwLocalAddr  = [BitConverter]::ToInt32(([Net.IPAddress]$c.LocalAddress).GetAddressBytes(), 0)
+      $row.dwRemoteAddr = [BitConverter]::ToInt32(([Net.IPAddress]$c.RemoteAddress).GetAddressBytes(), 0)
+      $row.dwLocalPort  = ((($c.LocalPort -band 0xff) -shl 8) -bor (($c.LocalPort -shr 8) -band 0xff))
+      $row.dwRemotePort = ((($c.RemotePort -band 0xff) -shl 8) -bor (($c.RemotePort -shr 8) -band 0xff))
+      if ([LOCKqz.Tcp]::SetTcpEntry([ref]$row) -eq 0) { $n++ }
+    } catch {}
+  }
+  return $n
+}
+function Warm-Apply {
+  $marker = "$StateDir\warm.applied"
+  if (Test-Path $WarmFile) {
+    $ips = @(Get-Content $WarmFile -ErrorAction SilentlyContinue | Where-Object { $_ })
+    if ($ips.Count -gt 0) {
+      $fresh = (-not (Test-Path $marker)) -or ((Get-Item $WarmFile).LastWriteTimeUtc -gt (Get-Item $marker).LastWriteTimeUtc)
+      if ($fresh) {
+        Get-NetFirewallRule -DisplayName "$FwTag-warm-quic" -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+        New-NetFirewallRule -DisplayName "$FwTag-warm-quic" -Direction Outbound -Action Block -Protocol UDP -RemotePort 443 -RemoteAddress $ips -ErrorAction SilentlyContinue | Out-Null
+        Warm-KillTcp $ips | Out-Null
+        New-Item -ItemType File -Force -Path $marker | Out-Null
+      } elseif (-not (Get-NetFirewallRule -DisplayName "$FwTag-warm-quic" -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName "$FwTag-warm-quic" -Direction Outbound -Action Block -Protocol UDP -RemotePort 443 -RemoteAddress $ips -ErrorAction SilentlyContinue | Out-Null
+      }
+    }
+  }
+  $stale = (-not (Test-Path $WarmFile)) -or (((Get-Date).ToUniversalTime() - (Get-Item $WarmFile).LastWriteTimeUtc).TotalSeconds -gt $WarmMaxAge)
+  $busy = "$WarmFile.refreshing"
+  if ($stale -and (-not (Test-Path $busy) -or ((Get-Date).ToUniversalTime() - (Get-Item $busy).LastWriteTimeUtc).TotalMinutes -gt 10)) {
+    New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
+    New-Item -ItemType File -Force -Path $busy | Out-Null
+    Start-Process -WindowStyle Hidden -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$($MyInvocation.ScriptName)`" warm" -ErrorAction SilentlyContinue
+  }
+}
+function Warm-Clear {
+  Remove-Item -LiteralPath "$StateDir\warm.applied" -Force -ErrorAction SilentlyContinue
+}
 function Policy($verb) {
   if (-not (Test-Path $Policy)) { return "" }
   return ((& powershell -NoProfile -ExecutionPolicy Bypass -File $Policy $verb) -join "`n")
@@ -129,6 +231,7 @@ function Policy($verb) {
 function Do-Lock {
   if (Is-Locked) {
     Kill-AiAndTools
+    Wild-On; Warm-Apply
     # Policies removed by hand mid-quiz -> put them back (browser-policy keeps the first backup).
     if ((Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Google\Chrome").LOCKqzManaged -ne 1) { Policy "lock" | Out-Null }
     "LOCKqz: LOCKED (re-applied, apps re-closed)"; return
@@ -140,6 +243,8 @@ function Do-Lock {
 
   # Firewall backup: DoT/DoQ + known DoH resolvers, local AI model servers, VPN protocols.
   Ensure-FirewallRules
+  # Wildcard AI domains (NRPT) + connections already open to AI hosts.
+  Wild-On; Warm-Apply
 
   # Browser AI + AI search answers + extensions off, Windows Copilot/Recall/Click to Do off (quiz only).
   $pol = Policy "lock"
@@ -159,6 +264,7 @@ function Do-Unlock {
     ipconfig /flushdns | Out-Null
   }
   Get-NetFirewallRule -DisplayName "$FwTag-*" -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+  Wild-Off; Warm-Clear
   # Restores exactly the policy values that were there before the quiz (nothing if none were changed).
   $pol = Policy "unlock"
   if ($pol -match "incomplete") { "LOCKqz: policy restore pending ($pol)" }
@@ -169,4 +275,5 @@ switch ($cmd) {
   "lock"   { Do-Lock }
   "unlock" { Do-Unlock }
   "status" { if (Is-Locked) { "LOCKqz: LOCKED" } else { "LOCKqz: unlocked" } }
+  "warm"   { try { Warm-Resolve } finally { Remove-Item -LiteralPath "$WarmFile.refreshing" -Force -ErrorAction SilentlyContinue } }
 }

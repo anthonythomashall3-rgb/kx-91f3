@@ -76,7 +76,7 @@ const AI_DOMAINS = [
   "mail.notion.so","calendar.notion.so","canva.com","www.canva.com","static.canva.com","canva.cn","quizlet.com","www.quizlet.com",
   "assets.quizlet.com","api.quizlet.com","slack.com","app.slack.com","edgeapi.slack.com","wss-primary.slack.com","wss-backup.slack.com","slack-edge.com",
   "a.slack-edge.com","slack-msgs.com","files.slack.com","evernote.com","www.evernote.com","update.evernote.com","goodnotes.com","www.goodnotes.com",
-  "web.goodnotes.com"
+  "web.goodnotes.com","whatsapp.com","www.whatsapp.com","web.whatsapp.com","telegram.org","web.telegram.org","discord.com","discordapp.com","messenger.com","www.messenger.com"
 ];
 const now = () => new Date().toISOString();
 // "Today" in America/Los_Angeles as YYYY-MM-DD, so a professor stays active through the end of their

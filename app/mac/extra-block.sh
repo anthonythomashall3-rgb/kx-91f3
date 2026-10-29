@@ -3,8 +3,8 @@
 # quiz is locked and fully undone at unlock. It closes the non-browser routes to AI and to a human
 # helper: VPNs, virtual machines, remote-desktop/screen-share tools, invisible-overlay cheat apps,
 # local AI model servers, Apple Intelligence (Writing Tools / Genmoji / Image Playground / Siri
-# ChatGPT) and the Mac's built-in AirPlay Receiver (a phone mirrored to the Mac has no process to
-# kill). Nothing is merely logged -- each route is closed. Honour LOCKQZ_DRYRUN=1 to preview.
+# ChatGPT), the Mac's built-in AirPlay Receiver (a phone mirrored to the Mac has no process to
+# kill), wildcard AI domains (resolver files) and connections already open to AI hosts (pf table). Nothing is merely logged -- each route is closed. Honour LOCKQZ_DRYRUN=1 to preview.
 
 # --- app/process kill lists (name-matched, case-insensitive) ---
 VM_APPS=("Parallels Desktop" "prl_vm_app" "UTM" "VirtualBox" "VirtualBoxVM" "VBoxHeadless" \
@@ -242,6 +242,100 @@ airplay_receiver_restore() {
   return $rc
 }
 
+# --- Wildcard AI domains (28 Oct 2026) ---
+# /etc/hosts cannot block a whole domain, so a per-customer AI endpoint (<name>.openai.azure.com, a
+# chat proxy on *.workers.dev / *.hf.space / *.vercel.app, a tunnel to a model at home) used by a CLI
+# or desktop app stayed open. While locked, one resolver file per domain (resolver(5)) sends every name
+# under it to 127.0.0.1 port 1, where nothing answers: the lookup fails at once for every program
+# that uses the system resolver. Browsers never needed this (their policies block the subdomains).
+# Never pages.dev (LOCKqz itself lives there). A resolver file the student made is never touched.
+WILD_DOMAINS=(openai.azure.com cognitiveservices.azure.com services.ai.azure.com inference.ai.azure.com ai.azure.com \
+              workers.dev hf.space modal.run vercel.app fly.dev replit.dev replit.app repl.co \
+              ngrok.io ngrok-free.app ngrok.app ngrok.dev ngrok-free.dev trycloudflare.com loca.lt serveo.net \
+              localhost.run pinggy.link pinggy.io zrok.io)
+RESOLVER_DIR="${RESOLVER_DIR:-/etc/resolver}"
+WILD_MARK="# LOCKqz quiz lock - removed at unlock"
+wild_block_on() {
+  local d rc=0 new=0
+  mkdir -p "$RESOLVER_DIR" 2>/dev/null || return 1
+  for d in "${WILD_DOMAINS[@]}"; do
+    case "$d" in pages.dev|*.pages.dev) continue ;; esac
+    if [ -f "$RESOLVER_DIR/$d" ] && ! grep -q "^$WILD_MARK" "$RESOLVER_DIR/$d" 2>/dev/null; then continue; fi
+    [ -f "$RESOLVER_DIR/$d" ] && continue
+    printf '%s\nnameserver 127.0.0.1\nport 1\n' "$WILD_MARK" > "$RESOLVER_DIR/$d" 2>/dev/null && new=1 || rc=1
+  done
+  [ "$new" = 1 ] && killall -HUP mDNSResponder 2>/dev/null   # pick the new resolver files up now
+  return $rc
+}
+wild_block_off() {
+  local d rc=0 gone=0
+  for d in "${WILD_DOMAINS[@]}"; do
+    [ -f "$RESOLVER_DIR/$d" ] || continue
+    grep -q "^$WILD_MARK" "$RESOLVER_DIR/$d" 2>/dev/null || continue
+    rm -f "$RESOLVER_DIR/$d" 2>/dev/null && gone=1 || rc=1
+  done
+  [ "$gone" = 1 ] && killall -HUP mDNSResponder 2>/dev/null
+  for d in "${WILD_DOMAINS[@]}"; do [ -f "$RESOLVER_DIR/$d" ] && grep -q "^$WILD_MARK" "$RESOLVER_DIR/$d" 2>/dev/null && rc=1; done
+  return $rc
+}
+
+# --- Warm connections to AI hosts (28 Oct 2026) ---
+# An app LOCKqz does not close (Office, a PDF reader ...) that already held an open keep-alive
+# connection to an AI host when the quiz opened could keep using it: /etc/hosts only stops NEW name
+# lookups. Closed here: the blocklist's hosts are resolved (A + AAAA, straight to the real DNS servers,
+# so it works after the hosts block too) into $WARM_IPS, loaded into the pf table <lq_warm>
+# (com.lockqz.pf.conf): a packet of a TCP connection pf has no state for (= opened before the lock) is
+# dropped, QUIC to those addresses is dropped (browsers fall back to TCP), and the states pf does hold
+# are killed once. New TCP connections still pass - a shared CDN address also serves Brightspace or
+# LOCKqz, and a new connection needs a name lookup, which the hosts block already refuses.
+# The address list is refreshed in the background at most every 12 h; the first lock on a Mac
+# protects from the first refresh on (seconds), re-applied by the 5-second lock loop.
+: "${STATE:=/Library/Application Support/LOCKqz}"; : "${PF_ANCHOR:=com.lockqz}"
+: "${BLOCKLIST:=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/blocklist.txt}"
+WARM_IPS="${WARM_IPS:-$STATE/warm_ips}"
+WARM_MAX_AGE=43200
+warm_resolve() {   # -> $WARM_IPS (written atomically); exit 1 when dig is missing or nothing resolved
+  local tmp="$WARM_IPS.tmp.$$"
+  command -v dig >/dev/null 2>&1 || return 1
+  domains_from "$BLOCKLIST" | sort -u | \
+    xargs -P 48 -I{} sh -c 'dig +short +time=2 +tries=1 A "$1" 2>/dev/null; dig +short +time=2 +tries=1 AAAA "$1" 2>/dev/null' _ {} 2>/dev/null \
+    | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[0-9a-fA-F:]*:[0-9a-fA-F:]*$' \
+    | grep -vE '^(0\.|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.|::1$|fe80:|fc|fd)' | sort -u > "$tmp"
+  [ -s "$tmp" ] || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$WARM_IPS"
+}
+_warm_age() {   # seconds since the file changed (macOS stat; GNU stat in the Linux tests)
+  local m
+  if [ "$(uname)" = Darwin ]; then m=$(stat -f %m "$1" 2>/dev/null); else m=$(stat -c %Y "$1" 2>/dev/null); fi
+  case "$m" in ''|*[!0-9]*) m=0 ;; esac
+  echo $(( $(date +%s) - m ))
+}
+warm_kill_states() {   # kill the states pf already holds to the listed addresses (once per lock)
+  local ip
+  while read -r ip; do
+    [ -z "$ip" ] && continue
+    case "$ip" in *:*) pfctl -k ::/0 -k "$ip" >/dev/null 2>&1 ;; *) pfctl -k 0.0.0.0/0 -k "$ip" >/dev/null 2>&1 ;; esac
+  done < "$WARM_IPS"
+}
+warm_apply() {   # called on every lock pass (5 s): cheap unless the list changed
+  local rc=0
+  # The table is reloaded on every pass: load_pf re-reads the ruleset each time, and a ruleset load
+  # resets a table to its (empty) definition. The state kill runs once per list version.
+  if [ -s "$WARM_IPS" ]; then
+    if pfctl -a "$PF_ANCHOR" -t lq_warm -T replace -f "$WARM_IPS" >/dev/null 2>&1; then
+      if [ ! -f "$STATE/warm.loaded" ] || [ "$WARM_IPS" -nt "$STATE/warm.loaded" ]; then warm_kill_states; touch "$STATE/warm.loaded"; fi
+    else rc=1; fi
+  fi
+  if [ ! -s "$WARM_IPS" ] || [ "$(_warm_age "$WARM_IPS")" -gt "$WARM_MAX_AGE" ]; then
+    if [ ! -f "$WARM_IPS.refreshing" ] || [ "$(_warm_age "$WARM_IPS.refreshing")" -gt 600 ]; then
+      touch "$WARM_IPS.refreshing"
+      ( warm_resolve; rm -f "$WARM_IPS.refreshing" ) >/dev/null 2>&1 &
+    fi
+  fi
+  return $rc
+}
+warm_clear() { rm -f "$STATE/warm.loaded" 2>/dev/null; pfctl -a "$PF_ANCHOR" -t lq_warm -T flush >/dev/null 2>&1 || true; }
+
 extra_lock() {
   if [ "$DRYRUN" = "1" ]; then
     xb_say "[dry-run] extra blockers:"
@@ -250,6 +344,7 @@ extra_lock() {
     _kill_list "local-model" "${LOCAL_MODEL_PROCS[@]}"; _kill_cmd_res "${LOCAL_MODEL_CMD_RES[@]}"
     _kill_if_tunnel "${VPN_IF_TUNNEL[@]}"; _kill_list "Apple Intelligence" "${APPLE_AI_APPS[@]}"
     apple_intelligence_off; proxies_off; airplay_receiver_off
+    echo "    [dry-run] would write ${#WILD_DOMAINS[@]} resolver files (wildcard AI domains) in $RESOLVER_DIR and load the AI addresses into pf <lq_warm> (warm connections)"
     echo "    [dry-run] pf already blocks local-model + VPN ports (com.lockqz.pf.conf)"
     return 0
   fi
@@ -265,6 +360,8 @@ extra_lock() {
   apple_intelligence_off || rc=1
   airplay_receiver_off || rc=1
   proxies_off || true
+  wild_block_on || rc=1
+  warm_apply || rc=1
   return $rc
 }
 
@@ -275,6 +372,8 @@ extra_unlock() {
   apple_intelligence_on || rc=1
   airplay_receiver_restore || rc=1
   proxies_restore || true
+  wild_block_off || rc=1
+  warm_clear
   rm -f "$PROXY_KEPT" 2>/dev/null || true
   return $rc
 }

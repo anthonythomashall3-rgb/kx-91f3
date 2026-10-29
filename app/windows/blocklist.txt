@@ -671,3 +671,13 @@ update.evernote.com
 goodnotes.com
 www.goodnotes.com
 web.goodnotes.com
+# Messaging apps whose AI bots cannot be separated from the chat (Meta AI in WhatsApp/Messenger, Telegram and Discord bots); owner decision 28 Oct 2026: closed during the quiz like Notion/Slack
+whatsapp.com
+www.whatsapp.com
+web.whatsapp.com
+telegram.org
+web.telegram.org
+discord.com
+discordapp.com
+messenger.com
+www.messenger.com

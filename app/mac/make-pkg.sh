@@ -102,6 +102,9 @@ if [ "$PY_OK" = 0 ]; then
   echo "LOCKqz: Apple's Command Line Tools could not be installed. Run: xcode-select --install, then this installer again."
   exit 1
 fi
+# Last step: the semester fee page opens by itself (it says "nothing to pay" when no fee is on).
+CONSOLE_USER="$(stat -f %Su /dev/console 2>/dev/null || true)"
+case "$CONSOLE_USER" in ""|root|loginwindow|_*) ;; *) sudo -u "$CONSOLE_USER" open "https://lockqz.pages.dev/pay" >/dev/null 2>&1 || true ;; esac
 exit 0
 POST
 chmod +x "$SCRIPTS/postinstall"

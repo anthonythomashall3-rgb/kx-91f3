@@ -186,3 +186,6 @@ try {
   Write-Host ("Helper status: " + ($s | ConvertTo-Json -Compress))
 } catch { Write-Host "Daemon still starting - re-check http://127.0.0.1:8787/status in a few seconds." }
 Write-Host "Done. Open a Brightspace quiz - LOCKqz asks your school email once, then locks AI automatically."
+# Last step: the semester fee page opens by itself (it says "nothing to pay" when no fee is on), so a
+# student never has to remember to come back to the website.
+try { Start-Process "$Site/pay" -ErrorAction SilentlyContinue } catch {}
