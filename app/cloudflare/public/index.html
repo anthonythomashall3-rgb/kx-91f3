@@ -19,7 +19,6 @@
   .or{display:flex;align-items:center;gap:14px;margin:18px 0;color:#999;font-weight:700;font-size:13px;letter-spacing:.1em}
   .or::before,.or::after{content:"";flex:1;border-top:1px solid #ddd}
   a.btn{display:block;background:var(--usc);color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:700;font-size:15px;text-align:center;margin:0 0 12px}
-  .need{color:#7a1414;font-size:13px;margin:20px 0 0}
   footer{margin-top:22px;font-size:13px}
   footer a{color:#777}
   .none{color:#777}
@@ -93,7 +92,10 @@
         <ol id="dlol"></ol>
       </div>
 
-      <p class="need" id="warnbox">Required to open your Brightspace exams.</p>
+      <div id="warnbox" style="display:flex;align-items:center;gap:10px;margin:20px 0 0;padding:12px 14px;border:1px solid #f0c9c9;background:#fff6f6;border-radius:10px;text-align:left">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#990000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none"><rect x="3" y="11" width="18" height="10" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+        <span style="font-size:13.5px;color:#7a1414;font-weight:600">Install + payment required to open your Brightspace exams.</span>
+      </div>
     </div>
 
     <p class="none" id="nope" hidden>Open this page on the Mac or Windows computer you take quizzes on.</p>
