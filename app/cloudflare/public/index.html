@@ -5,19 +5,22 @@
 <style>
   :root { --usc:#990000; }
   html,body{min-height:100%} body{margin:0;display:grid;place-items:center;font:16px -apple-system,Segoe UI,sans-serif;background:#fafafa;color:#111}
-  .card{text-align:center;max-width:460px;padding:24px 20px 32px;box-sizing:border-box;width:100%}
-  h1{color:var(--usc);font-size:42px;margin:0 0 6px;letter-spacing:-1px}
-  .tag{color:#777;font-size:14px;margin:0 0 26px}
-  .lead{font-weight:700;font-size:15px;margin:0 0 8px}
-  .cmd{display:flex;align-items:stretch;gap:0;border:1px solid #ddd;border-radius:10px;overflow:hidden;background:#fff}
-  .cmd code{flex:1;padding:13px 14px;font:13px ui-monospace,Menlo,Consolas,monospace;color:#222;text-align:left;word-break:break-all;user-select:all;background:#f6f6f6}
+  .card{text-align:center;max-width:440px;padding:24px 20px 32px;box-sizing:border-box;width:100%}
+  h1{color:var(--usc);font-size:42px;margin:0 0 4px;letter-spacing:-1px}
+  .tag{color:#777;font-size:14px;margin:0 0 28px}
+  .opt{background:#fff;border:1px solid #e3e3e3;border-radius:14px;padding:18px 16px 20px;text-align:left}
+  .opt h2{font-size:16px;margin:0 0 10px;text-align:center}
+  .opt ol{margin:0;padding-left:22px;line-height:1.6;font-size:14.5px}
+  .opt li+li{margin-top:4px}
+  .cmd{display:flex;align-items:stretch;border:1px solid #ddd;border-radius:10px;overflow:hidden;background:#fff;margin:8px 0}
+  .cmd code{flex:1;padding:12px 12px;font:13px ui-monospace,Menlo,Consolas,monospace;color:#222;text-align:left;word-break:break-all;user-select:all;background:#f6f6f6}
   .cmd button{border:0;border-left:1px solid #ddd;background:var(--usc);color:#fff;font-weight:700;font-size:13px;padding:0 16px;cursor:pointer;white-space:nowrap}
   .cmd button:active{opacity:.85}
-  .hint{color:#777;font-size:13px;margin:8px 0 0}
-  .or{margin:26px 0 0;border-top:1px solid #eee;padding-top:20px}
-  a.btn{display:inline-block;background:#fff;color:var(--usc);border:2px solid var(--usc);text-decoration:none;padding:11px 26px;border-radius:10px;font-weight:700;font-size:15px}
-  .warn{color:#777;font-size:12.5px;margin:9px 0 0;line-height:1.5}
-  footer{margin-top:24px;font-size:13px}
+  .or{display:flex;align-items:center;gap:14px;margin:18px 0;color:#999;font-weight:700;font-size:13px;letter-spacing:.1em}
+  .or::before,.or::after{content:"";flex:1;border-top:1px solid #ddd}
+  a.btn{display:block;background:var(--usc);color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:700;font-size:15px;text-align:center;margin:0 0 12px}
+  .need{color:#7a1414;font-size:13px;margin:20px 0 0}
+  footer{margin-top:22px;font-size:13px}
   footer a{color:#777}
   .none{color:#777}
   /* gear icon (top right) -> Account + Settings (account.js) */
@@ -68,25 +71,29 @@
     <p class="tag" id="os"></p>
 
     <div id="install" hidden>
-      <div id="store" hidden style="margin:0 0 24px"><a class="btn" id="storebtn" href="#" style="background:var(--usc);color:#fff">Get LOCKqz from Microsoft Store</a></div>
-      <p class="lead" id="lead">Install in one step:</p>
-      <p class="hint" id="how"></p>
-      <div class="cmd"><code id="cmd"></code><button id="copy" type="button">Copy</button></div>
-      <p class="hint" id="pw"></p>
-      <p class="hint" id="ok">Click OK or Allow on every prompt it shows.</p>
-      <div id="warnbox" style="display:flex;align-items:center;gap:10px;margin:18px 0 0;padding:12px 14px;border:1px solid #f0c9c9;background:#fff6f6;border-radius:10px;text-align:left">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#990000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none"><rect x="3" y="11" width="18" height="10" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-        <span style="font-size:13.5px;color:#7a1414;font-weight:600">You won’t be able to open your Brightspace exams unless you finish these steps.</span>
+      <div id="store" hidden style="margin:0 0 18px"><a class="btn" id="storebtn" href="#">Get LOCKqz from Microsoft Store</a></div>
+
+      <div class="opt">
+        <h2 id="lead">Paste one command</h2>
+        <ol>
+          <li id="how"></li>
+          <li>Paste this, press <b id="enter">Return</b>:
+            <div class="cmd"><code id="cmd"></code><button id="copy" type="button">Copy</button></div>
+          </li>
+          <li id="pw"></li>
+          <li id="ok">Click <b>OK or Allow</b> on every prompt.</li>
+        </ol>
       </div>
 
-      <div class="or">
-        <a class="btn" id="dl" href="#">Or download the installer</a>
-        <div id="dlsteps" hidden style="text-align:left;margin:16px 0 0">
-          <p style="font-weight:700;font-size:13px;margin:0 0 6px" id="dlhead">After it downloads:</p>
-          <ol id="dlol" style="margin:0;padding-left:20px;font-size:13px;color:#555;line-height:1.55"></ol>
-        </div>
-        <p class="warn" id="warn"></p>
+      <div class="or" id="orline">OR</div>
+
+      <div class="opt" id="dlbox">
+        <h2>Download the installer</h2>
+        <a class="btn" id="dl" href="#">Download</a>
+        <ol id="dlol"></ol>
       </div>
+
+      <p class="need" id="warnbox">Required to open your Brightspace exams.</p>
     </div>
 
     <p class="none" id="nope" hidden>Open this page on the Mac or Windows computer you take quizzes on.</p>
@@ -106,27 +113,25 @@
     $("install").hidden = false;
     if (mac) {
       $("os").textContent = "for macOS";
-      $("how").textContent = "Open Terminal (press ⌘+Space, type Terminal, press Return), paste this, press Return:";
+      $("how").innerHTML = "Open <b>Terminal</b> (press <b>\u2318 Space</b>, type Terminal, press Return).";
+      $("enter").textContent = "Return";
       $("cmd").textContent = "curl -fsSL " + site + "/install.sh | sudo bash";
-      $("pw").textContent = "It asks for your Mac password once (typing stays hidden) — that is macOS, not us.";
+      $("pw").textContent = "Type your Mac password (it stays hidden), press Return.";
       $("dl").href = "/download/lockqz-mac.pkg";
-      $("warn").textContent = "";
-      $("dlhead").textContent = "After lockqz-mac.pkg downloads:";
-      $("dlol").innerHTML = ["Open your Downloads folder and double-click <b>lockqz-mac.pkg</b>.", "If macOS says it can\u2019t be opened: <b>System Settings \u2192 Privacy &amp; Security \u2192 Open Anyway</b>, then open it again.", "Follow the installer and enter your Mac password when it asks.", "When it finishes you can close the installer \u2014 LOCKqz is set up."].map(function (x) { return "<li>" + x + "</li>"; }).join("");
-      $("dlsteps").hidden = false;
+      $("dl").textContent = "Download for Mac";
+      $("dlol").innerHTML = ["Open <b>lockqz-mac.pkg</b> from Downloads.", "If it won\u2019t open: <b>System Settings \u2192 Privacy &amp; Security \u2192 Open Anyway</b>.", "Follow the installer. Enter your Mac password when asked."].map(function (x) { return "<li>" + x + "</li>"; }).join("");
     } else {
       $("os").textContent = "for Windows";
-      $("how").textContent = "Open PowerShell as administrator (press Start, type PowerShell, right-click it → Run as administrator), paste this, press Enter:";
+      $("how").innerHTML = "Press <b>Start</b>, type PowerShell, right-click it \u2192 <b>Run as administrator</b>.";
+      $("enter").textContent = "Enter";
       $("cmd").textContent = "irm " + site + "/install.ps1 | iex";
-      $("pw").textContent = "";
+      $("pw").textContent = "Click Yes if Windows asks for permission.";
       $("dl").href = "/download/lockqz-win.exe";
-      $("warn").textContent = "";
-      $("dlhead").textContent = "After lockqz-win.exe downloads:";
-      $("dlol").innerHTML = ["Open your Downloads folder and double-click <b>lockqz-win.exe</b>.", "If Windows SmartScreen appears: click <b>More info \u2192 Run anyway</b>.", "Click <b>Yes</b> on the Windows permission (UAC) prompt.", "Follow the installer \u2014 when it finishes, LOCKqz is set up."].map(function (x) { return "<li>" + x + "</li>"; }).join("");
-      $("dlsteps").hidden = false;
+      $("dl").textContent = "Download for Windows";
+      $("dlol").innerHTML = ["Open <b>lockqz-win.exe</b> from Downloads.", "If SmartScreen appears: <b>More info \u2192 Run anyway</b>.", "Click <b>Yes</b>, then follow the installer."].map(function (x) { return "<li>" + x + "</li>"; }).join("");
       if (STORE_ID) {
         $("store").hidden = false; $("storebtn").href = "https://apps.microsoft.com/detail/" + STORE_ID;
-        $("lead").textContent = "Or install with one command:";
+        $("lead").textContent = "Or paste one command";
       }
     }
     // Pages answers a missing file with this page (HTML, status 200). Only offer what is really published.
@@ -135,7 +140,7 @@
     };
     var one = mac ? "install.sh" : "install.ps1", rel = "/download/" + (mac ? "mac/" : "windows/") + one;
     served("/" + one, function (ok) { if (!ok) served(rel, function (ok2) { if (ok2) $("cmd").textContent = $("cmd").textContent.replace(site + "/" + one, site + rel); }); });
-    served($("dl").getAttribute("href"), function (ok) { if (!ok) { $("dl").hidden = true; $("warn").hidden = true; $("dlsteps").hidden = true; } });
+    served($("dl").getAttribute("href"), function (ok) { if (!ok) { $("dlbox").hidden = true; $("orline").hidden = true; } });
   } else {
     $("nope").hidden = false;
   }
