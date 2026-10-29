@@ -699,7 +699,7 @@ function renderPay(){ const d=PAY, el=$("pay"); if(!el||!d) return;
   const note=d.memo, got=Number(d.received)||0, base=d.amount??d.price;
   const fx = n => ({ total:n, base:n, tax:0 });
   PW = d.ways || { zelle:fx(base), bank:fx(base), venmo:fx(base), po:fx(base), card:fx(d.stripe?d.stripe.card:base) }; PT = d.tax || null;
-  const ways = [d.stripe&&["card","Card","Instant"], d.venmo&&["venmo","Venmo","Memo filled in"], d.zelle&&["zelle","Zelle","Lowest price · arrives in minutes"], d.invoice&&["bank","Bank transfer (ACH / wire)","Bank details emailed to you"], d.po&&["po","Purchase order (PO)","Your department pays"]].filter(Boolean);
+  const ways = [d.zelle&&["zelle","Zelle","Lowest price · arrives in minutes"], d.stripe&&["card","Card","Instant"], d.venmo&&["venmo","Venmo","Memo filled in"], d.invoice&&["bank","Bank transfer (ACH / wire)","Bank details emailed to you"], d.po&&["po","Purchase order (PO)","Your department pays"]].filter(Boolean);
   el.innerHTML = `<section class="card" style="display:flex;flex-direction:column;gap:16px">
     <div class="hrow"><h2>Activate LOCKqz</h2><span>${d.term?termName(d.term):""}</span></div>
     <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b id="pprice" style="font-size:44px">${money(PW.zelle.total)}</b><span class="muted">per semester · all your sections</span><span id="pincl" class="muted"></span>${got>0?`<b style="color:var(--warn)">${PT ? `Received ${money(d.money??got)} · ${money(PW.zelle.total)} left` : `Received ${money(got)} of ${money(base)}`}</b>`:""}</div>

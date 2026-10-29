@@ -57,7 +57,7 @@ console.log("Z3a welcome email on sign-up");
 const w = mailsTo("prof@usc.edu")[0];
 check("one welcome email to the professor", mailsTo("prof@usc.edu").length === 1);
 check("subject: Welcome to LOCKqz — 2 steps and you're done", w && w.subject === "Welcome to LOCKqz — 2 steps and you're done", w && w.subject);
-check("HTML: logo, cardinal header, Add to Chrome + Open Brightspace buttons, 560px", w && /icon128\.png/.test(w.html) && /#990000/.test(w.html) && /Add LOCKqz to Chrome/.test(w.html) && /Open Brightspace/.test(w.html) && /max-width:560px/.test(w.html));
+check("HTML: logo, cardinal header, Add to Chrome + Open Brightspace buttons, 560px", w && /icon-white\.png/.test(w.html) && /#990000/.test(w.html) && /Add LOCKqz to Chrome/.test(w.html) && /Open Brightspace/.test(w.html) && /max-width:560px/.test(w.html));
 check("text: Hi Professor Bristow, the two steps, Respectfully", w && /^Hi Professor Bristow,/.test(w.text) && /1\. Add LOCKqz to Chrome/.test(w.text) && /2\. Open Brightspace/.test(w.text) && /Respectfully,\nThe LOCKqz Team/.test(w.text));
 check("store link + Proceed with caution -> Continue to install (text + HTML)", w && /chromewebstore\.google\.com\/detail\/bidlfpkdggdpmfbfkpjcnbjhfkfligkk/.test(w.text) && /Continue to install/.test(w.text) && /Continue to install/.test(w.html));
 sqlite.prepare("UPDATE teachers SET verified=1, active_until='2099-12-31', bs_user_id='4000' WHERE email='prof@usc.edu'").run();
@@ -277,7 +277,7 @@ check("dashboard: welcome page (3 steps, exam-day rule) shown first, and from th
 check("dashboard: exam-day banner (protected exam within 24 h) says keep the browser open", /examday/.test(dash) && /Keep \$\{BROWSER_NAME\} open and signed in to Brightspace until it ends\./.test(dash));
 check("dashboard: Safari gets 'works in Chrome, Edge or Firefox'", /LOCKqz works in Chrome, Edge or Firefox/.test(dash));
 check("extension popup: the short exam-day line", /Exam day:<\/b> keep this browser open on Brightspace\./.test(readFileSync(join(EXT, "popup.html"), "utf8")));
-check("the logo is served at lockqz.pages.dev/icon128.png (emails)", existsSync(join(CF, "public", "icon128.png")));
+check("the logo is served at lockqz.pages.dev/icon-white.png (emails)", existsSync(join(CF, "public", "icon-white.png")));
 const mac = readFileSync(join(APP, "mac", "lockqz-agent.py"), "utf8"), win = readFileSync(join(APP, "windows", "lockqz-agent.ps1"), "utf8");
 check("Mac agent: the one-time ready notice (display notification, flag file)", /display notification/.test(mac) && /LOCKqz is ready\. Nothing to do until your exam/.test(mac) && /ready-shown/.test(mac) && /verify_call\("status"\)/.test(mac) && /Finish setup before your exam/.test(mac));
 check("Windows agent: the one-time ready toast (flag file)", /ToastNotification/.test(win) && /LOCKqz is ready\. Nothing to do until your exam/.test(win) && /ready-shown/.test(win) && /op = "status"/.test(win) && /Finish setup before your exam/.test(win));

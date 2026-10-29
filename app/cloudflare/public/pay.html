@@ -56,18 +56,6 @@
 
   <section id="pay" hidden style="display:flex;flex-direction:column;gap:10px">
     <p class="muted" style="margin:0">How do you want to pay?</p>
-    <button class="way" id="card" type="button" hidden aria-expanded="false"><span class="wn"><b>Card</b></span><span class="wp" id="camt"></span></button>
-    <div class="zsteps" id="cpanel" hidden>
-      <div id="ctax"></div>
-      <p id="crenew" hidden style="margin:0 0 12px;font-size:16px;color:#111;line-height:1.4"></p>
-      <button class="btn prime" id="cgo" type="button" style="width:100%;padding:8px 14px;text-align:center">Pay by card</button>
-    </div>
-    <button class="way" id="venmo" type="button" hidden aria-expanded="false"><span class="wn"><b>Venmo</b></span><span class="wp" id="vamt"></span></button>
-    <div class="zsteps" id="vpanel" hidden>
-      <div id="vtax"></div>
-      <p style="margin:0 0 12px;line-height:1.4">Your memo is already in the Venmo <b>note</b> (“What’s this for?”). Leave it there.</p>
-      <a class="btn prime" id="vgo" href="#" target="_blank" rel="noopener">Open Venmo</a>
-    </div>
     <button class="way" id="zelle" type="button" hidden aria-expanded="false"><span class="wn"><b>Zelle</b></span><span class="wp" id="zamt">Zelle</span></button>
     <div class="zsteps" id="zsteps" hidden>
       <div id="ztax"></div>
@@ -79,6 +67,18 @@
         <li><b>Paste the memo</b> into the <b>Memo</b> box on the Zelle payment.</li>
         <li>Send. Access turns on within a minute.</li>
       </ol>
+    </div>
+    <button class="way" id="card" type="button" hidden aria-expanded="false"><span class="wn"><b>Card</b></span><span class="wp" id="camt"></span></button>
+    <div class="zsteps" id="cpanel" hidden>
+      <div id="ctax"></div>
+      <p id="crenew" hidden style="margin:0 0 12px;font-size:16px;color:#111;line-height:1.4"></p>
+      <button class="btn prime" id="cgo" type="button" style="width:100%;padding:8px 14px;text-align:center">Pay by card</button>
+    </div>
+    <button class="way" id="venmo" type="button" hidden aria-expanded="false"><span class="wn"><b>Venmo</b></span><span class="wp" id="vamt"></span></button>
+    <div class="zsteps" id="vpanel" hidden>
+      <div id="vtax"></div>
+      <p style="margin:0 0 12px;line-height:1.4">Your memo is already in the Venmo <b>note</b> (“What’s this for?”). Leave it there.</p>
+      <a class="btn prime" id="vgo" href="#" target="_blank" rel="noopener">Open Venmo</a>
     </div>
     <button class="way" id="bank" type="button" hidden aria-expanded="false"><span class="wn"><b>Bank transfer (ACH / wire)</b></span><span class="wp" id="bto"></span></button>
     <div class="zsteps" id="bpanel" hidden>

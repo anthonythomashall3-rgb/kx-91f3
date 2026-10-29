@@ -397,7 +397,7 @@ const gmailOn = env => typeof env.MAIL_SINK === "function" || !!(env.MAIL_USER &
 
 // ---- Email templates (27 Oct 2026): text + HTML, the LOCKqz look (cardinal header, logo, 560px) ----
 const SITE_URL = "https://lockqz.pages.dev", DASH_URL = "https://prof.lockqz.pages.dev", BS_URL = "https://brightspace.usc.edu";
-const LOGO_URL = SITE_URL + "/icon128.png";
+const LOGO_URL = SITE_URL + "/icon-white.png";   // white lock: readable on the red email header
 // Chrome Web Store listing: filled in when it is live (until then the dashboard links the extension package).
 const EXT_STORE_URL = "https://chromewebstore.google.com/detail/bidlfpkdggdpmfbfkpjcnbjhfkfligkk";
 const hesc = v => String(v == null ? "" : v).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -405,7 +405,7 @@ const mailBtn = (href, label) => `<a href="${hesc(href)}" style="display:inline-
 const mailWrap = (bodyHtml, footer = "") => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head><body style="margin:0;padding:0;background:#f6f5f2;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#1a1a1a">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f6f5f2"><tr><td align="center" style="padding:24px 12px">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#ffffff;border-radius:14px;border:1px solid #e6e3dc">
-<tr><td style="background:#990000;border-radius:14px 14px 0 0;padding:14px 22px"><img src="${LOGO_URL}" width="30" height="30" alt="" style="vertical-align:middle;border-radius:7px;border:0"><span style="color:#ffffff;font-size:19px;font-weight:700;vertical-align:middle;margin-left:10px;letter-spacing:-.01em">LOCKqz</span></td></tr>
+<tr><td style="background:#990000;border-radius:14px 14px 0 0;padding:14px 22px"><img src="${LOGO_URL}" width="28" height="28" alt="" style="vertical-align:middle;border:0"><span style="color:#ffffff;font-size:19px;font-weight:700;vertical-align:middle;margin-left:10px;letter-spacing:-.01em">LOCKqz</span></td></tr>
 <tr><td style="padding:22px 24px 8px;font-size:15px;line-height:1.55">${bodyHtml}</td></tr>
 ${footer ? `<tr><td style="padding:12px 24px 16px;border-top:1px solid #e6e3dc;font-size:12px;line-height:1.5;color:#8a877f">${footer}</td></tr>` : ""}
 </table></td></tr></table></body></html>`;

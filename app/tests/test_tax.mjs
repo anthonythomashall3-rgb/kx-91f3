@@ -178,7 +178,7 @@ check("+$1,500 -> active", r.results[0].paid === true && (await getc(ON, "/me", 
 
 console.log("T9 pages");
 const ph = readFileSync(join(CF, "public", "pay.html"), "utf8"), dh = readFileSync(join(CF, "public", "dashboard.html"), "utf8");
-check("pay page: Card, then Venmo, then Zelle (owner 29 Oct), bank + PO after", ph.indexOf('id="card"') > 0 && ph.indexOf('id="card"') < ph.indexOf('id="venmo"') && ph.indexOf('id="venmo"') < ph.indexOf('id="zelle"') && ["id=\"bank\"", "id=\"po\""].every(x => ph.indexOf(x) > ph.indexOf('id="zelle"')));
+check("pay page: Zelle first (owner 29 Oct 15:41), then Card, then Venmo; bank + PO after", ph.indexOf('id="zelle"') > 0 && ph.indexOf('id="zelle"') < ph.indexOf('id="card"') && ph.indexOf('id="card"') < ph.indexOf('id="venmo"') && ["id=\"bank\"", "id=\"po\""].every(x => ph.indexOf(x) > ph.indexOf('id="venmo"')));
 check("pay page: tax line shown when a way is picked", /taxline/.test(ph) && /\/pay\/bank/.test(ph));
 check("dashboard: tax breakdown + bank details button + tour", /PT\.label/.test(dh) && /\/pay\/bank/.test(dh) && /lqTour|startTour/.test(dh));
 
