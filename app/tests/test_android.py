@@ -22,7 +22,7 @@ for f in ["settings.gradle.kts", "build.gradle.kts", "app/build.gradle.kts", "ap
     check("exists: " + f, os.path.isfile(os.path.join(AND, f)))
 g = rd("app/build.gradle.kts")
 check("version comes from app/VERSION", 'file("../VERSION")' in g and "versionName = lqVersion" in g)
-check("one signing key for debug + release, from the CI secret, never in the repo", g.count('signingConfigs.getByName("lockqz")') == 2 and 'System.getenv("LOCKQZ_KEYSTORE")' in g and not os.path.exists(os.path.join(AND, "keystore")) and "keystore/" in rd(".gitignore"))
+check("one signing key for debug + release, from the CI secret, never in the repo", g.count('if (haveKey) "lockqz" else "debug"') == 2 and 'System.getenv("LOCKQZ_KEYSTORE")' in g and not os.path.exists(os.path.join(AND, "keystore")) and "keystore/" in rd(".gitignore"))
 check("CI writes the key from the secret and removes it", "ANDROID_KEYSTORE_B64" in open(os.path.join(APP, "..", ".github/workflows/release.yml")).read())
 check("no third-party runtime dependencies (small APK, nothing to audit)", re.search(r"implementation\(", g) is None)
 check("local.properties / build output ignored", "local.properties" in rd(".gitignore") and "build/" in rd(".gitignore"))

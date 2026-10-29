@@ -22,14 +22,12 @@ android {
     val ksPath = System.getenv("LOCKQZ_KEYSTORE"); val ksPass = System.getenv("LOCKQZ_KEYSTORE_PASS") ?: ""
     val haveKey = ksPath != null && file(ksPath).isFile
     signingConfigs {
-        create("lockqz") {
-            if (haveKey) { storeFile = file(ksPath!!); storePassword = ksPass; keyAlias = "lockqz"; keyPassword = ksPass }
-            else { storeFile = signingConfigs.getByName("debug").storeFile; storePassword = "android"; keyAlias = "androiddebugkey"; keyPassword = "android" }
-        }
+        create("lockqz") { if (haveKey) { storeFile = file(ksPath!!); storePassword = ksPass; keyAlias = "lockqz"; keyPassword = ksPass } }
     }
     buildTypes {
-        release { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("lockqz") }
-        debug { signingConfig = signingConfigs.getByName("lockqz") }
+        // Android's own debug key (created on first use) when the real key is absent.
+        release { isMinifyEnabled = false; signingConfig = signingConfigs.getByName(if (haveKey) "lockqz" else "debug") }
+        debug { signingConfig = signingConfigs.getByName(if (haveKey) "lockqz" else "debug") }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
