@@ -6,4 +6,6 @@
 2. Run `bash app/tests/run_all.sh` before every push; push small commits often.
 3. $0 forever: free plans only. Never use `wrangler d1 execute --file` (it rewrites the whole DB);
    use `--command`. Keep D1 writes minimal (free limit 100,000 rows/day).
-4. Commit as `Claude <noreply@anthropic.com>`.
+4. Commit as `Claude <noreply@anthropic.com>`. Never write `[skip ci]` in a commit message: it silences the
+   deploy for the whole push. The Release workflow decides by itself (diff against the live commit) and ends
+   in seconds for docs-only pushes.

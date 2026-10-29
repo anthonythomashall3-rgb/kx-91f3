@@ -14,12 +14,10 @@ name: Release
 on:
   push:
     branches: [master]
-    paths-ignore:
-      - "**.md"
-      - "0*_*/**"
-      - "LOCKqz-USC/**"
-      - "*.pdf"
-      - "*.xlsx"
+    # No paths-ignore: every push to master runs the "what changed" step, which compares HEAD with the
+    # commit that is LIVE (lockqz.pages.dev/api/version), not with the previous push. So a push the
+    # previous head commit's [skip ci] silenced, or a docs-only push after a lost deploy, still deploys.
+    # Docs-only differences end the run in seconds. Never write [skip ci] in a commit message.
   workflow_dispatch:
 
 concurrency:
@@ -34,6 +32,7 @@ jobs:
     # build jobs run ONLY when a push changes what goes into them. A site/API-only push = Linux only;
     # the deploy then reuses the installers already live on lockqz.pages.dev.
     outputs:
+      deploy: ${{ steps.chg.outputs.deploy }}
       mac: ${{ steps.chg.outputs.mac }}
       win: ${{ steps.chg.outputs.win }}
     steps:
@@ -43,16 +42,27 @@ jobs:
         id: chg
         env: { BEFORE: "${{ github.event.before }}" }
         run: |
-          if [ "${{ github.event_name }}" != "push" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-            echo "mac=true" >> "$GITHUB_OUTPUT"; echo "win=true" >> "$GITHUB_OUTPUT"; echo "full build"; exit 0; fi
-          files=$(git diff --name-only "$BEFORE" "$GITHUB_SHA")
+          # Base = the commit that is live (api field of /api/version); fall back to the push's "before".
+          live=$(curl -fsS -m 15 -A "LOCKqz/ci" https://lockqz.pages.dev/api/version | sed -n 's/.*"api":"\([0-9a-f]*\)".*/\1/p' || true)
+          base=""
+          if [ -n "$live" ] && git cat-file -e "$live^{commit}" 2>/dev/null; then base=$(git rev-parse "$live"); echo "live: $live"; fi
+          [ -z "$base" ] && [ "${{ github.event_name }}" = "push" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null && base="$BEFORE"
+          if [ -z "$base" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "mac=true" >> "$GITHUB_OUTPUT"; echo "win=true" >> "$GITHUB_OUTPUT"; echo "full build"; exit 0; fi
+          files=$(git diff --name-only "$base" "$GITHUB_SHA")
           echo "$files"
+          docs='(^|/)[^/]*\.md$|^0[0-9]*_[^/]*/|^LOCKqz-USC/|^[^/]*\.(pdf|xlsx)$'
+          if [ "${{ github.event_name }}" = "push" ] && ! echo "$files" | grep -v -E "$docs" | grep -q .; then
+            echo "deploy=false" >> "$GITHUB_OUTPUT"; echo "mac=false" >> "$GITHUB_OUTPUT"; echo "win=false" >> "$GITHUB_OUTPUT"; echo "nothing deployable changed since $base"; exit 0; fi
+          echo "deploy=true" >> "$GITHUB_OUTPUT"
           common='^(app/release/|app/VERSION$|\.github/)'
           echo "$files" | grep -qE "$common|^app/mac/|^app/tests/test_mac_" && echo "mac=true" >> "$GITHUB_OUTPUT" || echo "mac=false" >> "$GITHUB_OUTPUT"
           echo "$files" | grep -qE "$common|^app/windows/|^app/tests/test_windows_" && echo "win=true" >> "$GITHUB_OUTPUT" || echo "win=false" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
+        if: steps.chg.outputs.deploy == 'true'
         with: { node-version: 22 }
       - name: Run every suite
+        if: steps.chg.outputs.deploy == 'true'
         run: |
           rc=0; bash app/tests/run_all.sh > "$RUNNER_TEMP/tests.log" 2>&1 || rc=$?
           cat "$RUNNER_TEMP/tests.log"
@@ -161,7 +171,7 @@ jobs:
     # Runs when tests passed and each platform build either passed or was skipped (nothing changed).
     if: >-
       always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
-      needs.test.result == 'success' &&
+      needs.test.result == 'success' && needs.test.outputs.deploy == 'true' &&
       (needs.mac.result == 'success' || needs.mac.result == 'skipped') &&
       (needs.windows.result == 'success' || needs.windows.result == 'skipped')
     env:
