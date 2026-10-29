@@ -53,7 +53,14 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - name: Run every suite
-        run: bash app/tests/run_all.sh
+        run: |
+          rc=0; bash app/tests/run_all.sh > "$RUNNER_TEMP/tests.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/tests.log"
+          # Failing lines become annotations (readable through the API without downloading the log).
+          if [ "$rc" -ne 0 ]; then
+            awk '/^######## /{s=$0; gsub(/#/,"",s)} /FAIL|Error:|Exception|Cannot |not recognized/{l=$0; gsub(/::/,": ",l); print "::error title=" substr(s,1,80) "::" substr(l,1,300)}' "$RUNNER_TEMP/tests.log" | head -25
+          fi
+          exit $rc
 
   mac:
     name: Build + install-test the Mac package
