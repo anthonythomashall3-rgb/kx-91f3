@@ -1,0 +1,38 @@
+name: Chrome Web Store
+
+# When the professor extension's version (app/extension-prof/manifest.json) changes on master: build the package
+# and upload it to the Chrome Web Store, then submit it for review. Free (GitHub Actions + Chrome Web Store API).
+# One-time setup (repo Settings -> Secrets and variables -> Actions):
+#   CWS_SA_KEY   the JSON key of a Google Cloud service account that is linked in the Chrome Web Store
+#                Developer Dashboard (Account -> Service account) and whose project has the Chrome Web Store API on.
+# Without it the job says so and does nothing.
+
+on:
+  push:
+    branches: [master]
+    paths: ["app/extension-prof/manifest.json"]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 2 }
+      - name: Did the version change?
+        id: v
+        run: |
+          NEW=$(node -p "require('./app/extension-prof/manifest.json').version")
+          OLD=$(git show HEAD~1:app/extension-prof/manifest.json 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version" 2>/dev/null || echo none)
+          echo "version $OLD -> $NEW"
+          if [ "$NEW" != "$OLD" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then echo "go=1" >> "$GITHUB_OUTPUT"; fi
+      - name: Build the package
+        if: steps.v.outputs.go == '1'
+        run: bash app/extension-prof/build.sh
+      - name: Upload + submit for review
+        if: steps.v.outputs.go == '1'
+        env:
+          CWS_SA_KEY: ${{ secrets.CWS_SA_KEY }}
+          CWS_PUBLISHER: 073c37cf-a624-45dc-96ca-5e5de498961c
+          CWS_ITEM: bidlfpkdggdpmfbfkpjcnbjhfkfligkk
+        run: node app/extension-prof/cws-publish.mjs
