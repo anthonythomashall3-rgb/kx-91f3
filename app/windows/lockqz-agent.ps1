@@ -540,9 +540,16 @@ function Handle-Pw($pr, [bool]$first, [string]$note) {
   return $null
 }
 function Clear-Quiz { $script:Locked = $false; $script:Quiz = $null; $script:QuizTab = $null; $script:QuizTitle = $null; $script:QuizUrl = $null; $script:QuizProc = ""; $script:MissingSince = $null; $script:OperaWarned = $false }
+$script:HoldTold = $null
+$HoldText = "The quiz page is gone but Brightspace has not recorded your submission yet, so AI stays off.`n`nIt comes back by itself within about a minute of your submission reaching your professor's Brightspace, or at the quiz end. If you did submit, nothing to do."
 function Send-Unlock($quiz, $reason) {
-  # -> $true only when the helper confirmed it is unlocked.
-  try { $r = Helper "/unlock" @{ quiz_id = $quiz; reason = $reason }; return [bool]($r -and $r.ok -and ($r.state -eq "unlocked")) } catch { return $false }
+  # -> $true only when the helper confirmed it is unlocked. 202 pending = the server has not vouched for the
+  # quiz end yet (held): told to the student once per quiz, retried quietly.
+  try {
+    $r = Helper "/unlock" @{ quiz_id = $quiz; reason = $reason }
+    if ($r -and $r.pending -and ($script:HoldTold -ne $quiz)) { $script:HoldTold = $quiz; Show-Message $HoldText }
+    return [bool]($r -and $r.ok -and ($r.state -eq "unlocked"))
+  } catch { return $false }
 }
 while ($true) {
   try {

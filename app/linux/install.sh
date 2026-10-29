@@ -121,6 +121,7 @@ cat > /etc/systemd/user/lockqz-agent.service <<EOF
 [Unit]
 Description=LOCKqz agent (quiz detection + password)
 After=graphical-session.target
+PartOf=graphical-session.target
 
 [Service]
 Type=simple
@@ -132,6 +133,7 @@ Environment=LOCKQZ_TOKEN_DIR=$STATE/tokens
 Environment=PYTHONUNBUFFERED=1
 
 [Install]
+WantedBy=graphical-session.target
 WantedBy=default.target
 EOF
 systemctl daemon-reload

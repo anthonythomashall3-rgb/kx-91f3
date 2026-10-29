@@ -63,7 +63,12 @@ class H(BaseHTTPRequestHandler):
         if path.endswith("/report"):
             if b.get("event") == "lock" or (b.get("event") == "heartbeat" and b.get("source") == "helper"):
                 LOCKS[(dev, b.get("quiz_id"))] = now()
-            if b.get("event") == "unlock": LOCKS.pop((dev, b.get("quiz_id")), None)
+            if b.get("event") == "unlock":
+                det = b.get("detail") if isinstance(b.get("detail"), dict) else {}
+                try: why = open(LOG + ".unlock").read().strip()
+                except Exception: why = ""
+                if det.get("ask") and not why: return self.reply(200, {"ok": True, "hold": True, "beat_s": 30})   # gate on, nothing vouches
+                LOCKS.pop((dev, b.get("quiz_id")), None)
             if b.get("event") in ("heartbeat", "lock"):
                 try: why = open(LOG + ".unlock").read().strip()   # C9: the test says "this student submitted"
                 except Exception: why = ""
@@ -417,6 +422,34 @@ head -c 5000 /dev/zero | tr '\0' 'x' > "$TMP/h/daemon.log"
 run_d "$TMP/h" "$CTRL_PORT" LOCKQZ_LOG="$TMP/h/daemon.log" LOCKQZ_LOG_MAX=2000; DPID8=$DPID_; sleep 1
 [ -f "$TMP/h/daemon.log.1" ] && [ "$(wc -c < "$TMP/h/daemon.log")" -lt 2000 ] && grep -q "log rotated" "$TMP/h/daemon.log" && ok "old log moved to .1, new lines go to a fresh file" || bad "not rotated: $(ls -la "$TMP/h")"
 kill $DPID8 2>/dev/null
+
+echo "T18 (29 Oct) a student-token /unlock is HELD until the server vouches for the quiz end; the master token still unlocks"
+CTRL_PORT=$(free_port); M9=$(free_port); LOG9="$TMP/reports9.log"; mkdir -p "$TMP/i"; cp "$APP/mac/blocklist.txt" "$TMP/i/"; printf %s "$TOKEN" > "$TMP/i/helper.token"
+printf '{ "port": %s, "api_base": "http://127.0.0.1:%s/api", "device_id": "itest-hold" }\n' "$CTRL_PORT" "$M9" > "$TMP/i/config.json"
+SUID=$(( $(id -u) > 0 ? $(id -u) : 501 ))   # root runs the tests in CI: a pretend console user then
+echo "{\"console\": $SUID, \"alive\": [$SUID]}" > "$TMP/i/sessions.json"
+python3 "$TMP/mock.py" "$M9" "$LOG9" 0 & MPID9=$!
+run_d "$TMP/i" "$CTRL_PORT" LOCKQZ_TEST_SESSIONS="$TMP/i/sessions.json"; DPID9=$DPID_
+sleep 6   # the watcher shares the console user's token
+UTOK="$(cat "$TMP/i/tokens/$SUID" 2>/dev/null)"
+[ -n "$UTOK" ] && ok "console user got a per-user token" || bad "no per-user token in $TMP/i/tokens"
+UH="X-LOCKqz-Token: $UTOK"
+curl -s -X POST -H "$UH" -H 'Content-Type: application/json' -d '{"quiz_id":"98765-12345","student":"Al"}' "http://127.0.0.1:$CTRL_PORT/lock" >/dev/null; sleep 2
+code=$(curl -s -o "$TMP/i/u1.json" -w '%{http_code}' -X POST -H "$UH" -H 'Content-Type: application/json' -d '{"quiz_id":"98765-12345","reason":"quiz_submitted"}' "http://127.0.0.1:$CTRL_PORT/unlock")
+[ "$code" = 202 ] && grep -q '"pending": "brightspace"' "$TMP/i/u1.json" && ok "student token + 'quiz_submitted' nobody can confirm -> 202 pending, not unlocked" || bad "unlock answered $code: $(cat "$TMP/i/u1.json")"
+curl -s -H "$UH" "http://127.0.0.1:$CTRL_PORT/status" | grep -q '"state": "locked"' && ok "helper still locked" || bad "helper unlocked on the student's word"
+grep -q '"ask": true' "$LOG9" && ok "the server was asked (local unlock with ask)" || bad "server not asked: $(tail -3 "$LOG9")"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$UH" -H 'Content-Type: application/json' -d '{"quiz_id":"98765-12345","reason":"quiz_left"}' "http://127.0.0.1:$CTRL_PORT/unlock")
+n=$(grep -c '"event": "unlock"' "$LOG9")
+[ "$code" = 202 ] && [ "$n" = 1 ] && ok "a retry within 30 s is answered from the hold, not re-asked (agent retries every 5 s)" || bad "retry: code $code, asks=$n"
+echo "quiz_submitted" > "$LOG9.unlock"    # Brightspace's submission reaches the server
+sleep 32                                   # the helper beats every 30 s while a release is pending
+curl -s -H "$UH" "http://127.0.0.1:$CTRL_PORT/status" | grep -q '"state": "unlocked"' && ok "released by the server's next beat (unlock:true quiz_submitted) within 30 s" || bad "still locked after the submission: $(curl -s -H "$UH" "http://127.0.0.1:$CTRL_PORT/status")"
+rm -f "$LOG9.unlock"
+curl -s -X POST -H "$UH" -H 'Content-Type: application/json' -d '{"quiz_id":"98765-12345","student":"Al"}' "http://127.0.0.1:$CTRL_PORT/lock" >/dev/null; sleep 2
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "X-LOCKqz-Token: $TOKEN" -H 'Content-Type: application/json' -d '{"quiz_id":"98765-12345"}' "http://127.0.0.1:$CTRL_PORT/unlock")
+[ "$code" = 200 ] && ok "master (root) token unlocks at once (installer tests, admin)" || bad "root unlock answered $code"
+kill $DPID9 $MPID9 2>/dev/null
 CTRL_PORT=$CTRL1
 echo ""
 echo "RESULT: $pass passed, $fail failed"

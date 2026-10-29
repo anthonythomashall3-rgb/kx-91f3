@@ -62,6 +62,13 @@ _kill_cmd_res() {
     pkill -f -- "$r" 2>/dev/null || true
   done
 }
+SYSTEM_SERVICES=(tailscaled zerotier-one warp-svc docker containerd gnome-remote-desktop x11vnc vncserver tor openvpn wg-quick@wg0 nordvpnd expressvpn mullvad-daemon protonvpn-daemon)
+stop_services() {   # once per lock: systemd would restart a killed service every 5 s
+  [ "${LOCKQZ_NO_KILL:-0}" = 1 ] && return 0
+  local u
+  for u in "${SYSTEM_SERVICES[@]}"; do systemctl is-active --quiet "$u" 2>/dev/null && systemctl stop --no-block "$u" 2>/dev/null; done
+  return 0
+}
 close_apps() {
   [ "${LOCKQZ_NO_KILL:-0}" = 1 ] && return 0   # tests on a shared machine: never signal real processes
   _kill_list "AI app" "${AI_APPS[@]}"
@@ -78,24 +85,36 @@ close_apps() {
 }
 
 # --- firewall (nftables, iptables fallback) ---
-DOH_V4=(1.1.1.1 1.0.0.1 8.8.8.8 8.8.4.4 9.9.9.9 149.112.112.112 162.159.61.3 162.159.61.4 172.64.41.3 172.64.41.4 146.112.41.2
-        94.140.14.14 94.140.15.15 194.242.2.2 76.76.2.11 149.112.121.10 149.112.122.10 185.71.138.138 223.5.5.5 223.6.6.6 1.12.12.12 120.53.53.53)
-DOH_V6=(2606:4700:4700::1111 2606:4700:4700::1001 2001:4860:4860::8888 2001:4860:4860::8844 2620:fe::fe 2620:fe::9 2803:f800:53::3 2803:f800:53::4
-        2a06:98c1:52::3 2a06:98c1:52::4 2620:119:fc::2 2a10:50c0::ad1:ff 2a10:50c0::ad2:ff 2a07:e340::2 2606:1a40::11 2620:10a:80bb::10 2620:10a:80bc::10
-        2001:67c:930::1 2400:3200::1 2400:3200:baba::1)
+DOH_V4=(1.1.1.1 1.0.0.1 8.8.8.8 8.8.4.4 9.9.9.9 9.9.9.10 9.9.9.11 149.112.112.112 149.112.112.10 149.112.112.11 162.159.61.3 162.159.61.4 172.64.41.3 172.64.41.4 146.112.41.2
+        94.140.14.0/23 194.242.2.2 194.242.2.3 194.242.2.4 76.76.2.0/24 76.76.10.0/24 149.112.121.10 149.112.122.10 185.71.138.138 223.5.5.5 223.6.6.6 1.12.12.12 120.53.53.53
+        45.90.28.0/22 185.228.168.0/23 208.67.222.222 208.67.220.220 208.67.222.123 208.67.220.123 185.222.222.222 45.11.45.11 101.101.101.101 101.102.103.104
+        193.110.81.0 185.253.5.0 77.88.8.8 77.88.8.1 156.154.70.1 156.154.71.1 64.6.64.6 64.6.65.6 76.223.122.150 76.223.118.150)   # Cloudflare, Google, Quad9, OpenDNS, AdGuard, Mullvad, Control D, CIRA, Wikimedia, AliDNS, DNSPod, NextDNS, CleanBrowsing, dns.sb, Quad101, dns0, Yandex, Neustar/Verisign, Alekberg
+DOH_V6=(2606:4700:4700::1111 2606:4700:4700::1001 2001:4860:4860::8888 2001:4860:4860::8844 2620:fe::fe 2620:fe::9 2620:fe::10 2620:fe::11 2620:fe::fe:10 2620:fe::fe:11 2803:f800:53::3 2803:f800:53::4
+        2a06:98c1:52::3 2a06:98c1:52::4 2620:119:fc::2 2620:119:35::35 2620:119:53::53 2a10:50c0::/29 2a07:e340::2 2a07:e340::3 2606:1a40::11 2620:10a:80bb::10 2620:10a:80bc::10
+        2001:67c:930::1 2400:3200::1 2400:3200:baba::1 2a07:a8c0::/32 2a07:a8c1::/32 2a0d:2a00:1::/48 2a0d:2a00:2::/48 2a09::/128 2a11::/128 2a0f:fc80::/128 2a0f:fc81::/128 2001:678:8::/128 2a04:e4c0:10::2 2a04:e4c0:11::2)
 MODEL_PORTS="11434, 1234, 4891, 1337, 7860"
 LOCAL_MODEL_PORTS="8080, 5000, 8000"
 VPN_UDP="51820, 1194, 500, 4500"
 _join() { local IFS=,; echo "$*"; }
+resolved_stub() { grep -qE '^nameserver 127\.0\.0\.5[34]' /etc/resolv.conf 2>/dev/null && id -u systemd-resolve >/dev/null 2>&1; }
 nft_ruleset() {
+  local dns53=""
+  # With systemd-resolved, only the stub (which honours /etc/hosts) may speak DNS: a program that asks another
+  # server directly (dig @1.1.1.1, curl --doh-url to an unlisted resolver, --host-resolver-rules, a container) gets nothing.
+  local ruid
+  if resolved_stub; then ruid="$(id -u systemd-resolve 2>/dev/null)"; dns53="    meta skuid != { 0, $ruid } udp dport 53 drop
+    meta skuid != { 0, $ruid } tcp dport 53 drop"; fi   # root = LOCKqz's own warm-list resolver (a student with sudo is admin: accepted)
   cat <<EOF
 table inet $NFT_TABLE {
   set lq_warm4 { type ipv4_addr; }
   set lq_warm6 { type ipv6_addr; }
+  set lq_api4 { type ipv4_addr; }
+  set lq_api6 { type ipv6_addr; }
   chain output {
     type filter hook output priority 0; policy accept;
     tcp dport 853 drop
     udp dport 853 drop
+$dns53
     ip daddr { $(_join "${DOH_V4[@]}") } tcp dport 443 drop
     ip daddr { $(_join "${DOH_V4[@]}") } udp dport 443 drop
     ip6 daddr { $(_join "${DOH_V6[@]}") } tcp dport 443 drop
@@ -107,6 +126,10 @@ table inet $NFT_TABLE {
     tcp dport 1194 drop
     ip daddr @lq_warm4 udp dport 443 drop
     ip6 daddr @lq_warm6 udp dport 443 drop
+    ip daddr @lq_api4 tcp dport 443 drop
+    ip6 daddr @lq_api6 tcp dport 443 drop
+    ip daddr @lq_api4 udp dport 443 drop
+    ip6 daddr @lq_api6 udp dport 443 drop
   }
 }
 EOF
@@ -114,8 +137,8 @@ EOF
 fw_on() {
   if command -v nft >/dev/null 2>&1; then
     nft delete table inet "$NFT_TABLE" 2>/dev/null || true
-    nft_ruleset | nft -f - 2>/dev/null || return 1
-    return 0
+    if nft_ruleset | nft -f - 2>/dev/null; then return 0; fi
+    say "nftables refused the ruleset - trying iptables"
   fi
   if command -v iptables >/dev/null 2>&1; then
     iptables -N LOCKQZ 2>/dev/null || iptables -F LOCKQZ
@@ -158,11 +181,19 @@ warm_apply() {
       v4=$(grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' "$WARM_IPS" | paste -sd, -); v6=$(grep ':' "$WARM_IPS" | paste -sd, -)
       [ -n "$v4" ] && nft add element inet "$NFT_TABLE" lq_warm4 "{ $v4 }" 2>/dev/null
       [ -n "$v6" ] && nft add element inet "$NFT_TABLE" lq_warm6 "{ $v6 }" 2>/dev/null
+      if [ -s "$WARM_IPS.api" ]; then   # API-only AI endpoints: dropped outright (see browser-policy.py resolve)
+        v4=$(grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' "$WARM_IPS.api" | paste -sd, -); v6=$(grep ':' "$WARM_IPS.api" | paste -sd, -)
+        [ -n "$v4" ] && nft add element inet "$NFT_TABLE" lq_api4 "{ $v4 }" 2>/dev/null
+        [ -n "$v6" ] && nft add element inet "$NFT_TABLE" lq_api6 "{ $v6 }" 2>/dev/null
+      fi
     fi
     if [ ! -f "$STATE/warm.killed" ] || [ "$WARM_IPS" -nt "$STATE/warm.killed" ]; then
       if command -v ss >/dev/null 2>&1; then
         local ip
-        while read -r ip; do [ -n "$ip" ] && ss -K dst "$ip" >/dev/null 2>&1; done < "$WARM_IPS"
+        while read -r ip; do
+          [ -z "$ip" ] && continue
+          case "$ip" in *:*) ss -K dst "[$ip]" >/dev/null 2>&1 ;; *) ss -K dst "$ip" >/dev/null 2>&1 ;; esac
+        done < "$WARM_IPS"
       fi
       touch "$STATE/warm.killed"
     fi
@@ -198,7 +229,7 @@ do_lock() {
   is_locked || rc=1
   fw_on || rc=1
   policy lock || rc=1
-  [ "$already" = 0 ] && flush_dns
+  [ "$already" = 0 ] && { flush_dns; stop_services; }
   close_apps
   warm_apply
   write_status locked

@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.5.9"
+VERSION = "0.6.0"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -406,7 +406,8 @@ def unlock_now(qid):
     """Strip the block. The lock record is cleared ONLY when the engine confirms every layer is gone;
     otherwise the record is marked unlock_pending (a restart finishes the unlock, never re-locks) and
     the watcher retries every cycle. Caller holds LOCK."""
-    STATE.update(state="unlocked", quiz_id=None, locked_at=None, locked_since=0.0, owner_uid=None)
+    STATE.update(state="unlocked", quiz_id=None, locked_at=None, locked_since=0.0, owner_uid=None, release_pending=False)
+    STATE.pop("hold_until", None)
     set_assist(None, [])
     ok = engine("unlock")
     if ok:
@@ -854,7 +855,7 @@ def watcher():
                     if do_tamper:
                         log("TAMPER: block missing during quiz — re-applying")
                     engine("lock")   # idempotent; re-kills reopened AI apps
-                    do_beat = time.time() - last_beat >= BEAT_SECS
+                    do_beat = time.time() - last_beat >= (30 if STATE.get("release_pending") else BEAT_SECS)
             elif STATE["unlock_pending"]:
                 # An earlier unlock failed part-way: keep trying until every layer is really gone.
                 if engine("unlock"):
@@ -997,11 +998,36 @@ class H(BaseHTTPRequestHandler):
                 was_locked = STATE["state"] == "locked"
                 before_end = was_locked and (not STATE["end_known"] or time.time() < STATE["cap_at"] - END_GRACE)
                 held = int(time.time() - STATE["locked_since"]) if was_locked and STATE["locked_since"] else None
-                ok = unlock_now(qid) if STATE["state"] != "developer" else (STATE.update(state="unlocked", quiz_id=None) or True)
+                ask = who != "root" and was_locked and before_end and bool(qid)
+                if ask and STATE.get("hold_until", 0) > time.time():
+                    return self._send(202, {"ok": False, "state": "locked", "pending": "brightspace"})   # asked < 30 s ago: same answer
             det = {"reason": reason, "local": True}
             if was_locked: det.update(before_end=bool(before_end), held_s=held)
             if who != "root": det["uid"] = who
-            report_async("unlock", {"quiz_id": qid, "detail": det})
+            if ask:
+                # 29 Oct 2026: the student's own token (the agent's, or curl with it) cannot end the AI block by
+                # itself before the quiz end. The server is asked first; it vouches for the end (Brightspace's
+                # submission seen by the professor's Sync tab, or the quiz end) or, while the gate runs, says
+                # HOLD: the block stays, the helper beats every 30 s and the server releases it on the next
+                # beat after the submission arrives (or at the end). Server unreachable for 10 min -> stands.
+                det["ask"] = True
+                code, j = report("unlock", {"quiz_id": qid, "detail": det})
+                hold = isinstance(j, dict) and j.get("hold") is True
+                if code == 0:
+                    with LOCK:
+                        STATE.setdefault("ask_fail_since", time.time())
+                        hold = time.time() - STATE["ask_fail_since"] < 600
+                else:
+                    with LOCK: STATE.pop("ask_fail_since", None)
+                if hold:
+                    with LOCK:
+                        STATE["release_pending"] = True; STATE["hold_until"] = time.time() + 30
+                    log("unlock held: the server cannot confirm the quiz is over for %s yet" % qid)
+                    return self._send(202, {"ok": False, "state": "locked", "pending": "brightspace"})
+            with LOCK:
+                STATE["release_pending"] = False; STATE.pop("hold_until", None)
+                ok = unlock_now(qid) if STATE["state"] != "developer" else (STATE.update(state="unlocked", quiz_id=None) or True)
+            if not ask: report_async("unlock", {"quiz_id": qid, "detail": det})
             if not ok:
                 return self._send(500, {"ok": False, "state": "unlocking", "error": "unlock incomplete - retrying"})
             return self._send(200, {"ok": True, "state": "unlocked"})

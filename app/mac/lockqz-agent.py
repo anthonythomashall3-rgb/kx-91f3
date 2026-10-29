@@ -891,10 +891,16 @@ class Agent:
         if res is None and self.locked and not self.pay_shown:
             dialog("AI is locked for this quiz.\n\nIf it needs a password, LOCKqz will show it here as soon as the quiz opens." + note)
 
+    HOLD_TEXT = ("The quiz page is gone but Brightspace has not recorded your submission yet, so AI stays off.\n\n"
+                 "It comes back by itself within about a minute of your submission reaching your professor's Brightspace, "
+                 "or at the quiz end. If you did submit, nothing to do.")
     def send_unlock(self, quiz, reason):
-        """True only when the helper confirms AI is back."""
+        """True only when the helper confirms AI is back. 202 pending = the server has not vouched for the
+        quiz end yet (held): told to the student once per quiz, retried quietly."""
         try:
             r = self.helper("/unlock", {"quiz_id": quiz, "reason": reason}, timeout=150)
+            if isinstance(r, dict) and r.get("pending") and getattr(self, "hold_told", None) != quiz:
+                self.hold_told = quiz; dialog(self.HOLD_TEXT)
             return isinstance(r, dict) and bool(r.get("ok"))
         except Exception as e:
             log("helper unlock failed: %s" % e); return False

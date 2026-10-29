@@ -49,7 +49,8 @@ chk "501 in the background cannot re-lock / change the quiz" '[ "$(code "$A" /lo
 setsess '{"console":501,"alive":[501,502]}'
 chk "501 back at the screen: /unlock naming ANOTHER quiz is refused" '[ "$(code "$A" /unlock "{\"quiz_id\":\"1-2\"}")" = 409 ] && [ "$(st)" = locked ]'
 setsess '{"console":502,"alive":[502]}'
-chk "501 logged out: 502 sees the lock and may end it (nobody is left blocked)" '[ "$(body "$U2" /status | python3 -c "import sys,json;print(json.load(sys.stdin)[\"state\"])")" = locked ] && [ "$(code "$U2" /unlock "{\"quiz_id\":\"98765-12345\"}")" = 200 ] && [ "$(st)" = unlocked ]'
+chk "501 logged out: 502 sees the lock; its unlock is HELD (29 Oct: no local token ends the block before the server vouches; the cap / the server end it)" '[ "$(body "$U2" /status | python3 -c "import sys,json;print(json.load(sys.stdin)[\"state\"])")" = locked ] && [ "$(code "$U2" /unlock "{\"quiz_id\":\"98765-12345\"}")" = 202 ] && [ "$(st)" = locked ]'
+chk "the master token (root / installer) still ends it" '[ "$(code "$M" /unlock "{\"quiz_id\":\"98765-12345\"}")" = 200 ] && [ "$(st)" = unlocked ]'
 
 echo "F3 local unlocks are reported as local (the server checks them)"
 chk "unlock report carries local:true + before_end" 'grep -q "det = {\"reason\": reason, \"local\": True}" "$MAC/lockqzd.py" && grep -q "before_end=bool(before_end)" "$MAC/lockqzd.py"'

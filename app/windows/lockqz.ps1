@@ -59,7 +59,11 @@ $DohIps = @("1.1.1.1","1.0.0.1","8.8.8.8","8.8.4.4","9.9.9.9","149.112.112.112",
             "94.140.14.14","94.140.15.15","2a10:50c0::ad1:ff","2a10:50c0::ad2:ff","194.242.2.2","2a07:e340::2",
             "76.76.2.11","2606:1a40::11","149.112.121.10","149.112.122.10","2620:10a:80bb::10","2620:10a:80bc::10",
             "185.71.138.138","2001:67c:930::1","223.5.5.5","223.6.6.6","2400:3200::1","2400:3200:baba::1",
-            "1.12.12.12","120.53.53.53")
+            "1.12.12.12","120.53.53.53",
+            # 29 Oct 2026: NextDNS, CleanBrowsing, OpenDNS, dns.sb, Control D ranges, Quad101, dns0.eu, Quad9 variants, Yandex
+            "45.90.28.0/22","185.228.168.0/23","208.67.222.222","208.67.220.220","208.67.222.123","208.67.220.123","185.222.222.222","45.11.45.11","101.101.101.101","101.102.103.104",
+            "193.110.81.0","185.253.5.0","9.9.9.10","9.9.9.11","149.112.112.10","149.112.112.11","76.76.2.0/24","76.76.10.0/24","94.140.14.0/23","77.88.8.8","77.88.8.1",
+            "2a07:a8c0::/32","2a07:a8c1::/32","2a0d:2a00:1::/48","2a0d:2a00:2::/48","2620:119:35::35","2620:119:53::53","2620:fe::10","2620:fe::11","2620:fe::fe:10","2620:fe::fe:11","2a10:50c0::/29")
 $FwTag  = "LOCKqz-AI"
 $FwRules = @(
   @{ n = "$FwTag-DoT";     p = @{ Protocol = "TCP"; RemotePort = 853 } },
@@ -90,6 +94,12 @@ $WildTag = "LOCKqz-wild"
 # to them so browsers fall back to TCP. New TCP connections still pass: a shared CDN address also
 # serves Brightspace/LOCKqz, and a new connection needs a name lookup, which the hosts block refuses.
 $WarmFile = "$StateDir\warm_ips.txt"
+# API-only AI endpoints (29 Oct 2026): dropped outright on 443 (new connections too) - a client that never asks DNS
+# (curl --resolve, hard-coded address, own DoH) gets nothing. Never Google/Microsoft/GitHub front doors (shared with
+# Docs/Office/GitHub); any address an allow host (Brightspace, LOCKqz, sign-in) also uses is left alone.
+$ApiHosts = @("api.openai.com","api.anthropic.com","api.x.ai","api.deepseek.com","api.mistral.ai","api.groq.com","openrouter.ai","api.together.xyz","api.together.ai","api.perplexity.ai","api.cohere.com","api.cohere.ai","api.fireworks.ai","api.replicate.com","router.huggingface.co","api-inference.huggingface.co","api.cerebras.ai","api.sambanova.ai","api.deepinfra.com","api.hyperbolic.xyz","api.novita.ai","api.moonshot.cn","api.moonshot.ai","open.bigmodel.cn","api.minimax.chat","api.minimaxi.com","api.ai21.com","api.voyageai.com","api.siliconflow.cn","api.siliconflow.com","api.lepton.ai","api.baseten.co","api.friendli.ai","api.nebius.com","api.studio.nebius.ai","api.kimi.com")
+$AllowHosts = @("lockqz.pages.dev","usc.brightspace.com","brightspace.com","s.brightspace.com","content-cdn.brightspace.com","d2l.com","www.d2l.com","lms.usc.edu","google.com","www.google.com","docs.google.com","drive.google.com","accounts.google.com","login.microsoftonline.com","outlook.office.com","www.office.com","shibboleth.usc.edu","my.usc.edu","www.usc.edu","cloudflare.com","challenges.cloudflare.com","static.cloudflareinsights.com")
+$ApiFile = "$StateDir\api_ips.txt"
 $WarmMaxAge = 43200
 # Latin-1 maps every byte to one char and back, so a hosts file in any encoding round-trips untouched.
 $Latin1 = [Text.Encoding]::GetEncoding(28591)
@@ -114,6 +124,16 @@ function Remove-Block([string]$raw) {
 }
 function Read-Hosts { [IO.File]::ReadAllText($Hosts, $Latin1) }
 function Is-Locked { try { (Read-Hosts) -match [regex]::Escape($MarkStart) } catch { $false } }
+function Block-Intact {   # the markers are there AND every line between them is ours (an edited block is tamper)
+  try {
+    $raw = Read-Hosts
+    $m = [regex]::Match($raw, "(?s)" + [regex]::Escape($MarkStart) + "(.*?)" + [regex]::Escape($MarkEnd))
+    if (-not $m.Success) { return $false }
+    $have = @($m.Groups[1].Value -split "\r?\n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $want = @((Get-HostsLines (Get-Domains)) | Select-Object -Skip 1 | Select-Object -SkipLast 1)
+    return ((Compare-Object $have $want | Measure-Object).Count -eq 0)
+  } catch { return $false }
+}
 function Write-Hosts([string]$text, [bool]$append) {
   # Clears a read-only flag for the write and puts it back; $false if the write failed.
   $ro = $false
@@ -154,7 +174,27 @@ function Wild-On {
 function Wild-Off {
   Get-DnsClientNrptRule -ErrorAction SilentlyContinue | Where-Object { $_.Comment -eq $WildTag } | Remove-DnsClientNrptRule -Force -ErrorAction SilentlyContinue
 }
-function Warm-Resolve {   # writes $WarmFile atomically; runs in the background (lockqz.ps1 warm)
+function Resolve-Set($names) {
+  $ips = New-Object System.Collections.Generic.HashSet[string]
+  foreach ($d in $names) {
+    foreach ($t in "A","AAAA") {
+      foreach ($r in (Resolve-DnsName -Name $d -Type $t -NoHostsFile -DnsOnly -QuickTimeout -ErrorAction SilentlyContinue)) {
+        $ip = [string]$r.IPAddress
+        if (-not $ip) { continue }
+        if ($ip -match '^(0\.|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.)' -or $ip -eq '::1' -or $ip -match '^(fe80|fc|fd)') { continue }
+        [void]$ips.Add($ip)
+      }
+    }
+  }
+  return $ips
+}
+function Warm-Resolve {   # writes $WarmFile (+ $ApiFile) atomically; runs in the background (lockqz.ps1 warm)
+  $api = Resolve-Set $ApiHosts; $allow = Resolve-Set $AllowHosts
+  foreach ($a in $allow) { [void]$api.Remove($a) }
+  if ($api.Count -gt 0) {
+    New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
+    [IO.File]::WriteAllLines("$ApiFile.tmp", [string[]]($api | Sort-Object)); Move-Item -Force "$ApiFile.tmp" $ApiFile
+  }
   $ips = New-Object System.Collections.Generic.HashSet[string]
   foreach ($d in (Get-Domains)) {
     foreach ($t in "A","AAAA") {
@@ -199,6 +239,10 @@ function Warm-KillTcp($ips) {   # established IPv4 TCP connections to $ips -> cl
 }
 function Warm-Apply {
   $marker = "$StateDir\warm.applied"
+  if ((Test-Path $ApiFile) -and -not (Get-NetFirewallRule -DisplayName "$FwTag-api" -ErrorAction SilentlyContinue)) {
+    $aips = @(Get-Content $ApiFile -ErrorAction SilentlyContinue | Where-Object { $_ })
+    if ($aips.Count -gt 0) { New-NetFirewallRule -DisplayName "$FwTag-api" -Direction Outbound -Action Block -Protocol TCP -RemotePort 443 -RemoteAddress $aips -ErrorAction SilentlyContinue | Out-Null }
+  }
   if (Test-Path $WarmFile) {
     $ips = @(Get-Content $WarmFile -ErrorAction SilentlyContinue | Where-Object { $_ })
     if ($ips.Count -gt 0) {
@@ -229,8 +273,15 @@ function Policy($verb) {
   return ((& powershell -NoProfile -ExecutionPolicy Bypass -File $Policy $verb) -join "`n")
 }
 function Do-Lock {
+  if ((Is-Locked) -and -not (Block-Intact)) {
+    # Markers kept, AI lines deleted (admin edit): rewrite the block whole.
+    $wrote = Write-Hosts ((Remove-Block (Read-Hosts)) + ((Get-HostsLines (Get-Domains)) -join "`r`n") + "`r`n") $false
+    ipconfig /flushdns | Out-Null
+    if (-not $wrote) { "LOCKqz: LOCK FAILED (edited hosts block could not be rewritten)"; return }
+  }
   if (Is-Locked) {
     Kill-AiAndTools
+    Ensure-FirewallRules   # rules removed mid-quiz come back (admin-only to remove, but cheap to re-check)
     Wild-On; Warm-Apply
     # Policies removed by hand mid-quiz -> put them back (browser-policy keeps the first backup).
     if ((Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Google\Chrome").LOCKqzManaged -ne 1) { Policy "lock" | Out-Null }

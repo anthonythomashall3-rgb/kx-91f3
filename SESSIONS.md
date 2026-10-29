@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-10-29 10:30 PT — 01UUDg7b: v0.6.0 stress-test fixes (server-confirmed release on all platforms, API-IP drop, DoH lists, server event cap, Windows parity, Linux + Android red-team fixes). Touches: [[route]].js, mac lockqzd.py/lockqz-agent.py/extra-block.sh/pf.conf, windows lockqzd.ps1/lockqz.ps1/lockqz-agent.ps1, linux/*, android/*, tests. Pushing now.
 - 2026-10-28 22:10 PT — 01UUDg7b: LINUX PORT (app/linux/: engine, browser policies, agent, install, systemd; student browser extension app/extension-student/ = the tab reader on Linux; lockqzd.py Linux shim + /tabs endpoint; make-manifest linux; release.yml Linux install test; index.html Linux option). Touches: app/linux/*, app/extension-student/*, app/mac/lockqzd.py (Linux branches only), app/release/make-manifest.py, release.yml, index.html, tests.
 - 2026-10-27 19:40 PT — 01UzHDaF: Google sign-in (students + professors, codes as fallback) still in progress. Touches: [[route]].js (/auth/google/*), dashboard.html login form, mac+windows agents identity step, migrate_036, tests.
 

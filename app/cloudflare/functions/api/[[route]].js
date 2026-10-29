@@ -1610,6 +1610,12 @@ export async function onRequest(context) {
       const dev = v.ok ? v.dev : null;     // the device row (signed requests only; read once by verifyDevice)
       const signed = v.ok ? 1 : 0;
       const qidOk = typeof quiz_id === "string" && /^\d+-\d+$/.test(quiz_id) ? quiz_id : null;
+      // D1 free plan = 100k row writes/day for everyone: one device may log at most 300 events a day (a real exam
+      // day is ~10). Beyond that its reports are acknowledged and dropped (the lock rows already say what matters).
+      if (ev !== "heartbeat" && device_id) {
+        const n = await db.prepare("SELECT COUNT(*) AS n FROM events WHERE device_id=? AND ts>=?").bind(device_id, new Date(Date.now() - 86400000).toISOString()).first();
+        if (n && Number(n.n) >= 300) return json({ ok: true, dropped: "too_many_reports" }, 429);
+      }
       const studentStr = lowMail(str(student));
       // Unlock reports carry {reason} (quiz_submitted / quiz_left / quiz_tab_closed / cap ...): keep it
       // in the event detail so the live monitor can tell a clean submit from a mid-quiz unlock.
@@ -1619,14 +1625,25 @@ export async function onRequest(context) {
       // checked against what the server knows: Brightspace's submission (Sync tab) after this lock began,
       // or the quiz's end. Neither = "unexpected": /live shows it red until Brightspace's completion time
       // proves the student had submitted. One read, only on signed local unlocks (rare).
-      if (ev === "unlock" && v.ok && detail && typeof detail === "object" && detail.local === true && typeof quiz_id === "string" && /^\d+-\d+$/.test(quiz_id)) {
+      let hold = false;
+      if (ev === "unlock" && v.ok && detail && typeof detail === "object" && typeof quiz_id === "string" && /^\d+-\d+$/.test(quiz_id) && detail.reason !== "cap" && detail.reason !== "quiz_submitted_server" && detail.reason !== "quiz_ended") {
         const why = await serverUnlock(v.dev, v.id, quiz_id, true);
         detailObj = { ...detail, ...(why ? { expected: why } : { unexpected: true }) };
+        // 29 Oct 2026: a helper that ASKS (detail.ask) keeps the block until the server can vouch for the end:
+        // Brightspace's submission (Sync tab) or the quiz end. While the gate is running the professor is
+        // proctoring and the Sync tab reports submissions within a round, so an unlock the server cannot
+        // explain is held (the helper keeps beating; a later submission releases it through serverUnlock).
+        // Gate not running (never gated / stopped): nobody is proctoring -> the local unlock stands, flagged.
+        if (!why && detail.ask === true) {
+          const [ou, qi] = quiz_id.split("-");
+          const g = await db.prepare("SELECT gated FROM quizzes WHERE ou=? AND qi=?").bind(ou, qi).first();
+          if (g && Number(g.gated) === 1) { hold = true; detailObj = { ...detailObj, held: true }; }
+        }
       }
       const detailStr = detailObj ? JSON.stringify(detailObj).slice(0, 2000) : null;
       // A developer-mode lock claim is logged as "dev_lock", so /live and /password find the few claims
       // through the index without reading every student's lock event.
-      const evName = ev === "lock" && /"developer":true/.test(detailStr || "") ? "dev_lock" : String(ev).slice(0, 40);
+      const evName = ev === "lock" && /"developer":true/.test(detailStr || "") ? "dev_lock" : hold ? "unlock_held" : String(ev).slice(0, 40);
       const st = [];
       // "install" (sent at every helper start): logged only when the version/platform changed or the
       // device was quiet for a day (C6); the device row keeps the reported version for the gap rule.
@@ -1656,15 +1673,16 @@ export async function onRequest(context) {
         // The lock row carries a copy of the device's student/platform/student_verified (migrate_029), so
         // /live reads lock rows only; the devices triggers keep it in step. Same row: no extra write.
         st.push(db.prepare("INSERT INTO locks (device_id,quiz_id,last_lock,helper_seen,signed,ip,locked_at,student,platform,sv) SELECT ?,?,?,?,?,?,?,d.student,d.platform,COALESCE(d.student_verified,0) FROM (SELECT 1) one LEFT JOIN devices d ON d.device_id=? WHERE 1 ON CONFLICT(device_id,quiz_id) DO UPDATE SET last_lock=excluded.last_lock,helper_seen=excluded.helper_seen,signed=excluded.signed,ip=excluded.ip,locked_at=COALESCE(locks.locked_at,excluded.locked_at),student=excluded.student,platform=excluded.platform,sv=excluded.sv").bind(device_id, qidOk, now(), now(), signed, clientIp, now(), device_id));
-      if (ev === "unlock" && qidOk)
+      if (ev === "unlock" && qidOk && !hold)
         st.push(db.prepare("DELETE FROM locks WHERE device_id=? AND quiz_id=?").bind(device_id, qidOk));
       if (ev === "heartbeat" && qidOk) {
         // Only the helper's heartbeat keeps a lock alive; the agent's only proves the agent runs.
         if (agentBeat) st.push(db.prepare("UPDATE locks SET ext_seen=? WHERE device_id=? AND quiz_id=?").bind(now(), device_id, qidOk));
-        else st.push(db.prepare("UPDATE locks SET last_lock=?, helper_seen=?, signed=?, ip=COALESCE(?,ip) WHERE device_id=? AND quiz_id=?").bind(now(), now(), signed, clientIp, device_id, qidOk));
+        else st.push(db.prepare("UPDATE locks SET last_lock=?, helper_seen=?, signed=?, ip=COALESCE(?,ip) WHERE device_id=? AND quiz_id=? AND last_lock<?").bind(now(), now(), signed, clientIp, device_id, qidOk, new Date(Date.now() - 20000).toISOString()));   // a beat storm writes nothing (20 s floor)
       }
       if (purgeDue()) st.push(...purgeStmts());   // retention without a Sync (same batch: no extra query)
       await runBatches(db, st);
+      if (hold) return json({ ok: true, hold: true, beat_s: 30 });   // keep the block; beat every 30 s until released
       // C9: the server knows this student submitted (professor's Sync tab) or the quiz is over -> tell
       // the helper to unlock now. Only for the helper's own signed lock/heartbeat (old clients ignore it).
       if (v.ok && qidOk && (ev === "lock" || (ev === "heartbeat" && !agentBeat))) {

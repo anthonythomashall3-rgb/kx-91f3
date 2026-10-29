@@ -163,9 +163,9 @@ check("... shown as Submitted", rw?.status === "done" && rw?.submitted === true,
 await call("/submitted", { ou: "500", qi: "1", users: [{ id: "9100", completed: iso(0) }] }, { teacher: P });
 rw = await row(D[0]);
 check("forged unlock BEFORE the real completion stays red", rw?.status === "left_early", JSON.stringify(rw));
-// D2: an old helper's unlock (no local flag) keeps the old rule.
+// D2: an old helper's unlock (no local flag) is checked too (29 Oct 2026): every signed unlock the server cannot explain is tagged.
 await lock(D[2]); await call("/report", { event: "unlock", quiz_id: "500-1", detail: { reason: "quiz_submitted" } }, { dev: D[2] });
-check("old helpers' unlocks are not tagged", !/unexpected/.test(one("SELECT detail FROM events WHERE device_id=? AND event='unlock'", D[2].id)?.detail || ""));
+check("old helpers' unlocks are checked as well (unexplained -> tagged)", /unexpected/.test(one("SELECT detail FROM events WHERE device_id=? AND event='unlock'", D[2].id)?.detail || ""));
 check("dashboard explains 'unverified'", /unverified:"/.test(readFileSync(join(CF, "public", "dashboard.html"), "utf8")));
 
 console.log("F5 the retired course-wide password");
@@ -176,6 +176,37 @@ const pr = await call("/password", { url: "https://usc.brightspace.com/d2l/lms/q
 check("a quiz with only an old course-wide password gets NO password", !pr.data?.password, JSON.stringify(pr.data));
 const cr = await call("/course", { url: "https://usc.brightspace.com/d2l/home/600" }, { teacher: ADMIN });
 check("/course (make a course-wide password) is retired: 410", cr.status === 410, JSON.stringify(cr.data));
+
+console.log("F6 (29 Oct) a local unlock that ASKS is HELD while the gate runs and nothing vouches for the end; released once Brightspace sees the submission");
+sqlite.prepare("UPDATE quizzes SET gated=1 WHERE ou='500' AND qi='1'").run();
+const ask = (d, reason) => call("/report", { event: "unlock", quiz_id: "500-1", detail: { reason, local: true, ask: true, before_end: true } }, { dev: d });
+const D3 = await device("mac-o26-3", "s0@usc.edu");
+await lock(D3);
+let h = await ask(D3, "quiz_tab_closed");
+check("gate on, no submission: hold:true, lock row kept", h.data?.hold === true && !!one("SELECT 1 FROM locks WHERE device_id=? AND quiz_id='500-1'", D3.id), JSON.stringify(h.data));
+check("logged as unlock_held (not as an unlock)", !!one("SELECT 1 FROM events WHERE device_id=? AND event='unlock_held'", D3.id) && !one("SELECT 1 FROM events WHERE device_id=? AND event='unlock'", D3.id));
+check("hold answer asks for 30 s beats", h.data?.beat_s === 30);
+h = await ask(D3, "quiz_submitted");
+check("a claimed 'quiz_submitted' with no submission is held just the same", h.data?.hold === true);
+// the Sync tab reports the submission -> the next beat releases it
+sqlite.prepare("UPDATE locks SET locked_at=? WHERE device_id=?").run(iso(-10 * 60000), D3.id);
+await call("/submitted", { ou: "500", qi: "1", users: [{ id: "9100", completed: iso(-60000) }] }, { teacher: P });
+const hb = await call("/report", { event: "heartbeat", quiz_id: "500-1" }, { dev: D3 });
+check("heartbeat after the submission: unlock:true quiz_submitted", hb.data?.unlock === true && hb.data?.reason === "quiz_submitted", JSON.stringify(hb.data));
+h = await ask(D3, "quiz_submitted");
+check("asking again now: accepted (expected), lock row gone", h.data?.hold !== true && !one("SELECT 1 FROM locks WHERE device_id=? AND quiz_id='500-1'", D3.id), JSON.stringify(h.data));
+// gate stopped: nobody proctoring -> a local unlock stands (flagged), never a 6-hour stranding
+sqlite.prepare("UPDATE quizzes SET gated=0 WHERE ou='500' AND qi='1'").run();
+const D4 = await device("mac-o26-4", "s1@usc.edu"); await lock(D4);
+h = await ask(D4, "quiz_tab_closed");
+check("gate off: not held, flagged unexpected", h.data?.hold !== true && /"unexpected":true/.test(one("SELECT detail FROM events WHERE device_id=? AND event='unlock'", D4.id)?.detail || ""), JSON.stringify(h.data));
+// a device reporting non-stop hits the daily event ceiling and is dropped, not written
+const D5 = await device("mac-o26-5", "s2@usc.edu");
+for (let i = 0; i < 300; i++) sqlite.prepare("INSERT INTO events (device_id,quiz_id,event,ts) VALUES (?,?,?,?)").run(D5.id, "500-1", "quiz_left", iso(-1000 * i));
+const flood = await call("/report", { event: "lock", quiz_id: "500-1" }, { dev: D5 });
+check("301st event of the day: 429, nothing written", flood.status === 429 && flood.data?.dropped === "too_many_reports" && !one("SELECT 1 FROM locks WHERE device_id=?", D5.id));
+const bt1 = await call("/report", { event: "heartbeat", quiz_id: "500-1" }, { dev: D[1] });
+check("heartbeats are never dropped by the ceiling", bt1.status === 200);
 const route = readFileSync(join(CF, "functions", "api", "[[route]].js"), "utf8");
 check("no code path reads courses.password for /password", !/AS cpw/.test(route) && !/q\?\.cpw/.test(route));
 

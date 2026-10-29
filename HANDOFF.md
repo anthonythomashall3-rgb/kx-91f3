@@ -116,6 +116,39 @@ commit as `Claude <noreply@anthropic.com>`). The claude.ai Project "LOCKqz" has 
   results by the agent + Chromium/Firefox policies; AI Overviews cannot be removed without blocking Google search
   (left open by design); DoH/DoT, Tor, VPNs, system proxies, VMs, remote desktop, overlays, local models (apps +
   ports), Apple Intelligence, Gemini in Workspace (`appsgenaiserver-pa.*` blocked).
+- **29 Oct 2026 stress test (v0.6.0, session 01UUDg7b)** - three independent red-team passes (Mac/Windows bypasses,
+  server, Linux + Android), fixes:
+  1. **Server-confirmed release (all platforms).** A student could kill the agent and `curl /unlock` with the per-user
+     token (Windows: the config token) - the helper unlocked and the server only flagged it red afterwards. Now a local
+     unlock before the quiz end ASKS the server (`/report unlock detail.ask`): the server accepts only when Brightspace's
+     submission (Sync tab) or the quiz end vouches for it; while the gate runs and nothing vouches it answers `hold`
+     (event `unlock_held`, lock row kept) and the helper keeps the block, beats every 30 s and is released by the next
+     beat after the submission (serverUnlock). Gate stopped (nobody proctoring) -> the local unlock stands, flagged.
+     Server unreachable 10 min -> stands. Master (root) token unchanged (installers, admin). Agents tell the student
+     once ("AI stays off until Brightspace records your submission or the quiz ends"). Also closes the crafted
+     Content-frame `location=` "leaving" URL trick and Android's "30 s away from the tab" unlock.
+  2. **API-only AI endpoints dropped by address** (pf `<lq_api>` 443, Windows `LOCKqz-AI-api`, nft `lq_api4/6`): a
+     client that never asks DNS (`curl --resolve`, hard-coded address, own DoH) reached api.openai.com etc. Resolved
+     with the warm list; every address a Brightspace / LOCKqz / sign-in host also uses is excluded; never Google /
+     Microsoft / GitHub front doors (shared with Docs, Office, GitHub).
+  3. **DoH/DoT resolver lists extended** everywhere (NextDNS, CleanBrowsing, OpenDNS, dns.sb, Control D, Quad101, dns0,
+     Quad9 variants, Yandex; IPv6 incl. Android). Linux: with systemd-resolved only the stub (and root) may speak DNS
+     (`meta skuid`), Chromium `BuiltInDnsClientEnabled=false`, incognito/private windows off (not in the session files).
+  4. **Server:** 300 logged events per device per day (429 beyond; heartbeats never dropped), heartbeat lock refresh
+     writes nothing within 20 s, every signed unlock is checked (not only `local:true` ones).
+  5. **Windows parity:** hosts block compared line for line (markers kept + lines deleted = rewritten), firewall rules
+     re-ensured on the re-lock pass.
+  6. **Linux:** browser label from the exe PATH (snap Chromium was "Chrome"), one session file per Chrome profile,
+     `--user-data-dir` / `-profile` roots read, window-closed (cmd 17) handled, encrypted session files reported,
+     unpoliced browsers (Thorium, qutebrowser, Epiphany ...) + Tor/Mullvad `.real` closed at lock, policy dirs created
+     for every family, agent unit tied to graphical-session + desktop env recovered, system services stopped once via
+     systemd, nft failure falls back to iptables, policy files rewritten only on change.
+  7. **Android:** Private DNS detected (tamper + no password until off), IPv6 + more DoH routes, async DNS forwarding +
+     upstream refresh on network change, 60 s beats + restart report after a force-stop, hold protocol, password
+     re-polled (gated rotation, after payment), capped set keyed on last-seen, unreadable/proxy browsers and the
+     Google Assistant overlay sent home, Opera Mini dropped, work-profile report.
+  Still open (accepted or later): renamed local-model binary on an odd loopback port; Google/Microsoft API endpoints
+  by literal IP (shared front doors); Brightspace Pulse app; on-device Gemini/Galaxy AI; Linux wildcard domains.
 - **29 Oct 2026 Android (stage 1, session 01UUDg7b):** `app/android/` - native Kotlin app, no libraries, sideloaded from
   the site (`/download/lockqz-android.apk`, built + signed by the CI `android` job with `app/android/keystore/lockqz.jks` -
   move that key to a GitHub secret before any Play listing). AI block = local VPN as the phone's only DNS server

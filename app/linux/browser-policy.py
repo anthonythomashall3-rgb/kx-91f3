@@ -45,6 +45,10 @@ def P(p): return ROOT + p if ROOT else p
 
 def _atomic(path, text):
     d = os.path.dirname(path); os.makedirs(d, exist_ok=True)
+    try:   # unchanged content is not rewritten (the lock loop runs every 5 s; browsers reload policy on change)
+        with open(path) as f:
+            if f.read() == text: return
+    except Exception: pass
     tmp = path + ".lockqz.tmp"
     with open(tmp, "w") as f: f.write(text)
     os.chmod(tmp, 0o644); os.replace(tmp, path)
@@ -55,14 +59,10 @@ def _read(path):
     except Exception: return None
 
 def chromium_targets():
-    out = []
-    for d, pid in CHROMIUM_DIRS:
-        base = P(d)
-        # Only where that browser is installed (its /etc dir exists) - plus /etc/opt/chrome always
-        # (Chrome's own packages do not create it before first policy use). Firefox-style "distribution"
-        # dirs are handled below.
-        if os.path.isdir(base) or d == "/etc/opt/chrome": out.append((os.path.join(base, "policies", "managed", OURS), pid))
-    return out
+    # Every Chromium-family policy dir (snap Chromium reads /etc/chromium through its plug, Brave's and Edge's
+    # packages never create theirs): written whether or not the browser is installed - a file in an unused dir
+    # is harmless and a browser installed mid-quiz is covered.
+    return [(os.path.join(P(d), "policies", "managed", OURS), pid) for d, pid in CHROMIUM_DIRS]
 
 def firefox_targets():
     out = []
@@ -80,9 +80,14 @@ def lock():
     for path, pid in chromium_targets():
         pol = m.chromium_policy(pid)
         pol["URLBlocklist"] = m._union(pol["URLBlocklist"], extra + hosts)
+        pol["IncognitoModeAvailability"] = 1      # no incognito: the session file cannot see those tabs
+        pol["BrowserGuestModeEnabled"] = False
+        pol["BrowserAddPersonEnabled"] = False
+        pol["BuiltInDnsClientEnabled"] = False    # system resolver only (/etc/hosts + the stub rule)
         try: _atomic(path, json.dumps(pol, indent=1, sort_keys=True))
         except Exception as e: failed = True; print("LOCKqz policy: %s: %s" % (path, e), file=sys.stderr)
     ff = m.firefox_policy()
+    ff["DisablePrivateBrowsing"] = True           # private windows are not in the session store
     ff["WebsiteFilter"]["Block"] = m._union(ff["WebsiteFilter"]["Block"],
         [p for e in extra for p in ("*://%s*" % e, "*://*.%s*" % e)] + ["*://*.%s/*" % h for h in hosts])
     os.makedirs(BACKUP, exist_ok=True)
@@ -124,6 +129,10 @@ def status():
     print("locked" if on else "unlocked"); return 0
 
 # ---------- resolver for the warm-connection list (raw DNS, past /etc/hosts) ----------
+# API-only AI endpoints: their addresses (minus any address an allow host uses) go to <out>.api and are dropped
+# outright by the engine, so a client that never asks DNS (curl --resolve, own DoH) gets no connection either.
+API_HOSTS = ['api.openai.com', 'api.anthropic.com', 'api.x.ai', 'api.deepseek.com', 'api.mistral.ai', 'api.groq.com', 'openrouter.ai', 'api.together.xyz', 'api.together.ai', 'api.perplexity.ai', 'api.cohere.com', 'api.cohere.ai', 'api.fireworks.ai', 'api.replicate.com', 'router.huggingface.co', 'api-inference.huggingface.co', 'api.cerebras.ai', 'api.sambanova.ai', 'api.deepinfra.com', 'api.hyperbolic.xyz', 'api.novita.ai', 'api.moonshot.cn', 'api.moonshot.ai', 'open.bigmodel.cn', 'api.minimax.chat', 'api.minimaxi.com', 'api.ai21.com', 'api.voyageai.com', 'api.siliconflow.cn', 'api.siliconflow.com', 'api.lepton.ai', 'api.baseten.co', 'api.friendli.ai', 'api.nebius.com', 'api.studio.nebius.ai', 'api.kimi.com']
+ALLOW_HOSTS = ['lockqz.pages.dev', 'usc.brightspace.com', 'brightspace.com', 's.brightspace.com', 'content-cdn.brightspace.com', 'd2l.com', 'www.d2l.com', 'lms.usc.edu', 'google.com', 'www.google.com', 'docs.google.com', 'drive.google.com', 'accounts.google.com', 'login.microsoftonline.com', 'outlook.office.com', 'www.office.com', 'shibboleth.usc.edu', 'my.usc.edu', 'www.usc.edu', 'cloudflare.com', 'challenges.cloudflare.com', 'static.cloudflareinsights.com']
 PRIVATE = re.compile(r"^(0\.|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.|::1$|fe80:|fc|fd)")
 def upstream_servers():
     srv = []
@@ -190,15 +199,21 @@ def resolve(blocklist, out_path):
                 try: ips.update(_query(h, qtype, srv)); break
                 except Exception: continue
         return ips
-    ips = set()
+    ips, api, allow = set(), set(), set()
     with ThreadPoolExecutor(max_workers=32) as ex:
         for got in ex.map(one, sorted(set(hosts))): ips.update(got)
+        for got in ex.map(one, API_HOSTS): api.update(got)
+        for got in ex.map(one, ALLOW_HOSTS): allow.update(got)
     ips = sorted(i for i in ips if not PRIVATE.match(i))
+    api = sorted(i for i in api - allow if not PRIVATE.match(i))
     if not ips: return 1
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     tmp = out_path + ".tmp"
     with open(tmp, "w") as f: f.write("\n".join(ips) + "\n")
     os.replace(tmp, out_path)
+    if api:
+        with open(tmp, "w") as f: f.write("\n".join(api) + "\n")
+        os.replace(tmp, out_path + ".api")
     return 0
 
 if __name__ == "__main__":

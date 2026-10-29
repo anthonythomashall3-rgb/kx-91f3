@@ -36,7 +36,7 @@ class QuizAccessibilityService : AccessibilityService() {
             "org.mozilla.firefox_beta" to "org.mozilla.firefox_beta:id/mozac_browser_toolbar_url_view",
             "org.mozilla.fenix" to "org.mozilla.fenix:id/mozac_browser_toolbar_url_view",
             "org.mozilla.focus" to "org.mozilla.focus:id/mozac_browser_toolbar_url_view",
-            "com.opera.browser" to "com.opera.browser:id/url_field", "com.opera.mini.native" to "com.opera.mini.native:id/url_field",
+            "com.opera.browser" to "com.opera.browser:id/url_field",
             "com.duckduckgo.mobile.android" to "com.duckduckgo.mobile.android:id/omnibarTextInput",
             "com.ecosia.android" to "com.ecosia.android:id/url_bar", "com.yandex.browser" to "com.yandex.browser:id/bro_omnibar_address_title_text")
         // AI apps sent to the home screen while a quiz is locked
@@ -50,7 +50,8 @@ class QuizAccessibilityService : AccessibilityService() {
         val LEAVING = Regex("quizzes_list|quiz_submissions|feedback|results|submission", RegexOption.IGNORE_CASE)
         val QI = Regex("[?&]qi=(\\d+)"); val OU = Regex("[?&]ou=(\\d+)")
         const val GRACE_MS = 30_000L
-        const val BEAT_MS = 600_000L
+        const val BEAT_MS = 60_000L         // a phone can be force-stopped silently: short beats keep the server's view honest
+        const val HOLD_BEAT_MS = 30_000L    // while the server holds a local unlock: ask again every 30 s
 
         fun parts(url: String): Pair<String, String> {
             val s = if ("://" in url.take(12)) url else "https://$url"
@@ -78,12 +79,27 @@ class QuizAccessibilityService : AccessibilityService() {
     @Volatile private var lastBeat = 0L
     @Volatile private var lastSeen = 0L
     @Volatile private var pwShown: String? = null
-    @Volatile private var capped = mutableSetOf<String>()  // quizzes the server released (submitted / ended): never re-locked while open
+    @Volatile private var held = false                   // the server has not vouched for the quiz end yet: block stays
+    @Volatile private var holdUntil = 0L
+    @Volatile private var askFailSince = 0L
+    @Volatile private var pwNext = 0L
+    private val capped = java.util.concurrent.ConcurrentHashMap<String, Long>()   // released quiz id -> last time its page was seen
+    private val browsers = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()   // every app that opens https links
+    @Volatile private var otherProfileTold = false
 
     override fun onServiceConnected() {
         instance = this
         DnsVpnService.onRevoked = { onVpnRevoked() }
-        exec.execute { DnsVpnService.setBlocklist(Api.blocklist(this)) }
+        exec.execute {
+            DnsVpnService.setBlocklist(Api.blocklist(this))
+            try {   // every installed browser (anything that opens https links): the ones LOCKqz cannot read are sent home during a quiz
+                val i = Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://example.com/"))
+                for (r in packageManager.queryIntentActivities(i, android.content.pm.PackageManager.MATCH_ALL)) browsers.add(r.activityInfo.packageName)
+            } catch (_: Exception) {}
+            // Resumed after a force-stop / reboot while a quiz was locked: the server hears about the gap.
+            val prev = getSharedPreferences("lockqz", Context.MODE_PRIVATE).getString("locked_quiz", null)
+            if (prev != null) { Api.report(this, "restarted", prev, JSONObject().put("detail", "watcher_restarted")); getSharedPreferences("lockqz", Context.MODE_PRIVATE).edit().remove("locked_quiz").apply() }
+        }
         main.post(object : Runnable { override fun run() { tick(); main.postDelayed(this, 2000) } })
         Log.i(TAG, "watching")
     }
@@ -92,10 +108,14 @@ class QuizAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(e: AccessibilityEvent) {
         val pkg = e.packageName?.toString() ?: return
-        if (quiz != null && pkg in AI_APPS && e.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            performGlobalAction(GLOBAL_ACTION_HOME)
-            main.post { Toast.makeText(this, "LOCKqz: AI is off during your quiz", Toast.LENGTH_SHORT).show() }
-            return
+        if (quiz != null && e.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            if (pkg in AI_APPS || (pkg in browsers && pkg !in URL_BARS && pkg != packageName)) {
+                // an AI app, or a browser LOCKqz cannot read (proxy browsers render AI sites on their servers)
+                performGlobalAction(GLOBAL_ACTION_HOME)
+                main.post { Toast.makeText(this, if (pkg in AI_APPS) "LOCKqz: AI is off during your quiz" else "LOCKqz: use Chrome, Firefox, Samsung Internet, Edge or Brave during the quiz", Toast.LENGTH_SHORT).show() }
+                return
+            }
+            if (pkg == "com.google.android.googlequicksearchbox") { performGlobalAction(GLOBAL_ACTION_BACK); return }   // Assistant / Gemini overlay, Circle to Search
         }
         val barId = URL_BARS[pkg] ?: return
         val root = rootInActiveWindow ?: return
@@ -115,9 +135,10 @@ class QuizAccessibilityService : AccessibilityService() {
         val now = System.currentTimeMillis()
         if (isQuiz(url)) {
             val id = lockId(url); lastSeen = now
-            if (quiz == null && id !in capped) exec.execute { start(url, id) }
+            if (capped.containsKey(id)) { capped[id] = now; return }           // released by the server: never re-locked while its page stays open
+            if (quiz == null) exec.execute { start(url, id) }
             else if (quiz == id) { missingSince = 0; quizUrl = url }
-            else if (quiz != null) exec.execute { end("quiz_left") }
+            else exec.execute { end("quiz_left") }
         } else if (isLeaving(url) && quiz != null && lockId(url) == quiz) {
             exec.execute { end("quiz_submitted") }
         }
@@ -125,19 +146,25 @@ class QuizAccessibilityService : AccessibilityService() {
 
     /** Every 2 s: the quiz page has not been seen for the grace period -> unlock; heartbeat while locked. */
     private fun tick() {
-        val q = quiz ?: return
         val now = System.currentTimeMillis()
-        if (now - lastSeen > GRACE_MS) { exec.execute { end("quiz_closed") }; return }
-        if (now - lastBeat > BEAT_MS) { lastBeat = now; exec.execute { beat(q) } }
+        for ((id, seen) in capped) if (now - seen > 2 * GRACE_MS) capped.remove(id)   // page gone for a minute: a new attempt locks again
+        val q = quiz ?: return
+        if (!held && now - lastSeen > GRACE_MS) { exec.execute { end("quiz_closed") }; return }
+        if (held && now - lastSeen > GRACE_MS && now >= holdUntil) { exec.execute { end("quiz_closed") }; return }   // ask again (30 s)
+        if (now - lastBeat > (if (held) HOLD_BEAT_MS else BEAT_MS)) { lastBeat = now; exec.execute { beat(q) } }
+        val u = quizUrl
+        if (!held && u != null && "/attempt/" !in parts(u).first && now >= pwNext) { pwNext = now + 15_000; exec.execute { password(u, q, quiet = true) } }   // gated: new code every 5 min
     }
 
     private fun start(url: String, id: String) {
         if (quiz != null) return
         if (!Api.verified(this) && Api.student(this) == null) { notify("Finish LOCKqz setup", "Open LOCKqz and confirm your school email to get quiz passwords."); return }
-        if (!DnsVpnService.running) { DnsVpnService.start(this); Thread.sleep(1500) }
-        if (!DnsVpnService.running) { notify("LOCKqz is off", "Open LOCKqz and allow the AI block (VPN) to get the quiz password."); return }
+        if (!DnsVpnService.running) { try { DnsVpnService.start(this) } catch (e: Exception) { Log.w(TAG, "vpn start: $e") }; Thread.sleep(1500) }
+        if (!DnsVpnService.running) { notifyOnce("vpn", "LOCKqz is off", "Open LOCKqz and allow the AI block (VPN) to get the quiz password."); return }
         DnsVpnService.setBlocklist(Api.blocklist(this))
-        DnsVpnService.locked = true; quiz = id; quizUrl = url; lastSeen = System.currentTimeMillis(); missingSince = 0; pwShown = null
+        DnsVpnService.locked = true; quiz = id; quizUrl = url; lastSeen = System.currentTimeMillis(); missingSince = 0; pwShown = null; held = false; pwNext = 0
+        getSharedPreferences("lockqz", Context.MODE_PRIVATE).edit().putString("locked_quiz", id).apply()
+        checkOtherProfiles(id)
         Log.i(TAG, "locked $id")
         val (code, j) = Api.report(this, "lock", id, JSONObject().put("url", url).put("platform", Api.platform()))
         if (j?.optBoolean("unlock") == true) { release(id, j.optString("reason", "quiz_ended")); return }
@@ -146,18 +173,45 @@ class QuizAccessibilityService : AccessibilityService() {
         vpnNote()
     }
 
-    private fun password(url: String, id: String) {
+    /** Private DNS (DoT to a resolver of the student's choice) would answer every AI lookup past the filter. */
+    private fun privateDnsOn(): String? {
+        return try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            for (n in cm.allNetworks) {
+                val lp = cm.getLinkProperties(n) ?: continue
+                if (android.os.Build.VERSION.SDK_INT >= 28 && lp.isPrivateDnsActive) return lp.privateDnsServerName ?: "automatic"
+            }
+            null
+        } catch (_: Exception) { null }
+    }
+    private fun checkOtherProfiles(id: String) {
+        try {
+            val um = getSystemService(Context.USER_SERVICE) as android.os.UserManager
+            if (um.userProfiles.size > 1 && !otherProfileTold) { otherProfileTold = true; Api.report(this, "other_profile", id, JSONObject().put("detail", "work_profile_or_second_user")) }
+        } catch (_: Exception) {}
+    }
+
+    private fun password(url: String, id: String, quiet: Boolean = false) {
+        if (quiz != id) return
+        privateDnsOn()?.let { srv ->
+            if (!quiet) { Api.report(this, "tamper", id, JSONObject().put("detail", "private_dns:$srv")); notifyOnce("pdns", "Turn Private DNS off", "Settings > Network & internet > Private DNS > Off. LOCKqz gives you the quiz password once it is off.") }
+            main.postDelayed({ if (quiz == id && pwShown == null) exec.execute { password(quizUrl ?: url, id) } }, 15_000); return
+        }
         val (code, j) = Api.password(this, url)
         val pw = j?.optString("password", "")?.takeIf { it.isNotEmpty() && code == 200 }
         if (pw != null) {
             if (pwShown != pw) { pwShown = pw; showPassword(pw) }
             return
         }
+        if (quiet) return
         val pay = j?.optJSONObject("pay")
         if (pay != null) {
-            notify("Pay for LOCKqz this semester", "The quiz password comes as soon as your payment arrives. Memo: ${pay.optString("code")}")
-            try { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(pay.optString("url", "${Api.SITE}/pay"))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) {}
-            return
+            if (!getSharedPreferences("lockqz", Context.MODE_PRIVATE).getBoolean("pay_shown_$id", false)) {
+                getSharedPreferences("lockqz", Context.MODE_PRIVATE).edit().putBoolean("pay_shown_$id", true).apply()
+                notify("Pay for LOCKqz this semester", "The quiz password comes as soon as your payment arrives. Memo: ${pay.optString("code")}")
+                try { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(pay.optString("url", "${Api.SITE}/pay"))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) {}
+            }
+            main.postDelayed({ if (quiz == id && pwShown == null) exec.execute { password(quizUrl ?: url, id) } }, 15_000); return
         }
         when (j?.optString("reason")) {
             "not started" -> notify("Quiz not open yet", "LOCKqz gives you the password when the quiz opens.")
@@ -181,17 +235,37 @@ class QuizAccessibilityService : AccessibilityService() {
         if (j?.optBoolean("unlock") == true) release(id, j.optString("reason", "quiz_ended"))
     }
 
-    private fun release(id: String, reason: String) { capped.add(id); end(reason, report = reason != "not_protected") }
+    /** The server says this quiz is over for this student (submitted per the professor's Sync, or ended). */
+    private fun release(id: String, reason: String) { unlockNow(id, reason, report = false); capped[id] = System.currentTimeMillis() }
 
+    /** The quiz page is gone (submitted / left / closed). The server is ASKED before AI comes back: it vouches
+     *  for the end (Brightspace's submission, or the quiz end) or, while the gate runs, holds the block;
+     *  held, the watcher beats every 30 s and the server releases it right after the submission arrives. */
     private fun end(reason: String, report: Boolean = true) {
         val id = quiz ?: return
-        quiz = null; quizUrl = null; pwShown = null
+        if (!report) { unlockNow(id, reason, report = false); return }
+        val now = System.currentTimeMillis()
+        val det = JSONObject().put("reason", reason).put("local", true).put("ask", true)
+        val (code, j) = Api.report(this, "unlock", id, JSONObject().put("detail", det))
+        var hold = j?.optBoolean("hold") == true
+        if (code == 0) { if (askFailSince == 0L) askFailSince = now; hold = now - askFailSince < 600_000 } else askFailSince = 0
+        if (hold) {
+            if (!held) { Log.i(TAG, "unlock held for $id"); notifyOnce("hold", "AI stays off a little longer", "Brightspace has not recorded your submission yet. AI comes back by itself within a minute of it reaching your professor's Brightspace, or at the quiz end.") }
+            held = true; holdUntil = now + HOLD_BEAT_MS; lastBeat = now
+            return
+        }
+        unlockNow(id, reason, report = false)
+    }
+
+    private fun unlockNow(id: String, reason: String, report: Boolean) {
+        quiz = null; quizUrl = null; pwShown = null; held = false
         DnsVpnService.locked = false
+        getSharedPreferences("lockqz", Context.MODE_PRIVATE).edit().remove("locked_quiz").apply()
         Log.i(TAG, "unlocked $id ($reason)")
         if (report) Api.report(this, "unlock", id, JSONObject().put("detail", JSONObject().put("reason", reason)))
         notify("Quiz over", "AI is back.", cancelAfter = true)
         vpnNote()
-        if (reason != "quiz_submitted") main.postDelayed({ capped.remove(id) }, 60_000)
+        if (reason != "quiz_submitted" && reason != "not_protected") capped.remove(id)   // left / closed: a return to the page locks again
     }
 
     private fun onVpnRevoked() {
@@ -204,6 +278,12 @@ class QuizAccessibilityService : AccessibilityService() {
 
     private fun vpnNote() { /* the VPN notification text follows the lock state */ try { startService(Intent(this, DnsVpnService::class.java).setAction(DnsVpnService.ACTION_START)) } catch (_: Exception) {} }
 
+    private val told = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private fun notifyOnce(key: String, title: String, text: String) {   // the same notice at most every 10 min
+        val now = System.currentTimeMillis()
+        if (now - (told[key] ?: 0L) < 600_000) return
+        told[key] = now; notify(title, text, important = true)
+    }
     private fun notify(title: String, text: String, important: Boolean = false, cancelAfter: Boolean = false) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.createNotificationChannel(NotificationChannel("lockqz-quiz", "LOCKqz quiz", NotificationManager.IMPORTANCE_HIGH))

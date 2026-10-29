@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.5.9"
+$Version = "0.6.0"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = if ($env:LOCKQZ_CONFIG) { $env:LOCKQZ_CONFIG } else { "$env:ProgramData\LOCKqz\config.json" }
@@ -449,7 +449,8 @@ $watcher.AddScript({
         if ($tamper) { WReport "tamper" "hosts_block_removed" $null | Out-Null }
         # liveness ping on wall time, whatever a cycle costs; the server sets the interval (beat_s, 60-900 s;
         # default 300 until its first answer) and calls a lock dark after two missed pings
-        if (($State.state -eq "locked") -and (LQ-Due $lastBeat $now $script:BeatSecs)) {
+        $beatEvery = if ($State.release_pending) { 30 } else { $script:BeatSecs }
+        if (($State.state -eq "locked") -and (LQ-Due $lastBeat $now $beatEvery)) {
           $lastBeat = $now; $hq = $State.quiz_id
           $hr = WReport "heartbeat" $null "helper"
           $script:BeatSecs = LQ-BeatSecs $hr.data $script:BeatSecs
@@ -577,16 +578,40 @@ while ($listener.IsListening) {
       $q = if ($State.quiz_id) { $State.quiz_id } else { $body.quiz_id }
       $who = Get-Requester $req
       $why = LQ-UnlockReason $body.reason $who
-      $State.state="unlocked"; $State.quiz_id=$null; $State.locked_since=0; $State.applied=$false
-      $ok = (Engine "unlock") -cmatch "LOCKqz: UNLOCKED"   # if not, the watcher finishes it within 5 s
-      Clear-Lock
-      $det = @{ reason = $why; requester = $who.kind; engine_ok = $ok }
+      $det = @{ reason = $why; requester = $who.kind; local = $true }
       if ($who.name) { $det.process = $who.name }
       if (($why -eq "local_request") -and $body.reason) { $det.claimed = ([string]$body.reason).Substring(0, [Math]::Min(40, ([string]$body.reason).Length)) }
       if (($why -eq "local_request") -and $who.cmd) { $det.cmd = $who.cmd }
-      Report "unlock" $det $null $q | Out-Null
-      if (($why -eq "quiz_left") -or ($why -eq "quiz_tab_closed")) { Report "quiz_left" $why "agent" $q | Out-Null }
-      $out.state="unlocked"; $out.engine_unlocked=$ok
+      # 29 Oct 2026: no local caller (the agent, or anything with the token) ends the AI block before the quiz
+      # end by itself. The server is asked first; while the gate runs it says HOLD unless Brightspace's
+      # submission (Sync tab) or the quiz end vouches for it. Held: the block stays, the watcher beats every
+      # 30 s and the server releases it on the first beat after the submission arrives (or at the end).
+      $held = $false
+      if (($State.state -eq "locked") -and $q -and ($q -match '^\d+-\d+$')) {
+        $now = [int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        if ($State.hold_until -and ($now -lt [int64]$State.hold_until)) { $held = $true }
+        else {
+          $det.ask = $true
+          $r = Report "unlock" $det $null $q
+          if ($r.data -and ($r.data.hold -is [bool]) -and $r.data.hold) { $held = $true }
+          elseif ($r.code -eq 0) {
+            if (-not $State.ask_fail_since) { $State.ask_fail_since = $now }
+            if (($now - [int64]$State.ask_fail_since) -lt 600) { $held = $true }
+          } else { $State.ask_fail_since = $null }
+          if ($held) { $State.hold_until = $now + 30; $State.release_pending = $true }
+        }
+      }
+      if ($held) {
+        $res.StatusCode = 202; $out.state = "locked"; $out.pending = "brightspace"; $out.ok = $false
+      } else {
+        $State.state="unlocked"; $State.quiz_id=$null; $State.locked_since=0; $State.applied=$false; $State.release_pending=$false; $State.hold_until=$null
+        $ok = (Engine "unlock") -cmatch "LOCKqz: UNLOCKED"   # if not, the watcher finishes it within 5 s
+        Clear-Lock
+        $det.engine_ok = $ok
+        if (-not $det.ask) { Report "unlock" $det $null $q | Out-Null }
+        if (($why -eq "quiz_left") -or ($why -eq "quiz_tab_closed")) { Report "quiz_left" $why "agent" $q | Out-Null }
+        $out.state="unlocked"; $out.engine_unlocked=$ok
+      }
     }
     "/student"   { if($body.student){$State.student=$body.student}; Report-Install; $out.student=$State.student }
     "/verify"    {

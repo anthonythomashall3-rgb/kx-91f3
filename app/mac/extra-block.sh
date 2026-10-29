@@ -293,6 +293,14 @@ wild_block_off() {
 : "${STATE:=/Library/Application Support/LOCKqz}"; : "${PF_ANCHOR:=com.lockqz}"
 : "${BLOCKLIST:=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/blocklist.txt}"
 WARM_IPS="${WARM_IPS:-$STATE/warm_ips}"
+# API-only AI endpoints (29 Oct 2026): a program that never asks DNS (curl --resolve, a hard-coded address, its own
+# DoH to an unlisted server) still reached them. Their addresses are resolved with the warm list and DROPPED on
+# 443 (pf table <lq_api>) - unlike the warm table, new connections too. Only hosts that serve nothing but an AI
+# API (never Google/Microsoft/GitHub front doors, which share addresses with Docs, Office, GitHub). Any address
+# one of the ALLOW hosts (Brightspace, LOCKqz, USC sign-in, Google/Office sign-in) also uses is left alone.
+API_HOSTS=(api.openai.com api.anthropic.com api.x.ai api.deepseek.com api.mistral.ai api.groq.com openrouter.ai api.together.xyz api.together.ai api.perplexity.ai api.cohere.com api.cohere.ai api.fireworks.ai api.replicate.com router.huggingface.co api-inference.huggingface.co api.cerebras.ai api.sambanova.ai api.deepinfra.com api.hyperbolic.xyz api.novita.ai api.moonshot.cn api.moonshot.ai open.bigmodel.cn api.minimax.chat api.minimaxi.com api.ai21.com api.voyageai.com api.siliconflow.cn api.siliconflow.com api.lepton.ai api.baseten.co api.friendli.ai api.nebius.com api.studio.nebius.ai api.kimi.com)
+ALLOW_HOSTS=(lockqz.pages.dev usc.brightspace.com brightspace.com s.brightspace.com content-cdn.brightspace.com d2l.com www.d2l.com lms.usc.edu google.com www.google.com docs.google.com drive.google.com accounts.google.com login.microsoftonline.com outlook.office.com www.office.com shibboleth.usc.edu my.usc.edu www.usc.edu cloudflare.com challenges.cloudflare.com static.cloudflareinsights.com)
+API_IPS="${API_IPS:-$STATE/api_ips}"
 WARM_MAX_AGE=43200
 warm_resolve() {   # -> $WARM_IPS (written atomically); exit 1 when dig is missing or nothing resolved
   local tmp="$WARM_IPS.tmp.$$"
@@ -303,6 +311,20 @@ warm_resolve() {   # -> $WARM_IPS (written atomically); exit 1 when dig is missi
     | grep -vE '^(0\.|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.|::1$|fe80:|fc|fd)' | sort -u > "$tmp"
   [ -s "$tmp" ] || { rm -f "$tmp"; return 1; }
   mv -f "$tmp" "$WARM_IPS"
+  api_resolve || true
+}
+_dig_all() {   # _dig_all host... -> addresses, one per line (A + AAAA), private/loopback dropped
+  printf '%s\n' "$@" | xargs -P 24 -I{} sh -c 'dig +short +time=2 +tries=1 A "$1" 2>/dev/null; dig +short +time=2 +tries=1 AAAA "$1" 2>/dev/null' _ {} 2>/dev/null \
+    | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[0-9a-fA-F:]*:[0-9a-fA-F:]*$' \
+    | grep -vE '^(0\.|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.|::1$|fe80:|fc|fd)' | sort -u
+}
+api_resolve() {   # -> $API_IPS: the API hosts' addresses minus every address an ALLOW host uses
+  local tmp="$API_IPS.tmp.$$" allow
+  command -v dig >/dev/null 2>&1 || return 1
+  allow="$(_dig_all "${ALLOW_HOSTS[@]}")"
+  _dig_all "${API_HOSTS[@]}" | grep -vxF -f <(printf '%s\n' "$allow"; echo "__none__") > "$tmp"
+  [ -s "$tmp" ] || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$API_IPS"
 }
 _warm_age() {   # seconds since the file changed (macOS stat; GNU stat in the Linux tests)
   local m
@@ -321,6 +343,7 @@ warm_apply() {   # called on every lock pass (5 s): cheap unless the list change
   local rc=0
   # The table is reloaded on every pass: load_pf re-reads the ruleset each time, and a ruleset load
   # resets a table to its (empty) definition. The state kill runs once per list version.
+  if [ -s "$API_IPS" ]; then pfctl -a "$PF_ANCHOR" -t lq_api -T replace -f "$API_IPS" >/dev/null 2>&1 || rc=1; fi
   if [ -s "$WARM_IPS" ]; then
     if pfctl -a "$PF_ANCHOR" -t lq_warm -T replace -f "$WARM_IPS" >/dev/null 2>&1; then
       if [ ! -f "$STATE/warm.loaded" ] || [ "$WARM_IPS" -nt "$STATE/warm.loaded" ]; then warm_kill_states; touch "$STATE/warm.loaded"; fi
@@ -334,7 +357,7 @@ warm_apply() {   # called on every lock pass (5 s): cheap unless the list change
   fi
   return $rc
 }
-warm_clear() { rm -f "$STATE/warm.loaded" 2>/dev/null; pfctl -a "$PF_ANCHOR" -t lq_warm -T flush >/dev/null 2>&1 || true; }
+warm_clear() { rm -f "$STATE/warm.loaded" 2>/dev/null; pfctl -a "$PF_ANCHOR" -t lq_warm -T flush >/dev/null 2>&1 || true; pfctl -a "$PF_ANCHOR" -t lq_api -T flush >/dev/null 2>&1 || true; }
 
 extra_lock() {
   if [ "$DRYRUN" = "1" ]; then

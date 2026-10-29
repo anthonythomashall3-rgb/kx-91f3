@@ -61,6 +61,6 @@ check("last ping 22 min ago -> dark", s.st === "dark" || s.st === "helper_killed
 console.log("B3 both helpers follow the server's interval");
 const py = readFileSync(join(HERE, "..", "mac", "lockqzd.py"), "utf8"), ps = readFileSync(join(HERE, "..", "windows", "lockqzd.ps1"), "utf8");
 check("mac: report() adopts beat_s (60-900 s) unless a test set beat_cycles", /BEAT_FROM_SERVER = "beat_cycles" not in CONF/.test(py) && /BEAT_SECS = max\(60, min\(900, j\["beat_s"\]\)\)/.test(py));
-check("windows: LQ-BeatSecs clamps 60-900 and the watcher uses $script:BeatSecs", /function LQ-BeatSecs/.test(ps) && /LQ-Due \$lastBeat \$now \$script:BeatSecs/.test(ps) && /\$script:BeatSecs = LQ-BeatSecs \$hr\.data \$script:BeatSecs/.test(ps));
+check("windows: LQ-BeatSecs clamps 60-900 and the watcher uses $script:BeatSecs (30 s while a release is pending)", /function LQ-BeatSecs/.test(ps) && /LQ-Due \$lastBeat \$now \$beatEvery/.test(ps) && /\$beatEvery = if \(\$State\.release_pending\) \{ 30 \} else \{ \$script:BeatSecs \}/.test(ps) && /\$script:BeatSecs = LQ-BeatSecs \$hr\.data \$script:BeatSecs/.test(ps));
 console.log(`RESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
