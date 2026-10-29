@@ -130,8 +130,12 @@ jobs:
           else
             echo "::warning::no ANDROID_KEYSTORE_B64 secret: APK signed with the debug key (see app/android/README.md to add the real key)"
           fi
-          gradle -q testDebugUnitTest assembleRelease --no-daemon
+          echo "gradle $(gradle --version 2>/dev/null | grep -E '^Gradle' ) ANDROID_HOME=$ANDROID_HOME"
+          rc=0; gradle -q testDebugUnitTest assembleRelease --no-daemon > "$RUNNER_TEMP/gradle.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/gradle.log"
+          if [ "$rc" -ne 0 ]; then grep -E '^e: |error|What went wrong|^> |FAILED|Exception' "$RUNNER_TEMP/gradle.log" | head -40 | cut -c1-400 | sed 's/^/::error title=Android build::/'; fi
           rm -f "$RUNNER_TEMP/lockqz.jks"
+          exit $rc
           cp app/build/outputs/apk/release/app-release.apk ../../lockqz-android.apk
           "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | tail -1)/apksigner" verify --print-certs ../../lockqz-android.apk | head -2
       - uses: actions/upload-artifact@v4
