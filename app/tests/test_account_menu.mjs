@@ -143,14 +143,12 @@ try {
   check("no saved card: Auto-renew Off, no cancel button", /Auto-renew:?\s*Off/.test(await pg.textContent("#lqm-acc")) && !(await pg.isVisible("text=Cancel subscription")));
   check("no page errors with storage blocked", errs2.length === 0, errs2.join(" | "));
 
-  console.log("B9 pay page: the card renewal said plainly on the button and next to the price");
+  console.log("B9 pay page: the card renewal said on the button only");
   await pg.click("a.lqm-pay"); await pg.waitForSelector("#card:not([hidden])");
   await pg.click("#card");
-  const btxt = await pg.textContent("#cgo"), line = await pg.textContent("#crenew");
+  const btxt = await pg.textContent("#cgo");
   check("button: 'Pay $280 by card · renews each semester'", btxt === "Pay $280 by card · renews each semester", btxt);
-  check("line: 'Renews automatically each semester at $280. Cancel anytime: gear icon → Account.'", line === "Renews automatically each semester at $280. Cancel anytime: gear icon → Account.", line);
-  const sty = await pg.$eval("#crenew", e => { const s = getComputedStyle(e); return { fs: parseFloat(s.fontSize), c: s.color, v: e.offsetParent !== null }; });
-  check("line is normal body text (16px, near-black), visible", sty.v && sty.fs >= 16 && sty.c === "rgb(17, 17, 17)", JSON.stringify(sty));
+  check("no separate renewal line under the card (owner 29 Oct)", !(await pg.$("#crenew")) && !/Renews automatically/.test(await pg.textContent("#cpanel")));
   await c.close();
 
   console.log("B11 support page: form sends to LOCKqz's inbox with Reply-To = sender; errors; bot trap; limits; works with no mail app");

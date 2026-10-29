@@ -77,7 +77,6 @@
     <button class="way" id="card" type="button" hidden aria-expanded="false"><span class="wn"><b>Card</b></span><span class="wp" id="camt"></span></button>
     <div class="zsteps" id="cpanel" hidden>
       <div id="ctax"></div>
-      <p id="crenew" hidden style="margin:0 0 12px;font-size:16px;color:#111;line-height:1.4"></p>
       <button class="btn prime" id="cgo" type="button" style="width:100%;padding:8px 14px;text-align:center">Pay by card</button>
     </div>
     <button class="way" id="bank" type="button" hidden aria-expanded="false"><span class="wn"><b>Bank transfer (ACH / wire)</b></span><span class="wp" id="bto"></span></button>
@@ -132,7 +131,6 @@ function prices(){ if (!WAYS || !who) return;
   if (VENMO) { $("vgo").href = `https://venmo.com/?txn=pay&recipients=${encodeURIComponent(VENMO)}&amount=${encodeURIComponent(w.venmo.total.toFixed(2))}&note=${encodeURIComponent(code)}`; $("vgo").textContent = `Open Venmo · ${money2(w.venmo.total)} to @${VENMO}`; }
   // Card renews each semester (Fall/Spring): said plainly on the button and next to the price, at the real amount.
   $("cgo").textContent = "Pay " + money2(w.card.total) + " by card" + (RENEW ? " · renews each semester" : "");
-  $("crenew").hidden = !RENEW; if (RENEW) $("crenew").textContent = "Renews automatically each semester at " + money2(RENEW) + ". Cancel anytime: gear icon → Account.";
   if (PO) { $("pgo").href = `mailto:${PO.to}?subject=${encodeURIComponent("LOCKqz purchase order " + code)}&body=${encodeURIComponent("PO number:\nBilling contact:\nAmount: " + money2(w.po.total) + (TAX && w.po.tax > 0 ? " (LOCKqz " + money2(w.po.base) + " + " + TAX.label.toLowerCase() + " " + money2(w.po.tax) + ")" : "") + "\nMemo: " + code + " (" + PO.email + ")")}`; $("poto").textContent = "To " + PO.to; }
   if (PICKED) { $("amt").textContent = money2(w[PICKED].total); }
 }
