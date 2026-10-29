@@ -451,7 +451,8 @@ function viewHome(){
 const mailedAll = () => BS.courses.length > 0 && BS.courses.filter(c=>!c.roster_hidden).every(c => c.mailed_at || !c.students.length);
 function setupBlock(){
   if (ME.admin && !BS.courses.length) return "";
-  const steps = [EXT(), BS.courses.length > 0, mailedAll()], done = steps.filter(Boolean).length;
+  // In order: a step counts only after the one before it (Brightspace before the extension syncs nothing).
+  const s1 = EXT(), s2 = s1 && BS.courses.length > 0, steps = [s1, s2, s2 && mailedAll()], done = steps.filter(Boolean).length;
   if (done === 3) return "";
   const card = (i, t, d, act) => `<div class="step${steps[i] ? " done" : ""}"><span class="num">${steps[i] ? "✓" : i + 1}</span><span class="t">${t}</span><span class="d">${d}</span>${steps[i] ? `<span class="ok">Done</span>` : act}</div>`;
   const store = EXT_FROM_STORE(), edge = BROWSER === "edge";
@@ -460,7 +461,7 @@ function setupBlock(){
     : `${edge ? "<b>Allow</b> other stores, then " : ""}<b>Add to Chrome</b> → <b>Add extension</b>.<br>Warning? <b>Continue to install</b>.`;
   return `<section class="card" aria-label="Set up"><h2 style="margin:0">Set up — ${done} of 3 done</h2><div class="setup">` +
     card(0, `Add LOCKqz to ${BROWSER_NAME}`, extD, ext) +
-    card(1, "Open Brightspace", "Sign in. Your classes appear here.", `<a class="btn prime" href="${BS_SITE}" target="_blank" rel="noopener">Open Brightspace</a>`) +
+    card(1, "Open Brightspace", "Sign in. Your classes appear here.", steps[0] ? `<a class="btn prime" href="${BS_SITE}" target="_blank" rel="noopener">Open Brightspace</a>` : `<span class="d" style="margin-top:auto">After step 1.</span>`) +
     card(2, "Email your students", "Opens your email with the install link.", steps[1] ? `<button class="btn prime" onclick="emailAll(this)">Email students</button>` : `<span class="d" style="margin-top:8px">After step 2.</span>`) +
     `</div></section>`;
 }
