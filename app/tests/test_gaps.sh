@@ -90,7 +90,7 @@ check "refresh runs detached (lockqz.ps1 warm) at most every 12 h" 'grep -q "\$W
 echo "G4 installers end on the pay page (the page itself says 'nothing to pay' when no fee is on)"
 check "Mac install.sh opens /pay as the console user" 'grep -q "sudo -u \"\$CONSOLE_USER\" open \"\$SITE/pay\"" "$MAC/install.sh"'
 check "Mac .pkg postinstall opens /pay" 'grep -q "open \"https://lockqz.pages.dev/pay\"" "$MAC/make-pkg.sh"'
-check "Windows install.ps1 opens /pay" 'grep -q "Start-Process \"\$Site/pay\"" "$WIN/install.ps1"'
+check "Windows install.ps1 opens /pay through explorer.exe (not a child of the installer), skipped under LOCKQZ_NO_BROWSER" 'grep -q "Start-Process \"explorer.exe\" -ArgumentList \"\$Site/pay\"" "$WIN/install.ps1" && grep -q "LOCKQZ_NO_BROWSER" "$WIN/install.ps1" && grep -q "LOCKQZ_NO_BROWSER" "$HERE/test_windows_install.ps1"'
 check "never as root/loginwindow" 'grep -q "\"\"|root|loginwindow|_\*) ;;" "$MAC/install.sh"'
 
 echo ""; echo "RESULT: $PASS passed, $FAIL failed"; [ "$FAIL" = 0 ]

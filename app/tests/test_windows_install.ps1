@@ -18,6 +18,7 @@ Get-ChildItem "$PSScriptRoot\..\windows\*.ps1" | ForEach-Object {
 }
 
 # 1) silent install
+$env:LOCKQZ_NO_BROWSER = "1"   # the installer ends by opening the pay page; no browser on a build machine (and -Wait waits for the whole tree)
 $p = Start-Process -FilePath $Exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/LOG=install.log' -Wait -PassThru
 Check "installer exit code 0" ($p.ExitCode -eq 0)
 $Dest = "$env:ProgramData\LOCKqz"

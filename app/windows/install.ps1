@@ -188,4 +188,7 @@ try {
 Write-Host "Done. Open a Brightspace quiz - LOCKqz asks your school email once, then locks AI automatically."
 # Last step: the semester fee page opens by itself (it says "nothing to pay" when no fee is on), so a
 # student never has to remember to come back to the website.
-try { Start-Process "$Site/pay" -ErrorAction SilentlyContinue } catch {}
+# Through explorer.exe, which hands the URL to the browser and exits at once: the browser is then not a
+# child of this script (the installer, and a test's Start-Process -Wait, wait for the whole process tree).
+# LOCKQZ_NO_BROWSER=1 (CI) skips it.
+if (-not $env:LOCKQZ_NO_BROWSER) { try { Start-Process "explorer.exe" -ArgumentList "$Site/pay" -ErrorAction SilentlyContinue } catch {} }
