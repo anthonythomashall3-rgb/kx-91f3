@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-10-28 19:20 PT — 01UUDg7b: student download page (app/cloudflare/public/index.html) simplified: two options with an OR divider, fewer words. Touches: index.html, test_round2_frontend index check only if needed.
 - 2026-10-27 19:40 PT — 01UzHDaF: Google sign-in (students + professors, codes as fallback) still in progress. Touches: [[route]].js (/auth/google/*), dashboard.html login form, mac+windows agents identity step, migrate_036, tests.
 
 ## Recently finished
