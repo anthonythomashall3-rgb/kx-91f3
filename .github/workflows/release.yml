@@ -35,6 +35,7 @@ jobs:
       deploy: ${{ steps.chg.outputs.deploy }}
       mac: ${{ steps.chg.outputs.mac }}
       win: ${{ steps.chg.outputs.win }}
+      linux: ${{ steps.chg.outputs.linux }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -48,16 +49,18 @@ jobs:
           if [ -n "$live" ] && git cat-file -e "$live^{commit}" 2>/dev/null; then base=$(git rev-parse "$live"); echo "live: $live"; fi
           if [ -z "$base" ] && [ "${{ github.event_name }}" = "push" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then base="$BEFORE"; fi
           if [ -z "$base" ]; then
-            echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "mac=true" >> "$GITHUB_OUTPUT"; echo "win=true" >> "$GITHUB_OUTPUT"; echo "full build"; exit 0; fi
+            echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "mac=true" >> "$GITHUB_OUTPUT"; echo "win=true" >> "$GITHUB_OUTPUT"; echo "linux=true" >> "$GITHUB_OUTPUT"; echo "full build"; exit 0; fi
           files=$(git diff --name-only "$base" "$GITHUB_SHA")
           echo "$files"
           docs='(^|/)[^/]*\.md$|^0[0-9]*_[^/]*/|^LOCKqz-USC/|^[^/]*\.(pdf|xlsx)$'
           if [ "${{ github.event_name }}" = "push" ] && ! echo "$files" | grep -v -E "$docs" | grep -q .; then
-            echo "deploy=false" >> "$GITHUB_OUTPUT"; echo "mac=false" >> "$GITHUB_OUTPUT"; echo "win=false" >> "$GITHUB_OUTPUT"; echo "nothing deployable changed since $base"; exit 0; fi
+            echo "deploy=false" >> "$GITHUB_OUTPUT"; echo "mac=false" >> "$GITHUB_OUTPUT"; echo "win=false" >> "$GITHUB_OUTPUT"; echo "linux=false" >> "$GITHUB_OUTPUT"; echo "nothing deployable changed since $base"; exit 0; fi
           echo "deploy=true" >> "$GITHUB_OUTPUT"
           common='^(app/release/|app/VERSION$|\.github/)'
           echo "$files" | grep -qE "$common|^app/mac/|^app/tests/test_mac_" && echo "mac=true" >> "$GITHUB_OUTPUT" || echo "mac=false" >> "$GITHUB_OUTPUT"
           echo "$files" | grep -qE "$common|^app/windows/|^app/tests/test_windows_" && echo "win=true" >> "$GITHUB_OUTPUT" || echo "win=false" >> "$GITHUB_OUTPUT"
+          # Linux shares lockqzd.py / lockqz-agent.py / browser-policy.py / lockqz-core.sh / blocklist.txt with the Mac.
+          echo "$files" | grep -qE "$common|^app/linux/|^app/mac/(lockqzd\.py|lockqz-agent\.py|browser-policy\.py|lockqz-core\.sh|blocklist\.txt)$|^app/tests/test_linux_" && echo "linux=true" >> "$GITHUB_OUTPUT" || echo "linux=false" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         if: steps.chg.outputs.deploy == 'true'
         with: { node-version: 22 }
@@ -86,6 +89,24 @@ jobs:
           name: lockqz-mac
           path: /tmp/lockqz-mac.pkg
           if-no-files-found: error
+
+  linux:
+    name: Install-test on Linux (real Ubuntu - hosts, nftables, policies, agent tab reading)
+    needs: test
+    if: needs.test.outputs.linux == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Chromium for the agent's tab-reading check
+        run: (npm i --no-save playwright@1.49.1 && npx playwright install --with-deps chromium) >/dev/null 2>&1 || echo "no Chromium - tab-reading check will be skipped"
+      - name: Install, lock/unlock, uninstall
+        run: |
+          rc=0; bash app/tests/test_linux_install.sh > "$RUNNER_TEMP/linux.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/linux.log"
+          if [ "$rc" -ne 0 ]; then grep -E '^FAIL|Error|error:|Traceback' "$RUNNER_TEMP/linux.log" | head -25 | sed 's/^/::error title=Linux install test::/'; fi
+          exit $rc
 
   windows:
     name: Build + install-test the Windows installer
@@ -166,14 +187,15 @@ jobs:
 
   deploy:
     name: Sign the release + deploy to Cloudflare
-    needs: [test, mac, windows]
+    needs: [test, mac, windows, linux]
     runs-on: ubuntu-latest
     # Runs when tests passed and each platform build either passed or was skipped (nothing changed).
     if: >-
       always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       needs.test.result == 'success' && needs.test.outputs.deploy == 'true' &&
       (needs.mac.result == 'success' || needs.mac.result == 'skipped') &&
-      (needs.windows.result == 'success' || needs.windows.result == 'skipped')
+      (needs.windows.result == 'success' || needs.windows.result == 'skipped') &&
+      (needs.linux.result == 'success' || needs.linux.result == 'skipped')
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -221,6 +243,7 @@ jobs:
           python3 app/release/make-manifest.py --key "$RUNNER_TEMP/update_key.pem" --out app/cloudflare/public/download
           rm -f "$RUNNER_TEMP/update_key.pem"
           cp app/mac/install.sh app/mac/uninstall.sh app/windows/install.ps1 app/windows/uninstall.ps1 app/cloudflare/public/
+          cp app/linux/install.sh app/cloudflare/public/install-linux.sh; cp app/linux/uninstall.sh app/cloudflare/public/uninstall-linux.sh
           ls -la app/cloudflare/public/download app/cloudflare/public/download/mac app/cloudflare/public/download/windows
       - name: Stripe (key + webhook into Cloudflare; skipped until the STRIPE_SECRET_KEY GitHub secret exists)
         if: steps.chk.outputs.ok == 'true'
@@ -263,7 +286,7 @@ jobs:
           magic https://lockqz.pages.dev/download/lockqz-mac.pkg 'xar!' "a .pkg"
           magic https://lockqz.pages.dev/download/lockqz-win.exe 'MZ' "an .exe"
           magic https://lockqz.pages.dev/install.sh '#!' "a shell script"
-          for f in install.ps1 uninstall.sh uninstall.ps1; do curl -fsSL -A "LOCKqz/ci" -o "$t/f" "https://lockqz.pages.dev/$f"; ! grep -qi '<html' "$t/f" || { echo "::error::$f is HTML"; exit 1; }; done
+          for f in install.ps1 uninstall.sh uninstall.ps1 install-linux.sh uninstall-linux.sh; do curl -fsSL -A "LOCKqz/ci" -o "$t/f" "https://lockqz.pages.dev/$f"; ! grep -qi '<html' "$t/f" || { echo "::error::$f is HTML"; exit 1; }; done
           curl -fsS -A "LOCKqz/ci" -o "$t/u.json" https://lockqz.pages.dev/download/update.json
           curl -fsS -A "LOCKqz/ci" -o "$t/u.sig" https://lockqz.pages.dev/download/update.sig
           openssl base64 -d -A -in "$t/u.sig" -out "$t/u.bin"

@@ -28,6 +28,11 @@ MAC_FILES = ["lockqz.sh", "lockqz-core.sh", "extra-block.sh", "lockqzd.py", "loc
              "lockqz-boot.sh", "install.sh", "uninstall.sh", "update.pub"]
 WIN_FILES = ["lockqz.ps1", "lockqzd.ps1", "lockqz-boot.ps1", "blocklist.txt", "browser-policy.ps1", "lockqz-agent.ps1",
              "install.ps1", "uninstall.ps1", "update.pub.xml"]
+# Linux (28 Oct 2026): its own engine/agent/policy writer + the shared Mac files under their installed names.
+LINUX_FILES = {"lockqz.sh": "linux/lockqz.sh", "lockqz-agent.py": "linux/lockqz-agent.py", "browser-policy.py": "linux/browser-policy.py",
+               "install.sh": "linux/install.sh", "uninstall.sh": "linux/uninstall.sh",
+               "lockqzd.py": "mac/lockqzd.py", "agent-mac.py": "mac/lockqz-agent.py", "policy-mac.py": "mac/browser-policy.py",
+               "lockqz-core.sh": "mac/lockqz-core.sh", "blocklist.txt": "mac/blocklist.txt", "update.pub": "mac/update.pub"}
 LIVE_DEFAULT = "https://lockqz.pages.dev/download/update.json"
 
 def _which(names):
@@ -109,8 +114,9 @@ def live_problems(live, version, files):
     if _vt(version) < _vt(lv): return ["version %s is OLDER than the live %s" % (version, lv)]
     if _vt(version) > _vt(lv): return []
     changed = []
-    for plat in ("mac", "windows"):
+    for plat in ("mac", "windows", "linux"):
         old = (m.get(plat) or {}).get("files") or {}
+        if plat == "linux" and not old: continue   # first Linux release: nothing live to compare with
         for n in sorted(set(old) | set(files[plat])):
             if old.get(n) != files[plat].get(n): changed.append("%s/%s" % (plat, n))
     if changed:
@@ -144,6 +150,8 @@ def main():
     if probs: sys.exit("release refused:\n  " + "\n  ".join(probs))
     srcs = (("mac", a.mac, MAC_FILES), ("windows", a.windows, WIN_FILES))
     files = {plat: {n: sha(os.path.join(src, n)) for n in names} for plat, src, names in srcs}
+    linux_src = {n: os.path.join(APP, rel) for n, rel in LINUX_FILES.items()}
+    files["linux"] = {n: sha(p) for n, p in linux_src.items()}
     probs = live_problems(a.live, v, files)   # checked BEFORE anything is written to --out
     if probs: sys.exit("release refused:\n  " + "\n  ".join(probs))
     for plat, src, names in srcs:
@@ -152,7 +160,12 @@ def main():
         for n in names:
             shutil.copy2(os.path.join(src, n), os.path.join(d, n))
             assert sha(os.path.join(d, n)) == files[plat][n], "copy of %s changed" % n
-    m = {"version": v, "mac": {"files": files["mac"]}, "windows": {"files": files["windows"]}}
+    d = os.path.join(a.out, "linux")
+    shutil.rmtree(d, ignore_errors=True); os.makedirs(d)
+    for n, p in linux_src.items():
+        shutil.copy2(p, os.path.join(d, n))
+        assert sha(os.path.join(d, n)) == files["linux"][n], "copy of linux/%s changed" % n
+    m = {"version": v, "mac": {"files": files["mac"]}, "windows": {"files": files["windows"]}, "linux": {"files": files["linux"]}}
     body = json.dumps(m, sort_keys=True, separators=(",", ":")).encode()
     jp, sp = os.path.join(a.out, "update.json"), os.path.join(a.out, "update.sig")
     with open(jp, "wb") as f: f.write(body)
@@ -167,7 +180,7 @@ def main():
     if r.returncode != 0 or "Verified OK" not in r.stdout:
         sys.exit("release signature does not verify with mac/update.pub - wrong key?")
     shutil.copy2(pub, os.path.join(a.out, "update.pub"))
-    print("release %s: %d mac files, %d windows files -> %s" % (v, len(files["mac"]), len(files["windows"]), a.out))
+    print("release %s: %d mac files, %d windows files, %d linux files -> %s" % (v, len(files["mac"]), len(files["windows"]), len(files["linux"]), a.out))
 
 if __name__ == "__main__":
     main()

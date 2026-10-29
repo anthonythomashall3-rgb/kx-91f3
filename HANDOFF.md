@@ -112,6 +112,17 @@ commit as `Claude <noreply@anthropic.com>`). The claude.ai Project "LOCKqz" has 
   results by the agent + Chromium/Firefox policies; AI Overviews cannot be removed without blocking Google search
   (left open by design); DoH/DoT, Tor, VPNs, system proxies, VMs, remote desktop, overlays, local models (apps +
   ports), Apple Intelligence, Gemini in Workspace (`appsgenaiserver-pa.*` blocked).
+- **29 Oct 2026 Linux (v0.5.9, session 01UUDg7b):** `app/linux/` - LOCKqz installs and locks on Linux (systemd + python3):
+  `curl -fsSL https://lockqz.pages.dev/install-linux.sh | sudo bash`. The helper is the shared `lockqzd.py` with
+  `LOCKQZ_PLATFORM=linux` (logind sessions, `linux-<distro>` platform tag, update section by platform - self-update
+  itself still off on Linux: no rollback kit); the agent (`lockqz-agent.py`) imports the Mac agent (`agent-mac.py`) and
+  swaps the desktop pieces (Firefox session store + Chromium SNSS tab reading, zenity/kdialog, notify-send, xdg-open);
+  `browser-policy.py` writes the Mac module's (`policy-mac.py`) policies as managed JSON (Chrome/Chromium/Edge/Brave/
+  Vivaldi/Opera) + Firefox `policies.json` (student's own merged and restored); `lockqz.sh` = hosts + nftables
+  (iptables fallback) + policies + app kills + `ss -K` warm cut (addresses from `browser-policy.py resolve`, raw DNS past
+  /etc/hosts). Release: `update.json` gains `"linux"` (make-manifest LINUX_FILES), CI job installs for real on Ubuntu
+  (test_linux_install.sh), unit suite test_linux.py (50). See app/linux/README.md for what Linux still lacks.
+  ChromeOS / iPadOS / Android: impossible without a school-managed device - stated on the download page.
 - **28 Oct 2026 gaps pass (v0.5.8, session 01UUDg7b):** gaps 1-3 below are CLOSED. (1) Warm connections: the
   blocklist's hosts are resolved past the hosts block (Mac `warm_resolve`, Windows `lockqz.ps1 warm`, background,
   12 h) and at lock every connection already open to those addresses is cut (Mac: pf table `<lq_warm>` drops

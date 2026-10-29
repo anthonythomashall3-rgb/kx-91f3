@@ -98,7 +98,7 @@
       </div>
     </div>
 
-    <p class="none" id="nope" hidden>Open this page on the Mac or Windows computer you take quizzes on.</p>
+    <p class="none" id="nope" hidden>Open this page on the Mac, Windows or Linux computer you take quizzes on.<br><span style="font-size:13px">Phones, iPads and Chromebooks can't run LOCKqz.</span></p>
 
     <footer><a href="/privacy.html">Privacy</a></footer>
   </div>
@@ -107,13 +107,21 @@
   var ipad = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
   var win = /Windows/.test(ua) && !/Windows Phone/.test(ua);
   var mac = /Macintosh|Mac OS X/.test(ua) && !ipad && !/iPhone|iPad|iPod/.test(ua);
+  var linux = /Linux|X11/.test(ua) && !/Android|CrOS/.test(ua) && !mac && !win;
   var site = location.origin;
   var STORE_ID = "";   // Microsoft Store product id (Partner Center -> Product identity), e.g. "9NXXXXXXXXXX"
   var $ = function (id) { return document.getElementById(id); };
 
-  if (mac || win) {
+  if (mac || win || linux) {
     $("install").hidden = false;
-    if (mac) {
+    if (linux) {
+      $("os").textContent = "for Linux";
+      $("how").innerHTML = "Open a terminal (<b>Ctrl Alt T</b>).";
+      $("enter").textContent = "Enter";
+      $("cmd").textContent = "curl -fsSL " + site + "/install-linux.sh | sudo bash";
+      $("pw").textContent = "Type your password (it stays hidden), press Enter.";
+      $("dlbox").hidden = true; $("orline").hidden = true;   // no separate installer file on Linux: the command is the install
+    } else if (mac) {
       $("os").textContent = "for macOS";
       $("how").innerHTML = "Open <b>Terminal</b> (press <b>\u2318 Space</b>, type Terminal, press Return).";
       $("enter").textContent = "Return";
@@ -140,9 +148,9 @@
     var served = function (path, cb) {
       fetch(path, { method: "HEAD", cache: "no-store" }).then(function (r) { cb(r.ok && !/text\/html/i.test(r.headers.get("Content-Type") || "")); }, function () { cb(true); });
     };
-    var one = mac ? "install.sh" : "install.ps1", rel = "/download/" + (mac ? "mac/" : "windows/") + one;
+    var one = linux ? "install-linux.sh" : mac ? "install.sh" : "install.ps1", rel = "/download/" + (linux ? "linux/install.sh" : (mac ? "mac/" : "windows/") + one);
     served("/" + one, function (ok) { if (!ok) served(rel, function (ok2) { if (ok2) $("cmd").textContent = $("cmd").textContent.replace(site + "/" + one, site + rel); }); });
-    served($("dl").getAttribute("href"), function (ok) { if (!ok) { $("dlbox").hidden = true; $("orline").hidden = true; } });
+    if (!linux) served($("dl").getAttribute("href"), function (ok) { if (!ok) { $("dlbox").hidden = true; $("orline").hidden = true; } });
   } else {
     $("nope").hidden = false;
   }

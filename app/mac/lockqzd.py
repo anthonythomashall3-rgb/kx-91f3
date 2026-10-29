@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.5.8"
+VERSION = "0.5.9"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -234,9 +234,36 @@ def _test_sessions():
         with open(p) as f: return json.load(f)
     except Exception: return {}
 
+IS_LINUX = os.environ.get("LOCKQZ_PLATFORM") == "linux"   # the same helper runs on Linux (app/linux: its service sets this); tests on Linux CI stay "Mac"
+
+_LSESS = {"at": 0.0, "v": []}
+def _linux_sessions():
+    """[(uid, user, active)] for the graphical login sessions logind knows (x11 / wayland), cached 5 s."""
+    if time.time() - _LSESS["at"] < 5: return _LSESS["v"]
+    out = []
+    try:
+        ls = subprocess.run(["loginctl", "list-sessions", "--no-legend"], capture_output=True, text=True, timeout=5).stdout
+        for l in ls.splitlines():
+            sid = l.split()[0] if l.split() else ""
+            if not sid: continue
+            sh = subprocess.run(["loginctl", "show-session", sid, "-p", "Type", "-p", "Active", "-p", "User", "-p", "Name", "-p", "Class"],
+                                capture_output=True, text=True, timeout=5).stdout
+            kv = dict(x.split("=", 1) for x in sh.splitlines() if "=" in x)
+            if kv.get("Class", "user") != "user" or kv.get("Type") not in ("x11", "wayland", "mir"): continue
+            try: out.append((int(kv.get("User", "")), kv.get("Name", ""), kv.get("Active") == "yes"))
+            except ValueError: continue
+    except Exception:
+        pass
+    _LSESS["at"], _LSESS["v"] = time.time(), out
+    return out
+
 def console_uid():
     t = _test_sessions()
     if t is not None: return t.get("console") if isinstance(t.get("console"), int) else None
+    if IS_LINUX:
+        ss = _linux_sessions()
+        act = [u for u, _, a in ss if a] or [u for u, _, _ in ss]
+        return act[0] if act else None
     try:
         out = subprocess.run(["stat", "-f", "%u", "/dev/console"], capture_output=True, text=True, timeout=5).stdout.strip()
         return int(out) if out.isdigit() else None
@@ -249,6 +276,7 @@ def session_alive(uid):
     if not isinstance(uid, int): return False
     t = _test_sessions()
     if t is not None: return uid in (t.get("alive") or [])
+    if IS_LINUX: return any(u == uid for u, _, _ in _linux_sessions())
     try:
         out = subprocess.run(["ps", "-axo", "uid=,comm="], capture_output=True, text=True, timeout=5).stdout
         return any(l.split(None, 1)[0] == str(uid) and l.rstrip().endswith("loginwindow") for l in out.splitlines() if l.strip())
@@ -261,7 +289,7 @@ UPDATE_URL = (os.environ.get("LOCKQZ_UPDATE_URL") or (SITE + "/download" if SITE
 UPDATE_DIR = os.environ.get("LOCKQZ_UPDATE_DIR") or HERE          # where this install's files live
 # Only a real install updates itself (or a test that names its own LOCKQZ_UPDATE_DIR): a daemon
 # started from a source checkout must never overwrite the checkout.
-UPDATE_OK = bool(os.environ.get("LOCKQZ_UPDATE_DIR")) or HERE == "/Library/Application Support/LOCKqz"
+UPDATE_OK = bool(os.environ.get("LOCKQZ_UPDATE_DIR")) or HERE == "/Library/Application Support/LOCKqz"   # Linux: no self-update yet (no rollback kit there)
 PUBKEY = os.environ.get("LOCKQZ_UPDATE_PUB") or os.path.join(HERE, "update.pub")
 UPDATE_EVERY = max(12, int(os.environ.get("LOCKQZ_UPDATE_CYCLES", "4320")))   # 5 s cycles: 4320 = 6 h
 UPDATE_DELAY = float(os.environ.get("LOCKQZ_UPDATE_DELAY", "90"))           # seconds after start
@@ -431,11 +459,26 @@ def lock_id(url):
     return "%s-%s" % (ou.group(1) if ou else "x", qi.group(1) if qi else "x")
 
 def _console_user():
+    if IS_LINUX:
+        ss = _linux_sessions()
+        act = [n for _, n, a in ss if a] or [n for _, n, _ in ss]
+        return act[0] if act else None
     try:
         u = subprocess.run(["stat", "-f", "%Su", "/dev/console"], capture_output=True, text=True, timeout=5).stdout.strip()
         return u or None
     except Exception:
         return None
+
+def platform_tag():
+    """'mac-14.6' / 'linux-ubuntu-24.04' for the device record."""
+    if not IS_LINUX: return "mac-" + platform.mac_ver()[0]
+    try:
+        kv = {}
+        for l in open("/etc/os-release"):
+            if "=" in l: k, v = l.rstrip("\n").split("=", 1); kv[k] = v.strip().strip('"')
+        return "linux-%s-%s" % (kv.get("ID", "linux"), kv.get("VERSION_ID", ""))
+    except Exception:
+        return "linux-" + platform.release()
 
 def developer_mode():
     """True only on the admin's Mac (a valid developer key is present). Student installs
@@ -445,7 +488,7 @@ def developer_mode():
     cands = []
     if os.environ.get("LOCKQZ_DEV_KEY"): cands.append(os.environ["LOCKQZ_DEV_KEY"])
     u = _console_user()
-    if u: cands.append("/Users/%s/Library/Application Support/LOCKqz/developer.key" % u)
+    if u: cands.append(("/home/%s/.config/lockqz/developer.key" if IS_LINUX else "/Users/%s/Library/Application Support/LOCKqz/developer.key") % u)
     for p in cands:
         try:
             # O_NOFOLLOW: never follow a symlink (a student could point it at /dev/zero or a fifo).
@@ -508,7 +551,7 @@ def register():
     """Register this install's key with the server once (trust on first use)."""
     if NET["registered"] or not API or DEVICE in ("", "unknown"): return NET["registered"]
     code, j = call("/register", {"device_id": DEVICE, "key": KEY, "version": VERSION,
-                                 "platform": "mac-" + platform.mac_ver()[0], "student": STATE["student"]},
+                                 "platform": platform_tag(), "student": STATE["student"]},
                    signed=False)
     if code == 200: NET["registered"] = True; log("device registered")
     elif code == 409: log("device id is registered with another key - reinstall LOCKqz for a new device id")
@@ -591,7 +634,7 @@ def report_install():
         rec = None
     student = STATE["student"]
     if not install_due(rec, VERSION, student, time.time()): return False
-    code, _ = report("install", {"platform": "mac-" + platform.mac_ver()[0], "version": VERSION})
+    code, _ = report("install", {"platform": platform_tag(), "version": VERSION})
     if code == 200:
         try: _write_private(INSTFILE, json.dumps({"version": VERSION, "student": student, "at": time.time()}))
         except Exception as e: log("could not save install record: %s" % e)
@@ -665,6 +708,10 @@ def restart_after_update():
     if DRYRUN == "1":
         log("update: (dry-run) would restart the agent and the helper"); return
     try:
+        if IS_LINUX:
+            for uid, _, _ in _linux_sessions():
+                subprocess.run(["systemctl", "--machine=%d@" % uid, "--user", "restart", "lockqz-agent.service"], capture_output=True, timeout=20)
+            log("update: restarting helper on the new version"); os._exit(0)
         uid = subprocess.run(["stat", "-f", "%u", "/dev/console"], capture_output=True, text=True, timeout=5).stdout.strip()
         if uid and uid != "0":
             subprocess.run(["launchctl", "kickstart", "-k", "gui/%s/com.lockqz.agent" % uid], capture_output=True, timeout=20)
@@ -723,9 +770,10 @@ def check_update():
         except Exception: bad = ""
         if bad and bad == new:
             return False   # this release failed to start here and was rolled back; wait for the next one
-        files = (m.get("mac") or {}).get("files") or {}
+        plat = "linux" if IS_LINUX else "mac"
+        files = (m.get(plat) or {}).get("files") or {}
         if not isinstance(files, dict) or "lockqzd.py" not in files:
-            log("update: manifest lists no Mac helper - ignored"); return False
+            log("update: manifest lists no %s helper - ignored" % plat); return False
         for name, want in files.items():
             if name in UPDATE_NEVER or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}", name) \
                or not re.fullmatch(r"[0-9a-f]{64}", str(want)) \
@@ -733,7 +781,7 @@ def check_update():
                 log("update: refusing file entry %r" % name); return False
         shutil.rmtree(stage, ignore_errors=True); os.makedirs(stage, mode=0o700)
         for name, want in files.items():
-            data = _fetch(UPDATE_URL + "/mac/" + name)
+            data = _fetch(UPDATE_URL + "/" + plat + "/" + name)
             if hashlib.sha256(data).hexdigest() != want:
                 log("update: SHA-256 mismatch for %s - ignored" % name); shutil.rmtree(stage, ignore_errors=True); return False
             with open(os.path.join(stage, name), "wb") as f: f.write(data)

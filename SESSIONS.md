@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-10-29 06:50 PT — 01UUDg7b: Linux port v0.5.9 (app/linux: engine, policy writer, agent on the shared Mac logic, installer, systemd units; lockqzd.py Linux branches behind LOCKQZ_PLATFORM=linux; make-manifest linux section; release.yml linux install-test job; download page Linux). Touches: app/linux/*, app/mac/lockqzd.py, app/release/make-manifest.py, release.yml, index.html, tests. Pushing now; remove when green.
 - 2026-10-28 22:10 PT — 01UUDg7b: LINUX PORT (app/linux/: engine, browser policies, agent, install, systemd; student browser extension app/extension-student/ = the tab reader on Linux; lockqzd.py Linux shim + /tabs endpoint; make-manifest linux; release.yml Linux install test; index.html Linux option). Touches: app/linux/*, app/extension-student/*, app/mac/lockqzd.py (Linux branches only), app/release/make-manifest.py, release.yml, index.html, tests.
 - 2026-10-27 19:40 PT — 01UzHDaF: Google sign-in (students + professors, codes as fallback) still in progress. Touches: [[route]].js (/auth/google/*), dashboard.html login form, mac+windows agents identity step, migrate_036, tests.
 
