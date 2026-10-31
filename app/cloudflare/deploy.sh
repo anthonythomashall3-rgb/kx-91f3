@@ -95,6 +95,12 @@ STAGE=.deploy
 rm -rf "$STAGE" && mkdir -p "$STAGE"
 cp -R functions wrangler.toml "$STAGE"/
 cp -R public prof_site legacy_site legacy_prof "$STAGE"/
+# Firefox: a Mozilla-signed professor package is on the site -> the dashboard's Firefox button installs it.
+if [ -s public/download/lockqz-prof-firefox.xpi ]; then
+  for f in "$STAGE/public/dashboard.html" "$STAGE/prof_site/dashboard.html" "$STAGE/prof_site/index.html"; do
+    [ -f "$f" ] && sed -i.bak 's/const FF_XPI = false;/const FF_XPI = true;/' "$f" && rm -f "$f.bak"
+  done
+fi
 ROUTE="$STAGE/functions/api/[[route]].js"
 # Static copy of the AI blocklist: agents read it 2-3 times a day, and static files never count against
 # the free plan's 100,000 Functions requests/day (/api/blocklist stays for older installs).

@@ -1,4 +1,4 @@
-name: Chrome Web Store
+name: Chrome Web Store + Firefox
 
 # When the professor extension's version (app/extension-prof/manifest.json) changes on master: build the package
 # and upload it to the Chrome Web Store, then submit it for review. Free (GitHub Actions + Chrome Web Store API).
@@ -36,3 +36,43 @@ jobs:
           CWS_PUBLISHER: 073c37cf-a624-45dc-96ca-5e5de498961c
           CWS_ITEM: bidlfpkdggdpmfbfkpjcnbjhfkfligkk
         run: node app/extension-prof/cws-publish.mjs
+
+  firefox:
+    # The same package for Firefox, signed by Mozilla (addons.mozilla.org, unlisted = not listed, free), so a
+    # professor's Firefox keeps it (an unsigned add-on is gone after a restart). The signed .xpi is committed to
+    # app/extension-prof/dist/ and the next deploy serves it at /download/lockqz-prof-firefox.xpi.
+    # One-time setup: AMO API key (addons.mozilla.org/developers/addon/api/key/) -> repo secrets
+    # AMO_JWT_ISSUER + AMO_JWT_SECRET. Without them the job says so and does nothing.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 2 }
+      - name: Did the version change?
+        id: v
+        run: |
+          NEW=$(node -p "require('./app/extension-prof/manifest.json').version")
+          OLD=$(git show HEAD~1:app/extension-prof/manifest.json 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version" 2>/dev/null || echo none)
+          echo "version $OLD -> $NEW"
+          if [ "$NEW" != "$OLD" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then echo "go=1" >> "$GITHUB_OUTPUT"; fi
+      - name: Sign for Firefox (unlisted) and keep the signed package
+        if: steps.v.outputs.go == '1'
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          if [ -z "$AMO_JWT_ISSUER" ] || [ -z "$AMO_JWT_SECRET" ]; then echo "AMO_JWT_ISSUER / AMO_JWT_SECRET not set - Firefox signing skipped"; exit 0; fi
+          # The committed package (built by build.sh in the same push as the version bump; tests check it).
+          rm -rf "$RUNNER_TEMP/ff" "$RUNNER_TEMP/ffs"; mkdir -p "$RUNNER_TEMP/ff"
+          unzip -q app/extension-prof/dist/lockqz-prof-firefox.zip -d "$RUNNER_TEMP/ff"
+          npx --yes web-ext@8 sign --source-dir "$RUNNER_TEMP/ff" --channel unlisted --api-key "$AMO_JWT_ISSUER" --api-secret "$AMO_JWT_SECRET" --artifacts-dir "$RUNNER_TEMP/ffs" --approval-timeout 900000
+          f=$(ls "$RUNNER_TEMP"/ffs/*.xpi | head -1); [ -s "$f" ] || { echo "::error::no signed package"; exit 1; }
+          cp "$f" app/extension-prof/dist/lockqz-prof-firefox.xpi
+          git config user.name "Claude"; git config user.email "noreply@anthropic.com"
+          git add app/extension-prof/dist/lockqz-prof-firefox.xpi
+          git commit -m "Firefox: Mozilla-signed professor extension $(node -p "require('./app/extension-prof/manifest.json').version")"
+          git pull --rebase -q && git push
+          # A push made with this job's token starts no workflow by itself: ask for the deploy that serves the .xpi.
+          GH_TOKEN="${{ github.token }}" gh workflow run release.yml -R "${{ github.repository }}" || echo "::warning::deploy not started - the next push serves the .xpi"

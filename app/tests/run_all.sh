@@ -63,6 +63,7 @@ run "OSAS accommodations + quiz timing (extra time, makeups, mid-gate special ac
 run "Virtual machines: no password inside a VM/emulator, live view + gate, admin exempt, clients carry it" node --no-warnings test_vm.mjs
 run "Professor fallbacks: let a student in without LOCKqz (gate + code), backup card, extension keep-awake" node --no-warnings test_letin.mjs
 run "Google sign-in: one-time link, ID token checks (key, issuer, audience, expiry, nonce, domain), professor sign-in, apps offer it first" node --no-warnings test_google_signin.mjs
+run "Microsoft Store button by itself + automatic Store submissions; Firefox package signed by Mozilla" node --no-warnings test_store_ff.mjs
 if command -v xvfb-run >/dev/null 2>&1 && [ "$(id -u)" = 0 ]; then run "Real Chromium loads the quiz policy (AI refused, Web search + notes allowed, extensions off)" xvfb-run -a node --no-warnings test_chrome_policy_real.mjs; fi
 if command -v pwsh >/dev/null 2>&1; then
   run "Windows agent/engine logic (titles, unlock retry, policy restore)" pwsh -NoProfile -File test_windows_logic.ps1

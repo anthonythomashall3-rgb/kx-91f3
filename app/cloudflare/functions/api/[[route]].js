@@ -1564,6 +1564,20 @@ export async function onRequest(context) {
     // ---- device endpoints (signed by the device key; see verifyDevice) ----
     if (p === "/blocklist") return json({ domains: AI_DOMAINS });
     // C7: what this host runs (deploy.sh compares lockqz.pages.dev and lockdownqz.pages.dev). No auth.
+    // Is LOCKqz's Microsoft Store listing live? (the download page then offers it first on Windows: no
+    // SmartScreen warning). Asked of Microsoft at most every 6 h (1 h while not live), cached at the edge.
+    if (p === "/store") {
+      const sid = /^[0-9A-Z]{12}$/.test(String(env.STORE_ID || "")) ? String(env.STORE_ID) : "9P7D1114N2LJ";
+      const ck = new Request("https://lockqz.pages.dev/__store/" + sid);
+      let live = null;
+      try { const c = typeof caches !== "undefined" && caches.default ? await caches.default.match(ck) : null; if (c) live = !!(await c.json()).live; } catch {}
+      if (env.STORE_LIVE_TEST != null) live = String(env.STORE_LIVE_TEST) === "1";   // tests only (no network)
+      if (live === null) {
+        try { const r = await fetch("https://storeedgefd.dsx.mp.microsoft.com/v9.0/products/" + sid + "?market=US&locale=en-us&deviceFamily=Windows.Desktop"); live = r.status === 200; } catch { live = false; }
+        try { if (typeof caches !== "undefined" && caches.default) await caches.default.put(ck, new Response(JSON.stringify({ live }), { headers: { "Content-Type": "application/json", "Cache-Control": "max-age=" + (live ? 21600 : 3600) } })); } catch {}
+      }
+      return json({ id: live ? sid : null });
+    }
     if (p === "/version") return json({ ...buildInfo(), codes_on: codesOn, strict, fee_on: feeOn(), stripe: stripeOn(), google: env.GOOGLE_CLIENT_ID || null, google_hd: env.GOOGLE_CLIENT_ID ? String(env.GOOGLE_HD ?? "usc.edu") : null });
 
     // One-time device registration (trust on first use). A device id can never be re-keyed, so a

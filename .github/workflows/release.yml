@@ -201,6 +201,8 @@ jobs:
     needs: test
     if: needs.test.outputs.win == 'true'
     runs-on: windows-latest
+    env:
+      HAS_STORE: ${{ secrets.STORE_CLIENT_SECRET != '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Test-signed MSIX - install, open inside the package, lock/unlock, Store update, remove
@@ -220,6 +222,25 @@ jobs:
           name: lockqz-store
           path: ${{ runner.temp }}/store
           if-no-files-found: error
+      # Automatic Store updates: once Partner Center has a Microsoft Entra app for this account (repo secrets
+      # STORE_TENANT_ID, STORE_SELLER_ID, STORE_CLIENT_ID, STORE_CLIENT_SECRET), each Windows release goes to the
+      # Store by itself (Store installs never download code; they update from the Store). Not set = skipped.
+      - name: Microsoft Store Developer CLI
+        if: vars.MSIX_NAME != '' && env.HAS_STORE == 'true' && github.event_name != 'pull_request'
+        uses: microsoft/microsoft-store-apppublisher@v1.1
+      - name: Submit to the Microsoft Store
+        if: vars.MSIX_NAME != '' && env.HAS_STORE == 'true' && github.event_name != 'pull_request'
+        shell: pwsh
+        env:
+          STORE_TENANT_ID: ${{ secrets.STORE_TENANT_ID }}
+          STORE_SELLER_ID: ${{ secrets.STORE_SELLER_ID }}
+          STORE_CLIENT_ID: ${{ secrets.STORE_CLIENT_ID }}
+          STORE_CLIENT_SECRET: ${{ secrets.STORE_CLIENT_SECRET }}
+        run: |
+          msstore reconfigure --tenantId $env:STORE_TENANT_ID --sellerId $env:STORE_SELLER_ID --clientId $env:STORE_CLIENT_ID --clientSecret $env:STORE_CLIENT_SECRET
+          msstore publish "$env:RUNNER_TEMP\store\lockqz-store.msix" -id 9P7D1114N2LJ -v
+          if ($LASTEXITCODE -ne 0) { Write-Host "::warning::Microsoft Store submission failed - the site still deploys; see the log" }
+          exit 0
 
   deploy:
     name: Sign the release + deploy to Cloudflare
@@ -277,6 +298,10 @@ jobs:
           get lockqz-mac.pkg xar!
           get lockqz-win.exe MZ
           get lockqz-android.apk PK || true   # none live before the first Android build
+          # Professor extension packages: always the current build (they went stale when copied by hand), plus the
+          # Mozilla-signed Firefox package once the Chrome Web Store workflow has made one.
+          cp app/extension-prof/dist/lockqz-prof-chromium.zip app/extension-prof/dist/lockqz-prof-firefox.zip "$d/"
+          if [ -s app/extension-prof/dist/lockqz-prof-firefox.xpi ]; then cp app/extension-prof/dist/lockqz-prof-firefox.xpi "$d/"; fi
       - name: Build the signed update manifest + one-line installers
         if: steps.chk.outputs.ok == 'true'
         env:

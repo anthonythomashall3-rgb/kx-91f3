@@ -146,10 +146,12 @@
       $("dl").href = "/download/lockqz-win.exe";
       $("dl").textContent = "Download for Windows";
       $("dlol").innerHTML = ["Open <b>lockqz-win.exe</b> from Downloads.", "If SmartScreen appears: <b>More info \u2192 Run anyway</b>.", "Click <b>Yes</b>, then follow the installer."].map(function (x) { return "<li>" + x + "</li>"; }).join("");
-      if (STORE_ID) {
-        $("store").hidden = false; $("storebtn").href = "https://apps.microsoft.com/detail/" + STORE_ID;
-        $("lead").textContent = "Or paste one command";
-      }
+      var showStore = function (id) { if (!id) return;
+        $("store").hidden = false; $("storebtn").href = "https://apps.microsoft.com/detail/" + id;
+        $("lead").textContent = "Or paste one command"; };
+      // The Microsoft Store listing (no SmartScreen warning) shows here by itself once Microsoft has published it.
+      if (STORE_ID) showStore(STORE_ID);
+      else fetch("/api/store").then(function (r) { return r.json(); }).then(function (d) { showStore(d && d.id); }, function () {});
     }
     // Pages answers a missing file with this page (HTML, status 200). Only offer what is really published.
     var served = function (path, cb) {

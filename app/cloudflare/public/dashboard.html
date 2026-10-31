@@ -172,6 +172,7 @@ const API = /\.pages\.dev$/.test(location.hostname) ? "https://lockqz.pages.dev/
 // ---- Professor extension store links (Chrome Web Store, live 29 Oct 2026; Edge installs from it too). A browser
 // with no link (Firefox) gets the packaged .zip with a one-line load-unpacked fallback. ----
 const EXT_STORE = { CHROME: "https://chromewebstore.google.com/detail/bidlfpkdggdpmfbfkpjcnbjhfkfligkk", EDGE: "https://chromewebstore.google.com/detail/bidlfpkdggdpmfbfkpjcnbjhfkfligkk", FIREFOX: "" };   // Chrome Web Store listing (Edge installs from it too); Firefox still uses the zip
+const FF_XPI = false;   // deploy.sh sets it true once the Mozilla-signed Firefox package is on the site (installs for good)
 const EXT_ZIP = { chrome: INSTALL + "/download/lockqz-prof-chromium.zip", edge: INSTALL + "/download/lockqz-prof-chromium.zip", firefox: INSTALL + "/download/lockqz-prof-firefox.zip", other: INSTALL + "/download/lockqz-prof-chromium.zip" };
 const BS_SITE = "https://brightspace.usc.edu";
 let token = localStorage.getItem("lockqz_token") || "";
@@ -287,12 +288,13 @@ const postKey = () => { if (EXT() && SYNCKEY) window.postMessage({ lqz: "ext-key
 const BROWSER = (() => { const u = navigator.userAgent || ""; return /Edg\//.test(u) ? "edge" : /Firefox\//.test(u) ? "firefox" : /Chrome\//.test(u) ? "chrome" : "other"; })();
 const BROWSER_NAME = { edge: "Edge", firefox: "Firefox", chrome: "Chrome", other: "your browser" }[BROWSER];
 const EXT_FROM_STORE = () => !!EXT_STORE[BROWSER.toUpperCase()];
-const EXT_URL = () => EXT_STORE[BROWSER.toUpperCase()] || EXT_ZIP[BROWSER] || EXT_ZIP.other;
+const EXT_URL = () => EXT_STORE[BROWSER.toUpperCase()] || (BROWSER === "firefox" && FF_XPI ? INSTALL + "/download/lockqz-prof-firefox.xpi" : "") || EXT_ZIP[BROWSER] || EXT_ZIP.other;
 const EXT_PAGE = { edge: "edge://extensions", firefox: "about:debugging#/runtime/this-firefox", chrome: "chrome://extensions", other: "chrome://extensions" }[BROWSER];
 // Safari (and anything else): LOCKqz's extension is for Chrome, Edge and Firefox.
 const EXTBTN = () => BROWSER === "other" ? `<span>LOCKqz works in Chrome, Edge or Firefox. <a href="https://www.google.com/chrome/" target="_blank" rel="noopener">Get Chrome</a>, then open this page there.</span>` :
   `<a class="btn prime" href="${esc(EXT_URL())}" target="_blank" rel="noopener">Add LOCKqz to ${BROWSER_NAME}</a>` +
-  (EXT_FROM_STORE() ? `<span class="muted" style="display:block;margin-top:6px;font-size:13px">${BROWSER === "edge" ? "<b>Allow extensions from other stores</b> → " : ""}<b>Add to Chrome</b> → <b>Add extension</b>. If Chrome warns, click <b>Continue to install</b>.</span>` : `<span class="muted" style="display:block;margin-top:6px;font-size:13px">Unzip it, open <b>${EXT_PAGE}</b>, turn on Developer mode, click <b>${BROWSER === "firefox" ? "Load Temporary Add-on" : "Load unpacked"}</b> and pick the folder.</span>`);
+  (BROWSER === "firefox" && FF_XPI ? `<span class="muted" style="display:block;margin-top:6px;font-size:13px"><b>Continue to Installation</b> → <b>Add</b>.</span>` :
+   EXT_FROM_STORE() ? `<span class="muted" style="display:block;margin-top:6px;font-size:13px">${BROWSER === "edge" ? "<b>Allow extensions from other stores</b> → " : ""}<b>Add to Chrome</b> → <b>Add extension</b>. If Chrome warns, click <b>Continue to install</b>.</span>` : `<span class="muted" style="display:block;margin-top:6px;font-size:13px">Unzip it, open <b>${EXT_PAGE}</b>, turn on Developer mode, click <b>${BROWSER === "firefox" ? "Load Temporary Add-on" : "Load unpacked"}</b> and pick the folder.</span>`);
 function syncMsg(t, help = false){ SYNCMSG = t; SYNCHELPON = help; document.querySelectorAll(".syncst").forEach(e => e.innerHTML = syncHtml(t) + (help ? SYNCHELP() : "")); }
 function askSync(w){ BS_ORIGINS.forEach(o => { try { w.postMessage({ lqz: "sync" }, o); } catch {} }); }
 // After a switch here: the open LOCKqz Sync tab puts the change into Brightspace and redraws its panel, so
@@ -459,7 +461,8 @@ function setupBlock(){
   const card = (i, t, d, act) => `<div class="step${steps[i] ? " done" : ""}"><span class="num">${steps[i] ? "✓" : i + 1}</span><span class="t">${t}</span><span class="d">${d}</span>${steps[i] ? `<span class="ok"><span class="ck" aria-hidden="true">✓</span>Done</span>` : act}</div>`;
   const store = EXT_FROM_STORE(), edge = BROWSER === "edge";
   const ext = BROWSER === "other" ? EXTBTN() : `<a class="btn prime" href="${esc(EXT_URL())}" target="_blank" rel="noopener">Add to ${BROWSER_NAME}</a>`;
-  const extD = !store ? `Unzip, open <b>${EXT_PAGE}</b>, turn on Developer mode, <b>${BROWSER === "firefox" ? "Load Temporary Add-on" : "Load unpacked"}</b>.`
+  const extD = BROWSER === "firefox" && FF_XPI ? `<b>Continue to Installation</b> → <b>Add</b>.`
+    : !store ? `Unzip, open <b>${EXT_PAGE}</b>, turn on Developer mode, <b>${BROWSER === "firefox" ? "Load Temporary Add-on" : "Load unpacked"}</b>.`
     : `${edge ? "<b>Allow</b> other stores, then " : ""}<b>Add to Chrome</b> → <b>Add extension</b>.<br>Warning? <b>Continue to install</b>.`;
   return `<section class="card" aria-label="Set up"><h2 style="margin:0">Set up — ${done} of 3 done</h2><div class="setup">` +
     card(0, `Add LOCKqz to ${BROWSER_NAME}`, extD, ext) +
