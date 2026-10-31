@@ -81,7 +81,7 @@
   var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
   var day = function (t) { return t ? new Date(t).toLocaleDateString([], { month: "short", day: "numeric" }) : ""; };
   var dt = function (s) { var t = s ? Date.parse(s) : NaN; return isNaN(t) ? null : t; };
-  var EXPIRED = "Brightspace session expired — reload Brightspace and click Sync again.";
+  var EXPIRED = "Brightspace session expired \u2014 reload Brightspace and click Sync again.";
   var expired = function () { var e = new Error(EXPIRED); e.expired = true; return e; };
   // Staff roles (any school's names) and the LIS context roles Brightspace sends (not institution roles).
   var STAFF = /instructor|teach|professor|faculty|lecturer|tutor|course leader|\bta\b|assistant|grader|designer/i;
@@ -242,7 +242,7 @@
     var fpOf = function () { return hashStr(JSON.stringify(courses, function (k, v) { return k === "has_password" ? undefined : v; })); };
     var FP = fpOf();
     try { prev = JSON.parse(localStorage.getItem(FPK) || "null"); } catch (e) { prev = null; }
-    var autoLine = function () { return "Re-syncs by itself every 15 min while this tab is open · checked " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); };
+    var autoLine = function () { return "Re-syncs by itself every 15 min while this tab is open \u00b7 checked " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); };
     // The extension's background sync, no panel yet: nothing changed in Brightspace within the hour -> no
     // LOCKqz request at all (same rule as the panel's own re-check).
     if (QUIET && !AUTO && !ASKED && prev && prev.fp === FP && Date.now() - Number(prev.at || 0) < FORCE_MS) {
@@ -396,11 +396,11 @@
         '</div>';
       if (!c.quizzes) { unread++; html += '<div style="color:#990000;font-size:13px">Could not read quizzes from Brightspace. Click Sync again.</div>'; return; }
       var openList = openQ(c).slice().sort(byName), past = c.quizzes.filter(function (q) { return endedQ(q) && !GATED[String(q.qi)]; }).sort(byName);
-      if (!openList.length) html += '<div style="color:#888;font-size:13px">No upcoming quizzes' + (CLASSOFF[String(c.ou)] ? " · LOCKqz is off for this class." : " · new ones are protected by themselves.") + "</div>";
+      if (!openList.length) html += '<div style="color:#888;font-size:13px">No upcoming quizzes' + (CLASSOFF[String(c.ou)] ? " \u00b7 LOCKqz is off for this class." : " \u00b7 new ones are protected by themselves.") + "</div>";
       openList.forEach(function (q) {
         var on = !!prot[String(q.qi)], own = !on && OWNPW[String(q.qi)];
         var sd = q.start ? day(q.start) : "", ed = q.end ? day(q.end) : "";
-        var dates = (sd || ed || q.active === false) ? '<span style="color:#888;font-size:12px;display:block;margin-top:2px">' + (q.active === false ? "hidden in Brightspace" + (sd || ed ? " · " : "") : "") + esc(sd && ed ? sd + " – " + ed : (sd || ed)) + "</span>" : "";
+        var dates = (sd || ed || q.active === false) ? '<span style="color:#888;font-size:12px;display:block;margin-top:2px">' + (q.active === false ? "hidden in Brightspace" + (sd || ed ? " \u00b7 " : "") : "") + esc(sd && ed ? sd + " \u2013 " + ed : (sd || ed)) + "</span>" : "";
         html += '<div style="padding:9px 0;border-bottom:1px solid #eee;display:flex;align-items:center;gap:12px">' +
           '<span style="flex:1;min-width:0"><span style="font-weight:600">' + esc(q.name) + "</span>" + dates + "</span>" +
           '<label class="lqsw"><input type="checkbox" data-ou="' + c.ou + '" data-qi="' + q.qi + '"' + (on ? " checked" : "") + '><span class="lqsl"></span></label>' +
@@ -565,7 +565,7 @@
           // in yet, one round every 30 s instead of every 10 s (Cloudflare free plan).
           var g0 = G.qs[G.qs.length - 1], sMs = AUTOGATE ? dt(g0 && g0.StartDate) : null;
           if (sMs !== null && Date.now() < sMs - 120000) {
-            st.textContent = "Gate on · quiz hidden · admits locked students from " + new Date(sMs).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+            st.textContent = "Gate on \u00b7 quiz hidden \u00b7 admits locked students from " + new Date(sMs).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
             st.style.color = "#1a7f37"; G.busy = false; return;
           }
           if (G.idleUntil && Date.now() < G.idleUntil) { G.busy = false; return; }
@@ -576,8 +576,8 @@
           var s0 = dt(g0 && g0.StartDate), late = s0 === null || Date.now() > s0 + 300000, now0 = Date.now();
           G.idleUntil = G.endMs !== null && now0 > G.endMs ? now0 + 50000 : (!r.rows && AUTOGATE) || (late && G.calm >= 3) ? now0 + 20000 : 0;
           if (G.allFail >= 3) { G.busy = false; await stopGate(ou, qi, st, "stopped: Brightspace refused special access, quiz shown again"); showGateBtn(ou, qi); return; }
-          st.textContent = "LIVE — " + r.n + " locked in" + (r.bad ? " · " + r.bad + " not admitted (Brightspace error)" : "") +
-            (r.stuck ? " · " + r.stuck + " not removed (Brightspace error)" : "") + (G.rotNote ? " · " + G.rotNote : "") + (G.note ? " · " + G.note : "");
+          st.textContent = "LIVE \u2014 " + r.n + " locked in" + (r.bad ? " \u00b7 " + r.bad + " not admitted (Brightspace error)" : "") +
+            (r.stuck ? " \u00b7 " + r.stuck + " not removed (Brightspace error)" : "") + (G.rotNote ? " \u00b7 " + G.rotNote : "") + (G.note ? " \u00b7 " + G.note : "");
           st.style.color = r.bad || r.stuck || G.note || G.rotNote ? "#990000" : "#1a7f37";
         }
         catch (e) { st.textContent = (e.expired ? e.message : "gate error: " + e.message.slice(0, 50)) + " (retrying)"; st.style.color = "#990000"; }
@@ -608,7 +608,7 @@
         if (g) { g.busy = false; g.nextRot = 0; g.written = null; g.note = "stop failed: " + e.message.slice(0, 60); g.timer = setInterval(g.tick, 10000); GATES[qi] = g; markGates(); if (!why) g.tick(); }
         throw e;
       }
-      st.textContent = (why ? why + " · " : "") + (stuck ? "off · " + stuck + " LOCKqz access not removed (Brightspace error)" : "off");
+      st.textContent = (why ? why + " \u00b7 " : "") + (stuck ? "off \u00b7 " + stuck + " LOCKqz access not removed (Brightspace error)" : "off");
       st.style.color = stuck || /refused/.test(why || "") ? "#990000" : "#888";
     }
 

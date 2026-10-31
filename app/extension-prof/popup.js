@@ -18,12 +18,12 @@
     }
     const s = st.status || {};
     if (st.signin) setStatus("Sign in to Brightspace to sync", "warn");
-    else setStatus("Connected" + (s.name ? " · Prof. " + lastName(s.name) : ""), "ok");
+    else setStatus("Connected" + (s.name ? " \u00b7 Prof. " + lastName(s.name) : ""), "ok");
     $("synced").textContent = "Last synced " + ago(st.lastSync);
     // Protected = LOCKqz's password confirmed in Brightspace; the rest are shown as waiting.
-    if (s.classes != null) $("counts").textContent = `${s.classes} class${s.classes === 1 ? "" : "es"} · ${s.exams} exam${s.exams === 1 ? "" : "s"} protected` + (s.waiting ? ` · ${s.waiting} waiting to be set in Brightspace` : "");
-    // One line: exam · date · ready count (29 Oct 2026, owner: much less wordy).
-    if (s.next) { $("next").hidden = false; $("next").textContent = s.next.name + " · " + when(s.next.start) + " · " + s.next.ready + "/" + s.next.total + " students ready"; $("next").title = (s.next.course ? s.next.course + " · " : "") + $("next").textContent; }
+    if (s.classes != null) $("counts").textContent = `${s.classes} class${s.classes === 1 ? "" : "es"} \u00b7 ${s.exams} exam${s.exams === 1 ? "" : "s"} protected` + (s.waiting ? ` \u00b7 ${s.waiting} waiting to be set in Brightspace` : "");
+    // One line: exam \u00b7 date \u00b7 ready count (29 Oct 2026, owner: much less wordy).
+    if (s.next) { $("next").hidden = false; $("next").textContent = s.next.name + " \u00b7 " + when(s.next.start) + " \u00b7 " + s.next.ready + "/" + s.next.total + " students ready"; $("next").title = (s.next.course ? s.next.course + " \u00b7 " : "") + $("next").textContent; }
     else $("next").hidden = true;
     $("sync").disabled = false;
   }
@@ -37,7 +37,7 @@
   }
   $("dash").onclick = () => { api.tabs.create({ url: base() + "/" }); window.close(); };
   $("sync").onclick = async () => {
-    $("sync").disabled = true; $("sync").textContent = "Syncing…";
+    $("sync").disabled = true; $("sync").textContent = "Syncing\u2026";
     try { await api.runtime.sendMessage({ t: "sync" }); } catch {}
     const t0 = Date.now();
     const wait = setInterval(async () => {

@@ -38,13 +38,13 @@
   }
   function hideCard() { clearTimeout(cardTimer); if (card) card.remove(); card = null; }
   let firstWaiting = false;
-  const doneCard = n => showCard(`Done${n ? ` — ${n} class${n === 1 ? "" : "es"} synced` : " — your classes are synced"}. <a id="lqz-first-dash" href="${dashUrl()}" style="color:${RED};font-weight:700;white-space:nowrap">Open dashboard</a>`, 12000);
+  const doneCard = n => showCard(`Done${n ? ` \u2014 ${n} class${n === 1 ? "" : "es"} synced` : " \u2014 your classes are synced"}. <a id="lqz-first-dash" href="${dashUrl()}" style="color:${RED};font-weight:700;white-space:nowrap">Open dashboard</a>`, 12000);
 
   api.runtime.sendMessage({ t: "loaded" }).then(r => {
     if (!r || !r.key) return;
     me = r;
     if (r.first) {
-      if (r.run) { firstWaiting = true; showCard("Syncing your classes… They'll be on your LOCKqz dashboard in about a minute.", 180000); }   // gone by itself if Brightspace never answers (sign-in page)
+      if (r.run) { firstWaiting = true; showCard("Syncing your classes\u2026 They'll be on your LOCKqz dashboard in about a minute.", 180000); }   // gone by itself if Brightspace never answers (sign-in page)
       else doneCard(0);
     }
     if (r.run) inject(r, !!r.force, r.role === "gate");
@@ -57,7 +57,7 @@
     if (firstWaiting && (d.lqz === "synced" || d.lqz === "failed")) {
       firstWaiting = false;
       if (d.lqz === "synced" && d.ok === false) { const n = Number(d.errors) || 0;
-        showCard(`Synced. ${n} exam${n === 1 ? "" : "s"} could not be updated in Brightspace — <a href="${dashUrl()}" style="color:${RED};font-weight:700">open the LOCKqz dashboard</a>.`, 12000); }
+        showCard(`Synced. ${n} exam${n === 1 ? "" : "s"} could not be updated in Brightspace \u2014 <a href="${dashUrl()}" style="color:${RED};font-weight:700">open the LOCKqz dashboard</a>.`, 12000); }
       else if (d.lqz === "synced") doneCard(Number(d.courses) || 0);
       else showCard(`Could not sync yet: ${String(d.error || "").replace(/[<>]/g, "").slice(0, 140)}`, 12000);
     }

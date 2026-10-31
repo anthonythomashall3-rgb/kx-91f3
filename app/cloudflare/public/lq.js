@@ -85,8 +85,8 @@
     d.innerHTML = '<div role="dialog" aria-modal="true" aria-labelledby="lqwelh">' + lockSvg(44) +
       '<h2 id="lqwelh">Welcome to the test run!</h2>' +
       '<p>You are exempt from paying during this trial period. Have fun testing!</p>' +
-      '<p>Thank you for joining me on the USC students’ edification journey.</p>' +
-      '<p><i>Locks keep honest people honest.</i></p><button type="button">Let’s go</button></div>';
+      '<p>Thank you for joining me on the USC students\u2019 edification journey.</p>' +
+      '<p><i>Locks keep honest people honest.</i></p><button type="button">Let\u2019s go</button></div>';
     d.querySelector("button").onclick = function () { try { localStorage.setItem(k, "1"); } catch (e) {} d.remove(); };
     document.body.appendChild(d); brand(d);
   };

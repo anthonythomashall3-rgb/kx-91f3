@@ -164,7 +164,7 @@ check("class row: 'Emailed {date}' after emailing, remind button kept", /Emailed
 check("no absolute 'nothing to keep open' / 'opens the exam for installed students'", !/Nothing to click or keep open/.test(DASH) && !/opens the exam for installed students/.test(DASH));
 const EXT = join(APP, "extension-prof"), cb = readFileSync(join(EXT, "content-bs.js"), "utf8"), bg = readFileSync(join(EXT, "background.js"), "utf8"), pop = readFileSync(join(EXT, "popup.js"), "utf8");
 check("content-bs: the Brightspace notice claims nothing about who gets in beyond what LOCKqz admits", /LOCKqz protects this exam\./.test(cb) && /only to students LOCKqz lets in/.test(cb) && !/open this exam automatically/.test(cb) && !/to students who have LOCKqz/.test(cb));
-check("content-bs: ok:false -> 'Synced. N exams could not be updated in Brightspace — open the LOCKqz dashboard.'", /d\.ok === false/.test(cb) && /could not be updated in Brightspace — <a[^>]*>open the LOCKqz dashboard<\/a>\./.test(cb));
+check("content-bs: ok:false -> 'Synced. N exams could not be updated in Brightspace — open the LOCKqz dashboard.'", /d\.ok === false/.test(cb) && /could not be updated in Brightspace (?:—|\\u2014) <a[^>]*>open the LOCKqz dashboard<\/a>\./.test(cb));
 check("background: unchanged skip sets lastCheck, not lastSync; ok:false keeps the badge", /m\.unchanged \? \{ lastCheck: now/.test(bg) && /badge\(m\.ok === false \? "!" : ""\)/.test(bg));
 check("popup: 'Last synced' from lastSync only; waiting shown; 'students ready'", /"Last synced " \+ ago\(st\.lastSync\)/.test(pop) && /waiting to be set in Brightspace/.test(pop) && /students ready/.test(pop));
 

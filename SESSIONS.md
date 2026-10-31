@@ -11,6 +11,7 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 - 2026-10-27 19:40 PT — 01UzHDaF: Google sign-in (students + professors, codes as fallback) still in progress. Touches: [[route]].js (/auth/google/*), dashboard.html login form, mac+windows agents identity step, migrate_036, tests.
 
 ## Recently finished
+- 2026-10-31 06:20 PT — 01UUDg7b: "â€“" in the Brightspace Sync panel: scripts injected into Brightspace (sync.js, lq.js, extension content/popup scripts) are now pure ASCII (\uXXXX escapes); test in test_prof_zero_effort. Extension 1.0.2.
 - 2026-10-29 16:05 PT — 01UUDg7b: no tax / fees lines anywhere (pay pages: one "LOCKqz <total>" line; PO mailto, bank-details + renew emails: amount only); shorter memo bubble; no renewal line under Card; welcome page = 3 plain instructions (no buttons/links); every logo is the lock (dashboard header + sign-in + status orb, extension popup + Brightspace notices; extension 1.0.1 to upload); store link no longer typed out under the Add button.
 - 2026-10-29 15:50 PT — 01UUDg7b: emails use a white lock (public/icon-white.png, LOGO_URL) so it shows on the red header; Zelle first on both pay pages (Zelle, Venmo, Card, then bank/PO).
 - 2026-10-29 14:30 PT — 01UUDg7b: Set up steps count in order: step 2 (Open Brightspace) checks off only after step 1 (extension); its button shows only after step 1 ('After step 1.'); step 3 only after step 2.

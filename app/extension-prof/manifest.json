@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LOCKqz for Professors",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Keeps your LOCKqz classes, rosters and exams in sync with Brightspace by itself. No bookmark, no tab to keep open.",
   "icons": {
     "16": "icon16.png",

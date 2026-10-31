@@ -325,6 +325,9 @@ console.log("Z7 one Gmail budget: automatic mail stops at 250 / 24 h, sign-in co
   check("room again -> the held reminder goes on the next tick (2 students), counted +2", r.data.exams.reminders === 2 && used() === 2, JSON.stringify(r.data) + " used=" + used());
 }
 
+{ const files = ["cloudflare/public/sync.js", "cloudflare/public/lq.js", "extension-prof/content-bs.js", "extension-prof/popup.js", "extension-prof/background.js", "extension-prof/content-dash.js"];
+  const bad = files.filter(f => /[^\x00-\x7f]/.test(readFileSync(join(HERE, "..", f), "utf8")));
+  check("scripts that run inside Brightspace are plain ASCII (no 'â€“' when a page reads them in another encoding)", bad.length === 0, bad.join(",")); }
 console.log("Z9 invite email: LOCKqz sends it, with buttons");
 {
   const inv = await api("/invite", { email: "newprof@usc.edu" }, ADMIN);
