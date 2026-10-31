@@ -47,6 +47,44 @@ try { Invoke-RestMethod "$B/unlock" -Method Post -Headers $H -Body '{"quiz_id":"
 $hosts = Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw
 Check "UNLOCK cleans hosts" (-not ($hosts -match 'LOCKqz START'))
 
+# 3b) "Test it now" (what Microsoft's reviewers and students click): AI off without any account, then back by itself.
+function HostsBlocked { (Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw) -match 'LOCKqz START' }
+function PostCode($path, $json) {
+  try { Invoke-RestMethod "$B$path" -Method Post -Headers $H -Body $json -ContentType 'application/json' -TimeoutSec 120 | Out-Null; return 200 }
+  catch { if ($_.Exception.Response) { return [int]$_.Exception.Response.StatusCode } else { return 0 } }
+}
+function WaitState($want, $secs) {
+  $st = $null
+  for ($i = 0; $i -lt $secs; $i++) { try { $st = Invoke-RestMethod "$B/status" -Headers $H -TimeoutSec 5 } catch { }; if ($st -and $st.state -eq $want) { break }; Start-Sleep 1 }
+  return $st
+}
+$launcher = Join-Path (Split-Path -Parent $Out) "LOCKqz.exe"
+$tp = Start-Process $launcher -ArgumentList "/test", "10" -Wait -PassThru
+Check "Test it now: the app starts a test lock (no account)" ($tp.ExitCode -eq 0)
+$s = Invoke-RestMethod "$B/status" -Headers $H -TimeoutSec 10
+Check "Test it now: helper says test, with seconds left" (($s.state -eq "test") -and ($null -ne $s.test_left) -and ([int]$s.test_left -le 10))
+Check "Test it now: AI block in place" (HostsBlocked)
+Check "Test it now: VPNs, VMs and remote tools left alone (no VPN port rule)" ($null -eq (Get-NetFirewallRule -DisplayName "LOCKqz-AI-vpn-udp" -ErrorAction SilentlyContinue))
+Check "Test it now: encrypted-DNS rule in place like a quiz" ($null -ne (Get-NetFirewallRule -DisplayName "LOCKqz-AI-DoH" -ErrorAction SilentlyContinue))
+$s = WaitState "unlocked" 45
+Check "Test it now: ends by itself (AI back)" (($s.state -eq "unlocked") -and -not (HostsBlocked))
+Check "Test it now: stop ends a running test" (((PostCode "/test" '{"secs":120}') -eq 200) -and ((PostCode "/test" '{"stop":true}') -eq 200) -and ((WaitState "unlocked" 5).state -eq "unlocked") -and -not (HostsBlocked))
+PostCode "/lock" '{"quiz_id":"ci-store-quiz","student":"CI"}' | Out-Null
+Check "Test it now: refused during a quiz lock (409)" ((PostCode "/test" '{"secs":10}') -eq 409)
+Check "Test it now: stop never ends a quiz lock" (((PostCode "/test" '{"stop":true}') -eq 200) -and ((Invoke-RestMethod "$B/status" -Headers $H -TimeoutSec 10).state -eq "locked") -and (HostsBlocked))
+PostCode "/test" '{"secs":10}' | Out-Null
+Start-Sleep 20
+Check "Test it now: a quiz lock outlives a refused test" (((Invoke-RestMethod "$B/status" -Headers $H -TimeoutSec 10).state -eq "locked") -and (HostsBlocked))
+PostCode "/unlock" '{"quiz_id":"ci-store-quiz"}' | Out-Null
+Check "Test it now: quiz unlock still works after" (-not (HostsBlocked))
+PostCode "/test" '{"secs":120}' | Out-Null
+PostCode "/lock" '{"quiz_id":"ci-store-quiz2","student":"CI"}' | Out-Null
+Start-Sleep 12
+Check "Test it now: a quiz that opens during a test takes over (state locked, block kept)" (((Invoke-RestMethod "$B/status" -Headers $H -TimeoutSec 10).state -eq "locked") -and (HostsBlocked))
+Check "Test it now: the quiz that took over has the full block (VPN port rule back)" ($null -ne (Get-NetFirewallRule -DisplayName "LOCKqz-AI-vpn-udp" -ErrorAction SilentlyContinue))
+PostCode "/unlock" '{"quiz_id":"ci-store-quiz2"}' | Out-Null
+Check "Test it now: clean after the quiz" (((WaitState "unlocked" 10).state -eq "unlocked") -and -not (HostsBlocked))
+
 # 4) update from a newer Store package: copies the package payload, downloads nothing
 & powershell -NoProfile -ExecutionPolicy Bypass -File "$StoreDir\build-msix.ps1" -TestSign -Out "$env:TEMP\lqmsix2\lockqz.msix" -VersionOverride "9.9.9"
 Add-AppxPackage -Path "$env:TEMP\lqmsix2\lockqz.msix"

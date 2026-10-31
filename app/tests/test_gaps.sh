@@ -85,7 +85,7 @@ echo "G3b warm connections (Windows)"
 check "resolves past the hosts file (Resolve-DnsName -NoHostsFile)" 'grep -q "Resolve-DnsName -Name \$d -Type \$t -NoHostsFile" "$WIN/lockqz.ps1"'
 check "kills established TCP connections with SetTcpEntry (DELETE_TCB = 12), ports in network order" 'grep -q "SetTcpEntry(ref MIB_TCPROW row)" "$WIN/lockqz.ps1" && grep -q "dwState = 12" "$WIN/lockqz.ps1" && grep -q "band 0xff) -shl 8" "$WIN/lockqz.ps1"'
 check "QUIC to those addresses blocked (UDP 443), rule removed with the other LOCKqz rules at unlock" 'grep -q "\$FwTag-warm-quic\" -Direction Outbound -Action Block -Protocol UDP -RemotePort 443 -RemoteAddress \$ips" "$WIN/lockqz.ps1" && grep -q "Get-NetFirewallRule -DisplayName \"\$FwTag-\*\"" "$WIN/lockqz.ps1"'
-check "refresh runs detached (lockqz.ps1 warm) at most every 12 h" 'grep -q "\$WarmMaxAge = 43200" "$WIN/lockqz.ps1" && grep -q "\"warm\"   { try { Warm-Resolve }" "$WIN/lockqz.ps1" && grep -q "ValidateSet(\"lock\",\"unlock\",\"status\",\"warm\")" "$WIN/lockqz.ps1"'
+check "refresh runs detached (lockqz.ps1 warm) at most every 12 h" 'grep -q "\$WarmMaxAge = 43200" "$WIN/lockqz.ps1" && grep -q "\"warm\"   { try { Warm-Resolve }" "$WIN/lockqz.ps1" && grep -q "ValidateSet(\"lock\",\"unlock\",\"status\",\"warm\",\"test\")" "$WIN/lockqz.ps1"'
 
 echo "G4 installers end on the pay page (the page itself says 'nothing to pay' when no fee is on)"
 check "Mac install.sh opens /pay as the console user" 'grep -q "sudo -u \"\$CONSOLE_USER\" open \"\$SITE/pay\"" "$MAC/install.sh"'

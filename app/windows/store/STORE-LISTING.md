@@ -21,6 +21,8 @@ LOCKqz blocks AI apps and AI websites on your computer only while a Brightspace 
 
 Install once and forget it: open LOCKqz, click Yes on the Windows prompt, done. It starts with Windows and needs nothing else.
 
+See it work any time: click "Test it now" and AI stays off for 2 minutes, exactly as during a quiz.
+
 Your professor can see that LOCKqz is installed and running during their quiz.
 
 To remove it: open LOCKqz and click "Remove LOCKqz", then uninstall the app.
@@ -33,5 +35,7 @@ Logo (1:1, 300x300): StoreListing300.png
 LOCKqz is a desktop app. At first launch it asks the user for administrator approval (a normal Windows UAC prompt) and installs a small helper (Windows PowerShell scripts in C:\ProgramData\LOCKqz plus two scheduled tasks). During a Brightspace quiz the helper blocks AI websites through the hosts file and Windows Firewall, closes AI desktop apps and sets browser policies; after the quiz it removes every block. This needs full trust.
 
 ## Notes for certification
-LOCKqz is used by university courses (USC) for open-note quizzes that do not allow AI.
-Test: open LOCKqz -> click Yes on the Windows prompt -> it shows "LOCKqz is on." Blocking only starts when a Brightspace quiz opens in a browser, so nothing visible changes outside a quiz. All code ships inside the package; the helper never downloads code (updates come only from new Store packages). "Remove LOCKqz" in the app undoes everything.
+LOCKqz turns AI off on a student's PC only while a Brightspace quiz is open, then turns it back on. No account is needed to test it:
+1. Open LOCKqz and click Yes on the Windows prompt. The window shows "LOCKqz is on."
+2. Click "Test it now". For 2 minutes AI websites (for example chatgpt.com, claude.ai, gemini.google.com) do not open in Edge or Chrome and AI desktop apps close, exactly as during a quiz; other websites and apps keep working. The window counts down, and after 2 minutes AI works again ("Stop test" ends it sooner).
+Outside a test or a quiz LOCKqz changes nothing. A sign-in page or window for a school account may appear: it links the PC to the student's school account for real quizzes and can be closed for this test. "Remove LOCKqz" in the window undoes everything. All code ships inside the package; updates come only from new Store packages.

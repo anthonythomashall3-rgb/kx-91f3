@@ -10,7 +10,11 @@
 #   "LOCKqz: LOCK FAILED" - it is not (e.g. hosts file not writable)
 #   "LOCKqz: UNLOCKED"    - the hosts block is really gone
 #   "LOCKqz: UNLOCK FAILED"
-param([Parameter(Mandatory=$true)][ValidateSet("lock","unlock","status","warm")]$cmd)
+param([Parameter(Mandatory=$true)][ValidateSet("lock","unlock","status","warm","test")]$cmd)
+# "test" = the helper's "Test it now" (at most 2 minutes, outside any quiz): the same AI block, but virtual
+# machines, remote-control tools and VPNs are left running (a quiz closes them; a test must not cut off the
+# computer it runs on). "unlock" removes either.
+$TestMode = ($cmd -eq "test")
 $ErrorActionPreference = "SilentlyContinue"
 
 $Hosts     = "$env:WINDIR\System32\drivers\etc\hosts"
@@ -148,7 +152,8 @@ function Write-Hosts([string]$text, [bool]$append) {
 }
 
 function Kill-AiAndTools {
-  foreach ($a in ($AiApps + $VmApps + $RemoteApps + $OverlayApps + $ModelProcs + $VpnApps)) {
+  $all = if ($TestMode) { $AiApps + $OverlayApps + $ModelProcs } else { $AiApps + $VmApps + $RemoteApps + $OverlayApps + $ModelProcs + $VpnApps }
+  foreach ($a in $all) {
     Stop-Process -Name $a -Force -ErrorAction SilentlyContinue
   }
 }
@@ -156,6 +161,7 @@ function Ensure-FirewallRules {
   # One rule per name: creates missing ones, collapses duplicates left by an older version.
   $have = @(Get-NetFirewallRule -DisplayName "$FwTag-*" -ErrorAction SilentlyContinue)
   foreach ($r in $FwRules) {
+    if ($TestMode -and ($r.n -like "$FwTag-vpn-*")) { continue }
     $same = @($have | Where-Object { $_.DisplayName -eq $r.n })
     if ($same.Count -eq 1) { continue }
     if ($same.Count -gt 1) { $same | Remove-NetFirewallRule -ErrorAction SilentlyContinue }
@@ -302,7 +308,8 @@ function Do-Lock {
 
   Kill-AiAndTools
   if ($pol -match "FAILED") { "LOCKqz: browser policy not applied ($pol)" }
-  if ($wrote -and (Is-Locked)) { "LOCKqz: LOCKED (AI apps, VPNs, VMs, remote-desktop, overlays and local models closed; Windows Copilot/Recall off)" }
+  if ($wrote -and (Is-Locked) -and $TestMode) { "LOCKqz: LOCKED (test: AI apps, overlays and local models closed; Windows Copilot/Recall off)" }
+  elseif ($wrote -and (Is-Locked)) { "LOCKqz: LOCKED (AI apps, VPNs, VMs, remote-desktop, overlays and local models closed; Windows Copilot/Recall off)" }
   else { "LOCKqz: LOCK FAILED (the hosts file could not be written)" }
 }
 
@@ -324,6 +331,7 @@ function Do-Unlock {
 
 switch ($cmd) {
   "lock"   { Do-Lock }
+  "test"   { Do-Lock }
   "unlock" { Do-Unlock }
   "status" { if (Is-Locked) { "LOCKqz: LOCKED" } else { "LOCKqz: unlocked" } }
   "warm"   { try { Warm-Resolve } finally { Remove-Item -LiteralPath "$WarmFile.refreshing" -Force -ErrorAction SilentlyContinue } }

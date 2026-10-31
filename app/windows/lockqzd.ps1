@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.6.3"
+$Version = "0.6.4"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = if ($env:LOCKQZ_CONFIG) { $env:LOCKQZ_CONFIG } else { "$env:ProgramData\LOCKqz\config.json" }
@@ -54,7 +54,7 @@ $MaxMin = $CapMin
 # verified in place at least once during this lock (only then can its absence be tampering).
 # capped_quiz: released by the safety cap or the server (submitted / ended / other school) - the agent
 # never re-locks it while its page stays open.
-$State  = [hashtable]::Synchronized(@{ state="unlocked"; quiz_id=$null; student=$Conf.student; locked_since=0; max_minutes=$MaxMin; cap_at=0; end_known=$false; mono_since=$null; applied=$false; skew=0; registered=$false; capped_quiz=$null; capped_at=0; capped_reason=$null })
+$State  = [hashtable]::Synchronized(@{ state="unlocked"; quiz_id=$null; student=$Conf.student; locked_since=0; max_minutes=$MaxMin; cap_at=0; end_known=$false; mono_since=$null; applied=$false; skew=0; registered=$false; capped_quiz=$null; capped_at=0; capped_reason=$null; test_mono=$null; test_secs=0 })
 $KeyPath = "$env:ProgramData\LOCKqz\device.key"
 
 # Signing + API calls. Kept as text so the watcher runspace can load the same code.
@@ -284,6 +284,19 @@ function Policy-Relock {
   finally { if ($got) { try { $EngineMutex.ReleaseMutex() } catch { } } }
 }
 function EngineLocked { (& powershell -NoProfile -ExecutionPolicy Bypass -File $Engine status) -cmatch "LOCKqz: LOCKED" }
+function Stop-Test {
+  # Ends a running "Test it now" lock at once, under the engine's lock (the watcher may be re-applying it).
+  # Only a test: a quiz lock that took over meanwhile is left alone. -> $true/$false (engine), $null if none.
+  $ok = $null; $got = $false
+  try { $got = $EngineMutex.WaitOne(120000) } catch [System.Threading.AbandonedMutexException] { $got = $true }
+  try {
+    if ($State.state -eq "test") {
+      $State.state = "unlocked"; $State.test_mono = $null
+      $ok = ((& powershell -NoProfile -ExecutionPolicy Bypass -File $Engine unlock) -join "`n") -cmatch "LOCKqz: UNLOCKED"
+    }
+  } finally { if ($got) { try { $EngineMutex.ReleaseMutex() } catch { } } }
+  return $ok
+}
 # Cheap in-process check of the hosts block (same marker as the engine), for /status.
 $HostsFile = "$env:WINDIR\System32\drivers\etc\hosts"
 function HostsLocked { try { [IO.File]::ReadAllText($HostsFile) -match [regex]::Escape("# LOCKqz START") } catch { $false } }
@@ -474,6 +487,20 @@ $watcher.AddScript({
           if ($why) { WRelease $hq $why $null | Out-Null }
         }
       }
+    } elseif ($State.state -eq "test") {
+      # "Test it now" (POST /test): the quiz block for at most 2 minutes on the monotonic clock, kept in
+      # place like a quiz lock, then removed. Never reported (no account or network needed); a quiz that
+      # opens meanwhile takes over through /lock, and this branch then leaves the block alone.
+      $lastBeat = 0
+      $monoNow = [int64]([Diagnostics.Stopwatch]::GetTimestamp() / [Diagnostics.Stopwatch]::Frequency)
+      $over = ($null -eq $State.test_mono) -or (($monoNow - [int64]$State.test_mono) -ge [Math]::Min(120, [int64]$State.test_secs))
+      $got = WLock
+      try {
+        if ($State.state -eq "test") {
+          if ($over) { $State.state = "unlocked"; $State.test_mono = $null; WEngine "unlock" | Out-Null }
+          else { WEngine "test" | Out-Null }
+        }
+      } finally { WUnlockMx $got }
     } elseif ($State.state -eq "unlocked") {
       $lastBeat = 0
       # Never leave AI blocked after an unlock: a block (or saved policy backup) still present while
@@ -591,6 +618,11 @@ while ($listener.IsListening) {
       if ($why -and (Release-Quiz $body.quiz_id $why)) { $out.state = "unlocked"; $out.capped_quiz = $body.quiz_id; $out.capped_reason = $why }
     }
     "/unlock"    {
+      if ($State.state -eq "test") {
+        # a running self-test ends now, locally (it was never a quiz: nothing to ask or report)
+        $out.engine_unlocked = Stop-Test; $out.state = $State.state
+        break
+      }
       $q = if ($State.quiz_id) { $State.quiz_id } else { $body.quiz_id }
       $who = Get-Requester $req
       $why = LQ-UnlockReason $body.reason $who
@@ -627,6 +659,24 @@ while ($listener.IsListening) {
         if (-not $det.ask) { Report "unlock" $det $null $q | Out-Null }
         if (($why -eq "quiz_left") -or ($why -eq "quiz_tab_closed")) { Report "quiz_left" $why "agent" $q | Out-Null }
         $out.state="unlocked"; $out.engine_unlocked=$ok
+      }
+    }
+    "/test"      {
+      # "Test it now" (the Store app's button; Microsoft's reviewers and students): AI off for up to 2 minutes
+      # exactly as during a quiz, then back by itself (watcher). Only from "unlocked" (or a running test, which
+      # restarts): a quiz lock is never touched. Local only: no account, no server call, no row written.
+      # {"stop":true} = "Stop test": ends a running test only, never a quiz lock.
+      $secs = 120; $n = 0
+      if ([int]::TryParse([string]$body.secs, [ref]$n)) { $secs = [Math]::Max(10, [Math]::Min(120, $n)) }
+      if ($body.stop) { $out.engine_unlocked = Stop-Test; $out.state = $State.state }
+      elseif (@("unlocked", "test") -notcontains [string]$State.state) { $res.StatusCode = 409; $out = @{ ok = $false; state = $State.state; error = "quiz" } }
+      else {
+        $State.test_secs = $secs
+        $State.test_mono = [int64]([Diagnostics.Stopwatch]::GetTimestamp() / [Diagnostics.Stopwatch]::Frequency)
+        $State.state = "test"
+        $ok = (Engine "test") -cmatch "LOCKqz: LOCKED"
+        $out.state = $State.state; $out.secs = $secs; $out.engine_locked = $ok
+        if ($State.state -ne "test") { $out.ok = $false; $out.error = "quiz" }   # a quiz took over meanwhile
       }
     }
     "/student"   { if($body.student){$State.student=$body.student}; Report-Install; $out.student=$State.student }
@@ -698,6 +748,9 @@ while ($listener.IsListening) {
     "/event"     { if ($body.event -eq "quiz_left") { Report "quiz_left" $body.detail "agent" $body.quiz_id | Out-Null } else { $res.StatusCode = 400; $out = @{ error = "event not allowed" } } }
     "/status"    {
       $out = @{ state=$State.state; quiz_id=$State.quiz_id; student=$State.student; engine_locked=(HostsLocked); version=$Version; cap_at=$State.cap_at; end_known=$State.end_known; capped_quiz=$null; capped_reason=$null; capped_at=0 }
+      if (($State.state -eq "test") -and ($null -ne $State.test_mono)) {
+        $out.test_left = [Math]::Max([int64]0, [int64]$State.test_secs - ([int64]([Diagnostics.Stopwatch]::GetTimestamp() / [Diagnostics.Stopwatch]::Frequency) - [int64]$State.test_mono))
+      }
       # a quiz the safety cap or the server released within 24 h: the agent must not re-lock it
       if ($State.capped_quiz -and (([int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - [int64]$State.capped_at) -lt $CapForget)) { $out.capped_quiz = $State.capped_quiz; $out.capped_reason = $State.capped_reason; $out.capped_at = [int64]$State.capped_at }
     }

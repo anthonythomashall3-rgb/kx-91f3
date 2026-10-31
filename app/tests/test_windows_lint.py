@@ -165,6 +165,42 @@ ok("install.ps1 adds the Installed apps entry (skipped for Store + .exe installs
 ok("uninstall.ps1 removes the Installed apps entry") if "CurrentVersion\\Uninstall\\LOCKqz" in unin else bad("uninstall.ps1 leaves the Installed apps entry")
 ok("privacy page: uninstall steps for Windows, Mac, Linux, Android") if all(x in priv for x in ("Installed apps", "uninstall.sh | sudo bash", "uninstall-linux.sh | sudo bash", "Android")) else bad("privacy page uninstall steps missing")
 
+# 31 Oct: "Test it now" (Store certification 10.3.1: testable without an account). The helper's self-test is local
+# only, at most 2 minutes, never touches a quiz lock; the Store app's button drives it.
+dmn = open(os.path.join(WIN, "lockqzd.ps1"), encoding="utf-8").read()
+def seg(src, start, end):
+    i = src.find(start); j = src.find(end, i + 1) if i >= 0 else -1
+    return src[i:j] if i >= 0 and j > i else ""
+t_handler = seg(dmn, '"/test"      {', '"/student"   {')
+t_watch = seg(dmn, '} elseif ($State.state -eq "test") {', '} elseif ($State.state -eq "unlocked") {')
+t_stop = seg(dmn, "function Stop-Test {", "\n}\n")
+ok("helper: /test handler + watcher branch + Stop-Test exist") if t_handler and t_watch and t_stop else bad("self-test pieces missing")
+ok("helper: a test starts only from unlocked (or a running test); a quiz lock gets 409") if '@("unlocked", "test") -notcontains [string]$State.state' in t_handler and "$res.StatusCode = 409" in t_handler else bad("test may start during a quiz")
+ok("helper: test length clamped to 10..120 s, watcher never lets it run past 120 s") if "[Math]::Max(10, [Math]::Min(120, $n))" in t_handler and "[Math]::Min(120, [int64]$State.test_secs)" in t_watch else bad("test length not bounded")
+ok("helper: test timed on the monotonic clock (a date change cannot stretch it)") if "Stopwatch]::GetTimestamp()" in t_watch and "Stopwatch]::GetTimestamp()" in t_handler else bad("test not on the monotonic clock")
+ok("helper: nothing about a test reaches the server or the lock file (no account, no D1 row)") if all(x not in t_handler + t_watch + t_stop for x in ("Report", "LQ-Call", "Save-Lock", "WReport")) else bad("self-test reports or persists")
+ok("helper: the watcher ends a test only while it is still a test (a quiz that took over keeps its block)") if len(re.findall(r'(?<!else)if \(\$State\.state -eq "test"\)', t_watch)) == 1 and "WLock" in t_watch and "quiz_id" not in t_watch else bad("watcher test end can end a quiz lock")
+ok("helper: Stop-Test ends only a test, under the engine mutex") if 'if ($State.state -eq "test")' in t_stop and "$EngineMutex.WaitOne" in t_stop and "quiz_id" not in t_stop else bad("Stop-Test can end a quiz lock")
+ok("helper: {stop:true} and /unlock end a test locally (no server ask for a test)") if "if ($body.stop) { $out.engine_unlocked = Stop-Test" in t_handler and 'if ($State.state -eq "test") {\n        # a running self-test ends now, locally' in dmn else bad("test stop path missing")
+ok("helper: /status gives the seconds left in a test") if "$out.test_left" in dmn else bad("test_left missing")
+eng_t = open(os.path.join(WIN, "lockqz.ps1"), encoding="utf-8").read()
+ok("engine: 'test' verb = the AI block without closing VMs, remote-control tools or VPNs (no VPN port rules)") if ('ValidateSet("lock","unlock","status","warm","test")' in eng_t and '$TestMode = ($cmd -eq "test")' in eng_t
+    and "if ($TestMode) { $AiApps + $OverlayApps + $ModelProcs }" in eng_t and 'if ($TestMode -and ($r.n -like "$FwTag-vpn-*")) { continue }' in eng_t and '"test"   { Do-Lock }' in eng_t) else bad("engine test verb missing")
+ok("helper: a test uses the engine's test verb (start + re-apply); quiz locks keep the full block") if '(Engine "test")' in t_handler and 'WEngine "test"' in t_watch and 'Engine "test"' not in seg(dmn, '"/lock"      {', '"/unlock"    {') else bad("helper test does not use the test verb")
+agt_src = open(os.path.join(WIN, "lockqz-agent.ps1"), encoding="utf-8").read()
+ok("agent never adopts a test as a quiz lock") if '(($st.state -eq "locked") -or ($st.state -eq "developer")) -and $st.quiz_id' in agt_src and '"test"' not in agt_src else bad("agent may adopt a test lock")
+cs = open(os.path.join(WIN, "store", "LOCKqz.cs"), encoding="utf-8").read()
+ok("Store app: Test it now button -> /test (2 min), Stop test -> {stop:true}, token from config.json, no proxy") if all(x in cs for x in ('"Test it now"', '"/test", "{\\"secs\\":120}"', '"/test", "{\\"stop\\":true}"', '"config.json"', "rq.Proxy = null", '"X-LOCKqz-Token"')) else bad("Store app test button incomplete")
+ok("Store app: a running quiz is never ended from the app (no /unlock call)") if '"/unlock"' not in cs else bad("Store app calls /unlock")
+import shutil, subprocess, tempfile
+mcs = shutil.which("mcs")
+if mcs:
+    with tempfile.TemporaryDirectory() as d:
+        r = subprocess.run([mcs, "-langversion:5", "-target:winexe", "-out:" + os.path.join(d, "LOCKqz.exe"), "-r:System.Windows.Forms.dll", "-r:System.Drawing.dll", os.path.join(WIN, "store", "LOCKqz.cs")], capture_output=True, text=True)
+        ok("Store app compiles as C# 5 (mono mcs)") if r.returncode == 0 else bad("Store app does not compile: " + (r.stdout + r.stderr)[-400:])
+else:
+    print("  skip: Store app compile check (no mcs; Windows CI compiles it with csc)")
+
 print("")
 print(f"RESULT: {passed} passed, {failed} failed")
 sys.exit(0 if failed == 0 else 1)
