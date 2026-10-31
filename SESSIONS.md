@@ -7,8 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-10-28 22:10 PT — 01UUDg7b: LINUX PORT (app/linux/: engine, browser policies, agent, install, systemd; student browser extension app/extension-student/ = the tab reader on Linux; lockqzd.py Linux shim + /tabs endpoint; make-manifest linux; release.yml Linux install test; index.html Linux option). Touches: app/linux/*, app/extension-student/*, app/mac/lockqzd.py (Linux branches only), app/release/make-manifest.py, release.yml, index.html, tests.
-- 2026-10-27 19:40 PT — 01UzHDaF: Google sign-in (students + professors, codes as fallback) still in progress. Touches: [[route]].js (/auth/google/*), dashboard.html login form, mac+windows agents identity step, migrate_036, tests.
+- 2026-10-31 06:22 PT — 01UUDg7Y: owner's 31 Oct list — VM detection (helpers + /password), D2L Lumi block, Firefox extension signed by Mozilla (AMO), professor fallbacks (let-in switch, backup card, keep-awake), Google sign-in (takes over 01UzHDaF's stale 27 Oct claim), Windows installed-apps uninstall entry + privacy line, Microsoft Store listing + automated Store uploads, HANDOFF.md out of the public repo. Touches: [[route]].js, dashboard.html, index.html, privacy.html, sync.js, app/extension-prof/*, mac/windows/linux helpers + agents, android Api.kt/MainActivity, blocklists + browser policies, .github/workflows/*, migrate_038, CLAUDE.md, HANDOFF.md, app/VERSION, tests.
 
 ## Recently finished
 - 2026-10-31 06:20 PT — 01UUDg7b: "â€“" in the Brightspace Sync panel: scripts injected into Brightspace (sync.js, lq.js, extension content/popup scripts) are now pure ASCII (\uXXXX escapes); test in test_prof_zero_effort. Extension 1.0.2.
