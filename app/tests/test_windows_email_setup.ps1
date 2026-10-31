@@ -15,10 +15,11 @@ foreach ($f in Get-ChildItem $Win -Filter *.ps1) {
 
 Write-Host "W2 Setup-Identity (real code) with scripted dialogs"
 $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $Win "lockqz-agent.ps1"), [ref]$null, [ref]$null)
-$fns = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and @("Verify","Setup-Identity","Say","Ask-Email","Save-Student","Now-Sec") -contains $n.Name }, $true)
+$fns = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and @("Verify","Setup-Identity","Say","Ask-Email","Save-Student","Now-Sec","Google-Setup") -contains $n.Name }, $true)
 foreach ($fn in $fns) { . ([scriptblock]::Create($fn.Extent.Text)) }
 $EmailRe = ($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$EmailRe' }, $true) | Select-Object -First 1).Right.Extent.Text.Trim("'")
 $Ask = "Enter your school email"
+$GoogleSite = "https://lockqz.pages.dev"
 $StudentFile = Join-Path ([System.IO.Path]::GetTempPath()) ("lqstudent-" + [guid]::NewGuid() + ".json"); $CodeFresh = 720
 function Log($m) {}
 $script:Answers = @(); $script:Shown = @(); $script:Calls = @()
@@ -96,6 +97,27 @@ Check "bad proof: dropped, falls back to the code (email not asked)" (($null -eq
 function Helper($path, $body) { throw "offline" }
 $r = Run @() @{}
 Check "offline: nothing saved, no dialog" (($null -eq $r) -and $script:Shown.Count -eq 0)
+
+Write-Host "W3 Sign in with Google (31 Oct): one click, the browser page confirms, the app sees it through status"
+function Start-Sleep { param([int]$Seconds) }          # no waiting in the test
+function Start-Process { param($FilePath, $ArgumentList, $ErrorAction) $script:Opened += [string]$ArgumentList }
+$GoogleLink = "https://lockqz.pages.dev/google?n=" + ("a" * 32)
+function Helper($path, $body) {
+  $script:Calls += $body.op
+  switch ($body.op) {
+    "google_start" { return [pscustomobject]@{ status = 200; ok = $true; url = $script:GUrl } }
+    "status" { $script:St++; $done = $script:St -gt 1; return [pscustomobject]@{ status = 200; codes = $true; verified = $done; student = $(if ($done) { "al@usc.edu" } else { $null }); vtoken = $(if ($done) { "v" * 40 } else { $null }) } }
+  }
+}
+$script:Opened = @(); $script:St = 0; $script:GUrl = $GoogleLink; $script:VToken = $null
+$r = Run @(,@("Sign in with Google", "")) @{}
+Check "Google: link opened, confirmed email returned verified, proof kept" (($r.student -eq "al@usc.edu") -and $r.verified -and ($script:Opened -contains $GoogleLink) -and ($script:VToken -eq ("v" * 40)))
+$script:Opened = @(); $script:St = -100; $script:GUrl = $GoogleLink
+$r = Run @() @{}
+Check "Google dialog closed: nothing opened, asks again later" (($null -eq $r) -and ($script:Opened.Count -eq 0))
+$script:Opened = @(); $script:St = -100; $script:GUrl = "https://evil.example/google?n=" + ("a" * 32)
+$r = Run @() @{}
+Check "a link to another site is never opened (falls to the email dialog)" (($script:Opened.Count -eq 0) -and ($script:Shown[0] -match "school email"))
 
 Write-Host ""; Write-Host "RESULT: $pass passed, $fail failed"
 if ($fail) { exit 1 }

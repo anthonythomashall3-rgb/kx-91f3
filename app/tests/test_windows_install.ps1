@@ -68,8 +68,10 @@ $rep = powershell -NoProfile -Command "(Invoke-RestMethod '$api/report' -Method 
 Check "report accepted by API" ($rep -match 'True')
 
 # Installed apps: the .exe's own entry (LOCKqz_is1), never a second one from install.ps1
-$uk = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
-Check "listed once in Installed apps (.exe entry)" ((Test-Path "$uk\LOCKqz_is1") -and -not (Test-Path "$uk\LOCKqz"))
+# (the .exe is a 32-bit installer: Windows keeps its entry under WOW6432Node; both views are Installed apps)
+$uk = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'; $uk32 = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
+$innoKey = (Test-Path "$uk\LOCKqz_is1") -or (Test-Path "$uk32\LOCKqz_is1")
+Check "listed once in Installed apps (.exe entry)" ($innoKey -and -not (Test-Path "$uk\LOCKqz") -and -not (Test-Path "$uk32\LOCKqz"))
 
 # 6) UNINSTALL
 $un = Get-ChildItem $Dest -Filter 'unins*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -80,7 +82,7 @@ Check "uninstall removed helper task" ($null -eq (Get-ScheduledTask -TaskName 'L
 Check "uninstall removed agent task" ($null -eq (Get-ScheduledTask -TaskName 'LOCKqz Agent' -ErrorAction SilentlyContinue))
 $hosts = Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw
 Check "hosts clean after uninstall" (-not ($hosts -match 'LOCKqz START'))
-Check "Installed apps entry gone after uninstall" (-not (Test-Path "$uk\LOCKqz_is1") -and -not (Test-Path "$uk\LOCKqz"))
+Check "Installed apps entry gone after uninstall" (-not (Test-Path "$uk\LOCKqz_is1") -and -not (Test-Path "$uk32\LOCKqz_is1") -and -not (Test-Path "$uk\LOCKqz"))
 
 if ($fail) { Write-Host "`n$fail CHECK(S) FAILED"; Get-Content install.log -ErrorAction SilentlyContinue | Select-Object -Last 40; exit 1 }
 Write-Host "`nALL CHECKS PASSED"

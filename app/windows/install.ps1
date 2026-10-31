@@ -179,7 +179,7 @@ Register-ScheduledTask -TaskName "LOCKqz Agent" -Action $aAction -Trigger $aTrig
 # installer registers its own entry (LOCKqz_is1) and Store installs appear as the Store app, so only the
 # one-line install adds this one.
 $UninstKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\LOCKqz"
-if (-not $StorePackage -and -not $FromExe -and -not (Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\LOCKqz_is1")) {
+if (-not $StorePackage -and -not $FromExe -and -not (Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\LOCKqz_is1") -and -not (Test-Path "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\LOCKqz_is1")) {
   try {
     New-Item -Path $UninstKey -Force | Out-Null
     $un = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$Dest\uninstall.ps1`""
