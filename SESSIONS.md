@@ -7,9 +7,10 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-10-31 06:22 PT — 01UUDg7Y: owner's 31 Oct list — VM detection (helpers + /password), D2L Lumi block, Firefox extension signed by Mozilla (AMO), professor fallbacks (let-in switch, backup card, keep-awake), Google sign-in (takes over 01UzHDaF's stale 27 Oct claim), Windows installed-apps uninstall entry + privacy line, Microsoft Store listing + automated Store uploads, HANDOFF.md out of the public repo. Touches: [[route]].js, dashboard.html, index.html, privacy.html, sync.js, app/extension-prof/*, mac/windows/linux helpers + agents, android Api.kt/MainActivity, blocklists + browser policies, .github/workflows/*, migrate_038, CLAUDE.md, HANDOFF.md, app/VERSION, tests.
+- (none)
 
 ## Recently finished
+- 2026-10-31 07:20 PT — 01UUDg7Y: owner's 31 Oct list. v0.6.1 (3ecaa5c): no quiz password inside a virtual machine / emulator (helpers + Android report it, live view 'Virtual machine — not let in', gate revokes), D2L Lumi blocked (LearnWise lti + Forethought, wildcards), one-line Windows install in Installed apps, privacy uninstall steps. v0.6.2 (7313614, d5f742c): Google sign-in (one-time /google page, ID token checked server-side; codes = fallback; professor Google sign-in; GOOGLE_CLIENT_ID empty until the OAuth client exists), let-in without LOCKqz + live code (migrate_038), 'If LOCKqz is down' card, extension 1.0.3 keep-awake, /api/store -> Store button by itself, CI: msstore publish (STORE_* secrets) + Firefox signing (AMO_* secrets) + deploy serves current extension packages. HANDOFF.md moved to the private Project doc (CLAUDE.md rule 5). run_all green (2,458 checks).
 - 2026-10-31 06:20 PT — 01UUDg7b: "â€“" in the Brightspace Sync panel: scripts injected into Brightspace (sync.js, lq.js, extension content/popup scripts) are now pure ASCII (\uXXXX escapes); test in test_prof_zero_effort. Extension 1.0.2.
 - 2026-10-29 16:05 PT — 01UUDg7b: no tax / fees lines anywhere (pay pages: one "LOCKqz <total>" line; PO mailto, bank-details + renew emails: amount only); shorter memo bubble; no renewal line under Card; welcome page = 3 plain instructions (no buttons/links); every logo is the lock (dashboard header + sign-in + status orb, extension popup + Brightspace notices; extension 1.0.1 to upload); store link no longer typed out under the Add button.
 - 2026-10-29 15:50 PT — 01UUDg7b: emails use a white lock (public/icon-white.png, LOGO_URL) so it shows on the red header; Zelle first on both pay pages (Zelle, Venmo, Card, then bank/PO).
@@ -18,5 +19,6 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 - 2026-10-29 13:40 PT — 01UUDg7b: dashboard Set up redesigned: 3 cards always shown (number top-left, centred title/one line/button, done = green check), step 3 = ONE Email students button for every class (/email/students ous[] -> one draft, deduped Bcc, mail_sent per class). lq.js: LOCKqz on red/dark backgrounds turns white (was red qz on red buttons); extension dist rebuilt (store package not re-uploaded).
 - Older history: claude.ai Project LOCKqz, doc claude/LOCKqz-HANDOFF.md (private).
 
-## Requests (for whichever session picks them up)
-- (none)
+## Requests
+- When the Google OAuth client exists (project lockqz-513313, Web, origins https://lockqz.pages.dev + https://prof.lockqz.pages.dev): put its client ID in app/cloudflare/wrangler.toml GOOGLE_CLIENT_ID and publish the consent screen (In production).
+- Delete merged branches wip/prof-email-budget, wip/prof-zero-effort-orphan, cws-live (needs the owner's OK).
