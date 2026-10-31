@@ -9,3 +9,6 @@
 4. Commit as `Claude <noreply@anthropic.com>`. Never write `[skip ci]` in a commit message: it silences the
    deploy for the whole push. The Release workflow decides by itself (diff against the live commit) and ends
    in seconds for docs-only pushes.
+5. This repo is PUBLIC. The handoff, known gaps, bypass ideas and audit findings live only in the claude.ai
+   Project "LOCKqz" (doc `claude/LOCKqz-HANDOFF.md`; Mac copy in git-ignored `.private/`). Never write an open
+   gap, a bypass or an unfixed audit finding into any repo file or commit message; describe fixes as features.

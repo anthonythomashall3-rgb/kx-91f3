@@ -25,7 +25,5 @@ then GitHub -> Settings -> Secrets -> Actions: `ANDROID_KEYSTORE_B64` = `base64 
 Until the secret exists CI signs with the debug key (installable; a later real-key build needs an uninstall first).
 Unit tests: DNS wire helpers, blocklist matching, quiz URL rules.
 
-Not yet: the AI hosts' resolved addresses as drop routes (warm connections on a phone), Brightspace Pulse app
-(quizzes must be taken in a browser), on-device Gemini features that need no network, Samsung Galaxy AI,
-emulator tests in CI. Chrome's "Secure DNS" falls back to the system resolver when the VPN's DNS is not a known
+Chrome's "Secure DNS" falls back to the system resolver when the VPN's DNS is not a known
 DoH provider (default "automatic" mode); a student who forces a DoH provider by hand gets it blocked by address.

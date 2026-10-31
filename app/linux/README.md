@@ -18,7 +18,5 @@ Tabs: Firefox family from `recovery.jsonlz4` (deb, snap, flatpak), Chromium fami
 (`Sessions/Session_*`). Browsers that read policies only at start (Firefox family) or have none (Opera,
 Vivaldi, flatpak builds) are closed at lock unless they hold the quiz.
 
-Not yet on Linux: wildcard AI domains (systemd-resolved has no per-domain blackhole), tab rewriting (a quiz
-opened from Content unlocks when the tab is left, not on submit), self-update (no rollback kit; reinstall =
-update). Phones, iPads, Android and Chromebooks cannot run LOCKqz (no self-installed program may block
+Phones, iPads, Android and Chromebooks cannot run LOCKqz (no self-installed program may block
 other apps there; a school-managed device is the only route).

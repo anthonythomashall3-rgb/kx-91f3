@@ -31,3 +31,4 @@ paid_only.patch
 app/.src2.tgz
 .round2.patch
 app/cloudflare/.deploy/
+.private/
