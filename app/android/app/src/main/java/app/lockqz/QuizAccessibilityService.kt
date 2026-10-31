@@ -217,6 +217,7 @@ class QuizAccessibilityService : AccessibilityService() {
             "not started" -> notify("Quiz not open yet", "LOCKqz gives you the password when the quiz opens.")
             "gate_off" -> notify("Waiting for your professor", "The quiz password is released when your professor opens the exam.")
             "not_protected" -> { Log.i(TAG, "not protected: unlocking"); release(id, "not_protected") }
+            "vm" -> notify("LOCKqz", "This quiz can't open in an emulator. Open it on the phone or computer itself.")
             else -> if (code == 402) notify("LOCKqz", j?.optString("error", "This email is in a quiz on another device.") ?: "")
                     else notify("LOCKqz", "No password yet (${code}). Retrying.")
         }

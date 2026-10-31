@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.6.0"
+VERSION = "0.6.1"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -480,6 +480,45 @@ def platform_tag():
         return "linux-%s-%s" % (kv.get("ID", "linux"), kv.get("VERSION_ID", ""))
     except Exception:
         return "linux-" + platform.release()
+
+_VM = None
+VM_MARK = re.compile(r"(?i)virtual ?machine|virtualmac|vmware|virtualbox|innotek|parallels|qemu|\bkvm\b|bochs|\bxen\b|bhyve|hyper-v|amazon ec2|google compute|openstack")
+def _sysctl(name):
+    try: return subprocess.run(["sysctl", "-n", name], capture_output=True, text=True, timeout=5).stdout.strip()
+    except Exception: return ""
+def _readf(p):
+    try:
+        with open(p) as f: return f.read().strip()
+    except Exception: return ""
+def vm_guest():
+    """'' on a real computer; a short name when this system runs inside a virtual machine. A quiz taken
+    inside a VM is locked only inside the VM (the real computer around it keeps AI), so the server
+    gives no password. Hardware facts only; computed once."""
+    global _VM
+    if _VM is not None: return _VM
+    t = os.environ.get("LOCKQZ_TEST_VM")
+    if t is not None:
+        _VM = t[:40]; return _VM
+    v = ""
+    try:
+        if IS_LINUX:
+            if "microsoft" in _readf("/proc/sys/kernel/osrelease").lower(): v = "wsl"
+            if not v:
+                r = subprocess.run(["systemd-detect-virt", "--vm"], capture_output=True, text=True, timeout=5)
+                s = r.stdout.strip()
+                if r.returncode == 0 and s and s != "none": v = s
+            if not v:
+                m = VM_MARK.search(" ".join(_readf("/sys/class/dmi/id/" + n) for n in ("sys_vendor", "product_name", "bios_vendor")))
+                if m: v = m.group(0)
+        else:
+            if _sysctl("kern.hv_vmm_present") == "1": v = "hypervisor"
+            else:
+                m = VM_MARK.search(_sysctl("hw.model"))
+                if m: v = m.group(0)
+    except Exception:
+        v = ""
+    _VM = v.lower()[:40]
+    return _VM
 
 def developer_mode():
     """True only on the admin's Mac (a valid developer key is present). Student installs
@@ -1069,7 +1108,9 @@ class H(BaseHTTPRequestHandler):
             # The signed /password call itself refreshes this device's lock row on the server (C1): no
             # separate heartbeat first - only the lock report itself must have arrived.
             ensure_lock_reported(qid)
-            code, j = call("/password", {"url": url, "device_id": DEVICE})
+            pbody = {"url": url, "device_id": DEVICE}
+            if vm_guest(): pbody["vm"] = vm_guest()   # the server refuses a quiz inside a virtual machine
+            code, j = call("/password", pbody)
             j = j if isinstance(j, dict) else {}
             pw = j.get("password") if isinstance(j.get("password"), str) else None
             pay = j.get("pay") if isinstance(j.get("pay"), dict) else None
@@ -1109,6 +1150,8 @@ class H(BaseHTTPRequestHandler):
                 if qid: report_async("unlock", {"quiz_id": qid, "detail": {"reason": "other_school"}})
             elif code == 402 and reason:
                 out["reason"] = reason   # "verify": the student must confirm their school email first
+            elif code == 403 and reason == "vm":
+                out["reason"] = reason   # inside a virtual machine: no password (AI stays off in the VM)
             return self._send(200 if (pw or pay or out.get("reason")) else 502, out)
         if self.path == "/uncap":
             # The agent saw the released quiz's page closed (or a new attempt start): it may lock again.

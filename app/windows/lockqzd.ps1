@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.6.0"
+$Version = "0.6.1"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = if ($env:LOCKQZ_CONFIG) { $env:LOCKQZ_CONFIG } else { "$env:ProgramData\LOCKqz\config.json" }
@@ -328,6 +328,22 @@ function Lock-Id($u) {
   $qi = [regex]::Match([string]$u, '[?&]qi=(\d+)'); $ou = [regex]::Match([string]$u, '[?&]ou=(\d+)')
   "$(if ($ou.Success) { $ou.Groups[1].Value } else { 'x' })-$(if ($qi.Success) { $qi.Groups[1].Value } else { 'x' })"
 }
+# A quiz taken inside a virtual machine is locked only inside it (the real computer around it keeps AI), so
+# the server gives no password to a helper running in one. Hardware strings only: HypervisorPresent is also
+# true on ordinary PCs whose Windows security features use Hyper-V.
+$script:VmKind = $null
+function LQ-VmGuest {
+  if ($null -ne $env:LOCKQZ_TEST_VM) { return ([string]$env:LOCKQZ_TEST_VM).ToLower() }
+  try {
+    $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+    if ([string]$cs.Model -match '^\s*Virtual Machine\s*$') { return "hyper-v" }
+    $bios = Get-CimInstance Win32_BIOS -ErrorAction SilentlyContinue
+    $s = @([string]$cs.Manufacturer, [string]$cs.Model, [string]$bios.Manufacturer, [string]$bios.SerialNumber, [string]$bios.SMBIOSBIOSVersion) -join " | "
+    $m = [regex]::Match($s, '(?i)vmware|virtualbox|innotek|parallels|qemu|\bkvm\b|bochs|\bxen\b|bhyve|seabios|ovmf|standard pc \(|amazon ec2|google compute|openstack')
+    if ($m.Success) { return $m.Value.ToLower() }
+  } catch {}
+  return ""
+}
 function Report($event, $detail, $source, $quiz) {
   $b = @{ device_id=$Device; event=$event; quiz_id=$(if ($quiz) { $quiz } else { $State.quiz_id }); student=$State.student;
           ts=(Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") }
@@ -641,7 +657,10 @@ while ($listener.IsListening) {
         if (-not (EngineLocked)) { Report "tamper" "block_missing_at_password" $null | Out-Null; $res.StatusCode = 409; $out = @{ error = "AI block is not in place" } }
         else {
           # The signed /password call itself refreshes this device's lock row on the server (C1).
-          $r = LQ-Call $Api "/password" @{ url = $u; device_id = $Device } $Device $Key $State $true
+          $pb = @{ url = $u; device_id = $Device }
+          if ($null -eq $script:VmKind) { $script:VmKind = LQ-VmGuest }
+          if ($script:VmKind) { $pb.vm = $script:VmKind }   # the server refuses a quiz inside a virtual machine
+          $r = LQ-Call $Api "/password" $pb $Device $Key $State $true
           $pw = $null; $pay = $null; $why = $null
           if ($r.data) { $pw = $r.data.password; $pay = $r.data.pay; $why = [string]$r.data.reason }
           $out = @{ password = $pw; status = $r.code; pay = $pay }
@@ -666,6 +685,7 @@ while ($listener.IsListening) {
           } elseif (($r.code -eq 403) -and ($why -eq "other_school")) {
             $out.reason = $why   # C10: not a LOCKqz school -> nothing to protect, AI back now
             Release-Quiz $State.quiz_id "other_school" | Out-Null
+          } elseif (($r.code -eq 403) -and ($why -eq "vm")) { $out.reason = $why   # inside a virtual machine: no password
           } elseif (($r.code -eq 402) -and $why) { $out.reason = $why }
           if ((-not $pw) -and (-not $pay) -and (-not $out.reason)) { $res.StatusCode = 502 }
         }

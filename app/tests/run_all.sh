@@ -60,6 +60,7 @@ run "Past exams: 'was protected' only on proof from Brightspace (prot_at / unpro
 run "Status truth: ready/installed, protected counts, live labels, check-in, agent ready notice" node --no-warnings test_status_truth.mjs
 run "Wrong-computer guard on the student installers (Mac file on Windows and vice versa)" node --no-warnings test_download_guard.mjs
 run "OSAS accommodations + quiz timing (extra time, makeups, mid-gate special access, DST, assistive tools)" node --no-warnings test_osas.mjs
+run "Virtual machines: no password inside a VM/emulator, live view + gate, admin exempt, clients carry it" node --no-warnings test_vm.mjs
 if command -v xvfb-run >/dev/null 2>&1 && [ "$(id -u)" = 0 ]; then run "Real Chromium loads the quiz policy (AI refused, Web search + notes allowed, extensions off)" xvfb-run -a node --no-warnings test_chrome_policy_real.mjs; fi
 if command -v pwsh >/dev/null 2>&1; then
   run "Windows agent/engine logic (titles, unlock retry, policy restore)" pwsh -NoProfile -File test_windows_logic.ps1

@@ -38,7 +38,7 @@ const AI_DOMAINS = [
   "chat.webllm.ai","webllm.mlc.ai","remotedesktop.google.com","remotedesktop-pa.googleapis.com","web.teamviewer.com","my.anydesk.com","web.parsec.app","api.sec-tunnel.com",
   "mask.icloud.com","mask-h2.icloud.com","cloudflare-dns.com","chrome.cloudflare-dns.com","mozilla.cloudflare-dns.com","dns.google","dns.google.com","dns.quad9.net",
   "doh.opendns.com","dns.nextdns.io","firefox.dns.nextdns.io","chromium.dns.nextdns.io","doh.xfinity.com","private.canadianshield.cira.ca","wikimedia-dns.org","dns.adguard-dns.com",
-  "doh.mullvad.net","freedns.controld.com","dns.alidns.com","doh.pub","appsgenaiserver-pa.clients6.google.com","appsgenaiserver-pa.googleapis.com","chat.learnwise.ai","learnwise.ai",
+  "doh.mullvad.net","freedns.controld.com","dns.alidns.com","doh.pub","appsgenaiserver-pa.clients6.google.com","appsgenaiserver-pa.googleapis.com","chat.learnwise.ai","learnwise.ai","lti.learnwise.ai","app.learnwise.ai","api.learnwise.ai","widget.learnwise.ai","cdn.learnwise.ai","eu.learnwise.ai","us.learnwise.ai","forethought.ai","solve-widget.forethought.ai","api.forethought.ai","solve.forethought.ai",
   "blackbox.ai","www.blackbox.ai","hf.space","translate.goog","lens.google.com","abacus.ai","chatllm.abacus.ai","anakin.ai",
   "notegpt.io","perchance.org/ai-chat","augloop.office.com","bing.com/copilotsearch","duckduckgo.com/aichat","kagi.com/assistant","ai-chat.bsg.brave.com","llm.zed.dev",
   "cloud.zed.dev","tabnine.com","supermaven.com","grazie.ai","grazie.aws.intellij.net","codewhisperer.us-east-1.amazonaws.com","q.us-east-1.amazonaws.com","openai.azure.com",
@@ -1764,6 +1764,18 @@ export async function onRequest(context) {
       // signed up (active + synced + on). Any other Brightspace quiz is not ours -> the app restores AI,
       // and no student is charged and nothing is reported.
       if (!(await courseCovered(ou))) return json({ password: null, reason: "not_protected" }, 200);
+      // Virtual machine: LOCKqz inside a VM locks only the VM; the real computer around it keeps AI.
+      // No password (the admin may test in one). Logged once per quiz for the professor's live view.
+      const vmKind = typeof body.vm === "string" ? body.vm.trim().slice(0, 40) : "";
+      if (vmKind) {
+        const vd = v.ok ? v.dev : await db.prepare("SELECT student, student_verified FROM devices WHERE device_id=?").bind(device_id).first();
+        const adminVm = !!vd && Number(vd.student_verified) === 1 && !!env.ADMIN_EMAIL && String(vd.student || "").toLowerCase() === String(env.ADMIN_EMAIL).toLowerCase();
+        if (!adminVm) {
+          try { await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) SELECT ?,?,?,'vm',?,? WHERE NOT EXISTS (SELECT 1 FROM events WHERE device_id=? AND quiz_id=? AND event='vm')").bind(device_id, vd?.student || null, lockId, vmKind, now(), device_id, lockId).run(); }
+          catch (e) { if (!WRITE_CAP(e)) throw e; }
+          return json({ password: null, reason: "vm" }, 403);
+        }
+      }
       // Student fee: no password until this semester's fee is paid (matched automatically from Zelle / bank alerts).
       const stu = v.ok ? v.dev : (feeOn() ? await db.prepare("SELECT student, student_verified FROM devices WHERE device_id=?").bind(device_id).first() : null);
       if (feeOn()) {
@@ -3227,11 +3239,12 @@ export async function onRequest(context) {
       }
       // ONE pass over this quiz's events: tamper, developer-mode lock claims, and every unlock / gap.
       // Index events(quiz_id, event): only these event rows are read (course-wide: quiz_id range).
-      const evs = (await db.prepare(`SELECT e.device_id,e.quiz_id,e.event,e.detail,e.ts,d.student,d.platform,d.student_verified FROM events e LEFT JOIN devices d ON d.device_id=e.device_id WHERE ${ec.sql} AND ${exact ? "e.event" : "+e.event"} IN ('tamper','dev_lock','unlock','auto_unlock','lock_gap') ORDER BY e.ts`).bind(...ec.args).all()).results;
-      const tamp = new Set(), devClaim = new Set(), incidents = new Map();
+      const evs = (await db.prepare(`SELECT e.device_id,e.quiz_id,e.event,e.detail,e.ts,d.student,d.platform,d.student_verified FROM events e LEFT JOIN devices d ON d.device_id=e.device_id WHERE ${ec.sql} AND ${exact ? "e.event" : "+e.event"} IN ('tamper','dev_lock','unlock','auto_unlock','lock_gap','vm') ORDER BY e.ts`).bind(...ec.args).all()).results;
+      const tamp = new Set(), devClaim = new Set(), vmDev = new Set(), incidents = new Map();
       for (const e of evs) {
         if (e.event === "tamper") tamp.add(e.device_id);
         else if (e.event === "dev_lock") devClaim.add(e.device_id);
+        else if (e.event === "vm") vmDev.add(e.device_id + "|" + e.quiz_id);   // refused: inside a virtual machine
         else { const k = e.device_id + "|" + e.quiz_id; if (!incidents.has(k)) incidents.set(k, []); incidents.get(k).push(e); }
       }
       // Developer mode: only the admin's own Mac may hold a lock without blocking AI. A dev claim
@@ -3252,6 +3265,7 @@ export async function onRequest(context) {
         let status = "locked";
         const dev = devClaim.has(l.device_id);
         if (tamp.has(l.device_id) || (dev && !adminEm.has(String(l.student||"").toLowerCase()))) status = "tamper";
+        else if (vmDev.has(l.device_id + "|" + l.quiz_id)) status = "vm";   // never admitted by the gate (not "locked")
         else if (a !== null && a > STALE) {
           // "helper_killed" needs PROOF: the agent kept reporting after the helper went silent. A wifi
           // drop silences both -> "dark" (never treated as cheating; access is kept).

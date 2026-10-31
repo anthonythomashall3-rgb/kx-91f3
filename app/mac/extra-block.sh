@@ -252,7 +252,7 @@ airplay_receiver_restore() {
 WILD_DOMAINS=(openai.azure.com cognitiveservices.azure.com services.ai.azure.com inference.ai.azure.com ai.azure.com \
               workers.dev hf.space modal.run vercel.app fly.dev replit.dev replit.app repl.co \
               ngrok.io ngrok-free.app ngrok.app ngrok.dev ngrok-free.dev trycloudflare.com loca.lt serveo.net \
-              localhost.run pinggy.link pinggy.io zrok.io)
+              localhost.run pinggy.link pinggy.io zrok.io learnwise.ai forethought.ai)
 RESOLVER_DIR="${RESOLVER_DIR:-/etc/resolver}"
 WILD_MARK="# LOCKqz quiz lock - removed at unlock"
 wild_block_on() {

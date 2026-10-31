@@ -50,7 +50,7 @@ begin
     WizardForm.StatusLabel.Caption := 'Installing LOCKqz helper...';
     if (not Exec('powershell.exe',
          '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\install.ps1') +
-         '" -Api "{#LQAPI}"', '', SW_HIDE, ewWaitUntilTerminated, R)) or (R <> 0) then
+         '" -Api "{#LQAPI}" -FromExe', '', SW_HIDE, ewWaitUntilTerminated, R)) or (R <> 0) then
     begin
       SetupFailed := True;
       SuppressibleMsgBox('LOCKqz could not finish setting up (code ' + IntToStr(R) + '). ' +

@@ -7,7 +7,7 @@
 #     irm https://lockqz.pages.dev/install.ps1 | iex
 # With no files next to it, this script fetches the current release from the site, checks the
 # release manifest's RSA signature against the key below and every file's SHA-256, then installs.
-param([string]$Token, [string]$Api, [string]$Student = "", [string]$StorePackage = "")
+param([string]$Token, [string]$Api, [string]$Student = "", [string]$StorePackage = "", [switch]$FromExe)
 
 $ErrorActionPreference = "Stop"
 $Here = if ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { "" }
@@ -174,6 +174,24 @@ $aPrincipal = New-ScheduledTaskPrincipal -GroupId (Sid-Name $SidUsers) -RunLevel
 $aSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0 -RestartCount 99 -RestartInterval (New-TimeSpan -Minutes 1)
 Register-ScheduledTask -TaskName "LOCKqz Agent" -Action $aAction -Trigger $aTrigger `
   -Principal $aPrincipal -Settings $aSettings -Force | Out-Null
+
+# Listed in Settings > Apps > Installed apps (with a working Uninstall button) like any program. The .exe
+# installer registers its own entry (LOCKqz_is1) and Store installs appear as the Store app, so only the
+# one-line install adds this one.
+$UninstKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\LOCKqz"
+if (-not $StorePackage -and -not $FromExe -and -not (Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\LOCKqz_is1")) {
+  try {
+    New-Item -Path $UninstKey -Force | Out-Null
+    $un = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$Dest\uninstall.ps1`""
+    $Version = ""; try { $Version = [string]((Select-String -LiteralPath "$Dest\lockqzd.ps1" -Pattern '^\$Version = "([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value) } catch {}
+    foreach ($kv in @(@("DisplayName","LOCKqz"), @("DisplayVersion",$Version), @("Publisher","LOCKqz"), @("UninstallString",$un),
+                      @("DisplayIcon","powershell.exe"), @("URLInfoAbout","https://lockqz.pages.dev"), @("InstallLocation",$Dest))) {
+      New-ItemProperty -Path $UninstKey -Name $kv[0] -Value $kv[1] -PropertyType String -Force | Out-Null
+    }
+    New-ItemProperty -Path $UninstKey -Name "NoModify" -Value 1 -PropertyType DWord -Force | Out-Null
+    New-ItemProperty -Path $UninstKey -Name "NoRepair" -Value 1 -PropertyType DWord -Force | Out-Null
+  } catch { Write-Host "note: could not add LOCKqz to Installed apps ($_)" }
+}
 
 # Start it now.
 Start-ScheduledTask -TaskName "LOCKqz"

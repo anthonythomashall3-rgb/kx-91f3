@@ -191,5 +191,14 @@ const macApps7 = readFileSync(join(DIR, "../mac/lockqz.sh"), "utf8"), winApps7 =
 ['"Notion"','"Canva"','"Slack"','"Evernote"','"Goodnotes"'].every(a => macApps7.includes(a)) ? ok("mac closes the Notion / Canva / Slack / Evernote / Goodnotes apps") : bad("mac AI_APPS missing a notes app");
 ['"Notion"','"Canva"','"slack"','"Evernote"','"GoodNotes"'].every(a => winApps7.includes(a)) ? ok("windows closes the Notion / Canva / Slack / Evernote / Goodnotes apps") : bad("windows $AiApps missing a notes app");
 
+console.log("T18 31 Oct: Brightspace's own AI (D2L Lumi Chat / Lumi Tutor by LearnWise; older Lumi Chat on Forethought)");
+const need8 = ["learnwise.ai","chat.learnwise.ai","lti.learnwise.ai","forethought.ai","solve-widget.forethought.ai"];
+const miss8 = need8.filter(d => !mac.includes(d) || !win.includes(d) || !(served || []).includes(d));
+miss8.length === 0 ? ok("Lumi hosts in both blocklists + AI_DOMAINS (lti.learnwise.ai = the Lumi Tutor launch)") : bad("missing: " + miss8.join(", "));
+const wildMac = readFileSync(join(DIR, "../mac/extra-block.sh"), "utf8"), wildWin = readFileSync(join(DIR, "../windows/lockqz.ps1"), "utf8");
+/WILD_DOMAINS=\([^)]*\blearnwise\.ai\b[^)]*\bforethought\.ai\b/.test(wildMac) && /\$WildDomains = @\([^)]*"learnwise\.ai"[^)]*"forethought\.ai"/.test(wildWin)
+  ? ok("every *.learnwise.ai / *.forethought.ai subdomain blocked (Mac resolver files, Windows NRPT)") : bad("Lumi wildcard domains missing");
+!["brightspace.com","usc.brightspace.com","brightspace.usc.edu","d2l.com"].some(d => mac.includes(d)) ? ok("Brightspace itself is never blocked") : bad("a Brightspace host is blocked");
+
 console.log(`RESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

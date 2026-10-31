@@ -102,7 +102,21 @@ object Api {
         return call(c, "/report", b)
     }
 
-    fun password(c: Context, url: String) = call(c, "/password", JSONObject().put("url", url).put("device_id", deviceId(c)))
+    /** "" on a real phone; a short name on an emulator (Android Studio, Genymotion, BlueStacks ...). A quiz taken in
+     *  an emulator is locked only inside it - the computer around it keeps AI - so the server gives no password. */
+    fun emulator(): String {
+        val f = Build.FINGERPRINT.lowercase(); val h = Build.HARDWARE.lowercase(); val p = Build.PRODUCT.lowercase()
+        val m = Build.MODEL.lowercase(); val man = Build.MANUFACTURER.lowercase(); val b = Build.BRAND.lowercase()
+        return when {
+            h == "goldfish" || h == "ranchu" || h.startsWith("vbox") || h.contains("nox") || h == "ttvm_x86" -> "emulator-$h"
+            f.startsWith("generic") || f.contains("emulator") || f.contains("vbox") || f.contains("test-keys") && b == "generic" -> "emulator"
+            p.contains("sdk_gphone") || p.contains("emulator") || p.contains("simulator") || p.startsWith("sdk") || p.contains("vbox86p") || p.contains("bluestacks") -> "emulator-$p".take(40)
+            m.contains("android sdk built for") || m.contains("emulator") || man.contains("genymotion") || b.contains("bluestacks") -> "emulator"
+            else -> ""
+        }
+    }
+    fun password(c: Context, url: String) = call(c, "/password", JSONObject().put("url", url).put("device_id", deviceId(c))
+        .apply { val e = emulator(); if (e.isNotEmpty()) put("vm", e) })
 
     /** One-time student email setup: op = status | check | send | code | token. */
     fun verify(c: Context, op: String, email: String? = null, code: String? = null, vtoken: String? = null): JSONObject? {

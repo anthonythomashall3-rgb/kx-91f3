@@ -849,6 +849,13 @@ class Agent:
             self.share_told = self.quiz
             dialog("This school email is in a quiz on another computer right now.\n\nOne payment covers one student." if reason == "in_use"
                    else "This school email is already used on 2 computers.\n\nEmail lockqz.app@gmail.com to remove one.")
+        if reason == "vm":
+            # LOCKqz runs inside a virtual machine: no password (the real computer around it keeps AI).
+            if getattr(self, "vm_told", None) != self.quiz:
+                self.vm_told = self.quiz
+                dialog("This quiz can't open inside a virtual machine.\n\nOpen it on the computer itself.")
+            self.pw_next = now + 120
+            return "vm"
         # LOCKqz busy (free-plan limit, 503 server_busy) or unreachable: back off with jitter (30 s .. 5 min)
         # so thousands of waiting students do not burn the daily request budget; any answer resets it.
         if reason is None and (not r or r.get("error") == "server_busy"):

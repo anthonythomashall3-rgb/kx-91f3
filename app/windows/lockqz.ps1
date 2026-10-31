@@ -84,7 +84,7 @@ $FwRules = @(
 $WildDomains = @("openai.azure.com","cognitiveservices.azure.com","services.ai.azure.com","inference.ai.azure.com","ai.azure.com",
                  "workers.dev","hf.space","modal.run","vercel.app","fly.dev","replit.dev","replit.app","repl.co",
                  "ngrok.io","ngrok-free.app","ngrok.app","ngrok.dev","ngrok-free.dev","trycloudflare.com","loca.lt","serveo.net",
-                 "localhost.run","pinggy.link","pinggy.io","zrok.io")
+                 "localhost.run","pinggy.link","pinggy.io","zrok.io","learnwise.ai","forethought.ai")
 $WildTag = "LOCKqz-wild"
 # Warm connections (28 Oct 2026): an app LOCKqz does not close (Office, a PDF reader ...) that already
 # held an open keep-alive connection to an AI host when the quiz opened could keep using it: the hosts

@@ -67,6 +67,10 @@ Check "API reachable from PowerShell 5.1 ($n domains)" ([int]$n -ge 20)
 $rep = powershell -NoProfile -Command "(Invoke-RestMethod '$api/report' -Method Post -ContentType 'application/json' -Body '{""event"":""heartbeat""}').ok"
 Check "report accepted by API" ($rep -match 'True')
 
+# Installed apps: the .exe's own entry (LOCKqz_is1), never a second one from install.ps1
+$uk = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+Check "listed once in Installed apps (.exe entry)" ((Test-Path "$uk\LOCKqz_is1") -and -not (Test-Path "$uk\LOCKqz"))
+
 # 6) UNINSTALL
 $un = Get-ChildItem $Dest -Filter 'unins*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
 Check "uninstaller present" ($null -ne $un)
@@ -76,6 +80,7 @@ Check "uninstall removed helper task" ($null -eq (Get-ScheduledTask -TaskName 'L
 Check "uninstall removed agent task" ($null -eq (Get-ScheduledTask -TaskName 'LOCKqz Agent' -ErrorAction SilentlyContinue))
 $hosts = Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw
 Check "hosts clean after uninstall" (-not ($hosts -match 'LOCKqz START'))
+Check "Installed apps entry gone after uninstall" (-not (Test-Path "$uk\LOCKqz_is1") -and -not (Test-Path "$uk\LOCKqz"))
 
 if ($fail) { Write-Host "`n$fail CHECK(S) FAILED"; Get-Content install.log -ErrorAction SilentlyContinue | Select-Object -Last 40; exit 1 }
 Write-Host "`nALL CHECKS PASSED"

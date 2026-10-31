@@ -2,7 +2,7 @@
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>LOCKqz — Privacy</title>
-<style>
+<style>code{word-break:break-all}
   :root{--usc:#990000}
   body{font:16px/1.5 -apple-system,Segoe UI,sans-serif;margin:0;color:#111}
   header{background:#fff;color:#111;padding:12px 18px;font-weight:700;border-bottom:3px solid var(--usc)}
@@ -30,7 +30,7 @@ turns AI back on. It is open-note: notes, files and the rest of the web stay ope
   <li>IP addresses: when the app registers, while a quiz is locked, when the app gets a quiz password, and when you open the pay page.</li>
   <li>Quiz events with times: lock, unlock, password given to the app, left the quiz, and tamper flags (for example, the AI block was removed).</li>
   <li>From your professor's Brightspace (when they run LOCKqz Sync): your name, email, username, Brightspace user ID, org-defined ID, role, whether you submitted a protected quiz, and whether you already had special access on it (so LOCKqz never changes accommodations).</li>
-  <li>Pay page: typing an email there makes a payment code for that email. If you pay: the payment record from Venmo or Zelle (payer name, amount, memo, date).</li>
+  <li>Pay page: typing an email there makes a payment code for that email. If you pay: the payment record from Venmo, Zelle or Stripe (payer name, amount, memo, date).</li>
 </ul>
 
 <h2>Professors: what LOCKqz stores</h2>
@@ -54,13 +54,13 @@ turns AI back on. It is open-note: notes, files and the rest of the web stay ope
 <ul>
   <li>Your professor can see, for their own courses: who installed LOCKqz, live lock status, quiz events, and IP addresses.</li>
   <li>The LOCKqz admin can see all records.</li>
-  <li>Services that run LOCKqz: Cloudflare (hosting and database), Google Gmail (sends codes, reads payment alerts), Venmo and Zelle (if you pay).</li>
+  <li>Services that run LOCKqz: Cloudflare (hosting and database), Google (Gmail sends codes and reads payment alerts; Google sign-in if you use it), Stripe (if you pay by card), Venmo and Zelle (if you pay).</li>
   <li>Never sold, and never used for ads or anything other than running LOCKqz.</li>
 </ul>
 
 <h2>Your control</h2>
 <ul>
-  <li>Uninstall LOCKqz any time; it then sends nothing.</li>
+  <li>Uninstall LOCKqz any time; it then sends nothing. Windows: Settings &rarr; Apps &rarr; Installed apps &rarr; LOCKqz &rarr; Uninstall. Mac: in Terminal, <code>curl -fsSL https://lockqz.pages.dev/uninstall.sh | sudo bash</code>. Linux: <code>curl -fsSL https://lockqz.pages.dev/uninstall-linux.sh | sudo bash</code>. Android: uninstall the app.</li>
   <li>Quiz events are deleted after 120 days.</li>
   <li>Ask and we delete everything stored for your email; it is not re-imported from Brightspace.</li>
 </ul>

@@ -157,6 +157,14 @@ for f in sorted(os.listdir(WIN)):
         b = open(os.path.join(WIN, f), "rb").read()
         ok(f"{f} is plain ASCII") if all(c < 128 for c in b) else bad(f"{f} has non-ASCII bytes (PS 5.1 misreads them)")
 
+# 31 Oct: LOCKqz is listed in Settings > Apps > Installed apps with a working Uninstall (one-line install too),
+# and the privacy page says how to uninstall on every system.
+inst = open(os.path.join(WIN, "install.ps1")).read(); unin = open(os.path.join(WIN, "uninstall.ps1")).read()
+priv = open(os.path.join(WIN, "..", "cloudflare", "public", "privacy.html")).read()
+ok("install.ps1 adds the Installed apps entry (skipped for Store + .exe installs, which have their own)") if ("CurrentVersion\\Uninstall\\LOCKqz" in inst and "UninstallString" in inst and "LOCKqz_is1" in inst and "-not $StorePackage" in inst) else bad("Installed apps entry missing in install.ps1")
+ok("uninstall.ps1 removes the Installed apps entry") if "CurrentVersion\\Uninstall\\LOCKqz" in unin else bad("uninstall.ps1 leaves the Installed apps entry")
+ok("privacy page: uninstall steps for Windows, Mac, Linux, Android") if all(x in priv for x in ("Installed apps", "uninstall.sh | sudo bash", "uninstall-linux.sh | sudo bash", "Android")) else bad("privacy page uninstall steps missing")
+
 print("")
 print(f"RESULT: {passed} passed, {failed} failed")
 sys.exit(0 if failed == 0 else 1)

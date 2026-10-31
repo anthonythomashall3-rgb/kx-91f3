@@ -71,4 +71,5 @@ foreach ($prof in @(Get-CimInstance Win32_UserProfile | Where-Object { -not $_.S
 }
 
 Remove-Item -Recurse -Force $Dest
+Remove-Item -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\LOCKqz" -Recurse -Force -ErrorAction SilentlyContinue   # the Installed apps entry
 Write-Host "LOCKqz removed."
