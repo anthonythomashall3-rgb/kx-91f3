@@ -325,6 +325,27 @@ function Ask-Email($state) {
     return $email
   }
 }
+# One click instead of an emailed code: sign in with the school Google account in the browser; the server
+# confirms the email and this PC sees it through "status". -> @{ student; verified } when done; $null = use
+# the email code (Google sign-in off, not chosen, or not finished); $false = the dialog was closed.
+$GoogleSite = if ($env:LOCKQZ_SITE) { $env:LOCKQZ_SITE.TrimEnd("/") } else { "https://lockqz.pages.dev" }
+function Google-Setup($state) {
+  $g = Verify "google_start" $null
+  if (-not ($g -and $g.url)) { return $null }
+  $u = [string]$g.url
+  if ($u -notmatch ('^' + [regex]::Escape($GoogleSite) + '/google\?n=[0-9a-f]{32}$')) { return $null }
+  $a = Ask-Box "LOCKqz setup (one time only)`n`nConfirm your school email with your USC Google account." @("Use an email code", "Sign in with Google") "" $false
+  if (-not $a) { $state.r = "closed"; return $false }
+  if ($a.b -ne "Sign in with Google") { return $null }
+  try { Start-Process "explorer.exe" -ArgumentList $u -ErrorAction SilentlyContinue } catch {}
+  $end = (Now-Sec) + 600
+  while ((Now-Sec) -lt $end) {
+    Start-Sleep -Seconds 4
+    $st = Verify "status" $null
+    if ($st -and $st.verified -and $st.student) { if ($st.vtoken) { $script:VToken = [string]$st.vtoken }; Say "Done. LOCKqz is set up and won't ask again."; return @{ student = $st.student; verified = $true } }
+  }
+  return $null
+}
 function Setup-Identity($saved, $state) {
   # -> @{ student; verified } to save, or $null ($state.r = "server": retry quietly; "closed": dialog closed)
   if ($null -eq $state) { $state = @{ sent_email = ""; sent_at = 0; r = "" } }
@@ -344,6 +365,9 @@ function Setup-Identity($saved, $state) {
   }
   while ($true) {
     if (-not $email) {
+      $gs = Google-Setup $state
+      if (($gs -is [bool]) -and (-not $gs)) { return $null }   # the student closed the dialog
+      if ($gs) { return $gs }
       $email = Ask-Email $state
       if (-not $email) { return $null }
       Save-Student $email $false          # never asked again, whatever happens next

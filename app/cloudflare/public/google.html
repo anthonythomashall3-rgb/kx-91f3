@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>LOCKqz</title>
+<style>
+  :root{--usc:#990000}
+  body{font:16px/1.5 -apple-system,Segoe UI,sans-serif;margin:0;color:#111;background:#f6f5f2;min-height:100vh;display:flex;align-items:center;justify-content:center}
+  .card{background:#fff;border:1px solid #e6e3dc;border-radius:16px;padding:32px 28px;max-width:360px;width:calc(100% - 40px);display:flex;flex-direction:column;align-items:center;gap:18px;text-align:center}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:26px}
+  #msg{font-weight:600}#msg.ok{color:#1a7f37}#msg.err{color:var(--usc)}
+  #gbtn{min-height:44px}
+</style>
+<script src="/lq.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+<div class="card">
+  <div class="brand"><svg aria-hidden="true" width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#990000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 11V7a4 4 0 0 1 8 0v4"/><rect x="5" y="11" width="14" height="10" rx="2" fill="#990000"/><circle cx="12" cy="16" r="1.4" fill="#fff" stroke="none"/></svg><span class="lq">LOCKqz</span></div>
+  <div id="gbtn"></div>
+  <div id="msg"></div>
+</div>
+<script>
+// One-time setup of the LOCKqz app on this computer: sign in with the school Google account; the app
+// (polling its own status) sees the confirmed email and closes its dialog by itself.
+(() => {
+  const n = new URLSearchParams(location.search).get("n") || "";
+  const msg = (t, c) => { const m = document.getElementById("msg"); m.textContent = t; m.className = c || ""; };
+  if (!/^[0-9a-f]{32}$/.test(n)) { msg("Open this page from LOCKqz on your computer.", "err"); return; }
+  let cfg = null;
+  async function done(resp) {
+    msg("Checking…");
+    try {
+      const r = await fetch("/api/auth/google", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credential: resp.credential, n }) });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.ok) { document.getElementById("gbtn").hidden = true; msg("Done. Go back to LOCKqz.", "ok"); }
+      else msg(d.error || "Google sign-in failed. Try again.", "err");
+    } catch { msg("No connection. Try again.", "err"); }
+  }
+  function start() {
+    if (!cfg || !window.google || !google.accounts || !google.accounts.id) return;
+    google.accounts.id.initialize({ client_id: cfg.google, callback: done, nonce: n, auto_select: false, ux_mode: "popup", itp_support: true, ...(cfg.google_hd ? { hd: cfg.google_hd } : {}) });
+    google.accounts.id.renderButton(document.getElementById("gbtn"), { theme: "filled_blue", size: "large", text: "signin_with", shape: "pill" });
+  }
+  setTimeout(() => { if (!document.querySelector("#gbtn iframe, #gbtn div[role=button]") && !document.getElementById("msg").textContent) msg("Google sign-in didn't load. Use the email code in LOCKqz.", "err"); }, 8000);
+  fetch("/api/version").then(r => r.json()).then(v => {
+    if (!v || !v.google) { msg("Use the email code in LOCKqz.", "err"); return; }
+    cfg = v; if (window.google && google.accounts) start(); else window.addEventListener("load", start);
+  }).catch(() => msg("No connection. Try again.", "err"));
+})();
+</script>
+</body></html>

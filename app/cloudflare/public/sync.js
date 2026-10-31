@@ -433,7 +433,7 @@
     //    every grant keeps failing; the gate stops by itself 15 min after the quiz's end;
     //  * no IP lock; the password changes only when its code changes, and counts only once LOCKqz has
     //    confirmed it, so the app always hands out exactly what Brightspace holds.
-    var REVOKE = { tamper: 1, helper_killed: 1, done: 1, left_early: 1 };
+    var REVOKE = { tamper: 1, helper_killed: 1, done: 1, left_early: 1, vm: 1 };
     // Who Brightspace shows as having SUBMITTED this quiz, with when (QuizAttemptData.Completed, a
     // UTCDateTime, null while in progress). A student with an attempt still open is not counted.
     async function submittedUsers(ou, qi) {
@@ -481,6 +481,8 @@
       var q0 = g.qs[g.qs.length - 1], begun = dt(q0 && q0.StartDate) === null || Date.now() >= dt(q0.StartDate);
       live.rows.forEach(function (r) { if (!r.user_id) return; var u = String(r.user_id);
         if (r.eligible || (begun && r.verified === true && r.status === "locked")) want[u] = true; else if (REVOKE[r.status]) revoke[u] = true; });
+      // Let in by the professor without LOCKqz (no computer that runs it): access like an accommodation.
+      (live.letin || []).forEach(function (u) { u = String(u || ""); if (u) { want[u] = true; delete revoke[u]; } });
       var have = await saList(ou, qi), haveMap = {};
       have.forEach(function (x) { if (x && x.UserId != null) haveMap[String(x.UserId)] = x.SpecialAccess || {}; });
       // Special access the professor / OSAS added WHILE the gate runs (extra time, another day, a makeup):

@@ -575,4 +575,53 @@ ok("Reader file LOCKqz created is gone; nothing else left") if os.listdir(mp) ==
 os.environ.pop("LOCKQZ_PREFS_DIR", None); os.environ.pop("LOCKQZ_FF_IDS", None)
 """)
 
+print("Google sign-in instead of the emailed code (31 Oct)")
+class GUI:
+    def __init__(self, picks): self.picks, self.asked, self.opened, self.said = list(picks), [], [], []
+    def ask(self, msg, buttons, default="", answer=True):
+        self.asked.append((msg, list(buttons), answer)); return (self.picks.pop(0), "") if self.picks else (None, None)
+    def say(self, msg): self.said.append(msg)
+    def open_url(self, u): self.opened.append(u)
+A.GOOGLE_POLL = 0
+LINK = "https://lockqz.pages.dev/google?n=" + "a" * 32
+def gserver(confirm_after):
+    st = {"n": 0}
+    def call(op, **kw):
+        if op == "google_start": return {"status": 200, "ok": True, "url": LINK}
+        if op == "status":
+            st["n"] += 1
+            done = st["n"] > confirm_after
+            return {"status": 200, "codes": True, "verified": done, "student": "al@usc.edu" if done else None, **({"vtoken": "v" * 40} if done else {})}
+        return {"status": 200}
+    return call
+U2, S2 = GUI(["Sign in with Google"]), {}
+r = A.setup_identity(gserver(1), U2, "", None, S2)
+ok("Google: one click, the link opens, the confirmed email comes back verified") if r == ("al@usc.edu", True) and U2.opened == [LINK] and S2.get("vtoken") == "v" * 40 and U2.said else bad("google flow %r %r %r" % (r, U2.opened, S2))
+ok("Google dialog has no text box (buttons only)") if U2.asked and U2.asked[0][2] is False and "Sign in with Google" in U2.asked[0][1] else bad("google dialog %r" % U2.asked[:1])
+U3 = GUI(["Use an email code"]); sent = []
+def codeserver(op, **kw):
+    if op == "google_start": return {"status": 200, "ok": True, "url": LINK}
+    if op == "status": return {"status": 200, "codes": True, "verified": False}
+    if op == "check": return {"status": 200, "found": True, "name": "A*** L***"}
+    if op == "send": sent.append(kw.get("email")); return {"status": 200, "sent": True}
+    return {"status": 200}
+A.setup_identity(codeserver, U3, "", None, {})
+ok("'Use an email code' falls back to the email dialog") if len(U3.asked) >= 2 and "school email" in U3.asked[1][0] else bad("code fallback %r" % U3.asked)
+U4 = GUI([])
+ok("closing the Google dialog = closed (asks again later), nothing opened") if A.setup_identity(gserver(10**9), U4, "", None, {}) is None and not U4.opened else bad("closed google")
+U5 = GUI([])
+def offserver(op, **kw):
+    if op == "google_start": return {"status": 200, "error": "google_off"}
+    if op == "status": return {"status": 200, "codes": True, "verified": False}
+    return {"status": 200}
+A.setup_identity(offserver, U5, "", None, {})
+ok("Google off on the server -> straight to the email dialog") if U5.asked and "school email" in U5.asked[0][0] else bad("google off %r" % U5.asked)
+def evilserver(op, **kw):
+    if op == "google_start": return {"status": 200, "ok": True, "url": "https://evil.example/google?n=" + "a" * 32}
+    if op == "status": return {"status": 200, "codes": True, "verified": False}
+    return {"status": 200}
+U6 = GUI([])
+A.setup_identity(evilserver, U6, "", None, {})
+ok("a link to any other site is never opened") if not U6.opened and U6.asked and "school email" in U6.asked[0][0] else bad("evil link %r" % U6.opened)
+
 print(""); print(f"RESULT: {passed} passed, {failed} failed"); sys.exit(0 if failed == 0 else 1)

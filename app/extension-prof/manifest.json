@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LOCKqz for Professors",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Keeps your LOCKqz classes, rosters and exams in sync with Brightspace by itself. No bookmark, no tab to keep open.",
   "icons": {
     "16": "icon16.png",
@@ -11,7 +11,8 @@
   "permissions": [
     "storage",
     "alarms",
-    "notifications"
+    "notifications",
+    "power"
   ],
   "host_permissions": [
     "https://brightspace.usc.edu/*",

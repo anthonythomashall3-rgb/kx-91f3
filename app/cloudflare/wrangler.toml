@@ -20,6 +20,11 @@ database_id = "02a0c476-d6b7-4bd4-8c59-2ddef91ad8a3"
 # Optional: ROT_SECRET as a secret for rotating-code derivation; the API falls back to TEACHER_KEY.
 [vars]
 ADMIN_EMAIL = "athall@usc.edu"
+# Google sign-in (Google Identity Services, no secret): the OAuth client ID of project lockqz-513313
+# (Web, JavaScript origins https://lockqz.pages.dev + https://prof.lockqz.pages.dev). Empty = email codes only.
+GOOGLE_CLIENT_ID = ""
+# Students must sign in with this Google domain (empty = any verified Google email).
+GOOGLE_HD = "usc.edu"
 ZELLE_TO = "(858) 900-4347"
 VENMO_HANDLE = "LOCKqz"
 INVOICE_EMAIL = "lockqz.app@gmail.com"

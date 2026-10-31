@@ -147,6 +147,7 @@
     <input id="email" type="email" placeholder="USC email" autocomplete="username">
     <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
     <button id="lbtn" class="btn prime" onclick="go()">Sign in</button>
+    <div id="gsign" class="hide" style="display:flex;justify-content:center;min-height:44px"></div>
     <div class="err" id="lerr"></div>
     <div class="muted hide" id="signuprow"><a href="#" id="lswitch" onclick="toggle();return false">New here? Create an account</a></div>
     <div class="muted" id="forgotrow"><a href="#" onclick="showForgot();return false">Forgot password?</a></div>
@@ -163,6 +164,7 @@
 <main id="app" class="hide"></main>
 
 <script src="/lq.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 // The red lock loader from /lq.js (plain text if it did not load).
 const lqL = (m, e, o) => typeof lqLoading === "function" ? lqLoading(m, e, o) : m + "…";
@@ -580,8 +582,10 @@ function viewLive(id){
   <div class="band"><div><div style="display:flex;align-items:center;gap:10px"><span class="pulse"></span><span style="font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ok)">Live</span></div>
     <h1 style="margin:4px 0 0;font-size:28px;font-weight:700;letter-spacing:-.015em">${esc(title)}</h1><p class="sub">${q&&q.start_date?"Started "+when(q.start_date)+" · ":""}<span id="livesub">updates every 10 seconds</span></p></div></div>
   <div class="counts" id="lcounts"></div>
+  <div id="lcode"></div>
   <section class="card" style="padding:8px 24px 12px"><ul class="list" id="lrows"><li class="d">${lqL("Loading live status", "This takes about 2 seconds")}</li></ul></section>
-  <p class="foot">Students without a fresh LOCKqz lock cannot open this exam while the gate is on. Everything here is kept in the activity log.</p>`;
+  <p class="foot">Students without a fresh LOCKqz lock cannot open this exam while the gate is on. Everything here is kept in the activity log.</p>
+  ${BACKUP_CARD}`;
 }
 async function loadLive(id){
   const d = await get("/live?quiz="+encodeURIComponent(id)); if(!$("lrows")) return;
@@ -590,6 +594,9 @@ async function loadLive(id){
   const seen = new Set(rows.map(r=>(r.email||r.student||"").toLowerCase()));
   const nameOf = r => { const k=(r.email||r.student||"").toLowerCase(); const s=c&&c.students.find(x=>(x.email||"").toLowerCase()===k||(x.name||"").toLowerCase()===k); return s?s.name:(r.student||r.device_id); };
   const notStarted = c ? c.students.filter(s=>!seen.has((s.email||"").toLowerCase()) && !seen.has((s.name||"").toLowerCase())) : [];
+  const letin = new Set((d.letin_emails||[]).map(e=>String(e).toLowerCase()));
+  const letBtn = (s, on) => s && s.email ? `<button class="btn${on?'':' ok'}" style="padding:4px 12px;font-size:13px;min-height:32px" onclick="letIn('${esc(id)}','${esc(s.email)}',${on})">${on?"Let in":"Undo"}</button>` : "";
+  showCode(id, letin.size);
   // Labels only on evidence: "Submitted" needs a Brightspace submission (r.submitted); "working" needs the
   // student admitted (not unpaid, confirmed email + signed lock).
   const lbl = r => r.status==="done" && r.submitted ? ["","Submitted · unlocked"]
@@ -604,10 +611,27 @@ async function loadLive(id){
   const list = rows.sort((a,b)=>order(a)-order(b)).map(r=>{ const [k,l0]=lbl(r); const t=(r.age_ms==null||r.status==="done")?"":Math.round(r.age_ms/1000)+" s";
     const l = r.status==="left_early" && r.reason ? `${l0} · ${WHY[r.reason]||r.reason}${r.flagged_at?" "+new Date(r.flagged_at).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}):""}` : l0;
     return `<li class="${k==='red'?'flag':''}"><span class="dot ${k}"></span><span class="grow"><span style="font-size:15px;font-weight:${k==='red'?700:500}">${esc(nameOf(r))}${devCell(r.device_id)}</span></span><span class="st ${k}">${esc(l)}</span><span class="st" style="min-width:48px;text-align:right">${t}</span></li>`; })
-    .concat(notStarted.map(s=>`<li><span class="dot"></span><span class="grow"><span style="font-size:15px">${esc(s.name)}</span></span><span class="st">No LOCKqz lock seen</span><span class="st" style="min-width:48px"></span></li>`));
+    .concat(notStarted.map(s=>{ const inn = letin.has((s.email||"").toLowerCase());
+      return `<li><span class="dot ${inn?'ok':''}"></span><span class="grow"><span style="font-size:15px">${esc(s.name)}</span></span><span class="st">${inn?"Let in · no LOCKqz":"No LOCKqz lock seen"}</span><span class="st" style="min-width:64px;text-align:right">${letBtn(s, !inn)}</span></li>`; }));
   $("lrows").innerHTML = list.join("") || `<li class="d">No students have opened this exam yet.</li>`;
   $("livesub").textContent = "updated " + new Date().toLocaleTimeString();
 }
+
+// Let a student in without LOCKqz (the gate grants access like an accommodation; you read them the code).
+async function letIn(id, email, on){ const d = await post("/letin", { quiz: id, email, on }); if (d.error) { alert(d.error); return; } LIVE_CODE_AT = 0; loadLive(id); }
+let LIVE_CODE_AT = 0;
+async function showCode(id, n){
+  const box = $("lcode"); if (!box) return;
+  if (!n) { box.innerHTML = ""; return; }
+  if (Date.now() - LIVE_CODE_AT < 30000 && box.innerHTML) return;   // one small request per 30 s, only while someone is let in
+  LIVE_CODE_AT = Date.now();
+  const d = await get("/letin?quiz=" + encodeURIComponent(id)); if (!$("lcode")) return;
+  box.innerHTML = d.error ? "" : `<section class="card" style="padding:14px 24px;margin-bottom:14px"><span class="k" style="font-size:13px;color:var(--mute)">Code for the ${n} let in</span>
+    <div style="font-size:30px;font-weight:700;letter-spacing:.12em;margin-top:4px">${esc(d.code || "—")}</div>${d.rotates ? `<span style="font-size:13px;color:var(--mute)">New code in about ${Math.ceil((d.changes_in||0)/60)} min</span>` : ""}</section>`;
+}
+// The exam-day backup: works even when LOCKqz itself is down (Brightspace only).
+const BACKUP_CARD = `<details class="card" style="padding:14px 24px;margin-top:14px"><summary style="cursor:pointer;font-weight:600">If LOCKqz is down</summary>
+  <ol style="margin:10px 0 0;padding-left:20px;line-height:1.6"><li>Brightspace → Quizzes → this exam → Edit.</li><li>Restrictions: turn off "only users with special access", clear the password and any IP limit.</li><li>Save. Students open the exam without LOCKqz.</li></ol></details>`;
 
 // ---- CONNECTION (from the menu): is the extension here, when did it last sync ----
 function viewConnect(){
@@ -853,6 +877,24 @@ function tourShow(scroll){
 function maybeTour(){ if (!ME || TOUR) return; let seen = false; try { seen = !!localStorage.getItem(TOURKEY()); } catch (e) { seen = true; }
   return; }   // 27 Oct 2026: the welcome page replaced the automatic tour
 
+// Sign in with Google (only when Google sign-in is on): the same account, no password typed.
+async function gSignIn(resp){
+  $("lerr").innerHTML = lqL("Signing you in", "This takes about 2 seconds", {small:true});
+  const d = await post("/auth/google", { credential: resp.credential });
+  $("lerr").textContent = "";
+  if(d.error || !d.token){ $("lerr").textContent = d.error || "Google sign-in failed. Try again."; return; }
+  token=d.token; localStorage.setItem("lockqz_token",token); boot();
+}
+async function gInit(){
+  if(token) return;
+  const v = await call("/version", {}); if(!v || !v.google) return;
+  const draw = () => { if(!window.google || !google.accounts || !google.accounts.id) return false;
+    google.accounts.id.initialize({ client_id: v.google, callback: gSignIn, auto_select: false, ux_mode: "popup", itp_support: true });
+    google.accounts.id.renderButton($("gsign"), { theme: "outline", size: "large", text: "signin_with", shape: "pill", width: 280 });
+    $("gsign").classList.remove("hide"); return true; };
+  if(!draw()) window.addEventListener("load", draw);
+}
 boot();
+gInit();
 </script>
 </body></html>

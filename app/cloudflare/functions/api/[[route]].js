@@ -238,6 +238,43 @@ function sameHex(a, b) {   // constant-time compare
   return d === 0;
 }
 // Returns the device row too (dev), so callers need no second read of devices.
+// ---- Google sign-in: an ID token from Google Identity Services, checked here against Google's public
+// keys (no client secret anywhere). GOOGLE_CLIENT_ID empty = Google sign-in off (email codes only). ----
+const G_ISS = new Set(["accounts.google.com", "https://accounts.google.com"]);
+let G_KEYS = null, G_KEYS_AT = 0;
+async function googleKeys(env, fresh) {
+  if (env.GOOGLE_JWKS_TEST) return JSON.parse(env.GOOGLE_JWKS_TEST).keys || [];   // tests only
+  if (!fresh && G_KEYS && Date.now() - G_KEYS_AT < 3600000) return G_KEYS;
+  const r = await fetch("https://www.googleapis.com/oauth2/v3/certs");
+  if (!r.ok) throw new Error("google keys " + r.status);
+  G_KEYS = (await r.json()).keys || []; G_KEYS_AT = Date.now(); return G_KEYS;
+}
+const b64uBytes = s => { s = String(s).replace(/-/g, "+").replace(/_/g, "/"); while (s.length % 4) s += "="; return Uint8Array.from(atob(s), c => c.charCodeAt(0)); };
+async function verifyGoogleIdToken(env, jwt, nonce) {
+  const cid = String(env.GOOGLE_CLIENT_ID || ""); if (!cid) return { ok: false, why: "off" };
+  const parts = String(jwt || "").split("."); if (parts.length !== 3 || jwt.length > 8000) return { ok: false, why: "format" };
+  let h, pl; try { h = JSON.parse(new TextDecoder().decode(b64uBytes(parts[0]))); pl = JSON.parse(new TextDecoder().decode(b64uBytes(parts[1]))); } catch { return { ok: false, why: "format" }; }
+  if (!h || h.alg !== "RS256" || !h.kid || !pl || typeof pl !== "object") return { ok: false, why: "alg" };
+  let jwk = null;
+  try { jwk = (await googleKeys(env)).find(k => k.kid === h.kid) || null;
+        if (!jwk && !env.GOOGLE_JWKS_TEST) jwk = (await googleKeys(env, true)).find(k => k.kid === h.kid) || null; }   // Google rotated its keys
+  catch { return { ok: false, why: "keys" }; }
+  if (!jwk) return { ok: false, why: "kid" };
+  let good = false;
+  try {
+    const key = await crypto.subtle.importKey("jwk", { kty: "RSA", n: jwk.n, e: jwk.e, alg: "RS256", ext: true }, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+    good = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, b64uBytes(parts[2]), new TextEncoder().encode(parts[0] + "." + parts[1]));
+  } catch { good = false; }
+  if (!good) return { ok: false, why: "signature" };
+  const nowS = Date.now() / 1000;
+  if (!G_ISS.has(pl.iss)) return { ok: false, why: "iss" };
+  if (pl.aud !== cid) return { ok: false, why: "aud" };
+  if (!(Number(pl.exp) > nowS - 60) || (pl.iat && Number(pl.iat) > nowS + 300)) return { ok: false, why: "expired" };
+  if (nonce != null && pl.nonce !== nonce) return { ok: false, why: "nonce" };
+  if (!(pl.email_verified === true || pl.email_verified === "true") || typeof pl.email !== "string" || !pl.email.includes("@")) return { ok: false, why: "email" };
+  return { ok: true, email: pl.email.trim().toLowerCase(), hd: typeof pl.hd === "string" ? pl.hd.toLowerCase() : null };
+}
+
 async function verifyDevice(request, raw, db) {
   const id = (request.headers.get("X-LOCKqz-Device") || "").trim();
   const ts = (request.headers.get("X-LOCKqz-Time") || "").trim();
@@ -1527,7 +1564,7 @@ export async function onRequest(context) {
     // ---- device endpoints (signed by the device key; see verifyDevice) ----
     if (p === "/blocklist") return json({ domains: AI_DOMAINS });
     // C7: what this host runs (deploy.sh compares lockqz.pages.dev and lockdownqz.pages.dev). No auth.
-    if (p === "/version") return json({ ...buildInfo(), codes_on: codesOn, strict, fee_on: feeOn(), stripe: stripeOn() });
+    if (p === "/version") return json({ ...buildInfo(), codes_on: codesOn, strict, fee_on: feeOn(), stripe: stripeOn(), google: env.GOOGLE_CLIENT_ID || null, google_hd: env.GOOGLE_CLIENT_ID ? String(env.GOOGLE_HD ?? "usc.edu") : null });
 
     // One-time device registration (trust on first use). A device id can never be re-keyed, so a
     // registered student's device cannot be taken over by registering the same id again.
@@ -1560,6 +1597,16 @@ export async function onRequest(context) {
         const ver = Number(d?.student_verified) === 1 && !!d?.student;
         // paid: this term's fee (the agent's one-time "LOCKqz is ready" notice waits for verified + paid).
         return json({ student: d?.student || null, verified: ver, codes: codesOn, paid: ver ? await studentPaid(String(d.student).toLowerCase()) : !feeOn(), ...(ver ? { vtoken: await vtokenFor(String(d.student).toLowerCase()) } : {}) });
+      }
+      // Google sign-in instead of an emailed code: a one-time link for this computer; the page it opens
+      // confirms the email (POST /auth/google) and the app sees it through "status".
+      if (op === "google_start") {
+        if (!env.GOOGLE_CLIENT_ID) return json({ error: "google_off" });
+        const day = new Date(Date.now() - 864e5).toISOString();
+        if (Number((await db.prepare("SELECT COUNT(*) AS n FROM gsign WHERE device_id=? AND at>?").bind(dev, day).first())?.n) >= 10) return json({ error: "rate_limited" }, 429);
+        const n = hex(crypto.getRandomValues(new Uint8Array(16)));
+        await db.batch([db.prepare("DELETE FROM gsign WHERE at<?").bind(day), db.prepare("INSERT INTO gsign (n,device_id,at,done) VALUES (?,?,?,0)").bind(n, dev, now())]);
+        return json({ ok: true, url: String(env.SITE_URL || "https://lockqz.pages.dev") + "/google?n=" + n });
       }
       if (!EMAIL_OK(email)) return json({ error: "bad_email" }, 400);
       const rosterName = async () => (await db.prepare("SELECT name FROM roster WHERE email=? AND name IS NOT NULL LIMIT 1").bind(email).first())?.name || null;
@@ -1945,6 +1992,41 @@ export async function onRequest(context) {
         const go = mailOut(email, w.subject, w.text, { html: w.html }, "auto").catch(() => {});
         if (typeof context.waitUntil === "function") context.waitUntil(go); else await go; }
       return json({ token, email, name: body.name||null });
+    }
+    // Google sign-in (public): a computer's one-time setup (body.n, from /verify google_start) or a
+    // professor signing in to the dashboard. Failures share the sign-in limit of /login (per IP).
+    if (p === "/auth/google" && request.method === "POST") {
+      const ip = clientIp, since = new Date(Date.now() - 900000).toISOString();
+      const lf = await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='login_fail' AND " + RL_EV + " AND ts>? AND device_id=?").bind(since, "ip:" + ip).first();
+      if (Number(lf?.n) >= 30) return json({ error: "too many attempts — wait 15 minutes" }, 429);
+      const n = typeof body.n === "string" && /^[0-9a-f]{32}$/.test(body.n) ? body.n : null;
+      const g = await verifyGoogleIdToken(env, body.credential, n);
+      if (!g.ok) {
+        if (g.why !== "off") await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + ip, null, null, "login_fail", "google:" + g.why, now()).run();
+        return json({ error: g.why === "off" ? "Google sign-in is off." : "Google sign-in failed. Try again." }, g.why === "off" ? 404 : 401);
+      }
+      if (n) {
+        const row = await db.prepare("SELECT device_id, at, done FROM gsign WHERE n=?").bind(n).first();
+        if (!row || Number(row.done) === 1 || Date.now() - Date.parse(row.at) > 30 * 60000) return json({ error: "This link expired. Start again from LOCKqz on your computer." }, 410);
+        const hd = String(env.GOOGLE_HD ?? "usc.edu").trim().toLowerCase();
+        if (hd && g.hd !== hd && !g.email.endsWith("@" + hd)) return json({ error: "Use your " + hd + " Google account." }, 403);
+        // A computer in a quiz keeps its email until the quiz ends (as with email codes).
+        const d = await db.prepare("SELECT student FROM devices WHERE device_id=?").bind(row.device_id).first();
+        if (d?.student && String(d.student).toLowerCase() !== g.email && await db.prepare("SELECT 1 FROM locks WHERE device_id=? AND last_lock>?").bind(row.device_id, new Date(Date.now() - 120000).toISOString()).first())
+          return json({ error: "Finish your quiz first." }, 409);
+        await db.batch([
+          db.prepare("UPDATE devices SET student=?, student_verified=1 WHERE device_id=?").bind(g.email, row.device_id),
+          db.prepare("DELETE FROM email_codes WHERE device_id=?").bind(row.device_id),
+          db.prepare("DELETE FROM forgotten WHERE email=?").bind(g.email),
+          db.prepare("UPDATE gsign SET done=1, email=? WHERE n=?").bind(g.email, n),
+          db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(row.device_id, g.email, null, "email_verified", "google", now())]);
+        return json({ ok: true, email: g.email });
+      }
+      const t = await db.prepare("SELECT id,email,name,token FROM teachers WHERE email=?").bind(g.email).first();
+      if (!t) return json({ error: "No LOCKqz professor account for " + g.email + "." }, 404);
+      let token = t.token;
+      if (!token) { token = hex(crypto.getRandomValues(new Uint8Array(24))); await db.prepare("UPDATE teachers SET token=? WHERE id=?").bind(token, t.id).run(); }
+      return json({ token, email: t.email, name: t.name });
     }
     if (p === "/login" && request.method === "POST") {
       const email = String(body.email||"").trim().toLowerCase(), pw = String(body.password||"");
@@ -3108,6 +3190,27 @@ export async function onRequest(context) {
       else await db.prepare("DELETE FROM assist WHERE ou=? AND email=?").bind(ou, email).run();
       return json({ ok: true, ou, email, tools });
     }
+    // Let a student in WITHOUT LOCKqz (no computer that runs it, a broken laptop; the professor's call,
+    // e.g. sitting in the room). The gate grants them Brightspace special access each round like an
+    // accommodation, and the professor reads them the code Brightspace currently holds.
+    if (p === "/letin") {
+      const quiz = String((request.method === "POST" ? body.quiz : url.searchParams.get("quiz")) || "");
+      const mq = /^(\d+)-(\d+)$/.exec(quiz); if (!mq) return json({ error: "bad exam" }, 400);
+      const ou = mq[1], qi = mq[2];
+      if (!me.admin && !(await trustedInstructor(ou))) return json({ error: "Only the professor of this course." }, 403);
+      if (request.method === "POST") {
+        const email = String(body.email || "").trim().toLowerCase();
+        const r = email.includes("@") ? await db.prepare("SELECT user_id FROM roster WHERE ou=? AND email=? AND user_id IS NOT NULL LIMIT 1").bind(ou, email).first() : null;
+        if (!r) return json({ error: "not a student on this class list" }, 404);
+        if (body.on === false) await db.prepare("DELETE FROM letin WHERE ou=? AND qi=? AND email=?").bind(ou, qi, email).run();
+        else await db.prepare("INSERT INTO letin (ou,qi,email,user_id,by_teacher,at) VALUES (?,?,?,?,?,?) ON CONFLICT(ou,qi,email) DO UPDATE SET user_id=excluded.user_id,by_teacher=excluded.by_teacher,at=excluded.at").bind(ou, qi, email, String(r.user_id), String(me.id || "admin"), now()).run();
+      }
+      const list = (await db.prepare("SELECT email FROM letin WHERE ou=? AND qi=? LIMIT 500").bind(ou, qi).all()).results.map(x => x.email);
+      const q = list.length ? await db.prepare("SELECT password, gated, bs_code FROM quizzes WHERE ou=? AND qi=? LIMIT 1").bind(ou, qi).first() : null;
+      const rot = !!q && Number(q.gated) === 1 && !!q.bs_code;
+      return json({ ok: true, letin: list, code: q ? (rot ? q.bs_code : q.password) || null : null, rotates: rot,
+        changes_in: rot ? Math.max(1, Math.ceil(((minuteBucket() + 1) * ROT_MS - Date.now()) / 1000)) : null });
+    }
     if (p === "/bs") {
       const cs = (await db.prepare("SELECT ou,name,code,role,synced_at FROM teacher_courses WHERE teacher_id=? AND COALESCE(in_sync,1)<>0 ORDER BY name LIMIT 200").bind(me.id).all()).results;
       if (!cs.length) return json({ courses: [] });
@@ -3369,7 +3472,11 @@ export async function onRequest(context) {
         }
       });
       rows.forEach(r => { delete r._q; });
-      return { quiz, now: now(), stale_ms: STALE, rows };
+      // Students the professor let in without LOCKqz: the gate grants them access like an accommodation.
+      // Never fails the gate: before migrate_038 is applied the table is simply absent.
+      let letin = [];
+      if (exact) try { letin = (await db.prepare("SELECT email, user_id FROM letin WHERE ou=? AND qi=? LIMIT 500").bind(_ou0, quiz.split("-")[1]).all()).results; } catch { letin = []; }
+      return { quiz, now: now(), stale_ms: STALE, rows, letin: letin.map(x => String(x.user_id || "")).filter(Boolean), letin_emails: letin.map(x => x.email) };
       })();
       const bodyStr = JSON.stringify(liveOut);
       if (TTL > 0) {

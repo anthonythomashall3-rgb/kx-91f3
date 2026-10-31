@@ -100,7 +100,7 @@ check("Windows helper: hardware strings only (never HypervisorPresent), sends vm
 check("agents tell the student once (Mac/Linux + Windows)", agm.includes('reason == "vm"') && agm.includes("virtual machine") && agw.includes('($why -eq "vm")') && agw.includes("virtual machine"));
 check("Android: emulator detection sent as vm + notice", api.includes("fun emulator()") && api.includes('put("vm", e)') && qas.includes('"vm" ->'));
 check("dashboard label for vm", /vm:\["red","Virtual machine/.test(dash));
-check("gate never grants a vm device (eligible only when locked)", !/REVOKE\s*=\s*\{[^}]*\blocked\b/.test(sync));
+check("gate revokes a vm device at once", /REVOKE\s*=\s*\{[^}]*\bvm\s*:\s*1/.test(sync));
 check("test hook only through LOCKQZ_TEST_VM (no network/config switch)", py.includes('os.environ.get("LOCKQZ_TEST_VM")') && ps.includes("$env:LOCKQZ_TEST_VM"));
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);

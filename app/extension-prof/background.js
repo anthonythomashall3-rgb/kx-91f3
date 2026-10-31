@@ -62,7 +62,10 @@ async function tick() {
   if (!st.key) return;
   const gate = await tabAlive(st.gateTab);
   const gatesRunning = Number(st.gates) > 0 && now - Number(st.gateSeen || 0) < 2 * MIN;
-  if (examNow(st, now) || (gate && gatesRunning)) {
+  const examOn = examNow(st, now) || (gate && gatesRunning);
+  // An exam (or its gate) is on: keep this computer from sleeping, so it never closes the exam for everyone.
+  try { if (api.power) { if (examOn) api.power.requestKeepAwake("system"); else api.power.releaseKeepAwake(); } } catch {}
+  if (examOn) {
     if (!gate) {
       // The page's "loaded" message waits behind this event (serial), so the id is saved before it is read.
       const t = await api.tabs.create({ url: BS_HOME, active: false, pinned: true });

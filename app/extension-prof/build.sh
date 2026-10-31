@@ -13,7 +13,7 @@ python3 - <<'P'
 import json
 m = json.load(open("manifest.json"))
 c = json.loads(json.dumps(m)); c["background"] = {"service_worker": "background.js"}; c.pop("browser_specific_settings", None)
-f = json.loads(json.dumps(m)); f["background"] = {"scripts": ["background.js"]}
+f = json.loads(json.dumps(m)); f["background"] = {"scripts": ["background.js"]}; f["permissions"] = [x for x in f.get("permissions", []) if x != "power"]   # Firefox has no power API
 json.dump(c, open("build/chromium/manifest.json", "w"), indent=2)
 json.dump(f, open("build/firefox/manifest.json", "w"), indent=2)
 P

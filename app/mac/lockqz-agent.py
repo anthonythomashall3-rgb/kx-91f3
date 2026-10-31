@@ -556,6 +556,9 @@ class MacUI:
         b, _, t = out.partition("\n")
         return (b, t.strip())
     def say(self, msg): self.ask(msg, ["OK"], answer=False)
+    def open_url(self, u):
+        try: subprocess.run(["open", u], timeout=10)
+        except Exception as e: log("open failed: %s" % e)
 
 ASK = "Enter your school email (the one Brightspace uses, e.g. you@usc.edu):"
 CODE_FRESH = 12 * 60   # a code sent less than 12 min ago is still good (server: 15 min): ask for it, don't resend
@@ -563,6 +566,31 @@ CODE_FRESH = 12 * 60   # a code sent less than 12 min ago is still good (server:
 # The email is asked ONCE. The moment the student types it, it is saved on this computer (save());
 # every later try goes straight to the emailed code. Server/network trouble is NEVER shown as a popup:
 # setup just stops quietly (state["r"] = "server") and the agent retries in the background.
+GOOGLE_POLL, GOOGLE_WAIT = 4, 600   # Google sign-in: check every 4 s, give up (-> email code) after 10 min
+GOOGLE_URL = re.compile(r"^%s/google\?n=[0-9a-f]{32}$" % re.escape(os.environ.get("LOCKQZ_SITE", "https://lockqz.pages.dev").rstrip("/")))
+def _google(call, ui, state):
+    """One click instead of an emailed code: sign in with the school Google account in the browser; the
+    server confirms the email and this computer sees it through "status". -> (email, True); None = use
+    the email code (Google sign-in off, not chosen, or not finished); False = the dialog was closed."""
+    if not hasattr(ui, "open_url"): return None
+    g = call("google_start")
+    url = g.get("url") if isinstance(g, dict) else None
+    if not (isinstance(url, str) and GOOGLE_URL.match(url)): return None
+    b, _ = ui.ask("LOCKqz setup (one time only)\n\nConfirm your school email with your USC Google account.",
+                  ["Use an email code", "Sign in with Google"], answer=False)
+    if b is None: state["r"] = "closed"; return False
+    if b != "Sign in with Google": return None
+    ui.open_url(url)
+    end = time.time() + GOOGLE_WAIT
+    while time.time() < end:
+        time.sleep(GOOGLE_POLL)
+        st = call("status")
+        if st.get("verified") and st.get("student"):
+            if st.get("vtoken"): state["vtoken"] = st["vtoken"]
+            ui.say("Done. LOCKqz is set up and won't ask again.")
+            return (st["student"], True)
+    return None
+
 def _ask_email(call, ui, state):
     email, msg = "", "LOCKqz setup (one time only)\n\n" + ASK
     while True:
@@ -604,6 +632,9 @@ def setup_identity(call, ui, saved="", save=None, state=None):
         if r.get("error") == "bad_token": state.pop("vtoken", None)
     while True:
         if not email:
+            g = _google(call, ui, state)
+            if g is False: return None               # the student closed the dialog
+            if g: return g
             email = _ask_email(call, ui, state)
             if not email: return None
             if save: save(email)                      # never asked again, whatever happens next

@@ -83,8 +83,30 @@ class MainActivity : Activity() {
                 val r = Api.verify(this, "token", email = saved, vtoken = vt)
                 if (r?.optBoolean("verified") == true) { Api.setStudent(this, saved, true, r.optString("vtoken").ifEmpty { vt }); main.post { refresh() }; return@execute }
             }
+            // One tap instead of an emailed code: sign in with the school Google account (off on the server = code).
+            val g = Api.verify(this, "google_start")
+            val url = g?.optString("url").orEmpty()
+            if (saved == null && Regex("^https://lockqz\\.pages\\.dev/google\\?n=[0-9a-f]{32}$").matches(url)) { main.post { askGoogle(url) }; return@execute }
             main.post { askEmail(saved ?: "") }
         }
+    }
+    private fun askGoogle(url: String) {
+        AlertDialog.Builder(this).setTitle("LOCKqz setup (one time only)").setMessage("Confirm your school email with your USC Google account.")
+            .setPositiveButton("Sign in with Google") { _, _ ->
+                try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (_: Exception) {}
+                exec.execute {
+                    // The page confirms the email on the server; this phone sees it through "status" (every 4 s, up to 10 min).
+                    val end = System.currentTimeMillis() + 600_000
+                    while (System.currentTimeMillis() < end) {
+                        Thread.sleep(4000)
+                        val st = Api.verify(this, "status") ?: continue
+                        if (st.optBoolean("verified") && st.has("student")) {
+                            Api.setStudent(this, st.optString("student"), true, st.optString("vtoken").ifEmpty { null })
+                            say("Done. LOCKqz is set up and won't ask again."); main.post { refresh() }; return@execute
+                        }
+                    }
+                }
+            }.setNegativeButton("Use an email code") { _, _ -> askEmail("") }.show()
     }
     private fun askEmail(prefill: String) {
         val input = EditText(this).apply { inputType = InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS; setText(prefill); hint = "you@usc.edu" }

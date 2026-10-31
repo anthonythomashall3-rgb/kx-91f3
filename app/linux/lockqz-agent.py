@@ -109,6 +109,9 @@ class LinuxUI:
         notify(msg)
         return (None, None)
     def say(self, msg): self.ask(msg, ["OK"], answer=False)
+    def open_url(self, u):
+        try: subprocess.run(["xdg-open", u], timeout=10, capture_output=True)
+        except Exception as e: M.log("open failed: %s" % e)
 M.MacUI = LinuxUI
 
 def clipboard(text):

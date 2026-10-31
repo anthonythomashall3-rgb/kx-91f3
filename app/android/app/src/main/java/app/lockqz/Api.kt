@@ -118,7 +118,7 @@ object Api {
     fun password(c: Context, url: String) = call(c, "/password", JSONObject().put("url", url).put("device_id", deviceId(c))
         .apply { val e = emulator(); if (e.isNotEmpty()) put("vm", e) })
 
-    /** One-time student email setup: op = status | check | send | code | token. */
+    /** One-time student email setup: op = status | check | send | code | token | google_start. */
     fun verify(c: Context, op: String, email: String? = null, code: String? = null, vtoken: String? = null): JSONObject? {
         val b = JSONObject().put("op", op).put("device_id", deviceId(c))
         if (email != null) b.put("email", email); if (code != null) b.put("code", code); if (vtoken != null) b.put("vtoken", vtoken)

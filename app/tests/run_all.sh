@@ -61,6 +61,8 @@ run "Status truth: ready/installed, protected counts, live labels, check-in, age
 run "Wrong-computer guard on the student installers (Mac file on Windows and vice versa)" node --no-warnings test_download_guard.mjs
 run "OSAS accommodations + quiz timing (extra time, makeups, mid-gate special access, DST, assistive tools)" node --no-warnings test_osas.mjs
 run "Virtual machines: no password inside a VM/emulator, live view + gate, admin exempt, clients carry it" node --no-warnings test_vm.mjs
+run "Professor fallbacks: let a student in without LOCKqz (gate + code), backup card, extension keep-awake" node --no-warnings test_letin.mjs
+run "Google sign-in: one-time link, ID token checks (key, issuer, audience, expiry, nonce, domain), professor sign-in, apps offer it first" node --no-warnings test_google_signin.mjs
 if command -v xvfb-run >/dev/null 2>&1 && [ "$(id -u)" = 0 ]; then run "Real Chromium loads the quiz policy (AI refused, Web search + notes allowed, extensions off)" xvfb-run -a node --no-warnings test_chrome_policy_real.mjs; fi
 if command -v pwsh >/dev/null 2>&1; then
   run "Windows agent/engine logic (titles, unlock retry, policy restore)" pwsh -NoProfile -File test_windows_logic.ps1
