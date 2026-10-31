@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- (none)
+- 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons) + Google client ID (wrangler.toml).
 
 ## Recently finished
 - 2026-10-31 07:20 PT — 01UUDg7Y: owner's 31 Oct list. v0.6.1 (3ecaa5c): no quiz password inside a virtual machine / emulator (helpers + Android report it, live view 'Virtual machine — not let in', gate revokes), D2L Lumi blocked (LearnWise lti + Forethought, wildcards), one-line Windows install in Installed apps, privacy uninstall steps. v0.6.2 (7313614, d5f742c): Google sign-in (one-time /google page, ID token checked server-side; codes = fallback; professor Google sign-in; GOOGLE_CLIENT_ID empty until the OAuth client exists), let-in without LOCKqz + live code (migrate_038), 'If LOCKqz is down' card, extension 1.0.3 keep-awake, /api/store -> Store button by itself, CI: msstore publish (STORE_* secrets) + Firefox signing (AMO_* secrets) + deploy serves current extension packages. HANDOFF.md moved to the private Project doc (CLAUDE.md rule 5). run_all green (2,458 checks).
