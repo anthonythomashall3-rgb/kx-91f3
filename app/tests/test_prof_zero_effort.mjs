@@ -38,7 +38,7 @@ const sqlite = new DatabaseSync(":memory:");
 sqlite.exec(readFileSync(join(CF, "schema.sql"), "utf8"));
 for (const m of readdirSync(CF).filter(f => /^migrate_\d+.*\.sql$/.test(f)).sort()) { try { sqlite.exec(readFileSync(join(CF, m), "utf8")); } catch (e) { if (!/duplicate column|already exists|table .* already/.test(e.message)) throw e; } }
 const MAILS = [];
-const env = { DB: d1(sqlite), TEACHER_KEY: "admin-key", REQUIRE_SIGNED: "1", LIVE_CACHE_MS: "0", PAY_SECRET: "x".repeat(24), MAIL_SINK: async m => { MAILS.push(m); return true; } };
+const env = { DB: d1(sqlite), TEACHER_KEY: "admin-key", REQUIRE_SIGNED: "1", LIVE_CACHE_MS: "0", PAY_SECRET: "x".repeat(24), MAIL_SINK: async m => { MAILS.push(m); return true; }, FEE_EXEMPT: "dbristow@usc.edu" };
 const API = "https://lockqz.pages.dev/api";
 let lqCalls = [];
 async function api(path, body, headers = {}, e = env) {
@@ -342,6 +342,30 @@ console.log("Z9 invite email: LOCKqz sends it, with buttons");
   const anon = await api("/invite", {}, ADMIN);
   check("invite without an email: refused (copy the link instead)", (await api("/invite/send", { code: anon.data.code }, ADMIN)).status === 400);
   check("unknown code: 404", (await api("/invite/send", { code: "nope" }, ADMIN)).status === 404);
+}
+console.log("Z10 invite: named greeting; fee-exempt professor is told it is free; welcome says so too");
+{
+  const inv = await api("/invite", { email: "dbristow@usc.edu" }, ADMIN);
+  MAILS.length = 0;
+  const r = await api("/invite/send", { code: inv.data.code, name: "Duke Bristow" }, ADMIN);
+  const m = mailsTo("dbristow@usc.edu")[0];
+  check("sent", r.status === 200 && !!m, JSON.stringify(r.data));
+  check("subject names him", m && m.subject === "Professor Bristow, your LOCKqz account is ready", m && m.subject);
+  check("Hi Professor Bristow, (text + HTML)", m && m.text.startsWith("Hi Professor Bristow,") && /Hi Professor Bristow,/.test(m.html));
+  check("free for you (text + HTML)", m && /LOCKqz is free for you\./.test(m.text) && /LOCKqz is free for you\./.test(m.html));
+  check("still has the 3 buttons + Respectfully", m && /Create your account</.test(m.html) && /Add LOCKqz to Chrome</.test(m.html) && /Open Brightspace</.test(m.html) && /Respectfully,<br>The LOCKqz Team/.test(m.html));
+  check("short: plain text under 900 characters", m && m.text.length < 900, m && m.text.length);
+  const inv2 = await api("/invite", { email: "payprof@usc.edu" }, ADMIN);
+  MAILS.length = 0;
+  await api("/invite/send", { code: inv2.data.code, name: "Prof. Jane Doe" }, ADMIN);
+  const m2 = mailsTo("payprof@usc.edu")[0];
+  check("paying professor: named, NOT told it is free", m2 && m2.text.startsWith("Hi Professor Doe,") && !/free/i.test(m2.text) && !/free for you/.test(m2.html), m2 && m2.text.slice(0, 120));
+  MAILS.length = 0;
+  const su = await api("/signup", { email: "dbristow@usc.edu", password: "longpassword1", name: "Duke Bristow", invite: inv.data.code });
+  const w = mailsTo("dbristow@usc.edu")[0];
+  check("welcome after sign-up: Hi Professor Bristow + free for you", su.status === 200 && w && /Hi Professor Bristow,/.test(w.html) && /LOCKqz is free for you\./.test(w.html) && /free for you/.test(w.text), JSON.stringify(su.data));
+  // render both for review
+  try { const fs = await import("node:fs"); if (process.env.LQ_MAIL_OUT) { fs.writeFileSync(process.env.LQ_MAIL_OUT + "/invite.html", m.html); fs.writeFileSync(process.env.LQ_MAIL_OUT + "/welcome.html", w.html); fs.writeFileSync(process.env.LQ_MAIL_OUT + "/invite.txt", m.subject + "\n\n" + m.text); } } catch {}
 }
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

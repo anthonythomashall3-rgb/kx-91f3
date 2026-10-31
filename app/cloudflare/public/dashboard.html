@@ -682,7 +682,7 @@ const laDay = () => { const p = {}; new Intl.DateTimeFormat("en-US",{timeZone:"A
 function semEnd(){ const d=laDay(), y=d.slice(0,4), m=+d.slice(5,7); return m<=5?`${y}-05-31`:(m<=7?`${y}-08-15`:`${y}-12-31`); }
 function viewAdmin(){ return `${BACK('', 'Home')}
   <section class="card"><h2 style="margin:0 0 12px">Invite a professor</h2>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><input id="iemail" type="email" placeholder="Professor's email" style="padding:10px;border:1px solid #cfccc4;border-radius:8px;flex:1 1 220px"><span class="muted">active until</span><input id="iuntil" type="date" value="${semEnd()}" style="padding:10px;border:1px solid #cfccc4;border-radius:8px"><button class="btn prime" onclick="makeInvite()">Create invite</button></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><input id="iname" type="text" placeholder="Professor's name (e.g. Duke Bristow)" style="padding:10px;border:1px solid #cfccc4;border-radius:8px;flex:1 1 200px"><input id="iemail" type="email" placeholder="Professor's email" style="padding:10px;border:1px solid #cfccc4;border-radius:8px;flex:1 1 220px"><span class="muted">active until</span><input id="iuntil" type="date" value="${semEnd()}" style="padding:10px;border:1px solid #cfccc4;border-radius:8px"><button class="btn prime" onclick="makeInvite()">Create invite</button></div>
     <div id="newinvite"></div>
     <div style="overflow-x:auto;margin-top:12px"><table id="invites"><thead><tr><th>Email</th><th>Active until</th><th>Created</th><th>Status</th><th></th></tr></thead><tbody></tbody></table></div></section>
   <section class="card"><h2 style="margin:0 0 12px">Password reset requests</h2>
@@ -783,11 +783,11 @@ async function deactivate(email){ if(confirm("Turn off "+email+"?")){ const d=aw
 async function resetPw(email){ const d=await post("/reset",{email}); alert(d.error||("New password for "+email+": "+d.password+(d.sync_key_kept?"\n\n"+d.sync_key_kept:""))); }
 const inviteLink = code => location.origin + "/?invite=" + code;
 async function makeInvite(){ const d = await post("/invite",{email:$("iemail").value,until:$("iuntil").value||semEnd()}); if(d.error){ alert(d.error); return; }
-  window._ilink = inviteLink(d.code); window._icode = d.code;
+  window._ilink = inviteLink(d.code); window._icode = d.code; window._iname = $("iname").value.trim();
   $("newinvite").innerHTML = `<div class="note ok" style="margin-top:10px"><span>Invite link (works once): <code>${esc(window._ilink)}</code></span><span style="display:flex;gap:8px"><button class="btn" onclick="navigator.clipboard.writeText(window._ilink);this.textContent='Copied'">Copy link</button>${d.email ? `<button class="btn prime" onclick="sendInvite(this)">Email it to ${esc(d.email)}</button>` : ""}</span></div>`;
-  $("iemail").value=""; loadInvites(); }
+  $("iemail").value=""; $("iname").value=""; loadInvites(); }
 // LOCKqz sends the invite itself (buttons: Create your account, Add LOCKqz to Chrome, Open Brightspace).
-async function sendInvite(b){ b.disabled = true; b.textContent = "Sending…"; const d = await post("/invite/send",{code:window._icode});
+async function sendInvite(b){ b.disabled = true; b.textContent = "Sending…"; const d = await post("/invite/send",{code:window._icode,name:window._iname||""});
   if(d.error){ alert(d.error); b.disabled = false; b.textContent = "Email it"; return; } b.textContent = "Sent ✓"; }
 async function loadInvites(){ const d = await get("/invites"); const tb=document.querySelector("#invites tbody"); if(!tb) return; tb.innerHTML="";
   if(d.error){ tb.innerHTML=`<tr><td colspan="5" class="err">${esc(d.error)}</td></tr>`; return; }
