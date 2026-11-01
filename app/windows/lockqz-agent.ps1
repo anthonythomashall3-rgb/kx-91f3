@@ -552,7 +552,7 @@ function Handle-Pw($pr, [bool]$first, [string]$note) {
     # One payment = one student: the paid email is in use on another computer.
     $script:ShareTold = $script:Quiz
     if ($why -eq "in_use") { Show-Message "This school email is in a quiz on another computer right now.`n`nOne payment covers one student." }
-    else { Show-Message "This school email is already used on 2 computers.`n`nEmail lockqz.app@gmail.com to remove one." }
+    else { Show-Message "This school email is already used on 2 computers.`n`nEmail support@lockqz.com to remove one." }
   }
   if ($why -eq "vm") {
     # LOCKqz runs inside a virtual machine: no password (the real computer around it keeps AI).

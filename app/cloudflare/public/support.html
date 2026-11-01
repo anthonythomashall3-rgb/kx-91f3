@@ -37,7 +37,7 @@
   <button class="btn" id="go" type="submit">Send</button>
   <p class="msg" id="out" role="status" aria-live="polite"></p>
 </form>
-<p class="alt">Or email <b id="addr">lockqz.app@gmail.com</b> <button class="copy" id="cp" type="button">Copy</button></p>
+<p class="alt">Or email <b id="addr">support@lockqz.com</b> <button class="copy" id="cp" type="button">Copy</button></p>
 </main>
 <script>
 (function () {
@@ -60,8 +60,8 @@
       .then(function (r) { return r.json().catch(function () { return {}; }); })
       .then(function (d) {
         if (d && d.ok) { out.className = "msg ok"; out.textContent = "Sent. We'll reply to " + email + "."; $("ms").value = ""; }
-        else { out.className = "msg bad"; out.textContent = (d && d.error) || "Could not send. Email lockqz.app@gmail.com."; $("go").disabled = false; }
-      }, function () { out.className = "msg bad"; out.textContent = "Could not send. Email lockqz.app@gmail.com."; $("go").disabled = false; });
+        else { out.className = "msg bad"; out.textContent = (d && d.error) || "Could not send. Email support@lockqz.com."; $("go").disabled = false; }
+      }, function () { out.className = "msg bad"; out.textContent = "Could not send. Email support@lockqz.com."; $("go").disabled = false; });
   });
 })();
 </script>

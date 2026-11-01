@@ -155,7 +155,7 @@ try {
   c = await ctx({ userAgent: MAC, viewport: { width: 1280, height: 800 } });
   pg = await c.newPage(); const errs3 = []; pg.on("pageerror", e => errs3.push(e.message));
   await pg.goto("https://lockqz.pages.dev/support");
-  check("no mailto anywhere on the page; address shown with Copy", !(await pg.$("a[href^=mailto]")) && await pg.textContent("#addr") === "lockqz.app@gmail.com" && await pg.isVisible("#cp"));
+  check("no mailto anywhere on the page; address shown with Copy", !(await pg.$("a[href^=mailto]")) && await pg.textContent("#addr") === "support@lockqz.com" && await pg.isVisible("#cp"));
   await pg.click("#go");
   check("empty form: 'Enter your email.'", await pg.textContent("#out") === "Enter your email.");
   await pg.fill("#em", "zed@usc.edu"); await pg.click("#go");

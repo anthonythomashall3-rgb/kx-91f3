@@ -146,7 +146,7 @@
     });
     acc.appendChild(el("div", { "class": "lqm-block" }, [el("p", { "class": "lqm-k", text: "Your computers" }),
       devs.length ? list : el("p", { "class": "lqm-small", text: "None yet. Install LOCKqz below." }),
-      devs.length ? el("p", { "class": "lqm-small", text: "To free a computer, email lockqz.app@gmail.com." }) : null]));
+      devs.length ? el("p", { "class": "lqm-small", text: "To free a computer, email support@lockqz.com." }) : null]));
     if (state.msg) acc.appendChild(msgEl());
   }
   function setRenew(on) {

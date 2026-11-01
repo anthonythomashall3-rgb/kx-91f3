@@ -27,7 +27,9 @@ GOOGLE_CLIENT_ID = "974814794609-d9bcg7hjghna4tr7274uj6bdbpm069j7.apps.googleuse
 GOOGLE_HD = "usc.edu"
 ZELLE_TO = "(858) 900-4347"
 VENMO_HANDLE = "LOCKqz"
-INVOICE_EMAIL = "lockqz.app@gmail.com"
+INVOICE_EMAIL = "support@lockqz.com"
+# Replies to LOCKqz emails go here (Cloudflare Email Routing forwards *@lockqz.com to lockqz.app@gmail.com).
+MAIL_REPLY_TO = "support@lockqz.com"
 # Student fee per semester (USD) and the date it starts (YYYY-MM-DD; empty = off).
 STUDENT_FEE = "180"
 STUDENT_FEE_FROM = "2026-10-25"

@@ -879,7 +879,7 @@ class Agent:
             # One payment = one student: the paid email is in use on another computer.
             self.share_told = self.quiz
             dialog("This school email is in a quiz on another computer right now.\n\nOne payment covers one student." if reason == "in_use"
-                   else "This school email is already used on 2 computers.\n\nEmail lockqz.app@gmail.com to remove one.")
+                   else "This school email is already used on 2 computers.\n\nEmail support@lockqz.com to remove one.")
         if reason == "vm":
             # LOCKqz runs inside a virtual machine: no password (the real computer around it keeps AI).
             if getattr(self, "vm_told", None) != self.quiz:

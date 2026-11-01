@@ -312,7 +312,8 @@ const b64 = s => btoa(String.fromCharCode(...enc.encode(s)));
 // Minimal SMTP client over a TLS socket. `open` returns { readable, writable } (cloudflare:sockets).
 // to: one address or a list (each recipient gets its own copy; the others' addresses are never shown).
 // html: optional HTML part (multipart/alternative). replyTo: optional Reply-To (e.g. the professor).
-async function smtpSend(open, { user, pass, to, subject, text, html = null, fromName = "LOCKqz", replyTo = null }) {
+// fromAddr: the address shown in From (a Gmail "Send mail as" alias such as support@lockqz.com); default the login.
+async function smtpSend(open, { user, pass, to, subject, text, html = null, fromName = "LOCKqz", replyTo = null, fromAddr = null }) {
   const rcpts = (Array.isArray(to) ? to : [to]).map(x => String(x || "").trim()).filter(x => x && /^[^@\s<>]+@[^@\s<>]+$/.test(x));
   if (!rcpts.length) throw new Error("smtp no recipient");
   const sock = await open();
@@ -342,7 +343,7 @@ async function smtpSend(open, { user, pass, to, subject, text, html = null, from
     await say("DATA", [354]);
     const dot = t => String(t == null ? "" : t).split("\n").map(l => (l.startsWith(".") ? "." + l : l)).join("\r\n");
     const subj = /^[\x20-\x7e]*$/.test(subject) ? subject : "=?utf-8?B?" + b64(subject) + "?=";   // RFC 2047 for non-ASCII
-    const head = [`From: ${fromName} <${user}>`, rcpts.length === 1 ? `To: <${rcpts[0]}>` : `To: ${fromName} <${user}>`,
+    const head = [`From: ${fromName} <${fromAddr || user}>`, rcpts.length === 1 ? `To: <${rcpts[0]}>` : `To: ${fromName} <${fromAddr || user}>`,
       ...(replyTo ? [`Reply-To: <${replyTo}>`] : []), `Subject: ${subj}`,
       `Date: ${new Date().toUTCString().replace("GMT", "+0000")}`,
       `Message-ID: <${crypto.randomUUID()}@lockqz.com>`, "MIME-Version: 1.0"];
@@ -382,7 +383,8 @@ async function sendMail(env, to, subject, text, opts = {}) {
   const open = typeof env.MAIL_OPEN === "function" ? env.MAIL_OPEN
     : async () => (await import("cloudflare:sockets")).connect({ hostname: env.MAIL_HOST || "smtp.gmail.com", port: Number(env.MAIL_PORT || 465) },
                                 { secureTransport: "on", allowHalfOpen: false });
-  return smtpSend(open, { user: env.MAIL_USER, pass: String(env.MAIL_APP_PASSWORD).replace(/\s+/g, ""), to, subject, text, html: opts.html || null, replyTo: opts.replyTo || null });
+  return smtpSend(open, { user: env.MAIL_USER, pass: String(env.MAIL_APP_PASSWORD).replace(/\s+/g, ""), to, subject, text, html: opts.html || null,
+    replyTo: opts.replyTo || env.MAIL_REPLY_TO || null, fromAddr: env.MAIL_FROM_ADDR || null });
 }
 // ---- Amazon SES (28 Oct 2026): the high-volume sender. On only when SES_ACCESS_KEY_ID + SES_SECRET_ACCESS_KEY
 // (Pages secrets) and MAIL_FROM (an address on a domain verified in SES) exist; then every LOCKqz email goes
@@ -1868,7 +1870,7 @@ export async function onRequest(context) {
                  UNION SELECT e.device_id FROM events e JOIN devices d2 ON d2.device_id=e.device_id WHERE e.event='password_released' AND e.student=? AND e.device_id<>? AND e.ts>? AND COALESCE(d2.revoked,0)=0)) AS other`)
             .bind(wl, device_id, new Date(Date.now() - 120000).toISOString(), wl, device_id, new Date(Date.now() - 30 * 864e5).toISOString(), wl, device_id, new Date(Date.now() - 30 * 864e5).toISOString()).first();
           if (Number(sh?.live) > 0) return json({ password: null, reason: "in_use", error: "This email is in a quiz on another computer." }, 402);
-          if (Number(sh?.other) >= 2) return json({ password: null, reason: "too_many_devices", error: "This email is already used on 2 computers. Email lockqz.app@gmail.com to remove one." }, 402);
+          if (Number(sh?.other) >= 2) return json({ password: null, reason: "too_many_devices", error: "This email is already used on 2 computers. Email support@lockqz.com to remove one." }, 402);
         }
       }
       // The professor's assistive-tool allowance for this student (only a CONFIRMED email counts while codes are on).
@@ -2260,7 +2262,7 @@ export async function onRequest(context) {
         return json({ ok: true, on: !!body.on });
       }
       // No "remove a computer" op (Anthony 27 Oct): the account page shows a student's computers but never
-      // removes one. Removing is admin-only (email lockqz.app@gmail.com), as the too_many_devices message says.
+      // removes one. Removing is admin-only (email support@lockqz.com), as the too_many_devices message says.
       if (op === "receipts") {
         if (await db.prepare("SELECT 1 FROM events WHERE device_id=? AND quiz_id IS NULL AND event='receipts_sent' AND ts>?").bind("acct:" + email, new Date(Date.now() - 600000).toISOString()).first())
           return json({ ok: true, sent: true, again: true, to: email });   // once per 10 minutes
@@ -2399,11 +2401,11 @@ export async function onRequest(context) {
        || Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='support' AND ts>? AND student=?").bind(hr, email).first()).n) >= 5)
         return json({ error: "Too many messages. Try again in an hour." }, 429);
       if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='support' AND ts>?").bind(day).first()).n) >= Number(env.SUPPORT_MAX_DAY || 60))
-        return json({ error: "Too many messages today. Email lockqz.app@gmail.com." }, 429);
+        return json({ error: "Too many messages today. Email support@lockqz.com." }, 429);
       const to = String(env.SUPPORT_EMAIL || "lockqz.app@gmail.com");
       const name = String(body.name || "").replace(/[\r\n]/g, " ").trim().slice(0, 100);
       try { await mailOut(to, `LOCKqz support: ${name ? name + " · " : ""}${email}`, `From: ${name ? name + " <" + email + ">" : email}\n\n${msg}\n\n— Reply to this email to answer them.`, { replyTo: email, inbox: true }, "auto"); }
-      catch (e) { return json({ error: "Could not send. Email lockqz.app@gmail.com." }, e && e.budget ? 503 : 502); }
+      catch (e) { return json({ error: "Could not send. Email support@lockqz.com." }, e && e.budget ? 503 : 502); }
       await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + clientIp, email, null, "support", null, now()).run();
       return json({ ok: true });
     }
@@ -2419,7 +2421,7 @@ export async function onRequest(context) {
       // Global cap per day: these emails share Gmail's ~500/day sending limit with the students' email codes,
       // so many IPs asking for bank details to random addresses must never stop students verifying before a quiz.
       if (!script && Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_bank' AND " + RL_EV + " AND ts>?").bind(new Date(Date.now() - 86400000).toISOString()).first()).n) >= Number(env.BANK_MAIL_DAILY_MAX || 60))
-        return json({ error: "Too many requests today. Email " + (stuBank() || "lockqz.app@gmail.com") + " for the bank details." }, 429);
+        return json({ error: "Too many requests today. Email " + (stuBank() || "support@lockqz.com") + " for the bank details." }, 429);
       const prof = await db.prepare("SELECT id FROM teachers WHERE lower(email)=?").bind(email).first();
       let kind = "student", code, left;
       if (prof) {
