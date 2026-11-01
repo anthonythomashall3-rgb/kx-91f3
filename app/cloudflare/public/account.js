@@ -7,7 +7,7 @@
   "use strict";
   var wrap = document.getElementById("lqgear"), btn = document.getElementById("lqgearbtn"), menu = document.getElementById("lqmenu"), acc = document.getElementById("lqm-acc");
   if (!wrap || !btn || !menu || !acc) return;
-  var API = /\.pages\.dev$/.test(location.hostname) ? "https://lockqz.pages.dev/api" : "/api";
+  var API = /(\.pages\.dev|(^|\.)lockqz\.com)$/.test(location.hostname) ? "https://lockqz.pages.dev/api" : "/api";
   var KEY = "lqz_acct", state = { step: "out", email: "", busy: false, data: null, confirm: null, msg: "" };
 
   // ---- the saved sign-in (this browser only; every access wrapped: private windows / blocked storage) ----

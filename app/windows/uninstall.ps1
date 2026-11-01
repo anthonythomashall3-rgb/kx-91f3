@@ -1,5 +1,5 @@
 # Remove LOCKqz from this PC. Run elevated, or paste the one-line remover in any PowerShell window:
-#     irm https://lockqz.pages.dev/uninstall.ps1 | iex
+#     irm https://lockqz.com/uninstall.ps1 | iex
 # (it asks Windows for administrator rights and continues in a new window).
 $ErrorActionPreference = "SilentlyContinue"
 $Dest = "$env:ProgramData\LOCKqz"

@@ -174,7 +174,7 @@ function Show-Pay($r) {
   if (-not $r -or -not $r.pay) { return $false }
   if (-not $script:PayShown) {
     $script:PayShown = $true
-    $u = [string]$r.pay.url; if (-not $u.StartsWith("https://lockqz.pages.dev/")) { $u = "https://lockqz.pages.dev/pay" }
+    $u = [string]$r.pay.url; if (-not ($u.StartsWith("https://lockqz.com/") -or $u.StartsWith("https://lockqz.pages.dev/"))) { $u = "https://lockqz.com/pay" }
     try { Start-Process $u } catch {}
     $amt = if ($r.pay.amount) { $r.pay.amount } else { 5 }
     Show-Message ("Pay `$$amt for LOCKqz this semester to get the quiz password.`n`nMemo:  " + $r.pay.code + "`n`nThe payment page is open. LOCKqz shows the password here as soon as your payment arrives.")
@@ -206,7 +206,7 @@ function Show-Ready($ok) {
     $script:ReadyTold = $true
     try { Set-Content $ReadyFile ([DateTime]::UtcNow.ToString("o")) -Encoding UTF8 } catch {}
     $text = "LOCKqz is ready. Nothing to do until your exam " + [char]0x2014 + " just open it in Brightspace."
-  } else { $text = "LOCKqz is installed. Finish setup before your exam: open https://lockqz.pages.dev" }
+  } else { $text = "LOCKqz is installed. Finish setup before your exam: open https://lockqz.com" }
   # A toast through WinRT, in its own hidden process (never stalls the watch loop); a message box if toasts are off.
   $cmd = @"
 try {
@@ -333,7 +333,8 @@ function Google-Setup($state) {
   $g = Verify "google_start" $null
   if (-not ($g -and $g.url)) { return $null }
   $u = [string]$g.url
-  if ($u -notmatch ('^' + [regex]::Escape($GoogleSite) + '/google\?n=[0-9a-f]{32}$')) { return $null }
+  $gsRe = if ($env:LOCKQZ_SITE) { [regex]::Escape($GoogleSite) } else { 'https://lockqz\.(com|pages\.dev)' }
+  if ($u -notmatch ('^' + $gsRe + '/google\?n=[0-9a-f]{32}$')) { return $null }
   $a = Ask-Box "LOCKqz setup (one time only)`n`nConfirm your school email with your USC Google account." @("Use an email code", "Sign in with Google") "" $false
   if (-not $a) { $state.r = "closed"; return $false }
   if ($a.b -ne "Sign in with Google") { return $null }

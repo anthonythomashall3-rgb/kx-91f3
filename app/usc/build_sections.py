@@ -8,7 +8,7 @@ With CURRENT.json (the rows already in D1) only the changes are written: one SQL
 import json, sys, datetime, urllib.request, concurrent.futures as cf
 
 API = "https://classes.usc.edu/api"
-UA = {"User-Agent": "LOCKqz-sections/1.0 (+https://lockqz.pages.dev)"}
+UA = {"User-Agent": "LOCKqz-sections/1.0 (+https://lockqz.com)"}
 
 def get(path, tries=4):
     for i in range(tries):

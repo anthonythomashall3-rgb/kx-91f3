@@ -1,6 +1,6 @@
 # LOCKqz for Android (29 Oct 2026, stage 1)
 
-A native app (Kotlin, no third-party libraries, ~700 KB), sideloaded from https://lockqz.pages.dev
+A native app (Kotlin, no third-party libraries, ~700 KB), sideloaded from https://lockqz.com
 (`/download/lockqz-android.apk`). Same server protocol as the computers (device key, signed reports, `/password`,
 `/verify` email codes, pay page).
 

@@ -53,8 +53,8 @@ async function ctx(opts = {}, init = null) {
       const res = await onRequest({ request: new Request(req.url(), { method: req.method(), headers: h, body: ["GET", "HEAD", "OPTIONS"].includes(req.method()) ? undefined : req.postDataBuffer() }), env });
       return route.fulfill({ status: res.status, headers: Object.fromEntries(res.headers), body: Buffer.from(await res.arrayBuffer()) });
     }
-    if (u.host === "lockqz.pages.dev" && FILES[u.pathname]) return route.fulfill({ status: 200, contentType: FILES[u.pathname][1], body: readFileSync(join(PUB, FILES[u.pathname][0])) });
-    if (u.host === "lockqz.pages.dev" && /^\/(install\.(sh|ps1)|download\/)/.test(u.pathname)) return route.fulfill({ status: 200, contentType: "application/octet-stream", body: "x" });
+    if ((u.host === "lockqz.pages.dev" || u.host === "lockqz.com") && FILES[u.pathname]) return route.fulfill({ status: 200, contentType: FILES[u.pathname][1], body: readFileSync(join(PUB, FILES[u.pathname][0])) });
+    if ((u.host === "lockqz.pages.dev" || u.host === "lockqz.com") && /^\/(install\.(sh|ps1)|download\/)/.test(u.pathname)) return route.fulfill({ status: 200, contentType: "application/octet-stream", body: "x" });
     return route.fulfill({ status: 404, body: "" });
   });
   return c;
@@ -139,7 +139,7 @@ try {
   await pg.fill("#lqm-em", "dee@usc.edu"); await pg.click("text=Email me a code");
   await waitFor(() => pg.isVisible("#lqm-code"));
   await pg.fill("#lqm-code", mails.at(-1).code); await pg.click("#lqm-acc button[type=submit]");
-  check("Not paid + Pay link to /pay?email=…&t=<token>", await waitFor(async () => /Not paid/.test(await pg.textContent("#lqm-acc"))) && (await pg.getAttribute("a.lqm-pay", "href")) === `https://lockqz.pages.dev/pay?email=dee%40usc.edu&t=${payT(env, "dee@usc.edu")}`, await pg.getAttribute("a.lqm-pay", "href").catch(() => ""));
+  check("Not paid + Pay link to /pay?email=…&t=<token>", await waitFor(async () => /Not paid/.test(await pg.textContent("#lqm-acc"))) && (await pg.getAttribute("a.lqm-pay", "href")) === `https://lockqz.com/pay?email=dee%40usc.edu&t=${payT(env, "dee@usc.edu")}`, await pg.getAttribute("a.lqm-pay", "href").catch(() => ""));
   check("no saved card: Auto-renew Off, no cancel button", /Auto-renew:?\s*Off/.test(await pg.textContent("#lqm-acc")) && !(await pg.isVisible("text=Cancel subscription")));
   check("no page errors with storage blocked", errs2.length === 0, errs2.join(" | "));
 

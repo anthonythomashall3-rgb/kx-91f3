@@ -4,7 +4,7 @@ Same product as the Mac: a root helper (`lockqzd.service`, the shared `lockqzd.p
 and a per-user agent (`lockqz-agent.service`, a systemd user unit enabled for every account) that reuses the
 Mac agent's quiz logic (`agent-mac.py`) with Linux pieces (`lockqz-agent.py`).
 
-Install: `curl -fsSL https://lockqz.pages.dev/install-linux.sh | sudo bash` (Ubuntu, Debian, Fedora, Arch -
+Install: `curl -fsSL https://lockqz.com/install-linux.sh | sudo bash` (Ubuntu, Debian, Fedora, Arch -
 anything with systemd + python3). Files: `/usr/local/lib/lockqz`; state: `/var/lib/lockqz`.
 
 Lock layers (`lockqz.sh`): /etc/hosts blackhole (shared `lockqz-core.sh`); nftables (iptables fallback) for

@@ -128,8 +128,8 @@ const server = createServer({ key: readFileSync(join(tmp, "k.pem")), cert: readF
       const r = await onRequest({ request: new Request(u.href, { method: req.method, headers: h, body: ["GET", "HEAD", "OPTIONS"].includes(req.method) ? undefined : body }), env });
       const hs = Object.fromEntries(r.headers); return send(r.status, hs["content-type"] || "application/json", Buffer.from(await r.arrayBuffer()), hs);
     }
-    if (host === "prof.lockqz.pages.dev" && (u.pathname === "/dashboard" || u.pathname === "/")) return send(200, "text/html", DASH_HTML);
-    if (host === "prof.lockqz.pages.dev" && u.pathname === "/lq.js") return send(200, "application/javascript", LQ_JS);
+    if ((host === "prof.lockqz.pages.dev" || host === "professor.lockqz.com") && (u.pathname === "/dashboard" || u.pathname === "/")) return send(200, "text/html", DASH_HTML);
+    if ((host === "prof.lockqz.pages.dev" || host === "professor.lockqz.com") && u.pathname === "/lq.js") return send(200, "application/javascript", LQ_JS);
     if (host === "brightspace.usc.edu" && (u.pathname.startsWith("/d2l/api/") || u.pathname === "/d2l/lp/auth/xsrf-tokens")) {
       const r = brightspace(u, req.method, body.toString()); return send(r.status, r.contentType, r.body);
     }
@@ -141,7 +141,7 @@ await new Promise(r => server.listen(0, "127.0.0.1", r));
 const PORT = server.address().port;
 const context = await chromium.launchPersistentContext(join(tmp, "profile"), { channel: "chromium", headless: true, ignoreHTTPSErrors: true,
   args: [`--disable-extensions-except=${EXTDIR}`, `--load-extension=${EXTDIR}`, "--ignore-certificate-errors", "--no-proxy-server",
-    `--host-resolver-rules=MAP brightspace.usc.edu 127.0.0.1:${PORT}, MAP prof.lockqz.pages.dev 127.0.0.1:${PORT}, MAP lockqz.pages.dev 127.0.0.1:${PORT}, MAP * ~NOTFOUND`] });
+    `--host-resolver-rules=MAP brightspace.usc.edu 127.0.0.1:${PORT}, MAP prof.lockqz.pages.dev 127.0.0.1:${PORT}, MAP lockqz.pages.dev 127.0.0.1:${PORT}, MAP professor.lockqz.com 127.0.0.1:${PORT}, MAP * ~NOTFOUND`] });
 await context.addInitScript(t => { if (location.host === "prof.lockqz.pages.dev") { localStorage.setItem("lockqz_token", t); localStorage.setItem("lockqz_tour_prof@usc.edu", "1"); localStorage.setItem("lockqz_welcome_prof@usc.edu", "1"); } }, PROF);
 let sw = context.serviceWorkers()[0] || await context.waitForEvent("serviceworker", { timeout: 15000 });
 const syncs = () => lqCalls.filter(c => c === "/sync").length;
@@ -150,8 +150,8 @@ const bsTabs = () => context.pages().filter(p => { try { return new URL(p.url())
 const store = k => sw.evaluate(k => chrome.storage.local.get(k), k);
 // The first install opens the dashboard by itself (that is how the key gets handed over). It opened before
 // this test's sign-in was set up, so it shows the sign-in page: close it and open the dashboard signed in.
-check("first install opened the LOCKqz dashboard", await waitFor(() => context.pages().some(p => p.url().startsWith("https://prof.lockqz.pages.dev/")), 15000));
-for (const p of context.pages()) if (p.url().startsWith("https://prof.lockqz.pages.dev/")) await p.close();
+check("first install opened the LOCKqz dashboard (professor.lockqz.com)", await waitFor(() => context.pages().some(p => p.url().startsWith("https://professor.lockqz.com/")), 15000));
+for (const p of context.pages()) if (p.url().startsWith("https://professor.lockqz.com/")) await p.close();
 const dash = await context.newPage();
 await dash.goto("https://prof.lockqz.pages.dev/dashboard");
 const errors = []; dash.on("pageerror", e => errors.push(e.message));

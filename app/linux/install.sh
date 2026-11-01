@@ -1,6 +1,6 @@
 #!/bin/bash
 # LOCKqz Linux installer (Ubuntu / Debian / Fedora / Arch - anything with systemd and python3).
-#   curl -fsSL https://lockqz.pages.dev/install-linux.sh | sudo bash
+#   curl -fsSL https://lockqz.com/install-linux.sh | sudo bash
 # Fetches the signed release (same key as the Mac), installs the root helper (lockqzd.service) and the
 # per-user agent (lockqz-agent.service, a user unit enabled for every account), writes the device config,
 # then opens the pay page. Re-running updates in place and keeps the device id.

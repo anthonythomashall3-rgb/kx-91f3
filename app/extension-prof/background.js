@@ -8,11 +8,11 @@
 const api = globalThis.browser ?? chrome;
 const BS_HOME = "https://brightspace.usc.edu/d2l/home";
 const BS_URLS = ["https://brightspace.usc.edu/d2l/*", "https://usc.brightspace.com/d2l/*"];
-const DASH_URLS = ["https://prof.lockqz.pages.dev/*"];
+const DASH_URLS = ["https://professor.lockqz.com/*", "https://prof.lockqz.pages.dev/*"];
 const MIN = 60000;
 const QUIET_MS = 15 * MIN, BG_MS = 6 * 60 * MIN, LEAD_MS = 65 * MIN, AFTER_MS = 10 * MIN;
 const NO_ANSWER_MS = 3 * MIN, TMP_MAX_MS = 4 * MIN, NOTE_EVERY_MS = 60 * MIN;
-const BASES = ["https://prof.lockqz.pages.dev", "https://lockqz.pages.dev"];
+const BASES = ["https://professor.lockqz.com", "https://lockqz.com", "https://prof.lockqz.pages.dev", "https://lockqz.pages.dev"];
 const API = "https://lockqz.pages.dev/api";   // one API (main site secrets)
 const SEEN_MS = 4 * 60 * MIN;   // check in with LOCKqz this often while the browser is open (T-70 email stays quiet)
 const get = k => api.storage.local.get(k);

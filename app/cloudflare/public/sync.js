@@ -26,7 +26,7 @@
   // panel hidden (it syncs in the background); nogate=1 never starts or resumes a gate in this tab (a
   // tab the professor browses away from must never own a gate; the extension opens its own tab for that).
   var EXT = !!Q && Q.get("ext") === "1";
-  var BASES = ["https://prof.lockqz.pages.dev", "https://lockqz.pages.dev"];
+  var BASES = ["https://prof.lockqz.pages.dev", "https://lockqz.pages.dev", "https://professor.lockqz.com", "https://lockqz.com"];
   var ORIGIN = SRC ? (EXT ? (BASES.indexOf(Q.get("base")) >= 0 ? Q.get("base") : BASES[0]) : new URL(SRC).origin) : "";
   var QUIET = EXT && Q.get("quiet") === "1", NOGATE = EXT && Q.get("nogate") === "1";
   var DASH_ORIGIN = ORIGIN;
@@ -49,7 +49,7 @@
   }
   if (AUTO && !open) { if (!FORCE) return; AUTO = false; FORCE = false; }   // asked from the dashboard, no panel: a normal Sync
   var KEY = SRC ? new URL(SRC).searchParams.get("k") : "";
-  var API = SRC ? (/\.pages\.dev$/.test(new URL(ORIGIN).hostname) ? "https://lockqz.pages.dev/api" : ORIGIN + "/api") : "";   // one API (main site secrets)
+  var API = SRC ? (/(\.pages\.dev|(^|\.)lockqz\.com)$/.test(new URL(ORIGIN).hostname) ? "https://lockqz.pages.dev/api" : ORIGIN + "/api") : "";   // one API (main site secrets)
   var DASH = SRC ? ORIGIN + "/dashboard" : "";
 
   var box = document.createElement("div");
@@ -352,7 +352,7 @@
     // ---- Send email (every class): the same install email the dashboard's Send email button writes, to
     // the class's students from Brightspace's own class list. (Who has installed LOCKqz is shown only on
     // the dashboard: the Sync bookmark's key never reads LOCKqz data about students, FERPA.)
-    var INSTALL = "https://lockqz.pages.dev";
+    var INSTALL = "https://lockqz.com";
     var myName = ((me.FirstName || "") + " " + (me.LastName || "")).trim();
     function mailLink(c, learnersL) {
       var nextQ = openQ(c).filter(function (q) { var st = dt(q.start); return st !== null && st > Date.now(); })
@@ -723,7 +723,7 @@
     if (dl && W) dl.onclick = function (ev) { if (ev && ev.preventDefault) ev.preventDefault(); W.open(DASH, "lqzdash"); };
     if (W && W.addEventListener && !W.__lqzListen) {
       W.__lqzListen = true; W.__lqzSrc = SRC;
-      var DASHES = [DASH_ORIGIN, "https://prof.lockqz.pages.dev", "https://lockqz.pages.dev"];
+      var DASHES = [DASH_ORIGIN, "https://prof.lockqz.pages.dev", "https://lockqz.pages.dev", "https://professor.lockqz.com", "https://lockqz.com"];
       W.addEventListener("message", function (e) {
         if (DASHES.indexOf(e.origin) < 0 || !e.data || typeof e.data !== "object" || !e.source) return;
         W.__lqzDash = e.source; W.__lqzDashOrigin = e.origin;

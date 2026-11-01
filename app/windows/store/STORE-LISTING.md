@@ -6,8 +6,8 @@
 
 ## Properties
 - Category: Education
-- Privacy policy URL: https://lockqz.pages.dev/privacy
-- Website: https://lockqz.pages.dev
+- Privacy policy URL: https://lockqz.com/privacy
+- Website: https://lockqz.com
 - Support contact: athall@usc.edu
 
 ## Age ratings

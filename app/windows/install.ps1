@@ -4,7 +4,7 @@
 # Uninstall:  powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
 #
 # ONE-LINE INSTALL (no download, no SmartScreen warning - the $0 path), in an elevated PowerShell:
-#     irm https://lockqz.pages.dev/install.ps1 | iex
+#     irm https://lockqz.com/install.ps1 | iex
 # With no files next to it, this script fetches the current release from the site, checks the
 # release manifest's RSA signature against the key below and every file's SHA-256, then installs.
 param([string]$Token, [string]$Api, [string]$Student = "", [string]$StorePackage = "", [switch]$FromExe)
@@ -185,7 +185,7 @@ if (-not $StorePackage -and -not $FromExe -and -not (Test-Path "HKLM:\SOFTWARE\M
     $un = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$Dest\uninstall.ps1`""
     $Version = ""; try { $Version = [string]((Select-String -LiteralPath "$Dest\lockqzd.ps1" -Pattern '^\$Version = "([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value) } catch {}
     foreach ($kv in @(@("DisplayName","LOCKqz"), @("DisplayVersion",$Version), @("Publisher","LOCKqz"), @("UninstallString",$un),
-                      @("DisplayIcon","powershell.exe"), @("URLInfoAbout","https://lockqz.pages.dev"), @("InstallLocation",$Dest))) {
+                      @("DisplayIcon","powershell.exe"), @("URLInfoAbout","https://lockqz.com"), @("InstallLocation",$Dest))) {
       New-ItemProperty -Path $UninstKey -Name $kv[0] -Value $kv[1] -PropertyType String -Force | Out-Null
     }
     New-ItemProperty -Path $UninstKey -Name "NoModify" -Value 1 -PropertyType DWord -Force | Out-Null

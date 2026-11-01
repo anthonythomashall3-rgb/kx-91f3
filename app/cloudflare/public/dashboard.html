@@ -168,7 +168,7 @@
 <script>
 // The red lock loader from /lq.js (plain text if it did not load).
 const lqL = (m, e, o) => typeof lqLoading === "function" ? lqLoading(m, e, o) : m + "…";
-const API = /\.pages\.dev$/.test(location.hostname) ? "https://lockqz.pages.dev/api" : "/api", INSTALL = "https://lockqz.pages.dev";   // one API (main site secrets)
+const API = /(\.pages\.dev|(^|\.)lockqz\.com)$/.test(location.hostname) ? "https://lockqz.pages.dev/api" : "/api", INSTALL = "https://lockqz.com";   // one API (main site secrets)
 // ---- Professor extension store links (Chrome Web Store, live 29 Oct 2026; Edge installs from it too). A browser
 // with no link (Firefox) gets the packaged .zip with a one-line load-unpacked fallback. ----
 const EXT_STORE = { CHROME: "https://chromewebstore.google.com/detail/bidlfpkdggdpmfbfkpjcnbjhfkfligkk", EDGE: "https://chromewebstore.google.com/detail/bidlfpkdggdpmfbfkpjcnbjhfkfligkk", FIREFOX: "" };   // Chrome Web Store listing (Edge installs from it too); Firefox still uses the zip
@@ -824,7 +824,7 @@ function tourSteps(){
     S(".cls .note.warn .btn", "Remind students", "Emails the students who aren't ready yet (not installed, or fee unpaid)."),
     S(".note.ok .btn.ok", "Watch live", "During an exam, see every student: locked and working, submitted, or anything suspicious, updated every 10 seconds."),
     S("#menu summary", "Your menu", "How LOCKqz works, the Brightspace connection, the activity log and your password."),
-    S(null, "That's it", "LOCKqz runs by itself from here. Students install it once from lockqz.pages.dev. You never type an exam password."),
+    S(null, "That's it", "LOCKqz runs by itself from here. Students install it once from lockqz.com. You never type an exam password."),
   ];
   const list = home;
   return list.filter(x => !x.sel || visibleEl(x.sel));

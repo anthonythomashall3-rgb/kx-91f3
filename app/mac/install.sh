@@ -7,7 +7,7 @@
 # Uninstall any time:          sudo bash uninstall.sh
 #
 # ONE-LINE INSTALL (no download, no Gatekeeper warning - the $0 path):
-#     curl -fsSL https://lockqz.pages.dev/install.sh | sudo bash
+#     curl -fsSL https://lockqz.com/install.sh | sudo bash
 # With no files next to it, this script fetches the current release from the site, checks the
 # release manifest's RSA signature against the key below and every file's SHA-256, then installs.
 set -e

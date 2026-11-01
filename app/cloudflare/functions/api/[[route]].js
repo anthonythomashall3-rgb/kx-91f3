@@ -335,7 +335,7 @@ async function smtpSend(open, { user, pass, to, subject, text, html = null, from
   };
   try {
     await say(null, [220]);
-    await say("EHLO lockqz.pages.dev", [250]);
+    await say("EHLO lockqz.com", [250]);
     await say("AUTH PLAIN " + b64("\0" + user + "\0" + pass), [235]);
     await say(`MAIL FROM:<${user}>`, [250]);
     for (const r of rcpts) await say(`RCPT TO:<${r}>`, [250, 251]);
@@ -345,7 +345,7 @@ async function smtpSend(open, { user, pass, to, subject, text, html = null, from
     const head = [`From: ${fromName} <${user}>`, rcpts.length === 1 ? `To: <${rcpts[0]}>` : `To: ${fromName} <${user}>`,
       ...(replyTo ? [`Reply-To: <${replyTo}>`] : []), `Subject: ${subj}`,
       `Date: ${new Date().toUTCString().replace("GMT", "+0000")}`,
-      `Message-ID: <${crypto.randomUUID()}@lockqz.pages.dev>`, "MIME-Version: 1.0"];
+      `Message-ID: <${crypto.randomUUID()}@lockqz.com>`, "MIME-Version: 1.0"];
     let msg;
     if (html) {
       const b = "lqz" + crypto.randomUUID().replace(/-/g, "");
@@ -360,13 +360,13 @@ async function smtpSend(open, { user, pass, to, subject, text, html = null, from
 }
 function codeMail(env, to, code, web = false) {
   const subject = `Your LOCKqz code: ${code}`;
-  const text = web ? `Your LOCKqz sign-in code is ${code}\n\nType it on lockqz.pages.dev to open your account. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`
+  const text = web ? `Your LOCKqz sign-in code is ${code}\n\nType it on lockqz.com to open your account. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`
     : (isExempt(env, to) ? WELCOME + "\n\n" : "") + `Your LOCKqz code is ${code}\n\nType it into the LOCKqz window on your computer. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
   return { subject, text, html: autoHtml(text) };
 }
 async function sendCode(env, to, code, web = false) {
   const subject = `Your LOCKqz code: ${code}`;
-  const text = web ? `Your LOCKqz sign-in code is ${code}\n\nType it on lockqz.pages.dev to open your account. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`
+  const text = web ? `Your LOCKqz sign-in code is ${code}\n\nType it on lockqz.com to open your account. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`
     : (isExempt(env, to) ? WELCOME + "\n\n" : "") + `Your LOCKqz code is ${code}\n\nType it into the LOCKqz window on your computer. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
   const html = autoHtml(text);
   if (typeof env.MAIL_SINK === "function") return env.MAIL_SINK({ to, subject, text, html, code });   // tests
@@ -433,7 +433,7 @@ const mailOn = env => sesOn(env) || typeof env.MAIL_SINK === "function" || !!(en
 const gmailOn = env => typeof env.MAIL_SINK === "function" || !!(env.MAIL_USER && env.MAIL_APP_PASSWORD);
 
 // ---- Email templates (27 Oct 2026): text + HTML, the LOCKqz look (cardinal header, logo, 560px) ----
-const SITE_URL = "https://lockqz.pages.dev", DASH_URL = "https://prof.lockqz.pages.dev", BS_URL = "https://brightspace.usc.edu";
+const SITE_URL = "https://lockqz.com", DASH_URL = "https://professor.lockqz.com", BS_URL = "https://brightspace.usc.edu";
 const LOGO_URL = SITE_URL + "/icon-white.png";   // white lock: readable on the red email header
 // Chrome Web Store listing: filled in when it is live (until then the dashboard links the extension package).
 const EXT_STORE_URL = "https://chromewebstore.google.com/detail/bidlfpkdggdpmfbfkpjcnbjhfkfligkk";
@@ -451,8 +451,8 @@ const P = t => `<p style="margin:0 0 14px">${t}</p>`;
 // (red header + logo, white card, red buttons, signature). A line ending in a LOCKqz / Brightspace / Chrome Web Store
 // link becomes a button; a 6-digit code becomes a big code box; "LOCKqz" alone at the end becomes the signature.
 const autoBtn = u => /chromewebstore\.google\.com/.test(u) ? "Add LOCKqz to Chrome" : /renew=off/.test(u) ? "Stop these emails"
-  : /lockqz\.pages\.dev\/pay\b/.test(u) ? "Open your pay page" : /^https:\/\/prof\.lockqz\.pages\.dev/.test(u) ? "Open your dashboard"
-  : /brightspace\.usc\.edu/.test(u) ? "Open Brightspace" : /^https:\/\/lockqz\.pages\.dev\/?$/.test(u) ? "Open LOCKqz" : "";
+  : /lockqz\.(?:pages\.dev|com)\/pay\b/.test(u) ? "Open your pay page" : /^https:\/\/(?:prof\.lockqz\.pages\.dev|professor\.lockqz\.com)/.test(u) ? "Open your dashboard"
+  : /brightspace\.usc\.edu/.test(u) ? "Open Brightspace" : /^https:\/\/lockqz\.(?:pages\.dev|com)\/?$/.test(u) ? "Open LOCKqz" : "";
 const linkify = l => String(l).split(/(https?:\/\/[^\s<>"]+)/).map((x, i) => i % 2 ? `<a href="${hesc(x)}" style="color:#990000">${hesc(x)}</a>` : hesc(x)).join("");
 function autoHtml(text, { sign = true } = {}) {
   const paras = String(text == null ? "" : text).replace(/\r/g, "").split(/\n{2,}/).map(x => x.trim()).filter(Boolean);
@@ -479,7 +479,7 @@ const STEPS_HTML = `<table role="presentation" cellspacing="0" cellpadding="0" s
 ${P("<b>Nothing else to do, ever.</b>")}${P("<b>On exam day:</b> open the exam in Brightspace like normal. LOCKqz enters the password for you.")}`;
 const signTxt = (prof, course) => `Respectfully,\nProfessor ${prof}\n${course}`;
 const signHtml = (prof, course) => P(`Respectfully,<br>Professor ${hesc(prof)}<br><span style="color:#5c5952">${hesc(course)}</span>`);
-const studentFooter = last => `Sent by LOCKqz on behalf of Professor ${hesc(last)}. Replies go to your professor. <a href="${SITE_URL}/privacy" style="color:#8a877f">lockqz.pages.dev/privacy</a>`;
+const studentFooter = last => `Sent by LOCKqz on behalf of Professor ${hesc(last)}. Replies go to your professor. <a href="${SITE_URL}/privacy" style="color:#8a877f">lockqz.cages.dev/privacy</a>`;
 // "Free for you" line for fee-exempt professors (FEE_EXEMPT): a soft box in the LOCKqz colours.
 const FREE_HTML = `<p style="margin:0 0 14px"><span style="display:inline-block;background:#fbeaea;border:1px solid #f0caca;color:#990000;font-weight:700;border-radius:8px;padding:8px 12px">LOCKqz is free for you.</span></p>`;
 const MAIL = {
@@ -513,7 +513,7 @@ const MAIL = {
       P("From then on LOCKqz protects every exam in every class automatically. You never set a password.") +
       P("<b>On exam day: keep Chrome open and signed in to Brightspace</b> on a computer that's on, until the exam ends. If Chrome is closed, students wait at the start of the exam until you open it.") +
       P("When your classes appear, click <b>Email students</b> on each class so students install LOCKqz before the first exam.") +
-      P(`Dashboard: <a href="${DASH_URL}" style="color:#990000">prof.lockqz.pages.dev</a>`) + P("Respectfully,<br>The LOCKqz Team"));
+      P(`Dashboard: <a href="${DASH_URL}" style="color:#990000">professor.lockqz.com</a>`) + P("Respectfully,<br>The LOCKqz Team"));
     return { subject, text, html };
   },
   // To the class (kind "all"): install before the first exam.
@@ -534,7 +534,7 @@ const MAIL = {
       const PAYLINE = `LOCKqz is installed but your semester fee is not paid \u2014 pay at ${SITE_URL} before the exam.`;
       const subject = `Reminder: ${exam}${date ? " on " + date : ""} \u2014 your LOCKqz fee is not paid`;
       const text = `Hi,\n\n${exam} for ${label} is ${when}.\n\n${PAYLINE}\n\n${signTxt(prof, label)}\n\n--\nSent by LOCKqz on behalf of Professor ${last}. Replies go to your professor. ${SITE_URL}/privacy`;
-      const html = mailWrap(P("Hi,") + P(`<b>${hesc(exam)}</b> for ${hesc(label)} is <b>${hesc(when)}</b>.`) + P(`<b>LOCKqz is installed but your semester fee is not paid</b> \u2014 pay at <a href="${SITE_URL}" style="color:#990000">lockqz.pages.dev</a> before the exam.`) + signHtml(prof, label), studentFooter(last));
+      const html = mailWrap(P("Hi,") + P(`<b>${hesc(exam)}</b> for ${hesc(label)} is <b>${hesc(when)}</b>.`) + P(`<b>LOCKqz is installed but your semester fee is not paid</b> \u2014 pay at <a href="${SITE_URL}" style="color:#990000">lockqz.com</a> before the exam.`) + signHtml(prof, label), studentFooter(last));
       return { subject, text, html };
     }
     const subject = `Reminder: install LOCKqz before ${exam}${date ? " on " + date : ""}`;
@@ -584,7 +584,7 @@ export async function onRequest(context) {
   // answering with weaker rules. The dashboard and Sync panel call the main site directly; only old
   // installs and old Sync bookmarks come through here.
   const MAIN = String(env.API_HOST || "lockqz.pages.dev").toLowerCase();
-  if (url.hostname.toLowerCase() !== MAIN && /\.pages\.dev$/i.test(url.hostname) && String(env.NO_API_PROXY || "") !== "1") {
+  if (url.hostname.toLowerCase() !== MAIN && /(\.pages\.dev|(^|\.)lockqz\.com)$/i.test(url.hostname) && String(env.NO_API_PROXY || "") !== "1") {
     const h = new Headers(request.headers); h.delete("host");
     const init = { method: request.method, headers: h, redirect: "manual" };
     if (request.method !== "GET" && request.method !== "HEAD") init.body = await request.arrayBuffer();
@@ -1067,7 +1067,7 @@ export async function onRequest(context) {
   // studentStatus and professor activation also honor a next-term payment for what is left of the current term.
   const nearEnd = () => { const ce = Date.parse(classesEndOf(curTerms()[0]) + "T00:00:00Z"), t = Date.parse(laToday() + "T00:00:00Z"); return ce - t <= 14 * 86400000; };
   const payTermFor = (paidThisTerm, price) => { const [cur, nxt] = curTerms(); return inGap() || (ahead() && (FULL(paidThisTerm, price) || (nearEnd() && !(Number(paidThisTerm) > 0)))) ? nxt : cur; };   // a balance on a part-paid term stays on that term
-  const PAY_URL = "https://lockqz.pages.dev/pay";
+  const PAY_URL = SITE_URL + "/pay";
   // Pay links carry t = HMAC(email): only the owner of an email (the link reaches them from their own LOCKqz app
   // or their inbox) or the admin can see that email's memo code and payment status (Anthony, 26 Oct).
   const statusToken = async email => (await hmacHex(String(env.ROT_SECRET || env.TEACHER_KEY || "lqz-fallback"), "lqz-pay-status:" + String(email||"").trim().toLowerCase())).slice(0, 32);
@@ -1172,6 +1172,10 @@ export async function onRequest(context) {
     }
     return null;   // all taken: the memo is needed
   }
+  // Apps older than 0.6.5 only open LOCKqz pages on lockqz.pages.dev (the address before lockqz.com):
+  // they get that address, which still serves the same site.
+  const OLD_SITE = "https://lockqz.pages.dev";
+  const oldAppUrl = (info, dev) => { if (info && info.url && dev && !newerOrSame(dev.version, "0.6.5")) info.url = String(info.url).replace(SITE_URL, OLD_SITE); return info; };
   async function payInfo(email, limitIp = null, slot = false) {
     const code = await studentCode(email, limitIp);
     if (code && typeof code === "object") return code;   // { limited: true }
@@ -1285,7 +1289,7 @@ export async function onRequest(context) {
     let sent = 0;
     for (const r of due) {
       const email = String(r.email).toLowerCase(), amt = totalOf(r.kind === "student" ? "student" : "professor", "zelle");
-      const link = r.kind === "student" ? await payLink(email) : "https://prof.lockqz.pages.dev/";
+      const link = r.kind === "student" ? await payLink(email) : DASH_URL + "/";
       const text = `LOCKqz renews for the new semester.\n\n${r.kind === "student" ? `Pay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nZelle ${stuZelle()||""} (paste ${r.code} in the Zelle memo/note)${stripeOn() ? "  ·  Card" : ""}${stuVenmo() ? `  ·  Venmo @${stuVenmo()}` : ""}  ·  Bank transfer: email ${stuBank()||""}` : `Pay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nVenmo @${(env.VENMO_HANDLE||"").replace(/^@/,"")}  ·  Zelle ${env.ZELLE_TO||""}`}\n\nAccess turns on as soon as the payment arrives and lasts until ${termEndOf(cur)}.\n\nStop these emails: ${await payLink(email, "&renew=off")}`;
       try {
         await mailOut(email, "Renew LOCKqz", text, {}, "auto");
@@ -1306,7 +1310,7 @@ export async function onRequest(context) {
   //  3. a failed charge (declined / bank wants confirmation) is marked, the student is emailed the pay link once,
   //     and it is retried at most once a day (3 tries; never when the bank asks to confirm). Access is unchanged:
   //     unpaid = today's unpaid behaviour.
-  // Cancel = autorenew 0 (gear icon on lockqz.pages.dev -> Account -> Cancel subscription): auto-renew stops and
+  // Cancel = autorenew 0 (gear icon on lockqz.com -> Account -> Cancel subscription): auto-renew stops and
   // the card is never charged again; the current term's access stays. There is NO way to cancel the current term
   // from LOCKqz -- a student who wants this term's money back goes to their bank.
   const autoRenewOn = () => stripeOn() && String(env.STUDENT_AUTORENEW ?? "1") !== "0";
@@ -1325,7 +1329,7 @@ export async function onRequest(context) {
   const nextRenewal = after => { let t = nextTerm(after); if (!isSemester(t)) t = nextTerm(t);
     const d = renewDayOf(t), soonest = dayAdd(laToday(), RENEW_LEAD); return { term: t, day: d < soonest ? soonest : d }; };
   const cardFullCents = () => stripeCents("student", "card", Math.round(STUDENT_FEE * 100));
-  const CANCEL_HOW = "lockqz.pages.dev → gear icon (top right) → Account → Cancel subscription";
+  const CANCEL_HOW = "lockqz.com → gear icon (top right) → Account → Cancel subscription";
   const cardName = r => `${String(r.brand || "card").replace(/^./, c => c.toUpperCase())} •••• ${r.last4 || "????"}`;
   // Checkout paid with metadata save=1: remember the card (customer + payment method), and email the confirmation
   // the first time a card is saved (or a new card replaces it).
@@ -1624,7 +1628,7 @@ export async function onRequest(context) {
         if (Number((await db.prepare("SELECT COUNT(*) AS n FROM gsign WHERE device_id=? AND at>?").bind(dev, day).first())?.n) >= 10) return json({ error: "rate_limited" }, 429);
         const n = hex(crypto.getRandomValues(new Uint8Array(16)));
         await db.batch([db.prepare("DELETE FROM gsign WHERE at<?").bind(day), db.prepare("INSERT INTO gsign (n,device_id,at,done) VALUES (?,?,?,0)").bind(n, dev, now())]);
-        return json({ ok: true, url: String(env.SITE_URL || "https://lockqz.pages.dev") + "/google?n=" + n });
+        return json({ ok: true, url: String(env.SITE_URL || (newerOrSame(d && d.version, "0.6.5") ? SITE_URL : "https://lockqz.pages.dev")) + "/google?n=" + n });
       }
       if (!EMAIL_OK(email)) return json({ error: "bad_email" }, 400);
       const rosterName = async () => (await db.prepare("SELECT name FROM roster WHERE email=? AND name IS NOT NULL LIMIT 1").bind(email).first())?.name || null;
@@ -1852,7 +1856,7 @@ export async function onRequest(context) {
         const who = unconfirmed ? null : stu?.student;
         if (!(await studentPaid(who))) return unconfirmed
           ? json({ password: null, reason: "verify", needs_verify: true }, 402)   // no pay block: the agent re-runs email setup
-          : json({ password: null, reason: "unpaid", pay: await payInfo(who) }, 402);
+          : json({ password: null, reason: "unpaid", pay: await oldAppUrl(await payInfo(who), v.ok ? v.dev : null) }, 402);
         // One payment = one student. A paid email cannot be shared: (1) never on two computers in a quiz
         // at the same time; (2) at most 2 computers per email (seen in the last 30 days, not revoked).
         // Staff (professors / admin) are exempt.
@@ -2382,7 +2386,7 @@ export async function onRequest(context) {
     // answers anyone who emails LOCKqz about a bank transfer). BANK_DETAILS = a Pages secret (several lines:
     // bank, account holder, routing, account number); until it is set, the payer is told the details follow
     // and the admin is emailed to send them.
-    // Support form (lockqz.pages.dev/support): the message goes to LOCKqz's own inbox with Reply-To = the sender,
+    // Support form (lockqz.com/support): the message goes to LOCKqz's own inbox with Reply-To = the sender,
     // so it works for people with no mail app. Message text is never stored; one event row per message for limits.
     if (p === "/support" && request.method === "POST") {
       const email = String(body.email || "").trim().toLowerCase().slice(0, 200);
@@ -2642,7 +2646,7 @@ export async function onRequest(context) {
       for (const x of (await db.prepare(`SELECT term, COALESCE(SUM(${CREDIT()}),0) AS s FROM payments WHERE code=? AND term IN (?,?) AND ${COUNTS} GROUP BY term`).bind(memo, cur, nxt).all()).results) sums[x.term] = Number(x.s);
       const term = payTermFor(sums[cur], PRICE), dueC = Math.round(PRICE * 100) - Math.round(sums[term] * 100);
       if (dueC <= 0) return json({ error:"already paid" }, 409);
-      const back = /^https:\/\/([a-z0-9-]+\.)*lockqz\.pages\.dev\/[^\s]*$/i.test(String(body.back||"")) ? String(body.back) : "https://prof.lockqz.pages.dev/";
+      const back = /^https:\/\/([a-z0-9-]+\.)*lockqz\.(pages\.dev|com)\/[^\s]*$/i.test(String(body.back||"")) ? String(body.back) : DASH_URL + "/";
       const r = await stripeCheckout({ kind: "professor", method: body.method === "bank" && stripeBank() ? "bank" : "card", code: memo, email: me.email, term, dueC, back });
       return json(r, r.url ? 200 : r.processing ? 409 : 502);
     }

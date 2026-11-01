@@ -15,11 +15,11 @@ This extension is the professor side of LOCKqz. Add it once:
 1. Open Brightspace in your browser and sign in. Your classes, class lists and exams appear on your LOCKqz dashboard by themselves, and every exam is protected.
 2. On exam day, keep your browser open and signed in to Brightspace until the exam ends. LOCKqz runs the exam from there.
 
-You never set or share an exam password. Students install the LOCKqz app once from lockqz.pages.dev; students without it cannot open a protected exam.
+You never set or share an exam password. Students install the LOCKqz app once from lockqz.com; students without it cannot open a protected exam.
 
 LOCKqz works only on USC Brightspace and only with your own Brightspace sign-in. It reads your classes, class lists and quizzes so it can protect them. It never sees quiz content, answers or grades, and never records your screen, camera or keystrokes.
 
-Privacy policy: https://lockqz.pages.dev/privacy
+Privacy policy: https://lockqz.com/privacy
 
 ## Category
 Education
@@ -35,7 +35,7 @@ Connects a professor's Brightspace courses to LOCKqz so their exams are protecte
 - alarms: Checks once a minute whether a protected exam is about to start, so LOCKqz can open its Brightspace tab for that exam.
 - notifications: Tells the professor when they need to sign in to Brightspace before an exam.
 - Host permission brightspace.usc.edu / usc.brightspace.com: Reads the professor's own courses, class lists and quizzes from Brightspace and sets each protected exam's password, using the professor's own Brightspace sign-in.
-- Host permission prof.lockqz.pages.dev / lockqz.pages.dev: Connects to the professor's LOCKqz dashboard and the LOCKqz service.
+- Host permission professor.lockqz.com / lockqz.com (and the older prof.lockqz.pages.dev / lockqz.pages.dev addresses): Connects to the professor's LOCKqz dashboard and the LOCKqz service.
 
 ## Remote code
 No, I am not using remote code. (All code is inside the package.)
@@ -50,7 +50,7 @@ Then tick all three certifications:
 - I do not use or transfer user data to determine creditworthiness or for lending purposes
 
 ## Privacy policy URL
-https://lockqz.pages.dev/privacy
+https://lockqz.com/privacy
 
 ## Visibility
 Unlisted (only people with the link can install it; your dashboard and welcome email give professors the link).

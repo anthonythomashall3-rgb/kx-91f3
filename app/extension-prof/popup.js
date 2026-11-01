@@ -2,7 +2,7 @@
 // /ext-status (counts only, through the Sync key) and offers Open dashboard / Sync now.
 (() => {
   const api = globalThis.browser ?? chrome;
-  const BASES = ["https://prof.lockqz.pages.dev", "https://lockqz.pages.dev"];
+  const BASES = ["https://professor.lockqz.com", "https://lockqz.com", "https://prof.lockqz.pages.dev", "https://lockqz.pages.dev"];
   const $ = id => document.getElementById(id);
   const ago = t => { if (!t) return "never"; const m = Math.round((Date.now() - Number(t)) / 60000); return m < 1 ? "just now" : m < 60 ? m + " min ago" : m < 1440 ? Math.round(m / 60) + " h ago" : Math.round(m / 1440) + " d ago"; };
   const when = iso => { const t = iso ? Date.parse(iso) : NaN; return isNaN(t) ? "" : new Date(t).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); };

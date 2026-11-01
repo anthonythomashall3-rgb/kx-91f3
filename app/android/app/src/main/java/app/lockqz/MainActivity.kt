@@ -41,7 +41,7 @@ class MainActivity : Activity() {
         b1 = step("1. Confirm your school email") { setupEmail() }
         b2 = step("2. Turn on quiz detection") { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         b3 = step("3. Allow the AI block") { val i = VpnService.prepare(this); if (i != null) startActivityForResult(i, 1) else onActivityResult(1, RESULT_OK, null) }
-        b4 = step("4. Pay the semester fee") { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("${Api.SITE}/pay"))) }
+        b4 = step("4. Pay the semester fee") { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("${Api.WEB}/pay"))) }
         for (b in listOf(b1, b2, b3, b4)) col.addView(b)
         col.addView(TextView(this).apply { text = "Install + payment required to open your Brightspace exams.\nTake quizzes in Chrome, Firefox, Samsung Internet, Edge or Brave."; textSize = 13f; setPadding(0, pad, 0, 0); setTextColor(Color.parseColor("#7a1414")) })
         setContentView(ScrollView(this).apply { addView(col) })
@@ -86,7 +86,7 @@ class MainActivity : Activity() {
             // One tap instead of an emailed code: sign in with the school Google account (off on the server = code).
             val g = Api.verify(this, "google_start")
             val url = g?.optString("url").orEmpty()
-            if (saved == null && Regex("^https://lockqz\\.pages\\.dev/google\\?n=[0-9a-f]{32}$").matches(url)) { main.post { askGoogle(url) }; return@execute }
+            if (saved == null && Regex("^https://lockqz\\.(com|pages\\.dev)/google\\?n=[0-9a-f]{32}$").matches(url)) { main.post { askGoogle(url) }; return@execute }
             main.post { askEmail(saved ?: "") }
         }
     }

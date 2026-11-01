@@ -342,8 +342,8 @@ class Agent(M.Agent):
         if not isinstance(pay, dict): return False
         if not getattr(self, "pay_shown", False):
             self.pay_shown = True
-            u = str(pay.get("url") or "https://lockqz.pages.dev/pay")
-            if u.startswith("https://lockqz.pages.dev/"):
+            u = str(pay.get("url") or "https://lockqz.com/pay")
+            if u.startswith(("https://lockqz.com/", "https://lockqz.pages.dev/")):
                 try: subprocess.run(["xdg-open", u], timeout=10, capture_output=True)
                 except Exception: pass
             dialog("Pay $%s for LOCKqz this semester to get the quiz password.\n\nMemo:  %s\n\nThe payment page is open. LOCKqz shows the password here as soon as your payment arrives."

@@ -336,7 +336,7 @@ console.log("Z9 invite email: LOCKqz sends it, with buttons");
   const m = mailsTo("newprof@usc.edu")[0];
   check("sent to the invited email", r.status === 200 && r.data.sent === "newprof@usc.edu" && !!m, JSON.stringify(r.data));
   check("subject: Your LOCKqz professor account", m && m.subject === "Your LOCKqz professor account", m && m.subject);
-  check("HTML buttons: Create your account (invite link), Add LOCKqz to Chrome (store), Open Brightspace", m && m.html && new RegExp('href="https://prof\\.lockqz\\.pages\\.dev/\\?invite=' + inv.data.code + '"[^>]*>Create your account<').test(m.html) && /chromewebstore\.google\.com\/detail\/bidlfpkdggdpmfbfkpjcnbjhfkfligkk"[^>]*>Add LOCKqz to Chrome</.test(m.html) && /brightspace\.usc\.edu"[^>]*>Open Brightspace</.test(m.html) && /Continue to install/.test(m.html));
+  check("HTML buttons: Create your account (invite link), Add LOCKqz to Chrome (store), Open Brightspace", m && m.html && new RegExp('href="https://professor\\.lockqz\\.com/\\?invite=' + inv.data.code + '"[^>]*>Create your account<').test(m.html) && /chromewebstore\.google\.com\/detail\/bidlfpkdggdpmfbfkpjcnbjhfkfligkk"[^>]*>Add LOCKqz to Chrome</.test(m.html) && /brightspace\.usc\.edu"[^>]*>Open Brightspace</.test(m.html) && /Continue to install/.test(m.html));
   check("plain-text part has every link too", m && m.text.includes("?invite=" + inv.data.code) && /chromewebstore/.test(m.text));
   check("professor can't send invites", (await api("/invite/send", { code: inv.data.code }, { "X-LOCKqz-Teacher": PROF })).status === 403);
   const anon = await api("/invite", {}, ADMIN);

@@ -112,7 +112,7 @@
 <script>
 // The red lock loader from /lq.js (plain text if it did not load).
 const lqL = (m, e, o) => typeof lqLoading === "function" ? lqLoading(m, e, o) : m + "…";
-const API = /\.pages\.dev$/.test(location.hostname) ? "https://lockqz.pages.dev/api" : "/api", $ = id => document.getElementById(id);
+const API = /(\.pages\.dev|(^|\.)lockqz\.com)$/.test(location.hostname) ? "https://lockqz.pages.dev/api" : "/api", $ = id => document.getElementById(id);
 const money = n => "$" + Number(n).toLocaleString("en-US");
 const money2 = n => "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: Number(n) % 1 ? 2 : 0, maximumFractionDigits: 2 });
 let WAYS = null, TAX = null, PICKED = null, VENMO = null, PO = null, PAYING = false, RENEW = null;

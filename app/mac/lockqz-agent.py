@@ -25,7 +25,7 @@ USER_DIR = os.path.expanduser("~/Library/Application Support/LOCKqz")
 READY_FLAG = os.path.join(USER_DIR, "ready-shown")   # written once the "LOCKqz is ready" notice was shown
 READY_TEXT = "LOCKqz is ready. Nothing to do until your exam \u2014 just open it in Brightspace."
 # Shown instead while the server does not confirm this computer is verified, paid and not revoked.
-SETUP_TEXT = "LOCKqz is installed. Finish setup before your exam: open https://lockqz.pages.dev"
+SETUP_TEXT = "LOCKqz is installed. Finish setup before your exam: open https://lockqz.com"
 USER_CONF = os.path.join(USER_DIR, "student.json")
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -567,7 +567,7 @@ CODE_FRESH = 12 * 60   # a code sent less than 12 min ago is still good (server:
 # every later try goes straight to the emailed code. Server/network trouble is NEVER shown as a popup:
 # setup just stops quietly (state["r"] = "server") and the agent retries in the background.
 GOOGLE_POLL, GOOGLE_WAIT = 4, 600   # Google sign-in: check every 4 s, give up (-> email code) after 10 min
-GOOGLE_URL = re.compile(r"^%s/google\?n=[0-9a-f]{32}$" % re.escape(os.environ.get("LOCKQZ_SITE", "https://lockqz.pages.dev").rstrip("/")))
+GOOGLE_URL = re.compile(r"^%s/google\?n=[0-9a-f]{32}$" % (re.escape(os.environ["LOCKQZ_SITE"].rstrip("/")) if os.environ.get("LOCKQZ_SITE") else r"https://lockqz\.(?:com|pages\.dev)"))
 def _google(call, ui, state):
     """One click instead of an emailed code: sign in with the school Google account in the browser; the
     server confirms the email and this computer sees it through "status". -> (email, True); None = use
@@ -773,8 +773,8 @@ class Agent:
         if not isinstance(pay, dict): return False
         if not getattr(self, "pay_shown", False):
             self.pay_shown = True
-            u = str(pay.get("url") or "https://lockqz.pages.dev/pay")
-            if u.startswith("https://lockqz.pages.dev/"):
+            u = str(pay.get("url") or "https://lockqz.com/pay")
+            if u.startswith(("https://lockqz.com/", "https://lockqz.pages.dev/")):
                 try: subprocess.run(["open", u], timeout=10)
                 except Exception: pass
             dialog("Pay $%s for LOCKqz this semester to get the quiz password.\n\nMemo:  %s\n\nThe payment page is open. LOCKqz shows the password here as soon as your payment arrives."

@@ -23,7 +23,7 @@
 
   // ---- (1) first visit after install: a bottom-right card, once ----
   let card = null, cardTimer = null;
-  const dashUrl = () => ((me && me.base) || "https://prof.lockqz.pages.dev") + "/";
+  const dashUrl = () => ((me && me.base) || "https://professor.lockqz.com") + "/";
   function showCard(bodyHtml, ms) {
     if (!card) {
       card = document.createElement("div"); card.id = "lqz-first";

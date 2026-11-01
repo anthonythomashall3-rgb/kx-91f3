@@ -139,8 +139,14 @@ d=json.load(sys.stdin); print(d.get("version"), d.get("api"), "codes_on=%s" % d.
   [ -z "$ref" ] && ref="$got"
   [ "$got" = "$ref" ] || fail=1
 done
+# The public addresses (lockqz.com for students, professor.lockqz.com for professors) are custom domains on
+# the same Pages project/branch; reported here (a warning, not a failure, while DNS is still settling).
+for h in lockqz.com professor.lockqz.com; do
+  got=$(curl -fsS -m 15 -A "LOCKqz/deploy" "https://$h/api/version" 2>/dev/null | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("version"), d.get("api"))' 2>/dev/null || true)
+  echo "  $h: ${got:-no answer yet}"
+done
 rm -rf "$STAGE"
 if [ $fail -ne 0 ]; then echo "DEPLOY CHECK FAILED: the addresses above do not all serve version $VERSION build $BUILD with the same flags."; exit 1; fi
 
 echo ""
-echo "Done. Site: https://$PROJECT.pages.dev   Teachers: https://prof.$PROJECT.pages.dev   (old: https://$LEGACY.pages.dev)"
+echo "Done. Site: https://lockqz.com   Teachers: https://professor.lockqz.com   (also https://$PROJECT.pages.dev, https://prof.$PROJECT.pages.dev; old: https://$LEGACY.pages.dev)"

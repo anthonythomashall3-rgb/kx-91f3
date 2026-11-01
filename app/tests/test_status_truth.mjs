@@ -74,7 +74,7 @@ check("ed (installed, fee unpaid): installed, paid false, NOT ready", st["ed@usc
 check("fy (no device): not ready", st["fy@usc.edu"].ready === false);
 
 console.log("T2 'missing' email + reminders: everyone not ready; the unpaid get the pay line");
-const PAYLINE = "LOCKqz is installed but your semester fee is not paid — pay at https://lockqz.pages.dev before the exam.";
+const PAYLINE = "LOCKqz is installed but your semester fee is not paid — pay at https://lockqz.com before the exam.";
 MAILS.length = 0;
 let r = await api("/email/students", { ou: String(OU), kind: "missing" }, T);
 // The professor sends it from their own mail app: a draft to bo, cy, di, ed, fy (everyone not ready, never al).
@@ -148,7 +148,7 @@ r = await api("/verify", { op: "status", device_id: dA.id }, {}, env, dA);
 check("revoked device -> refused (no status to call it ready)", r.status !== 200, r.status);
 const mac = readFileSync(join(APP, "mac", "lockqz-agent.py"), "utf8"), win = readFileSync(join(APP, "windows", "lockqz-agent.ps1"), "utf8");
 const macFn = mac.slice(mac.indexOf("def ready_notice"), mac.indexOf("def tick("));
-check("Mac: 'ready' + flag only when status 200 + verified + paid; else 'Finish setup', no flag", /st\.get\("verified"\) is True and st\.get\("paid"\) is True/.test(macFn) && /if ok:[\s\S]*READY_FLAG/.test(macFn) && /SETUP_TEXT/.test(macFn) && /Finish setup before your exam: open https:\/\/lockqz\.pages\.dev/.test(mac));
+check("Mac: 'ready' + flag only when status 200 + verified + paid; else 'Finish setup', no flag", /st\.get\("verified"\) is True and st\.get\("paid"\) is True/.test(macFn) && /if ok:[\s\S]*READY_FLAG/.test(macFn) && /SETUP_TEXT/.test(macFn) && /Finish setup before your exam: open https:\/\/lockqz\.com/.test(mac));
 check("Windows: Check-Ready asks /verify status; flag only in the ok branch", /function Check-Ready/.test(win) && /\$st\.verified -eq \$true\) -and \(\$st\.paid -eq \$true\)/.test(win) && /if \(\$ok\) \{\s*\$script:ReadyTold = \$true\s*try \{ Set-Content \$ReadyFile/.test(win) && /\{ Check-Ready \}/.test(win) && !/\{ Show-Ready \}/.test(win));
 
 console.log("T7 dashboard / extension: labels only on evidence");

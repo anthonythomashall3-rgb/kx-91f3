@@ -209,7 +209,7 @@ class QuizAccessibilityService : AccessibilityService() {
             if (!getSharedPreferences("lockqz", Context.MODE_PRIVATE).getBoolean("pay_shown_$id", false)) {
                 getSharedPreferences("lockqz", Context.MODE_PRIVATE).edit().putBoolean("pay_shown_$id", true).apply()
                 notify("Pay for LOCKqz this semester", "The quiz password comes as soon as your payment arrives. Memo: ${pay.optString("code")}")
-                try { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(pay.optString("url", "${Api.SITE}/pay"))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) {}
+                try { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(pay.optString("url", "${Api.WEB}/pay"))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) {}
             }
             main.postDelayed({ if (quiz == id && pwShown == null) exec.execute { password(quizUrl ?: url, id) } }, 15_000); return
         }

@@ -9,22 +9,22 @@ cp -R public/. legacy_site/ && cp -R public/. legacy_prof/
 rm -rf legacy_site/download legacy_prof/download
 rm -f legacy_site/install.sh legacy_site/install.ps1 legacy_site/uninstall.sh legacy_site/uninstall.ps1 legacy_prof/install.sh legacy_prof/install.ps1 legacy_prof/uninstall.sh legacy_prof/uninstall.ps1
 cat > legacy_site/_redirects <<R
-/                 https://lockqz.pages.dev/                  301
-/index.html       https://lockqz.pages.dev/                  301
-/privacy.html     https://lockqz.pages.dev/privacy.html      301
-/dashboard        https://prof.lockqz.pages.dev/             301
-/dashboard.html   https://prof.lockqz.pages.dev/             301
-/download/*       https://lockqz.pages.dev/download/:splat   302
-/install.sh       https://lockqz.pages.dev/install.sh        302
-/install.ps1      https://lockqz.pages.dev/install.ps1       302
-/uninstall.sh     https://lockqz.pages.dev/uninstall.sh      302
-/uninstall.ps1    https://lockqz.pages.dev/uninstall.ps1     302
-/pay              https://lockqz.pages.dev/pay               302
-/pay.html         https://lockqz.pages.dev/pay.html          302
+/                 https://lockqz.com/                  301
+/index.html       https://lockqz.com/                  301
+/privacy.html     https://lockqz.com/privacy.html      301
+/dashboard        https://professor.lockqz.com/             301
+/dashboard.html   https://professor.lockqz.com/             301
+/download/*       https://lockqz.com/download/:splat   302
+/install.sh       https://lockqz.com/install.sh        302
+/install.ps1      https://lockqz.com/install.ps1       302
+/uninstall.sh     https://lockqz.com/uninstall.sh      302
+/uninstall.ps1    https://lockqz.com/uninstall.ps1     302
+/pay              https://lockqz.com/pay               302
+/pay.html         https://lockqz.com/pay.html          302
 R
 cat > legacy_prof/_redirects <<R
-/                 https://prof.lockqz.pages.dev/             301
-/index.html       https://prof.lockqz.pages.dev/             301
-/dashboard        https://prof.lockqz.pages.dev/             301
-/dashboard.html   https://prof.lockqz.pages.dev/             301
+/                 https://professor.lockqz.com/             301
+/index.html       https://professor.lockqz.com/             301
+/dashboard        https://professor.lockqz.com/             301
+/dashboard.html   https://professor.lockqz.com/             301
 R
