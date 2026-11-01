@@ -374,7 +374,8 @@ async function sendCode(env, to, code, web = false) {
   const open = typeof env.MAIL_OPEN === "function" ? env.MAIL_OPEN   // tests: fake SMTP server
     : async () => (await import("cloudflare:sockets")).connect({ hostname: env.MAIL_HOST || "smtp.gmail.com", port: Number(env.MAIL_PORT || 465) },
                                 { secureTransport: "on", allowHalfOpen: false });
-  return smtpSend(open, { user: env.MAIL_USER, pass: String(env.MAIL_APP_PASSWORD).replace(/\s+/g, ""), to, subject, text, html });
+  return smtpSend(open, { user: env.MAIL_USER, pass: String(env.MAIL_APP_PASSWORD).replace(/\s+/g, ""), to, subject, text, html,
+    replyTo: env.MAIL_REPLY_TO || null, fromAddr: env.MAIL_FROM_ADDR || null });
 }
 
 // opts: { html, replyTo }. `to` may be a list (one SMTP session, one copy per recipient).

@@ -206,6 +206,13 @@ async function suite(label, oldSchema) {
   check("EHLO, AUTH PLAIN with the app password (spaces removed), MAIL/RCPT", said[0].startsWith("EHLO") && said[1] === "AUTH PLAIN " + Buffer.from("\0lockqz@gmail.com\0abcdefghijklmnop").toString("base64") && said[2] === "MAIL FROM:<lockqz@gmail.com>" && said[3] === "RCPT TO:<al@usc.edu>", JSON.stringify(said.slice(0, 4)));
   const body = said.find(x => x.startsWith("MSG:")) || "";
   check("message carries From/To/Subject and the code", /From: LOCKqz <lockqz@gmail.com>/.test(body) && /To: <al@usc.edu>/.test(body) && /Subject: Your LOCKqz code: \d{6}/.test(body), body.slice(0, 200));
+  // With a Gmail "Send mail as" alias: From = the alias, Reply-To = support; the login (MAIL FROM) is unchanged.
+  said.length = 0;
+  const aliasEnv = { ...smtpEnv, MAIL_OPEN: fakeSmtp(OK), MAIL_FROM_ADDR: "support@lockqz.com", MAIL_REPLY_TO: "support@lockqz.com" };
+  const D7 = "mac-7777-0000-1111", K7 = await reg(aliasEnv, D7);
+  r = await call(aliasEnv, "/verify", { op: "send", email: "bo@usc.edu" }, { key: K7, device: D7 });
+  const body2 = said.find(x => x.startsWith("MSG:")) || "";
+  check("code email with the alias: From LOCKqz <support@lockqz.com>, Reply-To support@lockqz.com, login unchanged", r.data?.sent === true && /From: LOCKqz <support@lockqz.com>/.test(body2) && /Reply-To: <support@lockqz.com>/.test(body2) && said.includes("MAIL FROM:<lockqz@gmail.com>"), body2.slice(0, 300));
   const badEnv = { ...smtpEnv, MAIL_OPEN: fakeSmtp(["220 hi\r\n", "250 ok\r\n", "535 5.7.8 Username and Password not accepted\r\n"]) };
   const D6 = "mac-6666-0000-1111", K6 = await reg(badEnv, D6);
   r = await call(badEnv, "/verify", { op: "send", email: "al@usc.edu" }, { key: K6, device: D6 });
