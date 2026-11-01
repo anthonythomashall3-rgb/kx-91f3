@@ -208,7 +208,7 @@ try {
   check("forged token: 401", r.status === 401);
   r = await call("/account", { op: "send", email: "gus@usc.edu" });
   const code = mails.at(-1)?.code;
-  check("code emailed (sign-in wording)", r.data?.sent === true && /^\d{6}$/.test(code || "") && /lockqz\.pages\.dev/.test(mails.at(-1).text), JSON.stringify(r.data));
+  check("code emailed (sign-in wording)", r.data?.sent === true && /^\d{6}$/.test(code || "") && /lockqz\.com/.test(mails.at(-1).text), JSON.stringify(r.data));
   r = await call("/account", { op: "code", email: "gus@usc.edu", code: code === "000000" ? "111111" : "000000" });
   check("wrong code refused, tries left", r.status === 400 && r.data?.error === "wrong_code" && r.data.tries_left === 4, JSON.stringify(r.data));
   for (let i = 0; i < 4; i++) r = await call("/account", { op: "code", email: "gus@usc.edu", code: code === "000000" ? "111111" : "000000" });

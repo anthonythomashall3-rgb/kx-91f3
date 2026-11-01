@@ -184,7 +184,7 @@ check("ACCT 410 gone from the dashboard", !r.D.some(x => x.ou === "1004"), JSON.
 console.log("P2 a class switch and a Send email button on EVERY class, on both screens");
 check("panel: a class switch on every class", r.P.every(x => x.ou), JSON.stringify(r.P));
 check("panel: Send email on every class", r.P.every(x => x.mail), JSON.stringify(r.P.map(x => [x.name, x.mail])));
-check("panel email carries the class's students and the install link", /bcc=.*al%40usc\.edu/.test(r.P.find(x => x.ou === "1001").mailHref) && /lockqz\.pages\.dev/.test(decodeURIComponent(r.P.find(x => x.ou === "1001").mailHref)));
+check("panel email carries the class's students and the install link", /bcc=.*al%40usc\.edu/.test(r.P.find(x => x.ou === "1001").mailHref) && /lockqz\.com/.test(decodeURIComponent(r.P.find(x => x.ou === "1001").mailHref)));
 check("panel email never includes the professor", !/prof%40usc\.edu/.test(r.P.map(x => x.mailHref).join("")));
 let cards = homeCards(D);
 check("dashboard home: one card per class", cards.length === 3, cards.length);
