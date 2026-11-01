@@ -34,6 +34,7 @@ Connects a professor's Brightspace courses to LOCKqz so their exams are protecte
 - storage: Saves the professor's LOCKqz connection key and the time of the next protected exam on this computer.
 - alarms: Checks once a minute whether a protected exam is about to start, so LOCKqz can open its Brightspace tab for that exam.
 - notifications: Tells the professor when they need to sign in to Brightspace before an exam.
+- power: Keeps the professor's computer from going to sleep only while one of their protected exams is running, so students can open and finish the exam; released as soon as the exam ends.
 - Host permission brightspace.usc.edu / usc.brightspace.com: Reads the professor's own courses, class lists and quizzes from Brightspace and sets each protected exam's password, using the professor's own Brightspace sign-in.
 - Host permission professor.lockqz.com / lockqz.com (and the older prof.lockqz.pages.dev / lockqz.pages.dev addresses): Connects to the professor's LOCKqz dashboard and the LOCKqz service.
 
