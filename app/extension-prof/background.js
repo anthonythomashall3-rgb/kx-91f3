@@ -8,12 +8,14 @@
 const api = globalThis.browser ?? chrome;
 const BS_HOME = "https://brightspace.usc.edu/d2l/home";
 const BS_URLS = ["https://brightspace.usc.edu/d2l/*", "https://usc.brightspace.com/d2l/*"];
-const DASH_URLS = ["https://professor.lockqz.com/*", "https://prof.lockqz.pages.dev/*"];
+const DASH_URLS = ["https://professor.lockqz.com/*"];
 const MIN = 60000;
 const QUIET_MS = 15 * MIN, BG_MS = 6 * 60 * MIN, LEAD_MS = 65 * MIN, AFTER_MS = 10 * MIN;
 const NO_ANSWER_MS = 3 * MIN, TMP_MAX_MS = 4 * MIN, NOTE_EVERY_MS = 60 * MIN;
-const BASES = ["https://professor.lockqz.com", "https://lockqz.com", "https://prof.lockqz.pages.dev", "https://lockqz.pages.dev"];
-const API = "https://lockqz.pages.dev/api";   // one API (main site secrets)
+const BASES = ["https://professor.lockqz.com", "https://lockqz.com"];
+const OLD = { "https://prof.lockqz.pages.dev": "https://professor.lockqz.com", "https://lockqz.pages.dev": "https://lockqz.com" };   // keys saved by 1.0.4 and older
+const norm = b => OLD[b] || b;
+const API = "https://lockqz.com/api";   // one API (main site secrets)
 const SEEN_MS = 4 * 60 * MIN;   // check in with LOCKqz this often while the browser is open (T-70 email stays quiet)
 const get = k => api.storage.local.get(k);
 const set = o => api.storage.local.set(o);
@@ -131,9 +133,9 @@ async function handle(msg, sender) {
   if (!msg || typeof msg !== "object") return;
   const now = Date.now(), tab = sender && sender.tab ? sender.tab.id : null;
   if (msg.t === "key") {
-    if (typeof msg.key !== "string" || !/^lqs_[0-9a-f]{40}$/.test(msg.key) || !BASES.includes(msg.base)) return;
+    if (typeof msg.key !== "string" || !/^lqs_[0-9a-f]{40}$/.test(msg.key) || !BASES.includes(norm(msg.base))) return;
     const st = await get(["key", "lastSync"]);
-    await set({ key: msg.key, base: msg.base });
+    await set({ key: msg.key, base: norm(msg.base) });
     if (st.key !== msg.key || !st.lastSync) await syncNow(false);   // first connect (or a new key): sync now
     return { ok: true };
   }
@@ -148,9 +150,9 @@ async function handle(msg, sender) {
     const first = role === "browse" && !st.welcomed;
     if (first) await set({ welcomed: now });
     const extra = first ? { first: true, synced: !!st.lastSync } : {};
-    if (role === "browse" && now - Number(st.lastRun || 0) < QUIET_MS) return { key: st.key, base: st.base, role, run: false, ...extra };
+    if (role === "browse" && now - Number(st.lastRun || 0) < QUIET_MS) return { key: st.key, base: norm(st.base), role, run: false, ...extra };
     await set({ lastRun: now });
-    return { key: st.key, base: st.base, role, run: true, force: role === "tmp", ...extra };
+    return { key: st.key, base: norm(st.base), role, run: true, force: role === "tmp", ...extra };
   }
   if (msg.t === "from-sync") {
     const m = msg.m || {};

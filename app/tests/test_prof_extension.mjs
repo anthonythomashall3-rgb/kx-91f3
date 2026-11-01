@@ -122,10 +122,10 @@ const server = createServer({ key: readFileSync(join(tmp, "k.pem")), cert: readF
   const body = Buffer.concat(chunks), host = String(req.headers.host || "").split(":")[0], u = new URL("https://" + host + req.url);
   const send = (status, type, b, headers = {}) => { res.writeHead(status, { "Content-Type": type, ...headers }); res.end(b); };
   try {
-    if (host === "lockqz.pages.dev" && u.pathname.startsWith("/api/")) {
+    if ((host === "lockqz.pages.dev" || host === "lockqz.com") && u.pathname.startsWith("/api/")) {
       lqCalls.push(u.pathname.slice(4));
       const h = { ...req.headers }; delete h["content-length"]; delete h.host;
-      const r = await onRequest({ request: new Request(u.href, { method: req.method, headers: h, body: ["GET", "HEAD", "OPTIONS"].includes(req.method) ? undefined : body }), env });
+      const r = await onRequest({ request: new Request(u.href.replace("://lockqz.com/", "://lockqz.pages.dev/"), { method: req.method, headers: h, body: ["GET", "HEAD", "OPTIONS"].includes(req.method) ? undefined : body }), env });
       const hs = Object.fromEntries(r.headers); return send(r.status, hs["content-type"] || "application/json", Buffer.from(await r.arrayBuffer()), hs);
     }
     if ((host === "prof.lockqz.pages.dev" || host === "professor.lockqz.com") && (u.pathname === "/dashboard" || u.pathname === "/")) return send(200, "text/html", DASH_HTML);
@@ -141,8 +141,8 @@ await new Promise(r => server.listen(0, "127.0.0.1", r));
 const PORT = server.address().port;
 const context = await chromium.launchPersistentContext(join(tmp, "profile"), { channel: "chromium", headless: true, ignoreHTTPSErrors: true,
   args: [`--disable-extensions-except=${EXTDIR}`, `--load-extension=${EXTDIR}`, "--ignore-certificate-errors", "--no-proxy-server",
-    `--host-resolver-rules=MAP brightspace.usc.edu 127.0.0.1:${PORT}, MAP prof.lockqz.pages.dev 127.0.0.1:${PORT}, MAP lockqz.pages.dev 127.0.0.1:${PORT}, MAP professor.lockqz.com 127.0.0.1:${PORT}, MAP * ~NOTFOUND`] });
-await context.addInitScript(t => { if (location.host === "prof.lockqz.pages.dev") { localStorage.setItem("lockqz_token", t); localStorage.setItem("lockqz_tour_prof@usc.edu", "1"); localStorage.setItem("lockqz_welcome_prof@usc.edu", "1"); } }, PROF);
+    `--host-resolver-rules=MAP brightspace.usc.edu 127.0.0.1:${PORT}, MAP prof.lockqz.pages.dev 127.0.0.1:${PORT}, MAP lockqz.pages.dev 127.0.0.1:${PORT}, MAP professor.lockqz.com 127.0.0.1:${PORT}, MAP lockqz.com 127.0.0.1:${PORT}, MAP * ~NOTFOUND`] });
+await context.addInitScript(t => { if (location.host === "prof.lockqz.pages.dev" || location.host === "professor.lockqz.com") { localStorage.setItem("lockqz_token", t); localStorage.setItem("lockqz_tour_prof@usc.edu", "1"); localStorage.setItem("lockqz_welcome_prof@usc.edu", "1"); } }, PROF);
 let sw = context.serviceWorkers()[0] || await context.waitForEvent("serviceworker", { timeout: 15000 });
 const syncs = () => lqCalls.filter(c => c === "/sync").length;
 const waitFor = async (fn, ms = 20000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return true; await new Promise(r => setTimeout(r, 250)); } return false; };
@@ -153,7 +153,7 @@ const store = k => sw.evaluate(k => chrome.storage.local.get(k), k);
 check("first install opened the LOCKqz dashboard (professor.lockqz.com)", await waitFor(() => context.pages().some(p => p.url().startsWith("https://professor.lockqz.com/")), 15000));
 for (const p of context.pages()) if (p.url().startsWith("https://professor.lockqz.com/")) await p.close();
 const dash = await context.newPage();
-await dash.goto("https://prof.lockqz.pages.dev/dashboard");
+await dash.goto("https://professor.lockqz.com/dashboard");
 const errors = []; dash.on("pageerror", e => errors.push(e.message));
 const status = () => dash.evaluate(() => [...document.querySelectorAll(".syncst")].map(e => e.textContent).join(" | "));
 

@@ -107,7 +107,7 @@ const window = { opener: DASHWIN, addEventListener: (t, f) => { if (t === "messa
 const dashSays = (data, origin = "https://lockqz.test", source = DASHWIN) => LISTEN.forEach(f => f({ origin, data, source }));
 const ctx = { window, document, location: { pathname: "/d2l/home/98765", host: "brightspace.usc.edu" },
   localStorage: { getItem: k => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: k => store.delete(k) },
-  fetch: (url, opt) => { if (String(url).startsWith(API)) { lqCalls.push(String(url).slice(API.length).split("?")[0]); return onRequest({ request: new Request(url, opt), env }); } return brightspace(url, opt); },
+  fetch: (url, opt) => { url = String(url).replace("https://lockqz.com/api", API); if (String(url).startsWith(API)) { lqCalls.push(String(url).slice(API.length).split("?")[0]); return onRequest({ request: new Request(url, opt), env }); } return brightspace(url, opt); },
   setInterval: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearInterval: i => { if (timers[i - 1]) timers[i - 1].fn = null; },
   URL, Date: FDate, JSON, Promise, Object, Array, String, Number, Math, RegExp, Error, encodeURIComponent, console, setTimeout, confirm: () => true };
 vm.createContext(ctx);

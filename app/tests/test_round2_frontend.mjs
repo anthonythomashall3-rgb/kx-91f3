@@ -151,7 +151,7 @@ function syncTab(w, { ls = { "XSRF.Token": "csrf" }, ahead = 0 } = {}) {
   const document = { getElementById: () => boxes.find(b => b.appended && !b.removed) || null, createElement: newBox,
     body: { appendChild(b) { b.appended = true; } }, currentScript: { src: `${ORIGIN}/sync.js?k=${w.KEY}` } };
   const ctx = { document, location: { pathname: `/d2l/home/${OU}`, host: HOST, hostname: HOST }, localStorage: { getItem: k => (k in ls ? ls[k] : null) },
-    fetch: (url, opt) => String(url).startsWith(API) ? w.fetchApi(url, opt) : w.brightspace(url, opt),
+    fetch: (url, opt) => (url = String(url).replace("https://lockqz.com/api", API), 0) || String(url).startsWith(API) ? w.fetchApi(url, opt) : w.brightspace(url, opt),
     setInterval: fn => { timers.push(fn); return timers.length; }, clearInterval: i => { timers[i - 1] = null; },
     confirm: () => true, URL, Request, Response, console, setTimeout };
   if (ahead) ctx.Date = class extends Date { constructor(...a) { if (a.length) super(...a); else super(Date.now() + ahead); } static now() { return Date.now() + ahead; } };   // this tab's clock runs ahead

@@ -124,7 +124,7 @@ console.log("Z2 a password changed by hand in Brightspace comes back on the next
   const store = new Map();
   const ctx = { window: { opener: null, addEventListener() {}, open: () => null }, document, location: { pathname: "/d2l/home/98765", host: "brightspace.usc.edu" },
     localStorage: { getItem: k => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: k => store.delete(k) },
-    fetch: (url, opt) => { if (String(url).startsWith(API)) { lqCalls.push(String(url).slice(API.length).split("?")[0]); return onRequest({ request: new Request(url, opt), env }); } return brightspace(url, opt); },
+    fetch: (url, opt) => { url = String(url).replace("https://lockqz.com/api", API); if (String(url).startsWith(API)) { lqCalls.push(String(url).slice(API.length).split("?")[0]); return onRequest({ request: new Request(url, opt), env }); } return brightspace(url, opt); },
     setInterval: () => 1, clearInterval() {}, URL, JSON, Promise, Object, Array, String, Number, Math, RegExp, Error, Date, encodeURIComponent, console, setTimeout, confirm: () => true };
   vm.createContext(ctx);
   let pending = [];

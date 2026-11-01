@@ -1,4 +1,4 @@
-// LOCKqz professor extension, on the LOCKqz dashboard (professor.lockqz.com; prof.lockqz.pages.dev still works).
+// LOCKqz professor extension, on the LOCKqz dashboard (professor.lockqz.com).
 // Marks the page so the dashboard knows the extension is here, takes the professor's Sync key from the
 // dashboard, passes "Sync now" to the extension, and relays sync status back. Same-window messages only.
 (() => {

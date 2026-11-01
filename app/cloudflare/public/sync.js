@@ -49,7 +49,7 @@
   }
   if (AUTO && !open) { if (!FORCE) return; AUTO = false; FORCE = false; }   // asked from the dashboard, no panel: a normal Sync
   var KEY = SRC ? new URL(SRC).searchParams.get("k") : "";
-  var API = SRC ? (/(\.pages\.dev|(^|\.)lockqz\.com)$/.test(new URL(ORIGIN).hostname) ? "https://lockqz.pages.dev/api" : ORIGIN + "/api") : "";   // one API (main site secrets)
+  var API = SRC ? (/(\.pages\.dev|(^|\.)lockqz\.com)$/.test(new URL(ORIGIN).hostname) ? "https://lockqz.com/api" : ORIGIN + "/api") : "";   // one API (main site secrets)
   var DASH = SRC ? ORIGIN + "/dashboard" : "";
 
   var box = document.createElement("div");

@@ -101,7 +101,7 @@ function makePage(src) {
   const document = { getElementById: () => (open ? box : null), createElement: () => box, body: { appendChild() { open = true; } },
                      currentScript: { src } };
   const ctx = { document, location: { pathname: "/d2l/home/98765" }, localStorage: { getItem: () => "csrf" },
-    fetch: (url, opt) => String(url).startsWith(API) ? onRequest({ request: new Request(url, opt), env }) : brightspace(url, opt),
+    fetch: (url, opt) => (url = String(url).replace("https://lockqz.com/api", API), 0) || String(url).startsWith(API) ? onRequest({ request: new Request(url, opt), env }) : brightspace(url, opt),
     setInterval: (fn) => { timers.push(fn); return timers.length; }, clearInterval: (i) => { timers[i - 1] = null; },
     URL, Date, JSON, Promise, Object, Array, String, Number, Math, RegExp, Error, encodeURIComponent, console, setTimeout };
   vm.createContext(ctx);

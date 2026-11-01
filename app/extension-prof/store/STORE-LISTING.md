@@ -36,7 +36,7 @@ Connects a professor's Brightspace courses to LOCKqz so their exams are protecte
 - notifications: Tells the professor when they need to sign in to Brightspace before an exam.
 - power: Keeps the professor's computer from going to sleep only while one of their protected exams is running, so students can open and finish the exam; released as soon as the exam ends.
 - Host permission brightspace.usc.edu / usc.brightspace.com: Reads the professor's own courses, class lists and quizzes from Brightspace and sets each protected exam's password, using the professor's own Brightspace sign-in.
-- Host permission professor.lockqz.com / lockqz.com (and the older prof.lockqz.pages.dev / lockqz.pages.dev addresses): Connects to the professor's LOCKqz dashboard and the LOCKqz service.
+- Host permission professor.lockqz.com / lockqz.com: Connects to the professor's LOCKqz dashboard and the LOCKqz service.
 
 ## Remote code
 No, I am not using remote code. (All code is inside the package.)

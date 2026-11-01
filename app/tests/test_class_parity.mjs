@@ -109,7 +109,7 @@ function syncTab() {
     body: { appendChild(b) { b.appended = true; }, contains: b => b.appended && !b.removed }, currentScript: { src: `${ORIGIN}/sync.js?k=${KEY}` } };
   const window = { opener: OPENER, addEventListener() {}, open: () => null };
   const ctx = { window, document, location: { pathname: "/d2l/home/1001", host: "usc.brightspace.com" }, localStorage: { getItem: () => null, setItem() {} },
-    fetch: (url, opt) => String(url).startsWith(API) ? fetchApi(url, opt) : brightspace(url, opt),
+    fetch: (url, opt) => (url = String(url).replace("https://lockqz.com/api", API), 0) || String(url).startsWith(API) ? fetchApi(url, opt) : brightspace(url, opt),
     setInterval: () => 1, clearInterval() {}, confirm: () => true, alert: m => { t.alerts.push(m); }, URL, Request, Response, console, setTimeout };
   vm.createContext(ctx);
   const t = { alerts: [],

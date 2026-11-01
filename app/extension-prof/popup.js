@@ -2,13 +2,14 @@
 // /ext-status (counts only, through the Sync key) and offers Open dashboard / Sync now.
 (() => {
   const api = globalThis.browser ?? chrome;
-  const BASES = ["https://professor.lockqz.com", "https://lockqz.com", "https://prof.lockqz.pages.dev", "https://lockqz.pages.dev"];
+  const BASES = ["https://professor.lockqz.com", "https://lockqz.com"];
+  const OLD = { "https://prof.lockqz.pages.dev": "https://professor.lockqz.com", "https://lockqz.pages.dev": "https://lockqz.com" };
   const $ = id => document.getElementById(id);
   const ago = t => { if (!t) return "never"; const m = Math.round((Date.now() - Number(t)) / 60000); return m < 1 ? "just now" : m < 60 ? m + " min ago" : m < 1440 ? Math.round(m / 60) + " h ago" : Math.round(m / 1440) + " d ago"; };
   const when = iso => { const t = iso ? Date.parse(iso) : NaN; return isNaN(t) ? "" : new Date(t).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); };
   const lastName = n => { const w = String(n || "").trim().split(/\s+/).filter(Boolean); return w.length ? w[w.length - 1] : ""; };
   let st = {};
-  const base = () => (BASES.includes(st.base) ? st.base : BASES[0]);
+  const base = () => { const b = OLD[st.base] || st.base; return BASES.includes(b) ? b : BASES[0]; };
   const setStatus = (t, cls) => { $("status").textContent = t; $("status").className = "st " + (cls || ""); };
   async function draw() {
     st = await api.storage.local.get(["key", "base", "lastSync", "signin", "status", "statusAt"]);
@@ -31,7 +32,7 @@
   async function fetchStatus() {
     if (!st.key || (st.statusAt && Date.now() - Number(st.statusAt) < 60000)) return;
     try {
-      const r = await fetch("https://lockqz.pages.dev/api/ext-status", { headers: { "X-LOCKqz-Sync": st.key } });
+      const r = await fetch("https://lockqz.com/api/ext-status", { headers: { "X-LOCKqz-Sync": st.key } });
       const d = await r.json(); if (r.ok && d && !d.error) { await api.storage.local.set({ status: d, statusAt: Date.now() }); await draw(); }
     } catch {}
   }

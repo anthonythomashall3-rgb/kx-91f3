@@ -1,3 +1,6 @@
+// LOCKqz lives on lockqz.com (students) and professor.lockqz.com (professors): a page opened on an old
+// *.pages.dev address moves there (same path, query and hash). Brightspace and other hosts are untouched.
+(function () { var m = { "lockqz.pages.dev": "lockqz.com", "prof.lockqz.pages.dev": "professor.lockqz.com" }, h = m[location.hostname]; if (h) location.replace("https://" + h + location.pathname + location.search + location.hash); })();
 /* LOCKqz shared look: "LOCK" black + "qz" red everywhere, the red lock loader (locks and unlocks while
    a page waits, with how long it should take), and the test-run welcome. */
 (function () {

@@ -48,9 +48,9 @@ async function ctx(opts = {}, init = null) {
   if (init) await c.addInitScript(init);
   await c.route("**/*", async route => {
     const req = route.request(), u = new URL(req.url());
-    if (u.host === "lockqz.pages.dev" && u.pathname.startsWith("/api/")) {
+    if ((u.host === "lockqz.pages.dev" || u.host === "lockqz.com") && u.pathname.startsWith("/api/")) {
       const h = { ...req.headers() }; delete h["content-length"];
-      const res = await onRequest({ request: new Request(req.url(), { method: req.method(), headers: h, body: ["GET", "HEAD", "OPTIONS"].includes(req.method()) ? undefined : req.postDataBuffer() }), env });
+      const res = await onRequest({ request: new Request(req.url().replace("://lockqz.com/", "://lockqz.pages.dev/"), { method: req.method(), headers: h, body: ["GET", "HEAD", "OPTIONS"].includes(req.method()) ? undefined : req.postDataBuffer() }), env });
       return route.fulfill({ status: res.status, headers: Object.fromEntries(res.headers), body: Buffer.from(await res.arrayBuffer()) });
     }
     if ((u.host === "lockqz.pages.dev" || u.host === "lockqz.com") && FILES[u.pathname]) return route.fulfill({ status: 200, contentType: FILES[u.pathname][1], body: readFileSync(join(PUB, FILES[u.pathname][0])) });
@@ -68,7 +68,7 @@ try {
   let pg = await c.newPage(); const errs = []; pg.on("pageerror", e => errs.push(e.message));
   await pg.goto("https://lockqz.pages.dev/");
   await pg.waitForSelector("#lqgearbtn");
-  check("install command still shown (curl ... install.sh | sudo bash)", /curl -fsSL https:\/\/lockqz\.pages\.dev\/install\.sh \| sudo bash/.test(await pg.textContent("#cmd")), await pg.textContent("#cmd"));
+  check("install command still shown (curl ... install.sh | sudo bash)", /curl -fsSL https:\/\/lockqz\.com\/install\.sh \| sudo bash/.test(await pg.textContent("#cmd")), await pg.textContent("#cmd"));
   const gb = await pg.locator("#lqgearbtn").boundingBox();
   check("gear in the top-right corner", gb && gb.x + gb.width >= 1280 - 16 - 1 && gb.x + gb.width <= 1280 - 15 && gb.y <= 16, JSON.stringify(gb));
   check("menu closed at first", await pg.locator("#lqmenu").isHidden());

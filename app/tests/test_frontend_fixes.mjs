@@ -131,7 +131,7 @@ function syncTab(w) {
   const document = { getElementById: () => boxes.find(b => b.appended && !b.removed) || null, createElement: newBox,
     body: { appendChild(b) { b.appended = true; } }, currentScript: { src: `${ORIGIN}/sync.js?k=${w.KEY}` } };
   const ctx = { document, location: { pathname: `/d2l/home/${OU}`, host: "usc.brightspace.com" }, localStorage: { getItem: () => "csrf" },
-    fetch: (url, opt) => { w.calls.push(String(url)); return w.netDown ? Promise.reject(new TypeError("Failed to fetch")) : String(url).startsWith(API) ? w.fetchApi(url, opt) : w.brightspace(url, opt); },
+    fetch: (url, opt) => { url = String(url).replace("https://lockqz.com/api", API); w.calls.push(String(url)); return w.netDown ? Promise.reject(new TypeError("Failed to fetch")) : String(url).startsWith(API) ? w.fetchApi(url, opt) : w.brightspace(url, opt); },
     setInterval: fn => { timers.push(fn); return timers.length; }, clearInterval: i => { timers[i - 1] = null; },
     confirm: m => { w.confirms.push(m); return true; }, URL, Request, Response, console, setTimeout };
   vm.createContext(ctx);

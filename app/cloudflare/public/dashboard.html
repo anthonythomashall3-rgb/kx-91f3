@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="en"><head>
+
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>LOCKqz</title>
 <style>
@@ -168,7 +169,7 @@
 <script>
 // The red lock loader from /lq.js (plain text if it did not load).
 const lqL = (m, e, o) => typeof lqLoading === "function" ? lqLoading(m, e, o) : m + "…";
-const API = /(\.pages\.dev|(^|\.)lockqz\.com)$/.test(location.hostname) ? "https://lockqz.pages.dev/api" : "/api", INSTALL = "https://lockqz.com";   // one API (main site secrets)
+const API = /(\.pages\.dev|(^|\.)lockqz\.com)$/.test(location.hostname) ? "https://lockqz.com/api" : "/api", INSTALL = "https://lockqz.com";   // one API (main site secrets)
 // ---- Professor extension store links (Chrome Web Store, live 29 Oct 2026; Edge installs from it too). A browser
 // with no link (Firefox) gets the packaged .zip with a one-line load-unpacked fallback. ----
 const EXT_STORE = { CHROME: "https://chromewebstore.google.com/detail/bidlfpkdggdpmfbfkpjcnbjhfkfligkk", EDGE: "https://chromewebstore.google.com/detail/bidlfpkdggdpmfbfkpjcnbjhfkfligkk", FIREFOX: "" };   // Chrome Web Store listing (Edge installs from it too); Firefox still uses the zip

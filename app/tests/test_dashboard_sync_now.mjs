@@ -81,18 +81,18 @@ await api("/sync", { courses: [{ ou: String(OU), name: "ECON 203", role: "Instru
 // ---- the browser ----
 const browser = await chromium.launch();
 const context = await browser.newContext();
-await context.addInitScript(t => { if (location.host === "prof.lockqz.pages.dev") localStorage.setItem("lockqz_token", t); }, PROF);
+await context.addInitScript(t => { if (location.host === "prof.lockqz.pages.dev" || location.host === "professor.lockqz.com") localStorage.setItem("lockqz_token", t); }, PROF);
 await context.route("**/*", async route => {
   const req = route.request(), u = new URL(req.url());
   try {
-    if (u.host === "lockqz.pages.dev" && u.pathname.startsWith("/api/")) {
+    if ((u.host === "lockqz.pages.dev" || u.host === "lockqz.com") && u.pathname.startsWith("/api/")) {
       lqCalls.push(u.pathname.slice(4));
       const h = { ...req.headers() }; delete h["content-length"];
-      const res = await onRequest({ request: new Request(req.url(), { method: req.method(), headers: h, body: ["GET", "HEAD", "OPTIONS"].includes(req.method()) ? undefined : req.postDataBuffer() }), env });
+      const res = await onRequest({ request: new Request(req.url().replace("://lockqz.com/", "://lockqz.pages.dev/"), { method: req.method(), headers: h, body: ["GET", "HEAD", "OPTIONS"].includes(req.method()) ? undefined : req.postDataBuffer() }), env });
       return route.fulfill({ status: res.status, headers: Object.fromEntries(res.headers), body: Buffer.from(await res.arrayBuffer()) });
     }
-    if (u.host === "prof.lockqz.pages.dev" && u.pathname === "/dashboard") return route.fulfill({ status: 200, contentType: "text/html", body: DASH_HTML });
-    if (u.host === "prof.lockqz.pages.dev" && u.pathname === "/sync.js") return route.fulfill({ status: 200, contentType: "application/javascript", body: SYNC_JS });
+    if ((u.host === "prof.lockqz.pages.dev" || u.host === "professor.lockqz.com") && u.pathname === "/dashboard") return route.fulfill({ status: 200, contentType: "text/html", body: DASH_HTML });
+    if ((u.host === "prof.lockqz.pages.dev" || u.host === "professor.lockqz.com") && u.pathname === "/sync.js") return route.fulfill({ status: 200, contentType: "application/javascript", body: SYNC_JS });
     if (u.host === "brightspace.usc.edu" && u.pathname.startsWith("/d2l/api/")) return route.fulfill(brightspace(u, req.method(), req.postData()));
     if (u.host === "brightspace.usc.edu" && u.pathname === "/d2l/lp/auth/xsrf-tokens") return route.fulfill(brightspace(u, req.method()));
     if (u.host === "brightspace.usc.edu") return route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>Homepage - USC Brightspace</title><h1>Brightspace</h1>" });
