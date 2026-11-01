@@ -112,7 +112,7 @@ try {
   console.log("B5 your computers: listed read-only (no remove anywhere)");
   check("2 computers listed (Mac, Windows) with last seen", await pg.locator(".lqm-devs li").count() === 2 && /Mac[\s\S]*last seen[\s\S]*Windows/.test(await pg.textContent(".lqm-devs")));
   check("no Remove control anywhere in the menu", !(await pg.isVisible("text=Remove")), await pg.textContent("#lqm-acc"));
-  check("tells the student to email support to free a computer", /email lockqz\.app@gmail\.com/.test(await pg.textContent("#lqm-acc")));
+  check("tells the student to email support to free a computer", /email support@lockqz\.com/.test(await pg.textContent("#lqm-acc")));
   check("nothing revoked", sqlite.prepare("SELECT COUNT(*) AS n FROM devices WHERE COALESCE(revoked,0)=1").get().n === 0);
 
   console.log("B6 Contact support opens the support page (signed-in email filled in)");
