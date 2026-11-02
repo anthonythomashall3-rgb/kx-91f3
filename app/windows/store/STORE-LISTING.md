@@ -8,7 +8,7 @@
 - Category: Education
 - Privacy policy URL: https://lockqz.com/privacy
 - Website: https://lockqz.com
-- Support contact: athall@usc.edu
+- Support contact: support@lockqz.com
 
 ## Age ratings
 Answer the questionnaire: no violence, no user-generated content, no purchases. It collects the
