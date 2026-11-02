@@ -591,7 +591,9 @@ export async function onRequest(context) {
     const h = new Headers(request.headers); h.delete("host");
     const init = { method: request.method, headers: h, redirect: "manual" };
     if (request.method !== "GET" && request.method !== "HEAD") init.body = await request.arrayBuffer();
-    try { return await fetch("https://" + MAIN + url.pathname + url.search, init); }
+    try { const res = await fetch("https://" + MAIN + url.pathname + url.search, init);
+      // Cloudflare shows its own error page for a forwarded 502/504; the JSON answer must reach the page.
+      return res.status === 502 || res.status === 504 ? new Response(res.body, { status: 503, headers: res.headers }) : res; }
     catch (e) { return json({ error: "LOCKqz is not reachable right now - try again in a minute" }, 502); }
   }
   const raw = request.method === "POST" ? new Uint8Array(await request.arrayBuffer()) : new Uint8Array(0);
@@ -982,11 +984,17 @@ export async function onRequest(context) {
   // Remembered as an events row (device_id "code:<code>", event "stripe_sess"): 1 read per checkout, 1 write
   // per new session (D1 Free), purged after 2 days.
   const STRIPE_REUSE_MS = 30 * 60000;
+  // The Stripe API version LOCKqz's calls are written for (newer versions refuse payment_method_types on
+  // Checkout Sessions; 2 Nov 2026). STRIPE_API_VERSION overrides it.
+  const STRIPE_VERSION = String(env.STRIPE_API_VERSION || "2024-06-20");
   const stripeApi = async (path, form, extra = {}) => {
     const r = await fetch("https://api.stripe.com/v1/" + path, form ? { method: "POST", body: form,
-      headers: { Authorization: "Bearer " + env.STRIPE_SECRET_KEY, "Content-Type": "application/x-www-form-urlencoded", ...extra } }
-      : { headers: { Authorization: "Bearer " + env.STRIPE_SECRET_KEY } });
-    return { ok: r.ok, d: await r.json().catch(() => ({})) };
+      headers: { Authorization: "Bearer " + env.STRIPE_SECRET_KEY, "Stripe-Version": STRIPE_VERSION, "Content-Type": "application/x-www-form-urlencoded", ...extra } }
+      : { headers: { Authorization: "Bearer " + env.STRIPE_SECRET_KEY, "Stripe-Version": STRIPE_VERSION } });
+    const d = await r.json().catch(() => ({}));
+    // A refused Stripe call is logged (Stripe's message only, never a key) so the reason is findable.
+    if (!r.ok && form) db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("stripe", null, null, "stripe_error", (path.split("/")[0] + ": " + String(d?.error?.message || r.status)).slice(0, 300), now()).run().catch(() => {});
+    return { ok: r.ok, d };
   };
   const BUSY_PAYING = { error: "A card payment for this code is already being processed. Access turns on within a minute.", processing: true };
   async function stripeCheckout(args) {
@@ -2327,7 +2335,7 @@ export async function onRequest(context) {
       if (await studentPaid(email)) return json({ error:"already paid" }, 409);
       const st = await studentStatus(email), due = Math.round(STUDENT_FEE * 100) - Math.round(st.received * 100);
       const r = await stripeCheckout({ kind: "student", method, code, email, term: st.term, dueC: due, back: await payLink(email) });
-      return json(r, r.url ? 200 : r.processing ? 409 : 502);
+      return json(r, r.url ? 200 : r.processing ? 409 : 503);
     }
     // Stripe's webhook (signed). Paid checkouts are recorded like any other payment (txn = the
     // PaymentIntent, so the card "completed" and the bank "async succeeded" events count once);
@@ -2651,7 +2659,7 @@ export async function onRequest(context) {
       if (dueC <= 0) return json({ error:"already paid" }, 409);
       const back = /^https:\/\/([a-z0-9-]+\.)*lockqz\.(pages\.dev|com)\/[^\s]*$/i.test(String(body.back||"")) ? String(body.back) : DASH_URL + "/";
       const r = await stripeCheckout({ kind: "professor", method: body.method === "bank" && stripeBank() ? "bank" : "card", code: memo, email: me.email, term, dueC, back });
-      return json(r, r.url ? 200 : r.processing ? 409 : 502);
+      return json(r, r.url ? 200 : r.processing ? 409 : 503);
     }
     if (p === "/quiz" && request.method === "POST") {
       const { qi, ou } = ids(String(body.url||""));

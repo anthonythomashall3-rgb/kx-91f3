@@ -87,7 +87,7 @@ const OFF = base, ON = { ...base, STRIPE_SECRET_KEY: "sk_test_x", STRIPE_WEBHOOK
 const sessions = []; const realFetch = globalThis.fetch;
 globalThis.fetch = async (u, init) => {
   if (String(u).startsWith("https://api.stripe.com/v1/checkout/sessions")) {
-    const f = new URLSearchParams(String(init.body)); sessions.push({ auth: init.headers.Authorization, f });
+    const f = new URLSearchParams(String(init.body)); sessions.push({ auth: init.headers.Authorization, ver: init.headers["Stripe-Version"], f });
     return new Response(JSON.stringify({ id: "cs_" + sessions.length, url: "https://checkout.stripe.com/c/pay/cs_" + sessions.length }), { status: 200 });
   }
   return realFetch(u, init);
@@ -118,6 +118,7 @@ console.log("S3 Checkout Session: amount, method, memo code set by the server");
 r = await call(ON, "/pay/stripe", { email: "al@usc.edu", method: "card" });
 let s = sessions.at(-1).f;
 check("returns Stripe URL", r.status === 200 && /^https:\/\/checkout\.stripe\.com\//.test(r.data?.url||""), JSON.stringify(r.data));
+check("Stripe API version pinned (2024-06-20: Checkout still takes payment_method_types)", sessions.at(-1)?.ver === "2024-06-20", sessions.at(-1)?.ver);
 check("card, $200.00, usd, code in metadata", s.get("payment_method_types[0]") === "card" && s.get("line_items[0][price_data][unit_amount]") === "20000" && s.get("line_items[0][price_data][currency]") === "usd" && s.get("metadata[code]") === AL && s.get("customer_email") === "al@usc.edu", s.toString());
 check("secret key sent as Bearer", sessions.at(-1).auth === "Bearer sk_test_x");
 check("success url returns to pay page", /^https:\/\/lockqz\.com\/pay\?email=al%40usc\.edu&t=[0-9a-f]{32}&stripe=card$/.test(s.get("success_url") || ""));

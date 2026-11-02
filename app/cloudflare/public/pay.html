@@ -214,7 +214,7 @@ async function stripe(email, method, btn){
   $("err").hidden = true; const b = btn || $(method === "card" ? "cgo" : "ach"), t = b.textContent; b.disabled = true; b.innerHTML = '<span class="spin"></span>' + t;
   let d; try { d = await (await fetch(API + "/pay/stripe", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ email, method, t: TOK }) })).json(); } catch { d = { error:"No connection. Try again." }; }
   if (d.url) { location.href = d.url; return; }
-  b.disabled = false; b.textContent = t; $("err").textContent = d.error || "Try again."; $("err").hidden = false;
+  b.disabled = false; b.textContent = t; $("err").textContent = d.error || "Try again."; $("err").hidden = false; try { $("err").scrollIntoView({ block: "center", behavior: "smooth" }); } catch {}
 }
 function paid(){ stopPoll(); PAYING = false; who = null; $("f").hidden = true; $("pay").hidden = true; $("done").hidden = false; $("keep").hidden = false;
   if (UNTIL) { $("until").textContent = new Date(UNTIL + "T12:00:00").toLocaleDateString("en-US", { month:"long", day:"numeric", year:"numeric" }); $("untilp").hidden = false; } }
