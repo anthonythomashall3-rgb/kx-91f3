@@ -55,11 +55,11 @@ TAX_RATE = "0.25"
 TAX_LABEL = "Tax & fees"
 TAX_FROM = "2026-10-26T13:00:00Z"
 STUDENT_OTHER_PRICE = "200"
-# Whole-number totals people see (tax & fees = TAX_RATE of these).
-STUDENT_TOTAL = "240"
-# Student payment options (Zelle first, then bank transfer, then card). "1" would hide everything but card.
+# Whole-number totals people see (tax & fees = TAX_RATE of these). Students: $200 every way (Anthony, 2 Nov 2026).
+STUDENT_TOTAL = "200"
+# Student payment options (pay page order: Card, Venmo, Zelle, then bank transfer). "1" would hide everything but card.
 STUDENT_CARD_ONLY = "0"
-STUDENT_OTHER_TOTAL = "280"
+STUDENT_OTHER_TOTAL = "200"
 PROF_TOTAL = "6500"
 PROF_CARD_TOTAL = "6700"
 PROF_OTHER_PRICE = "5000"

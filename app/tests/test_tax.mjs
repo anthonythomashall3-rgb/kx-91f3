@@ -178,7 +178,10 @@ check("+$1,500 -> active", r.results[0].paid === true && (await getc(ON, "/me", 
 
 console.log("T9 pages");
 const ph = readFileSync(join(CF, "public", "pay.html"), "utf8"), dh = readFileSync(join(CF, "public", "dashboard.html"), "utf8");
-check("pay page: Zelle, then Venmo, then Card (owner 29 Oct 15:46); bank + PO after", ph.indexOf('id="zelle"') > 0 && ph.indexOf('id="zelle"') < ph.indexOf('id="venmo"') && ph.indexOf('id="venmo"') < ph.indexOf('id="card"') && ["id=\"bank\"", "id=\"po\""].every(x => ph.indexOf(x) > ph.indexOf('id="card"')));
+check("pay page: Card, then Venmo, then Zelle (owner 2 Nov); bank + PO after", ph.indexOf('id="card"') > 0 && ph.indexOf('id="card"') < ph.indexOf('id="venmo"') && ph.indexOf('id="venmo"') < ph.indexOf('id="zelle"') && ["id=\"bank\"", "id=\"po\""].every(x => ph.indexOf(x) > ph.indexOf('id="zelle"')));
+check("professor payment: Card, then Venmo, then Zelle (owner 2 Nov)", (m => !!m && m[1].indexOf('"card"') < m[1].indexOf('"venmo"') && m[1].indexOf('"venmo"') < m[1].indexOf('"zelle"'))(dh.match(/const ways = \[(.*?)\]\.filter/)));
+{ const wt = readFileSync(join(CF, "wrangler.toml"), "utf8");
+  check("students pay $200 every way (owner 2 Nov): STUDENT_TOTAL = STUDENT_OTHER_TOTAL = 200", /^STUDENT_TOTAL = "200"$/m.test(wt) && /^STUDENT_OTHER_TOTAL = "200"$/m.test(wt) && /^STUDENT_CARD_PRICE = "200"$/m.test(wt)); }
 check("pay page: one 'LOCKqz <total>' line per way, no tax / fees lines anywhere (owner 29 Oct)", /taxline/.test(ph) && /\/pay\/bank/.test(ph) && !/TAX\.label|includes \$\{TAX/.test(ph));
 { const dh = readFileSync(join(CF, "public", "dashboard.html"), "utf8");
   check("professor payment: no tax / fees lines either", !/PT\.label/.test(dh) && /function payTax\(w\)\{ return `<div class="hrow"[^`]*<span>LOCKqz<\/span><span>\$\{money\(w\.total\)\}/.test(dh)); }
