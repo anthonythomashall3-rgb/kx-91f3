@@ -369,7 +369,7 @@ async function sendCode(env, to, code, web = false) {
   const subject = `Your LOCKqz code: ${code}`;
   const text = web ? `Your LOCKqz sign-in code is ${code}\n\nType it on lockqz.com to open your account. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`
     : (isExempt(env, to) ? WELCOME + "\n\n" : "") + `Your LOCKqz code is ${code}\n\nType it into the LOCKqz window on your computer. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
-  const html = autoHtml(text);
+  const html = mailLinks(env, autoHtml(text));
   if (typeof env.MAIL_SINK === "function") return env.MAIL_SINK({ to, subject, text, html, code });   // tests
   const open = typeof env.MAIL_OPEN === "function" ? env.MAIL_OPEN   // tests: fake SMTP server
     : async () => (await import("cloudflare:sockets")).connect({ hostname: env.MAIL_HOST || "smtp.gmail.com", port: Number(env.MAIL_PORT || 465) },
@@ -437,6 +437,11 @@ const gmailOn = env => typeof env.MAIL_SINK === "function" || !!(env.MAIL_USER &
 
 // ---- Email templates (27 Oct 2026): text + HTML, the LOCKqz look (cardinal header, logo, 560px) ----
 const SITE_URL = "https://lockqz.com", DASH_URL = "https://professor.lockqz.com", BS_URL = "https://brightspace.usc.edu";
+// Links inside emails (2 Nov 2026): mail filters put mail linking to the brand-new lockqz.com in spam, so
+// emails link through the older lockqz.pages.dev addresses, which forward every page to lockqz.com.
+// MAIL_LINKS_COM = "1" (wrangler.toml) puts the lockqz.com links back once the domain has a reputation.
+const mailLinks = (env, t) => t == null || String(env.MAIL_LINKS_COM || "") === "1" ? t
+  : String(t).replace(/https:\/\/professor\.lockqz\.com/g, "https://prof.lockqz.pages.dev").replace(/https:\/\/(?:www\.)?lockqz\.com/g, "https://lockqz.pages.dev");
 const LOGO_URL = SITE_URL + "/icon-white.png";   // white lock: readable on the red email header
 // Chrome Web Store listing: filled in when it is live (until then the dashboard links the extension package).
 const EXT_STORE_URL = "https://chromewebstore.google.com/detail/bidlfpkdggdpmfbfkpjcnbjhfkfligkk";
@@ -751,6 +756,7 @@ export async function onRequest(context) {
   // -> "ses" | "gmail"; throws { budget: true } when neither channel has room, or the Gmail error.
   async function sendVia(to, subject, text, opts, cls) {
     if (!opts || !opts.html) opts = { ...(opts || {}), html: autoHtml(text, { sign: !(opts && opts.inbox) }) };   // every email branded
+    text = mailLinks(env, text); opts = { ...opts, html: mailLinks(env, opts.html) };
     const k = Array.isArray(to) ? to.length : 1;
     if (sesOn(env) && await sesRoom(k, cls)) {
       try { await sesSend(env, to, subject, text, opts); try { await sesCount(k); } catch {} return "ses"; }

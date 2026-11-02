@@ -336,7 +336,7 @@ console.log("Z9 invite email: LOCKqz sends it, with buttons");
   const m = mailsTo("newprof@usc.edu")[0];
   check("sent to the invited email", r.status === 200 && r.data.sent === "newprof@usc.edu" && !!m, JSON.stringify(r.data));
   check("subject: Your LOCKqz professor account", m && m.subject === "Your LOCKqz professor account", m && m.subject);
-  check("HTML buttons: Create your account (invite link), Add LOCKqz to Chrome (store), Open Brightspace", m && m.html && new RegExp('href="https://professor\\.lockqz\\.com/\\?invite=' + inv.data.code + '"[^>]*>Create your account<').test(m.html) && /chromewebstore\.google\.com\/detail\/bidlfpkdggdpmfbfkpjcnbjhfkfligkk"[^>]*>Add LOCKqz to Chrome</.test(m.html) && /brightspace\.usc\.edu"[^>]*>Open Brightspace</.test(m.html) && /Continue to install/.test(m.html));
+  check("HTML buttons: Create your account (invite link), Add LOCKqz to Chrome (store), Open Brightspace", m && m.html && new RegExp('href="https://prof\\.lockqz\\.pages\\.dev/\\?invite=' + inv.data.code + '"[^>]*>Create your account<').test(m.html) && /chromewebstore\.google\.com\/detail\/bidlfpkdggdpmfbfkpjcnbjhfkfligkk"[^>]*>Add LOCKqz to Chrome</.test(m.html) && /brightspace\.usc\.edu"[^>]*>Open Brightspace</.test(m.html) && /Continue to install/.test(m.html));
   check("plain-text part has every link too", m && m.text.includes("?invite=" + inv.data.code) && /chromewebstore/.test(m.text));
   check("professor can't send invites", (await api("/invite/send", { code: inv.data.code }, { "X-LOCKqz-Teacher": PROF })).status === 403);
   const anon = await api("/invite", {}, ADMIN);
@@ -366,6 +366,17 @@ console.log("Z10 invite: named greeting; fee-exempt professor is told it is free
   check("welcome after sign-up: Hi Professor Bristow + free for you", su.status === 200 && w && /Hi Professor Bristow,/.test(w.html) && /LOCKqz is free for you\./.test(w.html) && /free for you/.test(w.text), JSON.stringify(su.data));
   // render both for review
   try { const fs = await import("node:fs"); if (process.env.LQ_MAIL_OUT) { fs.writeFileSync(process.env.LQ_MAIL_OUT + "/invite.html", m.html); fs.writeFileSync(process.env.LQ_MAIL_OUT + "/welcome.html", w.html); fs.writeFileSync(process.env.LQ_MAIL_OUT + "/invite.txt", m.subject + "\n\n" + m.text); } } catch {}
+}
+console.log("Z11 email links: through lockqz.pages.dev (forwards to .com) until MAIL_LINKS_COM=1");
+{
+  const inv = await api("/invite", { email: "linkprof@usc.edu" }, ADMIN);
+  MAILS.length = 0; await api("/invite/send", { code: inv.data.code, name: "Lin Kay" }, ADMIN);
+  const m = mailsTo("linkprof@usc.edu")[0];
+  check("default: no lockqz.com link in the email (text + HTML); pages.dev links instead", m && !/https:\/\/(professor\.|www\.)?lockqz\.com/.test(m.text + m.html) && /https:\/\/prof\.lockqz\.pages\.dev\/\?invite=/.test(m.html), m && m.text.slice(0, 300));
+  const inv2 = await api("/invite", { email: "linkprof2@usc.edu" }, ADMIN);
+  MAILS.length = 0; await api("/invite/send", { code: inv2.data.code, name: "Lin Kay" }, ADMIN, { ...env, MAIL_LINKS_COM: "1" });
+  const m2 = mailsTo("linkprof2@usc.edu")[0];
+  check("MAIL_LINKS_COM=1: lockqz.com links again", m2 && /https:\/\/professor\.lockqz\.com\/\?invite=/.test(m2.html), m2 && m2.html.slice(0, 200));
 }
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
