@@ -74,8 +74,9 @@ Check "Test it now: helper says test, with seconds left" (($s.state -eq "test") 
 Check "Test it now: AI block in place" (HostsBlocked)
 Check "Test it now: VPNs, VMs and remote tools left alone (no VPN port rule)" ($null -eq (Get-NetFirewallRule -DisplayName "LOCKqz-AI-vpn-udp" -ErrorAction SilentlyContinue))
 Check "Test it now: encrypted-DNS rule in place like a quiz" ($null -ne (Get-NetFirewallRule -DisplayName "LOCKqz-AI-DoH" -ErrorAction SilentlyContinue))
-# "unlocked" is reported as the unlock starts; the hosts block goes a moment later -> wait for both.
-$s = $null; for ($i = 0; $i -lt 75; $i++) { $s = WaitState "unlocked" 1; if ($s -and $s.state -eq "unlocked" -and -not (HostsBlocked)) { break } }
+# "unlocked" is reported as the unlock starts (engine_locked stays true until the engine is done), and the hosts
+# block goes when it finishes -> wait (in real seconds) for all three.
+$s = $null; for ($i = 0; $i -lt 90; $i++) { $s = WaitState "unlocked" 1; if ($s -and $s.state -eq "unlocked" -and -not $s.engine_locked -and -not (HostsBlocked)) { break }; Start-Sleep 1 }
 $clean = (($s.state -eq "unlocked") -and -not (HostsBlocked))
 if (-not $clean) { Write-Host ("      state: " + ($s | ConvertTo-Json -Compress) + " hosts blocked: " + (HostsBlocked)); }
 Check "Test it now: ends by itself (AI back)" $clean
