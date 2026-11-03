@@ -59,14 +59,16 @@ function WaitState($want, $secs) {
   return $st
 }
 $launcher = Join-Path (Split-Path -Parent $Out) "LOCKqz.exe"
-$tp = Start-Process $launcher -ArgumentList "/test", "10" -Wait -PassThru
+# 30 s, not 10: on a slow runner the lock itself can use most of a 10 s test before the checks below run.
+$tp = Start-Process $launcher -ArgumentList "/test", "30" -Wait -PassThru
 Check "Test it now: the app starts a test lock (no account)" ($tp.ExitCode -eq 0)
-$s = Invoke-RestMethod "$B/status" -Headers $H -TimeoutSec 10
-Check "Test it now: helper says test, with seconds left" (($s.state -eq "test") -and ($null -ne $s.test_left) -and ([int]$s.test_left -le 10))
+$s = $null; for ($i = 0; $i -lt 3 -and -not $s; $i++) { try { $s = Invoke-RestMethod "$B/status" -Headers $H -TimeoutSec 15 } catch { Start-Sleep 1 } }
+Check "Test it now: helper says test, with seconds left" (($s.state -eq "test") -and ($null -ne $s.test_left) -and ([int]$s.test_left -le 30))
 Check "Test it now: AI block in place" (HostsBlocked)
 Check "Test it now: VPNs, VMs and remote tools left alone (no VPN port rule)" ($null -eq (Get-NetFirewallRule -DisplayName "LOCKqz-AI-vpn-udp" -ErrorAction SilentlyContinue))
 Check "Test it now: encrypted-DNS rule in place like a quiz" ($null -ne (Get-NetFirewallRule -DisplayName "LOCKqz-AI-DoH" -ErrorAction SilentlyContinue))
-$s = WaitState "unlocked" 45
+# "unlocked" is reported as the unlock starts; the hosts block goes a moment later -> wait for both.
+$s = $null; for ($i = 0; $i -lt 75; $i++) { $s = WaitState "unlocked" 1; if ($s -and $s.state -eq "unlocked" -and -not (HostsBlocked)) { break } }
 Check "Test it now: ends by itself (AI back)" (($s.state -eq "unlocked") -and -not (HostsBlocked))
 Check "Test it now: stop ends a running test" (((PostCode "/test" '{"secs":120}') -eq 200) -and ((PostCode "/test" '{"stop":true}') -eq 200) -and ((WaitState "unlocked" 5).state -eq "unlocked") -and -not (HostsBlocked))
 PostCode "/lock" '{"quiz_id":"ci-store-quiz","student":"CI"}' | Out-Null
