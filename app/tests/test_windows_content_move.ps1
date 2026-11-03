@@ -111,7 +111,10 @@ foreach ($b in $browsers) {
   # 1) A Content page that is NOT a quiz: never moved.
   Set-Content -Path $hits -Value ""; Remove-Item "$Out\agent.log" -ErrorAction SilentlyContinue; $script:Moved = @{}
   Start-Process -FilePath $b.Exe -ArgumentList ($common + @($nw, "`"$contentFile`""))
-  for ($i = 0; $i -lt 12; $i++) { Start-Sleep -Seconds 1; [void](Get-BrowserWindows) }
+  # Wait for the page itself (a cold first browser start on a slow runner can take well over 12 s), then
+  # a few more seconds so a wrong move of this non-quiz page would have time to show up.
+  for ($i = 0; $i -lt 30; $i++) { Start-Sleep -Seconds 1; [void](Get-BrowserWindows); if ((Get-Content $hits -Raw) -match 'document /d2l/le/content/123/fullscreen/457/') { break } }
+  for ($i = 0; $i -lt 6; $i++) { Start-Sleep -Seconds 1; [void](Get-BrowserWindows) }
   $h = Get-Content $hits -Raw
   Check ($h -match 'document /d2l/le/content/123/fullscreen/457/') "$($b.Name): the Content page loaded"
   Check (-not ($h -match 'document /d2l/le/content/123/viewContent/457/View')) "$($b.Name): a non-quiz Content page is left alone"
