@@ -48,7 +48,14 @@ $hosts = Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw
 Check "UNLOCK cleans hosts" (-not ($hosts -match 'LOCKqz START'))
 
 # 3b) "Test it now" (what Microsoft's reviewers and students click): AI off without any account, then back by itself.
-function HostsBlocked { (Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw) -match 'LOCKqz START' }
+function HostsBlocked {
+  # The helper rewrites hosts while it locks / unlocks: a read that fails (file busy) is retried, never taken as "clean".
+  for ($r = 0; $r -lt 10; $r++) {
+    try { $t = [IO.File]::ReadAllText("$env:WINDIR\System32\drivers\etc\hosts"); if ($null -ne $t) { return ($t -match 'LOCKqz START') } } catch { }
+    Start-Sleep -Milliseconds 300
+  }
+  return $true
+}
 function PostCode($path, $json) {
   try { Invoke-RestMethod "$B$path" -Method Post -Headers $H -Body $json -ContentType 'application/json' -TimeoutSec 120 | Out-Null; return 200 }
   catch { if ($_.Exception.Response) { return [int]$_.Exception.Response.StatusCode } else { return 0 } }
@@ -69,7 +76,9 @@ Check "Test it now: VPNs, VMs and remote tools left alone (no VPN port rule)" ($
 Check "Test it now: encrypted-DNS rule in place like a quiz" ($null -ne (Get-NetFirewallRule -DisplayName "LOCKqz-AI-DoH" -ErrorAction SilentlyContinue))
 # "unlocked" is reported as the unlock starts; the hosts block goes a moment later -> wait for both.
 $s = $null; for ($i = 0; $i -lt 75; $i++) { $s = WaitState "unlocked" 1; if ($s -and $s.state -eq "unlocked" -and -not (HostsBlocked)) { break } }
-Check "Test it now: ends by itself (AI back)" (($s.state -eq "unlocked") -and -not (HostsBlocked))
+$clean = (($s.state -eq "unlocked") -and -not (HostsBlocked))
+if (-not $clean) { Write-Host ("      state: " + ($s | ConvertTo-Json -Compress) + " hosts blocked: " + (HostsBlocked)); }
+Check "Test it now: ends by itself (AI back)" $clean
 Check "Test it now: stop ends a running test" (((PostCode "/test" '{"secs":120}') -eq 200) -and ((PostCode "/test" '{"stop":true}') -eq 200) -and ((WaitState "unlocked" 5).state -eq "unlocked") -and -not (HostsBlocked))
 PostCode "/lock" '{"quiz_id":"ci-store-quiz","student":"CI"}' | Out-Null
 Check "Test it now: refused during a quiz lock (409)" ((PostCode "/test" '{"secs":10}') -eq 409)

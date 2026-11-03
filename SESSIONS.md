@@ -7,11 +7,10 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-11-03 10:55 PT — 015umorZ: app/tests/test_windows_store.ps1 (hosts read retried; diagnostics on the 'ends by itself' check).
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
 
 ## Recently finished
-- 2026-11-03 10:40 PT — 015umorZ: v0.6.9 ships the faster Windows policy writes; store test 'Test it now' runs 30 s and waits for state + hosts both clean (it raced the unlock on slow runners).
+- 2026-11-03 10:40 PT — 015umorZ: v0.6.9 ships the faster Windows policy writes; store test 'Test it now' runs 30 s and waits for state + hosts both clean (it raced the unlock on slow runners); a busy hosts read is retried, never taken as clean.
 - 2026-11-03 09:55 PT — 015umorZ: Windows browser policy: registry values written/removed through .NET (cmdlet fallback) - lock + unlock had grown ~9 s with the longer filter lists (CI 'Test it now' timed out). Content-move test waits for the first page instead of a fixed 12 s (slow cold Chrome start on CI). run_all green.
 - 2026-11-03 08:45 PT — 015umorZ: v0.6.8 AI audit 3: +76 blocklist entries (both blocklists + AI_DOMAINS; Android gets them from the served list): new chat AIs (Meta Muse, Alexa+ web, ChatOn, PolyBuzz, ai.com, free.ai, Shapes, Prism short domain, ZeroGPT, Gamma), homework/study AIs (Knowt AI answers, Khanmigo path, MathGPT .org, Coursology, Thetawise ...), quiz-solver extension back ends, humanizers, regional chats, AI browsers (Dia, Tabbit, Norton Neo, SigmaOS), free model APIs. test_blocklist T20. Browser filter lists now Chromium 879 / Firefox 901 of 1000. run_all green.
 - 2026-11-03 07:00 PT — 015umorZ: v0.6.7 search pinning: every Google country site Google runs (186, google.com/supported_domains) closed in Chrome/Edge/Brave/Firefox on Mac, Linux and Windows (whole www.google.<cc> host, sign-in hosts untouched); Firefox Google exceptions need a real udm/tbm parameter; Mac/Linux agent rewrites a Google page unless every udm/tbm on it is an AI-free vertical. test_blocklist T19 (incl. 1000-entry cap guard), test_chrome_policy_real (country sites, redirect to plain search refused), test_agent. run_all green.
