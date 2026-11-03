@@ -95,10 +95,10 @@ badPath.length === 0 ? ok(`all ${pathsE.length} path entries are routed to the b
   : bad("path entries the policies would drop: " + badPath.join(", "));
 
 console.log("T10 open-note resources are never blocked (hosts entries also match subdomains in Chromium)");
-const notes = ["docs.google.com", "drive.google.com", "www.google.com", "studocu.com", "www.studocu.com",
-  "knowunity.com", "onedrive.live.com", "www.office.com", "m365.cloud.microsoft", "www.onenote.com", "github.com",
+const notes = ["docs.google.com", "drive.google.com", "www.google.com",
+  "onedrive.live.com", "www.office.com", "m365.cloud.microsoft", "www.onenote.com", "github.com",
   "huggingface.co", "www.bing.com", "x.com", "brightspace.usc.edu", "usc.brightspace.com", "www.khanacademy.org",
-  "www.desmos.com", "en.wikipedia.org", "outlook.office.com", "www.icloud.com", "superhuman.com"];
+  "www.desmos.com", "en.wikipedia.org", "www.youtube.com", "outlook.office.com", "www.icloud.com", "superhuman.com"];
 const hits = notes.filter(n => hostsE.some(e => n === e || n.endsWith("." + e)));
 hits.length === 0 ? ok(`none of ${notes.length} notes/Brightspace hosts is blocked`) : bad("over-block: " + hits.join(", "));
 !hostsE.includes("m365.cloud.microsoft") && pathsE.includes("m365.cloud.microsoft/chat")
@@ -230,6 +230,14 @@ const need20 = ["muse.ai","alexa.amazon.com","chaton.ai","polybuzz.ai","ai.com",
 const miss20 = need20.filter(d => !mac.includes(d) || !win.includes(d) || !(served || []).includes(d));
 miss20.length === 0 ? ok(`all ${need20.length} in both blocklists + AI_DOMAINS`) : bad("missing: " + miss20.join(", "));
 !["knowt.com","scribbr.com","khanacademy.org","github.com","amazon.com","qq.com"].some(d => mac.includes(d)) ? ok("Knowt, Scribbr, Khan Academy, GitHub, Amazon, QQ themselves stay open (AI paths/hosts only)") : bad("a whole site is over-blocked");
+
+console.log("T21 3 Nov owner decision: no AI in any app left open (Studocu, Knowunity, Instagram, Facebook, Snapchat web, YouTube pages, Colab, Reddit Answers)");
+const need21 = ["studocu.com","knowunity.com","instagram.com","i.instagram.com","facebook.com","web.snapchat.com","snapchat.com/web",
+  "youtube.com/watch","youtube.com/results","youtube.com/shorts","m.youtube.com","colab.research.google.com","reddit.com/answers"];
+const miss21 = need21.filter(d => !mac.includes(d) || !win.includes(d) || !(served || []).includes(d));
+miss21.length === 0 ? ok(`all ${need21.length} in both blocklists + AI_DOMAINS`) : bad("missing: " + miss21.join(", "));
+!mac.some(d => d === "youtube.com" || d === "www.youtube.com" || d.startsWith("youtube.com/embed") || d === "youtube-nocookie.com" || d === "reddit.com")
+  ? ok("youtube.com itself (embedded quiz videos) and reddit.com stay reachable; only their pages / AI path are blocked") : bad("youtube.com or reddit.com blocked whole");
 
 console.log(`RESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

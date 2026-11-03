@@ -96,7 +96,11 @@ const AI_DOMAINS = [
   "sigmaos.com","composite.com","models.github.ai","bedrock-mantle.us-east-1.api.aws","bedrock-mantle.us-east-2.api.aws",
   "bedrock-mantle.us-west-2.api.aws","bedrock-mantle.eu-central-1.api.aws","api-inference.modelscope.cn","qianfan.baidubce.com","puter.com",
   "pollinations.ai","base44.app","labs.google.com","khanacademy.org/khan-labs","merlin.foyer.work","playground.allenai.org",
-  "chat.chatbot.app","lmsys.org","wenxiaobai.com","chat.360.com","tutorai.me","answerthis.io"
+  "chat.chatbot.app","lmsys.org","wenxiaobai.com","chat.360.com","tutorai.me","answerthis.io","studocu.com","knowunity.com","instagram.com",
+  "www.instagram.com","i.instagram.com","web.snapchat.com","snapchat.com/web","facebook.com","www.facebook.com","m.facebook.com",
+  "youtube.com/watch","youtube.com/results","youtube.com/shorts","youtube.com/feed","youtube.com/channel",
+  "youtube.com/playlist","youtube.com/live","youtube.com/c/","youtube.com/user","m.youtube.com","music.youtube.com",
+  "colab.research.google.com","colab.google","reddit.com/answers"
 ];
 const now = () => new Date().toISOString();
 // "Today" in America/Los_Angeles as YYYY-MM-DD, so a professor stays active through the end of their

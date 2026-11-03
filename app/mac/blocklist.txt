@@ -152,8 +152,7 @@ undetectable.ai
 stealthgpt.ai
 humanizeai.pro
 
-# Homework / answer sites that answer with AI (quizlet.com, studocu.com, knowunity.com stay
-# open: they hold the student's own notes)
+# Homework / answer sites that answer with AI (studocu.com and knowunity.com: see the 3 Nov owner decision below)
 gauthmath.com
 questionai.com
 studyx.ai
@@ -775,3 +774,31 @@ wenxiaobai.com
 chat.360.com
 tutorai.me
 answerthis.io
+
+# 3 Nov owner decision: no AI in any app left open during a quiz. Studocu + Knowunity (Ask AI), Instagram / Facebook
+# (Meta AI), Snapchat web (My AI), YouTube pages (Ask / Gemini on videos; youtube.com/embed stays open so a video
+# embedded in a quiz question still plays), Google Colab (Gemini), Reddit Answers.
+studocu.com
+knowunity.com
+instagram.com
+www.instagram.com
+i.instagram.com
+web.snapchat.com
+snapchat.com/web
+facebook.com
+www.facebook.com
+m.facebook.com
+youtube.com/watch
+youtube.com/results
+youtube.com/shorts
+youtube.com/feed
+youtube.com/channel
+youtube.com/playlist
+youtube.com/live
+youtube.com/c/
+youtube.com/user
+m.youtube.com
+music.youtube.com
+colab.research.google.com
+colab.google
+reddit.com/answers
