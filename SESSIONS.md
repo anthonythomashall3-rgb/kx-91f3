@@ -7,10 +7,10 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-11-03 06:45 PT — 015umorZ: v0.6.7 search pinning (app/mac/browser-policy.py, app/mac/lockqz-agent.py, app/windows/browser-policy.ps1, tests test_blocklist/test_chrome_policy_real/test_agent; version bump app/VERSION + both daemons, taking over 01UUDg7Y's stale claim on those three).
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
 
 ## Recently finished
+- 2026-11-03 07:00 PT — 015umorZ: v0.6.7 search pinning: every Google country site Google runs (186, google.com/supported_domains) closed in Chrome/Edge/Brave/Firefox on Mac, Linux and Windows (whole www.google.<cc> host, sign-in hosts untouched); Firefox Google exceptions need a real udm/tbm parameter; Mac/Linux agent rewrites a Google page unless every udm/tbm on it is an AI-free vertical. test_blocklist T19 (incl. 1000-entry cap guard), test_chrome_policy_real (country sites, redirect to plain search refused), test_agent. run_all green.
 - 2026-11-03 06:30 PT — 015umorY: USC forms with the lockqz.com addresses committed (LTI Intake x4, HECVAT, VPAT docx+pdf, Privacy-Security-Review x2; MANIFESTs). Branch delete refused from a Claude session (no ref-delete rights).
 - 2026-11-02 14:30 PT — 015umorY: students pay $200 every way (STUDENT_TOTAL = STUDENT_OTHER_TOTAL = 200; card already 200; every earlier payment now credits the same or more, so nobody loses access). Pay order Card, Venmo, Zelle, then bank/PO on the student pay page and the professor payment panel. test_tax T9. run_all green.
 - 2026-11-01 07:30 PT — 01UzHDaG: .com everywhere: extension 1.0.5 is .com-only (hosts professor.lockqz.com + lockqz.com, API https://lockqz.com/api, homepage_url; keys saved under pages.dev bases are mapped to .com); web pages call https://lockqz.com/api (forwarded to the API); lq.js moves any page opened on lockqz.pages.dev / prof.lockqz.pages.dev to the .com address. Installed apps keep calling lockqz.pages.dev (unchanged).

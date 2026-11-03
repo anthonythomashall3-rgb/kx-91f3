@@ -200,5 +200,28 @@ const wildMac = readFileSync(join(DIR, "../mac/extra-block.sh"), "utf8"), wildWi
   ? ok("every *.learnwise.ai / *.forethought.ai subdomain blocked (Mac resolver files, Windows NRPT)") : bad("Lumi wildcard domains missing");
 !["brightspace.com","usc.brightspace.com","brightspace.usc.edu","d2l.com"].some(d => mac.includes(d)) ? ok("Brightspace itself is never blocked") : bad("a Brightspace host is blocked");
 
+console.log("T19 3 Nov: every Google country site closed (they carry AI Overviews / AI Mode), Firefox exceptions need a real parameter, filter lists under the browsers' 1000-entry cap");
+const ccList = (src, start, end) => { const a = src.indexOf(start); return (src.slice(a, src.indexOf(end, a)).match(/"([a-z.]+)"/g) || []).map(x => x.slice(1, -1)); };
+const macCC = ccList(pyPol, "GOOGLE_CC = [", "]");
+const winCC = ccList(psPol, "$GoogleCC = @(", ")");
+// google.com/supported_domains (3 Nov 2026), minus google.com itself
+const supported = "ad ae com.af com.ag al am co.ao com.ar as at com.au az ba com.bd be bf bg com.bh bi bj com.bn com.bo com.br bs bt co.bw by com.bz ca cd cf cg ch ci co.ck cl cm cn com.co co.cr com.cu cv com.cy cz de dj dk dm com.do dz com.ec ee com.eg es com.et fi com.fj fm fr ga ge gg com.gh com.gi gl gm gr com.gt gy com.hk hn hr ht hu co.id ie co.il im co.in iq is it je com.jm jo co.jp co.ke com.kh ki kg co.kr com.kw kz la com.lb li lk co.ls lt lu lv com.ly co.ma md me mg mk ml com.mm mn com.mt mu mv mw com.mx com.my co.mz com.na com.ng com.ni ne nl no com.np nr nu co.nz com.om com.pa com.pe com.pg com.ph com.pk pl pn com.pr ps pt com.py com.qa ro ru rw com.sa com.sb sc se com.sg sh si sk com.sl sn so sm sr st com.sv td tg co.th com.tj tl tm tn to com.tr tt com.tw co.tz com.ua co.ug co.uk com.uy co.uz com.vc co.ve co.vi com.vn vu ws rs co.za co.zm co.zw cat".split(" ");
+const missCC = supported.filter(c => !macCC.includes(c) || !winCC.includes(c));
+missCC.length === 0 ? ok(`all ${supported.length} Google country sites closed on Mac/Linux and Windows`) : bad("Google country sites left open: " + missCC.join(", "));
+JSON.stringify(macCC) === JSON.stringify(winCC) ? ok("Mac and Windows Google country lists identical") : bad("Mac GOOGLE_CC and Windows $GoogleCC differ");
+!/accounts\.google|"google\.com"[,\]]/.test(pyPol.slice(pyPol.indexOf("GOOGLE_CC = ["), pyPol.indexOf("SEARCH_BLOCK"))) ? ok("google.com and Google sign-in hosts are not in the country list") : bad("country list over-blocks google.com / sign-in");
+!/\?\*udm=14\*|\?\*tbm=isch\*/.test(pyPol + psPol) ? ok("Firefox exceptions no longer accept 'udm=14' as loose text (&x=udm=14 + udm=50)") : bad("loose Firefox *udm=14* exception still present");
+{
+  const { execFileSync } = await import("node:child_process");
+  const n = JSON.parse(execFileSync("python3", ["-c", `
+import importlib.util,json,sys
+spec=importlib.util.spec_from_file_location('bp',sys.argv[1]); m=importlib.util.module_from_spec(spec); sys.argv=['x']; spec.loader.exec_module(m)
+c=m.chromium_policy('com.google.Chrome'); f=m.firefox_policy(); x=m.path_entries(); h=m.host_entries()
+cb=m._union(c['URLBlocklist'], x+h)
+fb=m._union(f['WebsiteFilter']['Block'], [p for e in x for p in ("*://%s*" % e, "*://*.%s*" % e)] + ["*://*.%s/*" % k for k in h])
+print(json.dumps([len(cb), len(fb), len(f['WebsiteFilter']['Exceptions'])]))`, join(DIR, "../mac/browser-policy.py")], { env: { ...process.env, LOCKQZ_BLOCKLIST: macF } }).toString());
+  n[0] <= 1000 && n[1] <= 1000 && n[2] <= 1000 ? ok(`filter lists fit the 1000-entry cap (Chromium ${n[0]}, Firefox block ${n[1]}, exceptions ${n[2]})`) : bad(`a filter list is over 1000 entries (Chromium ${n[0]}, Firefox ${n[1]}): later entries would be ignored`);
+}
+
 console.log(`RESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

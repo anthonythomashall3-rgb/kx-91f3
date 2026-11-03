@@ -34,7 +34,24 @@ $Chromium = [ordered]@{ "HKLM:\SOFTWARE\Policies\Google\Chrome" = "chrome";
 $Firefox  = "HKLM:\SOFTWARE\Policies\Mozilla\Firefox"
 $Mark     = "LOCKqzManaged"
 
-$SearchBlock = @("google.com/search","google.com/webhp","bing.com/search","bing.com/copilotsearch","bing.com/chat",
+# Google's country sites carry the same AI Overviews / AI Mode (google.com.qa/search?udm=50): every
+# country site Google runs (google.com/supported_domains) is closed for the quiz; web search stays on
+# google.com through the default engine. One whole-host entry each (www.google.<cc>); accounts.google.<cc>
+# (sign-in) is left alone. Same list as app/mac/browser-policy.py GOOGLE_CC (test_blocklist checks).
+$GoogleCC = @("ad","ae","com.af","com.ag","al","am","co.ao","com.ar","as","at","com.au","az","ba","com.bd","be",
+              "bf","bg","com.bh","bi","bj","com.bn","com.bo","com.br","bs","bt","co.bw","by","com.bz","ca","cd",
+              "cf","cg","ch","ci","co.ck","cl","cm","cn","com.co","co.cr","com.cu","cv","com.cy","cz","de","dj",
+              "dk","dm","com.do","dz","com.ec","ee","com.eg","es","com.et","fi","com.fj","fm","fr","ga","ge","gg",
+              "com.gh","com.gi","gl","gm","gr","com.gt","gy","com.hk","hn","hr","ht","hu","co.id","ie","co.il",
+              "im","co.in","iq","is","it","je","com.jm","jo","co.jp","co.ke","com.kh","ki","kg","co.kr","com.kw",
+              "kz","la","com.lb","li","lk","co.ls","lt","lu","lv","com.ly","co.ma","md","me","mg","mk","ml",
+              "com.mm","mn","com.mt","mu","mv","mw","com.mx","com.my","co.mz","com.na","com.ng","com.ni","ne","nl",
+              "no","com.np","nr","nu","co.nz","com.om","com.pa","com.pe","com.pg","com.ph","com.pk","pl","pn",
+              "com.pr","ps","pt","com.py","com.qa","ro","ru","rw","com.sa","com.sb","sc","se","com.sg","sh","si",
+              "sk","com.sl","sn","so","sm","sr","st","com.sv","td","tg","co.th","com.tj","tl","tm","tn","to",
+              "com.tr","tt","com.tw","co.tz","com.ua","co.ug","co.uk","com.uy","co.uz","com.vc","co.ve","co.vi",
+              "com.vn","vu","ws","rs","co.za","co.zm","co.zw","cat")
+$SearchBlock = @($GoogleCC | ForEach-Object { "www.google." + $_ }) + @("google.com/search","google.com/webhp","bing.com/search","bing.com/copilotsearch","bing.com/chat",
                  "copilot.microsoft.com","duckduckgo.com","duck.ai","search.yahoo.com","search.brave.com",
                  "you.com","kagi.com","yandex.com/search","ecosia.org/search","startpage.com",
                  "yandex.ru/search","ya.ru/search","baidu.com/s","search.naver.com","ask.com","yep.com","search.aol.com","ecosia.org/chat","sogou.com/web","so.com/s")
@@ -43,16 +60,18 @@ $SearchBlock = @("google.com/search","google.com/webhp","bing.com/search","bing.
 $SearchAllow = @("noai.duckduckgo.com","google.com/search?udm=14","google.com/search?udm=2","google.com/search?udm=12",
                  "google.com/search?udm=7","google.com/search?udm=36","google.com/search?tbm=isch",
                  "google.com/search?tbm=nws","google.com/search?tbm=vid","google.com/search?tbm=bks")
-$FfBlock = @("https://www.google.com/search*","https://www.google.com/webhp*","https://www.bing.com/*search*",
+$FfBlock = @($GoogleCC | ForEach-Object { "https://www.google." + $_ + "/*" }) + @("https://www.google.com/search*","https://www.google.com/webhp*","https://www.bing.com/*search*",
              "https://www.bing.com/chat*","https://copilot.microsoft.com/*","https://duckduckgo.com/*","https://duck.ai/*",
              "https://search.yahoo.com/*","https://search.brave.com/*","https://you.com/*","https://kagi.com/*",
              "https://yandex.com/search*","https://www.ecosia.org/search*","https://www.startpage.com/*",
              "https://yandex.ru/search*","https://ya.ru/search*","https://www.baidu.com/s*","https://search.naver.com/*",
              "https://www.ask.com/*","https://yep.com/*","https://search.aol.com/*","https://www.ecosia.org/chat*",
              "https://www.sogou.com/web*","https://www.so.com/s*")
-$FfAllow = @("https://www.google.com/search?*udm=14*","https://www.google.com/search?*udm=2*","https://www.google.com/search?*udm=12*",
-             "https://www.google.com/search?*udm=7*","https://www.google.com/search?*udm=36*","https://www.google.com/search?*tbm=isch*",
-             "https://www.google.com/search?*tbm=nws*","https://www.google.com/search?*tbm=vid*","https://www.google.com/search?*tbm=bks*")
+# Each allowed vertical must be a real query parameter (?udm=14 / &udm=14), not text that merely contains
+# it (&x=udm=14 next to udm=50 opens AI Mode). With a real udm=14 Google answers Web results.
+$FfOkParams = @("udm=14","udm=2","udm=12","udm=7","udm=36","tbm=isch","tbm=nws","tbm=vid","tbm=bks")
+$FfAllow = @(foreach ($v in $FfOkParams) { foreach ($f in @("https://www.google.com/search?{0}","https://www.google.com/search?{0}&*",
+             "https://www.google.com/search?*&{0}","https://www.google.com/search?*&{0}&*")) { $f -f $v } })
 # Firefox AI prefs, set through the documented Preferences policy (one REG_MULTI_SZ JSON value).
 $FfPrefs = [ordered]@{ "browser.ml.chat.enabled" = $false; "browser.ml.enable" = $false; "browser.ml.linkPreview.enabled" = $false; "browser.smartwindow.enabled" = $false }
 # Extensions that stay ON during the quiz (no AI in them): Bitwarden, 1Password, LastPass, Dashlane,

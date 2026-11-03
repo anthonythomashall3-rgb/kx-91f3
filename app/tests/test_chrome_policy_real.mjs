@@ -46,10 +46,16 @@ try {
   const missing = must.filter(n => !okRow(n)); missing.length === 0 ? ok("core AI-off policies applied with status OK") : bad("not OK: " + missing.map(n => (set.find(r => name(r) === n) || n + " (not set)").slice(0, 200)).join(" | "));
   console.log("T2 what a student can and cannot open (blocked = refused by the browser itself, before any network)");
   const blocked = async u => { const q = await ctx.newPage(); const r = await q.goto(u, { timeout: 8000 }).then(() => false).catch(e => /ERR_BLOCKED_BY_ADMINISTRATOR/.test(e.message)); await q.close(); return r; };
-  for (const u of ["https://chatgpt.com/", "https://gemini.google.com/app", "https://claude.ai/", "https://www.google.com/search?q=derivative+of+x2", "https://www.google.com/search?udm=50&q=x", "https://www.google.com/search?q=x&udm=50", "https://www.bing.com/chat", "https://copilot.microsoft.com/", "https://www.perplexity.ai/", "https://www.gauthmath.com/", "https://x.com/i/grok", "https://www.google.com/ai"])
+  for (const u of ["https://chatgpt.com/", "https://gemini.google.com/app", "https://claude.ai/", "https://www.google.com/search?q=derivative+of+x2", "https://www.google.com/search?udm=50&q=x", "https://www.google.com/search?q=x&udm=50", "https://www.bing.com/chat", "https://copilot.microsoft.com/", "https://www.perplexity.ai/", "https://www.gauthmath.com/", "https://x.com/i/grok", "https://www.google.com/ai",
+    // every Google country site (AI Overviews / AI Mode there too), and two AI Mode params in one URL
+    "https://www.google.com.qa/search?q=x&udm=50", "https://www.google.sk/search?q=x", "https://www.google.co.uk/", "https://www.google.com.gh/search?q=x&udm=50", "https://www.google.com/search?udm=14&udm=50&q=x"])
     (await blocked(u)) ? ok("blocked: " + u) : bad("NOT blocked: " + u);
-  for (const u of ["https://www.google.com/search?udm=14&q=derivative", "https://www.google.com/search?q=derivative&udm=14", "https://docs.google.com/document/u/0/", "https://drive.google.com/", "https://www.onenote.com/", "https://brightspace.usc.edu/d2l/home", "https://en.wikipedia.org/wiki/Derivative", "https://www.desmos.com/calculator"])
+  for (const u of ["https://www.google.com/search?udm=14&q=derivative", "https://www.google.com/search?q=derivative&udm=14", "https://docs.google.com/document/u/0/", "https://drive.google.com/", "https://www.onenote.com/", "https://brightspace.usc.edu/d2l/home", "https://en.wikipedia.org/wiki/Derivative", "https://www.desmos.com/calculator", "https://accounts.google.com/", "https://www.google.com/search?q=derivative&udm=14&start=10"])
     (await blocked(u)) ? bad("over-blocked: " + u) : ok("allowed: " + u);
+  // A vertical Google turns back into plain search (tbm=nws&udm=50 -> 302 /search?q=, which carries an AI Overview)
+  // must be refused at the redirect.
+  await ctx.route("https://www.google.com/search?tbm=nws&udm=50&q=x", r => r.fulfill({ status: 302, headers: { location: "https://www.google.com/search?q=x" } }));
+  (await blocked("https://www.google.com/search?tbm=nws&udm=50&q=x")) ? ok("redirect from an allowed vertical to plain (AI Overview) search is refused") : bad("redirect to plain search NOT blocked");
   console.log("T3 extensions");
   const em = await ctx.newPage(); await em.goto("chrome://extensions"); await em.waitForTimeout(1200);
   const list = await em.evaluate(() => new Promise(r => chrome.management.getAll(l => r(l.map(e => ({ n: e.name, en: e.enabled }))))));

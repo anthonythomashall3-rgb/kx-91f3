@@ -225,7 +225,8 @@ def rewrite_search(url):
     if re.match(r"^(www\.)?google\.[a-z.]+$", host) and (path in ("/search", "/webhp", "/") or path.startswith(("/ai", "/searchbyimage"))):
         if path.startswith(("/ai", "/searchbyimage")): return web   # AI Mode / image search pages
         udm, tbm = q.get("udm", []), q.get("tbm", [])
-        if (udm and all(x in WEB_OK_UDM for x in udm)) or (tbm and all(x in WEB_OK_TBM for x in tbm)):
+        # Every udm/tbm on the page must be an AI-free vertical (tbm=nws&udm=50 is not news).
+        if (udm or tbm) and all(x in WEB_OK_UDM for x in udm) and all(x in WEB_OK_TBM for x in tbm):
             return None
         # Any other udm/tbm (AI Mode udm=50, Lens udm=26, ...) goes to plain web results, even with no q.
         if udm or tbm: return web

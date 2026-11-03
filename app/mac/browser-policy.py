@@ -101,14 +101,27 @@ def assist_extensions():
             if i not in out: out.append(i)
     return out
 
-# Google's country sites carry the same AI Overviews / AI Mode (google.co.uk/search?udm=50): blocked too
-# (the udm=14 allowlist is google.com only, so plain web search keeps working through the default engine).
-GOOGLE_CC = ["co.uk", "ca", "com.au", "co.in", "de", "fr", "es", "it", "nl", "be", "ch", "at", "ie", "se",
-             "no", "dk", "fi", "pl", "pt", "gr", "cz", "hu", "ro", "co.jp", "co.kr", "com.hk", "com.tw",
-             "com.sg", "com.ph", "co.id", "com.my", "co.th", "com.vn", "com.mx", "com.br", "com.ar", "cl",
-             "com.co", "com.pe", "co.nz", "co.za", "com.ng", "com.eg", "com.sa", "ae", "co.il", "com.tr",
-             "ru", "com.ua", "com.pk", "com.bd", "lk", "is", "lu"]
-SEARCH_BLOCK = ["google.%s/search" % c for c in GOOGLE_CC] + ["google.%s/webhp" % c for c in GOOGLE_CC] + ["google.com/search", "google.com/webhp", "bing.com/search", "bing.com/copilotsearch",
+# Google's country sites carry the same AI Overviews / AI Mode (google.com.qa/search?udm=50): every
+# country site Google runs (google.com/supported_domains) is closed for the quiz; plain web search keeps
+# working on google.com through the default engine. One whole-host entry each (www.google.<cc>) keeps the
+# browsers' 1000-entry filter lists small; accounts.google.<cc> (sign-in) is left alone.
+GOOGLE_CC = ["ad", "ae", "com.af", "com.ag", "al", "am", "co.ao", "com.ar", "as", "at", "com.au", "az", "ba",
+             "com.bd", "be", "bf", "bg", "com.bh", "bi", "bj", "com.bn", "com.bo", "com.br", "bs", "bt",
+             "co.bw", "by", "com.bz", "ca", "cd", "cf", "cg", "ch", "ci", "co.ck", "cl", "cm", "cn",
+             "com.co", "co.cr", "com.cu", "cv", "com.cy", "cz", "de", "dj", "dk", "dm", "com.do", "dz",
+             "com.ec", "ee", "com.eg", "es", "com.et", "fi", "com.fj", "fm", "fr", "ga", "ge", "gg",
+             "com.gh", "com.gi", "gl", "gm", "gr", "com.gt", "gy", "com.hk", "hn", "hr", "ht", "hu", "co.id",
+             "ie", "co.il", "im", "co.in", "iq", "is", "it", "je", "com.jm", "jo", "co.jp", "co.ke",
+             "com.kh", "ki", "kg", "co.kr", "com.kw", "kz", "la", "com.lb", "li", "lk", "co.ls", "lt", "lu",
+             "lv", "com.ly", "co.ma", "md", "me", "mg", "mk", "ml", "com.mm", "mn", "com.mt", "mu", "mv",
+             "mw", "com.mx", "com.my", "co.mz", "com.na", "com.ng", "com.ni", "ne", "nl", "no", "com.np",
+             "nr", "nu", "co.nz", "com.om", "com.pa", "com.pe", "com.pg", "com.ph", "com.pk", "pl", "pn",
+             "com.pr", "ps", "pt", "com.py", "com.qa", "ro", "ru", "rw", "com.sa", "com.sb", "sc", "se",
+             "com.sg", "sh", "si", "sk", "com.sl", "sn", "so", "sm", "sr", "st", "com.sv", "td", "tg",
+             "co.th", "com.tj", "tl", "tm", "tn", "to", "com.tr", "tt", "com.tw", "co.tz", "com.ua", "co.ug",
+             "co.uk", "com.uy", "co.uz", "com.vc", "co.ve", "co.vi", "com.vn", "vu", "ws", "rs", "co.za",
+             "co.zm", "co.zw", "cat"]
+SEARCH_BLOCK = ["www.google.%s" % c for c in GOOGLE_CC] + ["google.com/search", "google.com/webhp", "bing.com/search", "bing.com/copilotsearch",
                 "bing.com/chat", "copilot.microsoft.com", "duckduckgo.com", "duck.ai",
                 "search.yahoo.com", "search.brave.com", "you.com", "kagi.com",
                 "yandex.com/search", "ecosia.org/search", "startpage.com",
@@ -122,6 +135,7 @@ SEARCH_ALLOW = ["noai.duckduckgo.com", "google.com/search?udm=14", "google.com/s
                 "google.com/search?tbm=isch", "google.com/search?tbm=nws",
                 "google.com/search?tbm=vid", "google.com/search?tbm=bks"]
 WEB_SEARCH = "https://www.google.com/search?udm=14&q={searchTerms}"
+FF_OK_PARAMS = ["udm=14", "udm=2", "udm=12", "udm=7", "udm=36", "tbm=isch", "tbm=nws", "tbm=vid", "tbm=bks"]
 
 def keep_proxy():
     return os.path.exists(PROXY_KEPT)
@@ -164,12 +178,11 @@ def chromium_policy(domain):
     return p
 
 def firefox_policy():
-    exc = ["https://www.google.com/search?*udm=14*", "https://www.google.com/search?*udm=2*",
-           "https://www.google.com/search?*udm=12*", "https://www.google.com/search?*udm=7*",
-           "https://www.google.com/search?*udm=36*", "https://www.google.com/search?*tbm=isch*",
-           "https://www.google.com/search?*tbm=nws*", "https://www.google.com/search?*tbm=vid*",
-           "https://www.google.com/search?*tbm=bks*"]
-    blk = ["https://www.google.%s/search*" % c for c in GOOGLE_CC] + ["https://www.google.com/search*", "https://www.google.com/webhp*", "https://www.bing.com/*search*",
+    # Each allowed vertical must be a real query parameter (?udm=14 / &udm=14), not text that merely
+    # contains it (&x=udm=14 next to udm=50 opens AI Mode). With a real udm=14 Google answers Web results.
+    exc = [p % v for v in FF_OK_PARAMS for p in ("https://www.google.com/search?%s", "https://www.google.com/search?%s&*",
+                                                  "https://www.google.com/search?*&%s", "https://www.google.com/search?*&%s&*")]
+    blk = ["https://www.google.%s/*" % c for c in GOOGLE_CC] + ["https://www.google.com/search*", "https://www.google.com/webhp*", "https://www.bing.com/*search*",
            "https://www.bing.com/chat*", "https://copilot.microsoft.com/*", "https://duckduckgo.com/*",
            "https://duck.ai/*", "https://search.yahoo.com/*", "https://search.brave.com/*",
            "https://you.com/*", "https://kagi.com/*", "https://yandex.com/search*",
