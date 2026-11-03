@@ -110,8 +110,33 @@ function RG-Read($path, $name) {
   if (@($k.GetValueNames()) -notcontains $name) { return $null }
   return @{ kind = [string]$k.GetValueKind($name); value = $k.GetValue($name, $null, "DoNotExpandEnvironmentNames") }
 }
-function RG-Write($path, $name, $value, $kind) { New-ItemProperty -LiteralPath $path -Name $name -Value $value -PropertyType $kind -Force -ErrorAction Stop | Out-Null }
-function RG-Remove($path, $name) { Remove-ItemProperty -LiteralPath $path -Name $name -ErrorAction Stop }
+# Writes and removes go straight to the .NET registry API: the PowerShell registry cmdlets are slow per value,
+# and a quiz lock writes ~900 browser-filter entries per browser family (then removes them at unlock), which
+# made lock and unlock take seconds longer than needed. Any path or value .NET refuses falls back to the cmdlet.
+function RG-NetKey($path) {
+  if ($path -match '^(?:Registry::)?(HKLM:|HKEY_LOCAL_MACHINE)\\(.+)$') { return @([Microsoft.Win32.Registry]::LocalMachine, $Matches[2]) }
+  if ($path -match '^(?:Registry::)?(HKU:|HKEY_USERS)\\(.+)$') { return @([Microsoft.Win32.Registry]::Users, $Matches[2]) }
+  if ($path -match '^(?:Registry::)?(HKCU:|HKEY_CURRENT_USER)\\(.+)$') { return @([Microsoft.Win32.Registry]::CurrentUser, $Matches[2]) }
+  return $null
+}
+function RG-Write($path, $name, $value, $kind) {
+  $r = RG-NetKey $path
+  if ($r) {
+    $k = $null; $done = $false
+    try { $k = $r[0].OpenSubKey($r[1], $true); if ($k) { $k.SetValue([string]$name, $value, [Microsoft.Win32.RegistryValueKind]$kind); $done = $true } } catch { $done = $false } finally { if ($k) { $k.Close() } }
+    if ($done) { return }
+  }
+  New-ItemProperty -LiteralPath $path -Name $name -Value $value -PropertyType $kind -Force -ErrorAction Stop | Out-Null
+}
+function RG-Remove($path, $name) {
+  $r = RG-NetKey $path
+  if ($r) {
+    $k = $null; $done = $false
+    try { $k = $r[0].OpenSubKey($r[1], $true); if ($k -and (@($k.GetValueNames()) -contains [string]$name)) { $k.DeleteValue([string]$name, $true); $done = $true } } catch { $done = $false } finally { if ($k) { $k.Close() } }
+    if ($done) { return }
+  }
+  Remove-ItemProperty -LiteralPath $path -Name $name -ErrorAction Stop
+}
 # -------------------------------------------------------------------------------------------
 
 function Get-PathEntries {
