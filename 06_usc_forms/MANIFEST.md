@@ -29,3 +29,5 @@ Created 22 Oct 2026. Everything USC asks for to add LOCKqz to Brightspace (LTI),
 
 
 2026-10-23: Final check — all 4 forms complete. HECVAT + VPAT URLs updated lockdownqz -> lockqz.pages.dev / prof.lockqz.pages.dev. Backups of VPAT pre-edit in /tmp/vp. Handoff: claude Project doc LOCKqz-HANDOFF.md.
+
+2026-11-01: Addresses moved to lockqz.com / professor.lockqz.com: LTI Intake (Vendor Website URL -> https://lockqz.com, also the 3 older copies), HECVAT (Organization D27, Privacy C28 + D75 -> https://lockqz.com/privacy), VPAT .docx + re-exported .pdf (scope URLs). Security Questions had no URL. Old Privacy-Security-Review PDFs (LOCKqz-USC/, app/usc/) privacy link patched to https://lockqz.com/privacy. Pre-edit copies: reference/BEFORE_COM/.

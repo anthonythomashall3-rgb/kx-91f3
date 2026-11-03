@@ -7,10 +7,10 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-11-03 06:20 PT — 015umorY: commit owner's lockqz.com USC form updates (06_usc_forms, LOCKqz-USC, app/usc, LTI-Intake-Form-LOCKqz.pdf, 08_microsoft_store/MANIFEST.md); delete merged branches.
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
 
 ## Recently finished
+- 2026-11-03 06:30 PT — 015umorY: USC forms with the lockqz.com addresses committed (LTI Intake x4, HECVAT, VPAT docx+pdf, Privacy-Security-Review x2; MANIFESTs). Merged branches cws-live, wip/prof-email-budget, wip/prof-zero-effort-orphan deleted (owner OK 3 Nov).
 - 2026-11-02 14:30 PT — 015umorY: students pay $200 every way (STUDENT_TOTAL = STUDENT_OTHER_TOTAL = 200; card already 200; every earlier payment now credits the same or more, so nobody loses access). Pay order Card, Venmo, Zelle, then bank/PO on the student pay page and the professor payment panel. test_tax T9. run_all green.
 - 2026-11-01 07:30 PT — 01UzHDaG: .com everywhere: extension 1.0.5 is .com-only (hosts professor.lockqz.com + lockqz.com, API https://lockqz.com/api, homepage_url; keys saved under pages.dev bases are mapped to .com); web pages call https://lockqz.com/api (forwarded to the API); lq.js moves any page opened on lockqz.pages.dev / prof.lockqz.pages.dev to the .com address. Installed apps keep calling lockqz.pages.dev (unchanged).
 - 2026-11-01 06:40 PT — 01UzHDaG: v0.6.5 + v0.6.6 LIVE. lockqz.com (+www) = students, professor.lockqz.com = professors (Pages custom domains; professor CNAME -> prof.lockqz.pages.dev). The API stays on lockqz.pages.dev (installed apps + one cache); lockqz.com/api and professor.lockqz.com/api forward there. Apps 0.6.5+ show/open lockqz.com and accept both; older apps get pages.dev pay/Google links. Extension 1.0.4 (professor.lockqz.com host) built, needs store upload. support@lockqz.com shown everywhere; Cloudflare Email Routing: support@ + catch-all -> lockqz.app@gmail.com; Reply-To support@lockqz.com (MAIL_REPLY_TO); MAIL_FROM_ADDR optional for a Gmail send-as alias. Google OAuth origins + branding and Stripe public details moved to lockqz.com.
@@ -27,4 +27,3 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 
 ## Requests
 - When the Google OAuth client exists (project lockqz-513313, Web, origins https://lockqz.pages.dev + https://prof.lockqz.pages.dev): put its client ID in app/cloudflare/wrangler.toml GOOGLE_CLIENT_ID and publish the consent screen (In production).
-- Delete merged branches wip/prof-email-budget, wip/prof-zero-effort-orphan, cws-live (needs the owner's OK).

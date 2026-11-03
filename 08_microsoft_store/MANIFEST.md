@@ -6,3 +6,4 @@
 Code: app/windows/store (LOCKqz.cs launcher, AppxManifest.xml.in, build-msix.ps1). Test: app/tests/test_windows_store.ps1 (27/27 on CI run 40110900760).
 - lockqz-store.msix - Store build (BrainChild.LOCKqz, CN=1A42620D-42A4-477F-9C34-30F2A815AE62, v0.3.0.0), CI run 40116067665. Uploaded + validated in Partner Center 2026-10-24.
 Partner Center: Outlook account anthonythomashall31@outlook.com (NOT the USC one). Store ID 9P7D1114N2LJ. https://apps.microsoft.com/detail/9P7D1114N2LJ
+- lockqz-store-0.6.3.msix - Store build v0.6.3.0 (BrainChild.LOCKqz, same identity), CI run 41211038750 (artifact lockqz-store), sha256 19065199c762df64a8ad840aa0cac901b4b1cb47639921eea477d7672a2808f4. Replaces v0.3.0 in submission 1 before certification (2026-10-31).
