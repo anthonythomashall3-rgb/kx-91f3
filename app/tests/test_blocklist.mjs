@@ -223,5 +223,13 @@ print(json.dumps([len(cb), len(fb), len(f['WebsiteFilter']['Exceptions'])]))`, j
   n[0] <= 1000 && n[1] <= 1000 && n[2] <= 1000 ? ok(`filter lists fit the 1000-entry cap (Chromium ${n[0]}, Firefox block ${n[1]}, exceptions ${n[2]})`) : bad(`a filter list is over 1000 entries (Chromium ${n[0]}, Firefox ${n[1]}): later entries would be ignored`);
 }
 
+console.log("T20 3 Nov AI audit 3: new chat AIs, study/quiz solvers, humanizers, AI browsers, free model APIs");
+const need20 = ["muse.ai","alexa.amazon.com","chaton.ai","polybuzz.ai","ai.com","free.ai","prism.app","gamma.app","math-gpt.org","coursology.com",
+  "knowt.com/ai-answer-generator","scribbr.com/humanize-ai","khanacademy.org/khan-labs","quizsolverai.com","quizmate.io","getquibble.com","justdone.com",
+  "indus.sarvam.ai","quark.cn","diabrowser.com","tabbit.com","models.github.ai","puter.com","pollinations.ai","playground.allenai.org","scite.ai","n.cn"];
+const miss20 = need20.filter(d => !mac.includes(d) || !win.includes(d) || !(served || []).includes(d));
+miss20.length === 0 ? ok(`all ${need20.length} in both blocklists + AI_DOMAINS`) : bad("missing: " + miss20.join(", "));
+!["knowt.com","scribbr.com","khanacademy.org","github.com","amazon.com","qq.com"].some(d => mac.includes(d)) ? ok("Knowt, Scribbr, Khan Academy, GitHub, Amazon, QQ themselves stay open (AI paths/hosts only)") : bad("a whole site is over-blocked");
+
 console.log(`RESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
