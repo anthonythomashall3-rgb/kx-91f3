@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-03 06:45 PT — 015umorZ: v0.6.7 search pinning (app/mac/browser-policy.py, app/mac/lockqz-agent.py, app/windows/browser-policy.ps1, tests test_blocklist/test_chrome_policy_real/test_agent; version bump app/VERSION + both daemons, taking over 01UUDg7Y's stale claim on those three).
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
 
 ## Recently finished
