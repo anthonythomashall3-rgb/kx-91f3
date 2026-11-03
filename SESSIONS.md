@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-03 10:30 PT — 015umorZ: v0.6.9 (app/VERSION + both daemons) + app/tests/test_windows_store.ps1 'Test it now' timing (taking over 01UUDg7Y's stale claim on those files).
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
 
 ## Recently finished
