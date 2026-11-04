@@ -7,10 +7,10 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-11-04 05:25 PT — 015umorZ: v0.6.11 browser filter lists drop subdomains of already-listed hosts (app/mac/browser-policy.py, app/windows/browser-policy.ps1, test_blocklist, app/VERSION + both daemons).
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
 
 ## Recently finished
+- 2026-11-04 05:50 PT — 015umorZ: v0.6.11 browser filter lists skip subdomains of an already-listed host (Mac/Linux host_entries, Windows Get-HostEntries; hosts file unchanged): Chromium 903 -> 769, Firefox ~935 -> 802 of 1000. test_blocklist T22 (every host still covered), test_linux whatsapp check. run_all green.
 - 2026-11-03 12:10 PT — 015umorZ: v0.6.10 owner decision (3 Nov): no AI in any app left open during a quiz. Blocked: Studocu + Knowunity (were open-note), Instagram, Facebook, Snapchat web, YouTube pages (watch/results/shorts/feed/channel/playlist/live, m. and music.; youtube.com/embed + youtube-nocookie stay open for videos inside quiz questions), Google Colab, Reddit Answers. Old 'Studocu/Knowunity stay open' test asserts updated; privacy page wording. test_blocklist T21. Filter lists Chromium ~900 / Firefox ~935 of 1000. run_all green.
 - 2026-11-03 10:40 PT — 015umorZ: v0.6.9 ships the faster Windows policy writes; store test 'Test it now' runs 30 s and waits for state + hosts both clean (it raced the unlock on slow runners); a busy hosts read is retried, never taken as clean; the wait loop sleeps and waits for engine_locked false (status says unlocked while the unlock still runs).
 - 2026-11-03 09:55 PT — 015umorZ: Windows browser policy: registry values written/removed through .NET (cmdlet fallback) - lock + unlock had grown ~9 s with the longer filter lists (CI 'Test it now' timed out). Content-move test waits for the first page instead of a fixed 12 s (slow cold Chrome start on CI). run_all green.

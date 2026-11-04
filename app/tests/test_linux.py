@@ -60,7 +60,7 @@ check("Chrome: incognito/guest off, built-in DNS client off (system resolver onl
 d = json.load(open(cj))
 check("Chrome: GenAI off, Gemini off, DoH off, proxy direct, extensions blocked, blocklist hosts inside URLBlocklist",
       d.get("GenAiDefaultSettings") == 2 and d.get("GeminiSettings") == 1 and d.get("DnsOverHttpsMode") == "off" and d.get("ProxyMode") == "direct"
-      and d.get("ExtensionInstallBlocklist") == ["*"] and "chatgpt.com" in d["URLBlocklist"] and "web.whatsapp.com" in d["URLBlocklist"] and d.get("LOCKqzManaged") is True)
+      and d.get("ExtensionInstallBlocklist") == ["*"] and "chatgpt.com" in d["URLBlocklist"] and "whatsapp.com" in d["URLBlocklist"] and "web.whatsapp.com" not in d["URLBlocklist"] and d.get("LOCKqzManaged") is True)
 check("Brave: Leo + Tor + VPN off", json.load(open(bj)).get("BraveAIChatEnabled") is False and json.load(open(bj)).get("TorDisabled") is True)
 ff = json.load(open(os.path.join(ROOT, "etc/firefox/policies/policies.json")))["policies"]
 check("Firefox: student's own policy kept, ours merged (AI chat off, DoH off, WebsiteFilter with the blocklist)",

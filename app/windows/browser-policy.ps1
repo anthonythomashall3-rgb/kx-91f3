@@ -148,7 +148,14 @@ function Get-HostEntries {
   # Plain host lines of blocklist.txt (the hosts-file entries), mirrored into the browsers' own URL
   # filters. Chromium matches subdomains too. URLBlocklist / WebsiteFilter take <= 1000 entries.
   if (-not (Test-Path $BlockFile)) { return @() }
-  @(Get-Content $BlockFile | ForEach-Object { $_.Trim().ToLower() } | Where-Object { $_ -match '^[a-z0-9-]+(\.[a-z0-9-]+)+$' } | Select-Object -Unique)
+  $all = @(Get-Content $BlockFile | ForEach-Object { $_.Trim().ToLower() } | Where-Object { $_ -match '^[a-z0-9-]+(\.[a-z0-9-]+)+$' } | Select-Object -Unique)
+  # A listed host already covers its subdomains in every browser filter, so chat.openai.com next to
+  # openai.com only spends one of the 1000 entries (the hosts file keeps both).
+  $have = @{}; foreach ($h in $all) { $have[$h] = $true }
+  @($all | Where-Object {
+    $parts = $_.Split('.'); $keep = $true
+    for ($i = 1; $i -lt $parts.Count - 1; $i++) { if ($have.ContainsKey(($parts[$i..($parts.Count - 1)] -join '.'))) { $keep = $false; break } }
+    $keep })
 }
 function Get-ConsoleUserSids {
   # SIDs of the users signed in at this PC (owners of explorer.exe), for per-user (HKU) policies.

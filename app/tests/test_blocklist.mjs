@@ -239,5 +239,20 @@ miss21.length === 0 ? ok(`all ${need21.length} in both blocklists + AI_DOMAINS`)
 !mac.some(d => d === "youtube.com" || d === "www.youtube.com" || d.startsWith("youtube.com/embed") || d === "youtube-nocookie.com" || d === "reddit.com")
   ? ok("youtube.com itself (embedded quiz videos) and reddit.com stay reachable; only their pages / AI path are blocked") : bad("youtube.com or reddit.com blocked whole");
 
+console.log("T22 browser filter lists skip subdomains of a listed host (room under the 1000-entry cap), every host still covered");
+{
+  const { execFileSync } = await import("node:child_process");
+  const r = JSON.parse(execFileSync("python3", ["-c", `
+import importlib.util,json,sys
+spec=importlib.util.spec_from_file_location('bp',sys.argv[1]); m=importlib.util.module_from_spec(spec); sys.argv=['x']; spec.loader.exec_module(m)
+print(json.dumps(m.host_entries()))`, join(DIR, "../mac/browser-policy.py")], { env: { ...process.env, LOCKQZ_BLOCKLIST: macF } }).toString());
+  const set = new Set(r), plain = mac.filter(d => !d.includes("/"));
+  const uncovered = plain.filter(d => { const p = d.split("."); for (let i = 0; i < p.length - 1; i++) if (set.has(p.slice(i).join("."))) return false; return true; });
+  uncovered.length === 0 ? ok(`all ${plain.length} blocklist hosts covered by ${r.length} browser entries`) : bad("hosts no longer in the browser filters: " + uncovered.slice(0, 10).join(", "));
+  const dup = r.filter(d => { const p = d.split("."); for (let i = 1; i < p.length - 1; i++) if (set.has(p.slice(i).join("."))) return true; return false; });
+  dup.length === 0 ? ok("no browser entry is a subdomain of another") : bad("redundant: " + dup.slice(0, 10).join(", "));
+  /\$have\.ContainsKey/.test(psPol) ? ok("Windows Get-HostEntries skips subdomains the same way") : bad("Windows browser-policy.ps1 does not collapse subdomains");
+}
+
 console.log(`RESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

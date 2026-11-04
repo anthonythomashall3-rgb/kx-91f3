@@ -252,7 +252,11 @@ def host_entries():
                     out.append(l)
     except Exception:
         pass
-    return list(dict.fromkeys(out))
+    out = list(dict.fromkeys(out))
+    # A listed host already covers its subdomains in every browser filter, so chat.openai.com next to
+    # openai.com only spends one of the 1000 entries the browsers read (the hosts file keeps both).
+    have = set(out)
+    return [h for h in out if not any(".".join(h.split(".")[i:]) in have for i in range(1, h.count(".")))]
 
 def _union(a, b):
     a = a if isinstance(a, list) else []
