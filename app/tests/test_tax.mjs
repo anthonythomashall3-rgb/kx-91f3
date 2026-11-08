@@ -144,21 +144,31 @@ let g = await start("gu@usc.edu");
 sqlite.prepare("INSERT INTO payments (txn,code,amount,via,payer,note,term,received_at,matched) VALUES (?,?,?,?,?,?,?,?,NULL)").run("zelle:old", g.code, 180, "zelle", "", g.code, g.term, "2000-01-01T12:00:00Z");
 check("old $180 Zelle still = paid", (await start("gu@usc.edu")).paid === true);
 
-console.log("T7 bank details emailed automatically (pay page button / Gmail script)");
+console.log("T7 bank details emailed automatically to professors (dashboard button / Gmail script); students have no bank transfer");
 mails.length = 0;
+for (const e of ["hu@usc.edu", "iv@gmail.com", "pd@usc.edu", "jo@usc.edu"]) await call(ON, "/signup", { email: e, password: "profpass7!" });
+mails.length = 0;   // the sign-up welcome emails are not what this test looks at
 r = await call(ON, "/pay/bank", { email: "hu@usc.edu" });
-check("sent", r.status === 200 && r.data.sent === true && r.data.amount === 240, JSON.stringify(r.data));
+check("sent", r.status === 200 && r.data.sent === true && r.data.amount === 6500, JSON.stringify(r.data));
 const m0 = mails.find(m => m.to === "hu@usc.edu");
-check("email: amount (no tax line), memo, bank details", m0 && /Amount: \$240\.00\n/.test(m0.text) && !/tax & fees/i.test(m0.text) && /Memo \/ reference: LQS/.test(m0.text) && /Routing: 000000000/.test(m0.text), m0 && m0.text);
+check("email: amount (no tax line), memo, bank details", m0 && /Amount: \$6,500\.00\n/.test(m0.text) && !/tax & fees/i.test(m0.text) && /Memo \/ reference: LQ/.test(m0.text) && /Routing: 000000000/.test(m0.text), m0 && m0.text);
 r = await call(ON, "/pay/bank", { email: "hu@usc.edu" });
 check("second ask within 10 min: no second email", r.data.again === true && mails.filter(m => m.to === "hu@usc.edu").length === 1);
 r = await onRequest({ request: new Request(BASE + "/api/pay/bank", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Pay": SECRET }, body: JSON.stringify({ email: "iv@gmail.com" }) }), env: ON }).then(x => x.json());
-check("Gmail script asks for a sender: sent", r.sent === true && mails.some(m => m.to === "iv@gmail.com"), JSON.stringify(r));
-r = await call(ON, "/pay/bank", { email: "al@usc.edu" });
-check("already paid: no email", r.data.paid === true && !mails.some(m => m.to === "al@usc.edu"), JSON.stringify(r.data));
+check("Gmail script asks for a professor: sent", r.sent === true && mails.some(m => m.to === "iv@gmail.com"), JSON.stringify(r));
+{ const tk = (await call(ON, "/login", { email: "pd@usc.edu", password: "profpass7!" })).data.token, memo = (await getc(ON, "/my-sections", { teacher: tk })).data.memo;
+  await notify([{ txn: "zelle:pd1", amount: 6500, note: memo, via: "zelle" }]); mails.length = 0;   // the "paid" email is not a bank-details email
+  r = await call(ON, "/pay/bank", { email: "pd@usc.edu" });
+  check("already paid: no email", r.data.paid === true && !mails.some(m => m.to === "pd@usc.edu"), JSON.stringify(r.data)); }
 { const NOB = { ...ON }; delete NOB.BANK_DETAILS; mails.length = 0;
   r = await call(NOB, "/pay/bank", { email: "jo@usc.edu" });
   check("no BANK_DETAILS: payer told details follow + admin emailed", r.data.sent === true && /follow in a separate email/.test(mails.find(m => m.to === "jo@usc.edu")?.text || "") && mails.some(m => m.to === "admin@usc.edu" && /jo@usc\.edu/.test(m.subject)), JSON.stringify(mails.map(m => m.to))); }
+mails.length = 0;
+r = await call(ON, "/pay/bank", { email: "stu7@usc.edu" });
+check("student asks for bank details -> refused (card, Venmo or Zelle), no email, no code made", r.status === 400 && r.data.student === true && /no bank transfer/.test(r.data.error) && !mails.length, JSON.stringify(r.data));
+r = await onRequest({ request: new Request(BASE + "/api/pay/bank", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Pay": SECRET }, body: JSON.stringify({ email: "stu8@usc.edu" }) }), env: ON }).then(x => x.json());
+check("Gmail script asking for a student -> refused too", r.student === true && !mails.length, JSON.stringify(r));
+check("student pay info: no bank transfer, no PO", (await start("stu9@usc.edu")).bank === null && (await start("stu9@usc.edu")).po === null);
 
 console.log("T8 professors: $5,000 + tax = $6,666.67 by Zelle/bank");
 r = await call(ON, "/signup", { email: "prof@usc.edu", password: "profpass1", name: "Pat Doe" });

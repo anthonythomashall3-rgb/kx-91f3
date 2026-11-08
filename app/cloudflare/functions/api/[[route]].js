@@ -2475,9 +2475,9 @@ export async function onRequest(context) {
         for (const x of (await db.prepare(`SELECT term, COALESCE(SUM(${CREDIT()}),0) AS s FROM payments WHERE code=? AND term IN (?,?) AND ${COUNTS} GROUP BY term`).bind(code, cur, nxt).all()).results) sums[x.term] = Number(x.s);
         left = PRICE - sums[payTermFor(sums[cur], PRICE)];
       } else {
-        code = await studentCode(email, script ? null : clientIp);
-        if (!code || typeof code === "object") return json({ error: "too many requests — try again in an hour" }, 429);
-        left = (await studentPaid(email)) ? 0 : STUDENT_FEE - (await studentStatus(email)).received;
+        // Students have no bank-transfer option (owner 8 Nov 2026): card, Venmo or Zelle only. The pay page never
+        // offers it; this also answers the Gmail script's auto-reply and anyone posting here by hand.
+        return json({ error: "Students pay by card, Venmo or Zelle at " + PAY_URL + " — there is no bank transfer option.", student: true }, 400);
       }
       await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + (script ? "gmail" : clientIp), email, null, "pay_bank", kind, now()).run();
       // Without the email's pay-link token the answer is the same whatever the email (never says "paid" or the balance).
