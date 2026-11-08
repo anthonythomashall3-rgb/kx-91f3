@@ -954,7 +954,7 @@ export async function onRequest(context) {
   // ---- income tax on top (Anthony, 26 Oct 2026). From TAX_FROM on, every price = base / (1 - TAX_RATE), so
   // LOCKqz keeps the base after setting aside income tax; the payer sees "Tax & fees (23%)" as its own line.
   // Bases: Zelle and bank transfer = the fee ($180 student, $5,000 professor); Venmo and PO =
-  // STUDENT_OTHER_PRICE ($200) / PROF_OTHER_PRICE; card = STUDENT_CARD_PRICE / PROF_CARD_PRICE.
+  // STUDENT_OTHER_PRICE ($210) / PROF_OTHER_PRICE; card = STUDENT_CARD_PRICE / PROF_CARD_PRICE.
   // A payment counts by how it came: credit = amount x fee / that way's total (a $240 Zelle = $180 of a
   // student's fee; a $266.67 Venmo = $180). Payments received before TAX_FROM count 1:1, as before.
   const TAX_FROM = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?Z)?$/.test(String(env.TAX_FROM || "")) ? String(env.TAX_FROM) : "";
@@ -966,21 +966,26 @@ export async function onRequest(context) {
   const isStu = code => /^LQS[A-Z0-9]{5}$/.test(String(code || ""));
   const baseOf = (kind, way) => {
     const n = (v, d) => Number(v) > 0 ? Number(v) : d, other = way === "venmo" || way === "po";
-    if (kind === "student") return way === "card" ? n(env.STUDENT_CARD_PRICE, 200) : way === "sbank" ? n(env.STUDENT_BANK_PRICE, 181.45) : other && taxOn() ? n(env.STUDENT_OTHER_PRICE, 200) : STUDENT_FEE;
+    if (kind === "student") return way === "card" ? n(env.STUDENT_CARD_PRICE, 210) : way === "sbank" ? n(env.STUDENT_BANK_PRICE, 181.45) : other && taxOn() ? n(env.STUDENT_OTHER_PRICE, 210) : STUDENT_FEE;
     return way === "card" ? n(env.PROF_CARD_PRICE, 5150) : way === "sbank" ? n(env.PROF_BANK_PRICE, 5005) : other && taxOn() ? n(env.PROF_OTHER_PRICE, PRICE) : PRICE;
   };
   const feeOf = kind => kind === "student" ? STUDENT_FEE : PRICE;
-  // Whole-number totals (Anthony, 26 Oct 06:05): students $240 Zelle / bank, $270 Venmo / card / PO; professors
-  // $6,500, card $6,700. Tax & fees = TAX_RATE of the total. A way without a set total = base / (1 - TAX_RATE).
-  const setTotal = (kind, way) => { const v = Number(kind === "student" ? (way === "zelle" ? env.STUDENT_TOTAL : way === "sbank" ? 0 : env.STUDENT_OTHER_TOTAL)
-                                                                       : (way === "card" ? env.PROF_CARD_TOTAL : way === "sbank" ? 0 : env.PROF_TOTAL)); return v > 0 ? v : 0; };
-  const totalOf = (kind, way) => { way = way === "bank" ? "zelle" : way; return setTotal(kind, way) || grossUp(baseOf(kind, way)); };
-  const factorOf = (kind, way) => taxOn() ? feeOf(kind) / totalOf(kind, way) : 1;
+  // Whole-number totals (8 Nov 2026): students $200 Zelle / bank, $210 Venmo / card / PO; professors
+  // $6,300 Zelle / bank (PROF_ZELLE_TOTAL), $6,500 Venmo (PROF_TOTAL) and card (PROF_CARD_TOTAL). Tax & fees = TAX_RATE of the total. A way without a set total = base / (1 - TAX_RATE).
+  // Students (8 Nov 2026): $210 by Venmo / card / PO, $200 by Zelle / bank transfer. A Venmo / card / PO payment
+  // received before STUDENT_OTHER_FROM still counts against the total in force then (STUDENT_OTHER_TOTAL_PREV),
+  // so nobody who already paid loses access when the price moves.
+  const OTHER_FROM = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?Z)?$/.test(String(env.STUDENT_OTHER_FROM || "")) && Number(env.STUDENT_OTHER_TOTAL_PREV) > 0 ? String(env.STUDENT_OTHER_FROM) : "";
+  const setTotal = (kind, way, prev = false) => { const v = Number(kind === "student" ? (way === "zelle" ? env.STUDENT_TOTAL : way === "sbank" ? 0 : prev && OTHER_FROM ? env.STUDENT_OTHER_TOTAL_PREV : env.STUDENT_OTHER_TOTAL)
+                                                                       : (way === "card" ? env.PROF_CARD_TOTAL : way === "sbank" ? 0 : way === "zelle" && Number(env.PROF_ZELLE_TOTAL) > 0 ? env.PROF_ZELLE_TOTAL : env.PROF_TOTAL)); return v > 0 ? v : 0; };
+  const totalOf = (kind, way, prev = false) => { way = way === "bank" ? "zelle" : way; return setTotal(kind, way, prev) || grossUp(baseOf(kind, way)); };
+  const factorOf = (kind, way, prev = false) => taxOn() ? feeOf(kind) / totalOf(kind, way, prev) : 1;
   const creditOf = (code, via, amount) => Number(amount) * factorOf(isStu(code) ? "student" : "professor", wayOf(via));
   // The same credit in SQL, for every SUM over payments.
   const CREDIT = () => { if (!taxOn()) return "amount";
-    const f = k => { const w = way => factorOf(k, way).toFixed(12); return `(CASE lower(COALESCE(via,'')) WHEN 'venmo' THEN ${w("venmo")} WHEN 'stripe-card' THEN ${w("card")} WHEN 'stripe-bank' THEN ${w("sbank")} WHEN 'po' THEN ${w("po")} ELSE ${w("zelle")} END)`; };
-    return `(CASE WHEN COALESCE(received_at,'') < '${TAX_FROM}' THEN amount ELSE amount * (CASE WHEN length(code)=8 AND substr(code,1,3)='LQS' THEN ${f("student")} ELSE ${f("professor")} END) END)`; };
+    const f = (k, prev = false) => { const w = way => factorOf(k, way, prev).toFixed(12); return `(CASE lower(COALESCE(via,'')) WHEN 'venmo' THEN ${w("venmo")} WHEN 'stripe-card' THEN ${w("card")} WHEN 'stripe-bank' THEN ${w("sbank")} WHEN 'po' THEN ${w("po")} ELSE ${w("zelle")} END)`; };
+    const stu = OTHER_FROM ? `(CASE WHEN COALESCE(received_at,'') < '${OTHER_FROM}' THEN ${f("student", true)} ELSE ${f("student")} END)` : f("student");
+    return `(CASE WHEN COALESCE(received_at,'') < '${TAX_FROM}' THEN amount ELSE amount * (CASE WHEN length(code)=8 AND substr(code,1,3)='LQS' THEN ${stu} ELSE ${f("professor")} END) END)`; };
   const FULL = (sum, fee) => Number(sum) >= fee - 0.005;   // credits are fractions of cents
   // What each way costs for what is still owed (credit left): { total, base, tax }.
   const waysFor = (kind, left) => Object.fromEntries(WAYS.map(w => {
@@ -998,7 +1003,7 @@ export async function onRequest(context) {
   const stripeCents = (kind, method, dueC) => {
     if (taxOn()) return dueC > 0 ? Math.max(50, Math.ceil(dueC / factorOf(kind, method === "card" ? "card" : "sbank") - 1e-6)) : 0;
     const fullC = Math.round((kind === "student" ? STUDENT_FEE : PRICE) * 100);
-    const set = kind === "student" ? (method === "card" ? cts(env.STUDENT_CARD_PRICE, 200) : cts(env.STUDENT_BANK_PRICE, 181.45))
+    const set = kind === "student" ? (method === "card" ? cts(env.STUDENT_CARD_PRICE, 210) : cts(env.STUDENT_BANK_PRICE, 181.45))
                                    : (method === "card" ? cts(env.PROF_CARD_PRICE, 5150) : cts(env.PROF_BANK_PRICE, 5005));
     if (dueC >= fullC) return set;
     if (dueC <= 0) return 0;
@@ -2677,7 +2682,7 @@ export async function onRequest(context) {
       for (const x of (await db.prepare(`SELECT term, COALESCE(SUM(${CREDIT()}),0) AS s, COALESCE(SUM(amount),0) AS m FROM payments WHERE code=? AND term IN (?,?) AND ${COUNTS} GROUP BY term`).bind(memo, cur, nxt).all()).results) { sums[x.term] = Number(x.s); paidMoney[x.term] = Number(x.m); }
       const payTerm = payTermFor(sums[cur], PRICE);   // H14: partial payments add up per term
       const dueC = Math.round(PRICE * 100) - Math.round(sums[payTerm] * 100);
-      return json({ ...r, price: PRICE, venmo: (env.VENMO_HANDLE || "").replace(/^@/, "") || null, zelle: env.ZELLE_TO || null, invoice: env.INVOICE_EMAIL || env.ADMIN_EMAIL || null, po: env.INVOICE_EMAIL || env.ADMIN_EMAIL || null, stripe: me.active ? null : stripeInfo("professor", dueC), memo, all_active: !!me.active, received: sums[payTerm], pay_term: payTerm, money: paidMoney[payTerm], tax: taxInfo(), ways: taxOn() ? waysFor("professor", Math.max(0, PRICE - sums[payTerm])) : null });
+      return json({ ...r, price: PRICE, venmo: (env.VENMO_HANDLE || "").replace(/^@/, "") || null, zelle: env.ZELLE_TO || null, invoice: env.INVOICE_EMAIL || env.ADMIN_EMAIL || null, po: null /* no purchase orders (owner 8 Nov 2026) */, stripe: me.active ? null : stripeInfo("professor", dueC), memo, all_active: !!me.active, received: sums[payTerm], pay_term: payTerm, money: paidMoney[payTerm], tax: taxInfo(), ways: taxOn() ? waysFor("professor", Math.max(0, PRICE - sums[payTerm])) : null });
     }
     // Professor: Stripe Checkout (card or bank) for what is still due this term.
     if (p === "/pay/stripe-prof" && request.method === "POST") {

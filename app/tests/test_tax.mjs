@@ -176,12 +176,48 @@ check("$5,000 Zelle -> not active yet", r.results[0].paid === false && (await ge
 r = await notify([{ txn: "zelle:p2", amount: 1500, note: ms.memo, via: "zelle" }]);
 check("+$1,500 -> active", r.results[0].paid === true && (await getc(ON, "/me", { teacher: PT })).data.active === true, JSON.stringify(r));
 
+console.log("T10 students (8 Nov): $200 Zelle / bank, $210 Venmo / card / PO; earlier Venmo / card / PO payments keep the $200 total");
+{ const mk = from => ({ ...ON, STUDENT_TOTAL: "200", STUDENT_OTHER_TOTAL: "210", STUDENT_OTHER_TOTAL_PREV: "200", STUDENT_OTHER_FROM: from, STUDENT_CARD_PRICE: "210", STUDENT_OTHER_PRICE: "210" });
+  const notify2 = (env, payments) => onRequest({ request: new Request(BASE + "/api/pay/notify", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Pay": SECRET }, body: JSON.stringify({ payments }) }), env }).then(r => r.json());
+  const NOW = mk("2000-01-03T00:00:00Z"), LATER = mk("2099-01-01T00:00:00Z");   // LATER: every payment so far came before the change
+  let s1 = (await call(NOW, "/pay/start", { email: "nv@usc.edu" })).data;
+  check("Zelle $200 / bank $200", s1.ways.zelle.total === 200 && s1.ways.bank.total === 200, JSON.stringify(s1.ways));
+  check("Venmo $210 / PO $210 / card $210 (Stripe charges $210)", s1.ways.venmo.total === 210 && s1.ways.po.total === 210 && s1.ways.card.total === 210 && s1.stripe.card === 210, JSON.stringify([s1.ways, s1.stripe]));
+  let rr = await notify2(NOW, [{ txn: "venmo:nv1", amount: 200, note: s1.code, via: "venmo" }]);
+  check("$200 Venmo after the change -> not paid ($10 still due)", rr.results[0].paid === false && (await call(NOW, "/pay/start", { email: "nv@usc.edu" })).data.ways.venmo.total === 10, JSON.stringify(rr));
+  let s2 = (await call(NOW, "/pay/start", { email: "nw@usc.edu" })).data;
+  rr = await notify2(NOW, [{ txn: "venmo:nw1", amount: 210, note: s2.code, via: "venmo" }]);
+  check("$210 Venmo after the change -> paid", rr.results[0].paid === true && (await call(NOW, "/pay/start", { email: "nw@usc.edu" })).data.paid === true, JSON.stringify(rr));
+  let s3 = (await call(LATER, "/pay/start", { email: "nx@usc.edu" })).data;
+  rr = await notify2(LATER, [{ txn: "venmo:nx1", amount: 200, note: s3.code, via: "venmo" }]);
+  check("$200 Venmo received before the change -> still paid (old $200 total)", (await call(LATER, "/pay/start", { email: "nx@usc.edu" })).data.paid === true, JSON.stringify(rr));
+  let s4 = (await call(LATER, "/pay/start", { email: "ny@usc.edu" })).data;
+  rr = await notify2(LATER, [{ txn: "zelle:ny1", amount: 200, note: s4.code, via: "zelle" }]);
+  check("$200 Zelle -> paid either way", rr.results[0].paid === true, JSON.stringify(rr));
+  check("new payments are priced at $210 by Venmo even while old ones keep $200", (await call(LATER, "/pay/start", { email: "nz@usc.edu" })).data.ways.venmo.total === 210); }
+
+console.log("T11 professors (8 Nov): $6,300 Zelle / bank, $6,500 Venmo and card, no purchase orders");
+{ const P2 = { ...ON, PROF_TOTAL: "6500", PROF_CARD_TOTAL: "6500", PROF_ZELLE_TOTAL: "6300" };
+  await call(P2, "/signup", { email: "p8@usc.edu", password: "profpass11" });
+  const pt = (await call(P2, "/login", { email: "p8@usc.edu", password: "profpass11" })).data.token;
+  const ms2 = (await getc(P2, "/my-sections", { teacher: pt })).data;
+  check("Zelle $6,300 / bank $6,300", ms2.ways?.zelle.total === 6300 && ms2.ways.bank.total === 6300, JSON.stringify(ms2.ways));
+  check("Venmo $6,500 / card $6,500 (Stripe charges $6,500)", ms2.ways.venmo.total === 6500 && ms2.ways.card.total === 6500 && ms2.stripe?.card === 6500, JSON.stringify([ms2.ways, ms2.stripe]));
+  check("no purchase-order option for professors", ms2.po === null, JSON.stringify(ms2.po));
+  const notifyP = payments => onRequest({ request: new Request(BASE + "/api/pay/notify", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Pay": SECRET }, body: JSON.stringify({ payments }) }), env: P2 }).then(r => r.json());
+  let rp = await notifyP([{ txn: "zelle:p8a", amount: 6300, note: ms2.memo, via: "zelle" }]);
+  check("$6,300 by Zelle -> professor active", rp.results[0].paid === true && (await getc(P2, "/me", { teacher: pt })).data.active === true, JSON.stringify(rp));
+  const wt = readFileSync(join(CF, "wrangler.toml"), "utf8");
+  check("wrangler: PROF_TOTAL 6500, PROF_CARD_TOTAL 6500, PROF_ZELLE_TOTAL 6300", /^PROF_TOTAL = "6500"$/m.test(wt) && /^PROF_CARD_TOTAL = "6500"$/m.test(wt) && /^PROF_ZELLE_TOTAL = "6300"$/m.test(wt));
+  check("dashboard: no PO button in the professor payment panel", !/Purchase order \(PO\)/.test(readFileSync(join(CF, "public", "dashboard.html"), "utf8"))); }
+
 console.log("T9 pages");
 const ph = readFileSync(join(CF, "public", "pay.html"), "utf8"), dh = readFileSync(join(CF, "public", "dashboard.html"), "utf8");
 check("pay page: Card, then Venmo, then Zelle (owner 2 Nov); bank + PO after", ph.indexOf('id="card"') > 0 && ph.indexOf('id="card"') < ph.indexOf('id="venmo"') && ph.indexOf('id="venmo"') < ph.indexOf('id="zelle"') && ["id=\"bank\"", "id=\"po\""].every(x => ph.indexOf(x) > ph.indexOf('id="zelle"')));
 check("professor payment: Card, then Venmo, then Zelle (owner 2 Nov)", (m => !!m && m[1].indexOf('"card"') < m[1].indexOf('"venmo"') && m[1].indexOf('"venmo"') < m[1].indexOf('"zelle"'))(dh.match(/const ways = \[(.*?)\]\.filter/)));
 { const wt = readFileSync(join(CF, "wrangler.toml"), "utf8");
-  check("students pay $200 every way (owner 2 Nov): STUDENT_TOTAL = STUDENT_OTHER_TOTAL = 200", /^STUDENT_TOTAL = "200"$/m.test(wt) && /^STUDENT_OTHER_TOTAL = "200"$/m.test(wt) && /^STUDENT_CARD_PRICE = "200"$/m.test(wt)); }
+  check("students pay $200 by Zelle / bank, $210 by card / Venmo / PO (owner 8 Nov)", /^STUDENT_TOTAL = "200"$/m.test(wt) && /^STUDENT_OTHER_TOTAL = "210"$/m.test(wt) && /^STUDENT_CARD_PRICE = "210"$/m.test(wt));
+  check("card / Venmo / PO payments received before the price change keep the $200 total", /^STUDENT_OTHER_TOTAL_PREV = "200"$/m.test(wt) && /^STUDENT_OTHER_FROM = "2026-11-08T\d{2}:\d{2}:\d{2}Z"$/m.test(wt)); }
 check("pay page: one 'LOCKqz <total>' line per way, no tax / fees lines anywhere (owner 29 Oct)", /taxline/.test(ph) && /\/pay\/bank/.test(ph) && !/TAX\.label|includes \$\{TAX/.test(ph));
 { const dh = readFileSync(join(CF, "public", "dashboard.html"), "utf8");
   check("professor payment: no tax / fees lines either", !/PT\.label/.test(dh) && /function payTax\(w\)\{ return `<div class="hrow"[^`]*<span>LOCKqz<\/span><span>\$\{money\(w\.total\)\}/.test(dh)); }

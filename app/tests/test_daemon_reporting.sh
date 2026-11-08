@@ -256,6 +256,7 @@ r=$(hpost /lock '{"quiz_id":"98765-12345","student":"Admin"}')
 echo "$r" | grep -q '"state": "developer"' && ok "/lock answers developer (AI stays on)" || bad "lock in dev mode: $r"
 st=$(curl -s -H "X-LOCKqz-Token: $TOKEN" "http://127.0.0.1:$CTRL_PORT/status")
 echo "$st" | grep -q '"engine_locked": false' && ok "engine NOT locked in developer mode" || bad "engine locked in dev mode: $st"
+for i in 1 2 3 4 5 6; do grep '"event": "lock"' "$LOG3" | grep -q '"developer": true' && break; sleep 0.5; done   # the lock report is sent in the background
 grep '"event": "lock"' "$LOG3" | grep '"developer": true' | grep -q 'signed=1' && ok "signed lock flagged developer sent to server" || bad "no signed developer lock"
 r=$(hpost /password "{\"url\":\"$QURL\"}")
 echo "$r" | grep -q 'LQ-TESTPASS' && ok "admin gets the quiz password in developer mode" || bad "no password in dev mode: $r"

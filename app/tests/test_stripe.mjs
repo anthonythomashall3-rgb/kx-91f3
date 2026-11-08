@@ -170,7 +170,7 @@ r = await call(ON, "/signup", { email: "prof@usc.edu", password: "profpass1", na
 const PT = r.data.token;
 r = await getc(ON, "/my-sections", { teacher: PT });
 const MEMO = r.data?.memo;
-check("professor prices 5150 / 5005 + PO", r.data?.stripe?.card === 5150 && r.data.stripe.bank === 5005 && r.data.po === "pay@usc.edu", JSON.stringify(r.data));
+check("professor prices 5150 / 5005, no PO (owner 8 Nov)", r.data?.stripe?.card === 5150 && r.data.stripe.bank === 5005 && r.data.po === null, JSON.stringify(r.data));
 check("card nets >= $5,000", 5150 - (5150 * 0.029 + 0.30) >= 5000);
 check("bank nets $5,000 (fee capped $5)", 5005 - Math.min(5005 * 0.008, 5) === 5000);
 r = await call(ON, "/pay/stripe-prof", { method: "card", back: "https://evil.example/" }, { teacher: PT });
@@ -187,7 +187,7 @@ check("no login -> no professor checkout", (await call(ON, "/pay/stripe-prof", {
 console.log("S10 pay page + dashboard show the options");
 const html = readFileSync(join(CF, "public", "pay.html"), "utf8"), dash = readFileSync(join(CF, "public", "dashboard.html"), "utf8");
 check("pay.html: card, bank account, ACH/wire, PO", /id="card"/.test(html) && /id="ach"/.test(html) && /ACH \/ wire/.test(html) && /Purchase order \(PO\)/.test(html) && /\/pay\/stripe"/.test(html));
-check("dashboard: card, bank, ACH/wire, PO", /stripePay\('card'/.test(dash) && /stripePay\('bank'/.test(dash) && /ACH \/ wire/.test(dash) && /Purchase order \(PO\)/.test(dash));
+check("dashboard: card, bank, ACH/wire; no PO (owner 8 Nov)", /stripePay\('card'/.test(dash) && /stripePay\('bank'/.test(dash) && /ACH \/ wire/.test(dash) && !/Purchase order \(PO\)/.test(dash));
 
 console.log("S11a default: one Zelle price ($180) + memo; no unique amounts, no amount guessing");
 { const DEF = { ...ON }; delete DEF.ZELLE_UNIQUE;
