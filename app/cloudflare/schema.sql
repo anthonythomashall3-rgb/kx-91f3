@@ -155,6 +155,7 @@ CREATE INDEX IF NOT EXISTS payments_code ON payments (code, term);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_quizzes_ou_qi ON quizzes(ou, qi);
 CREATE TABLE IF NOT EXISTS renew_optout (email TEXT PRIMARY KEY, at TEXT);
 CREATE TABLE IF NOT EXISTS renew_sent (email TEXT NOT NULL, term TEXT NOT NULL, at TEXT, PRIMARY KEY (email, term));
+CREATE TABLE IF NOT EXISTS pay_nudge (email TEXT PRIMARY KEY, at TEXT NOT NULL, sent INTEGER DEFAULT 1);   -- one pay reminder per student (migrate_040)
 -- Student card auto-renew (migrate_033): saved card per email, charged off-session each Fall/Spring from /pay/tick.
 CREATE TABLE IF NOT EXISTS card_renew (
   email TEXT PRIMARY KEY, customer TEXT, pm TEXT, brand TEXT, last4 TEXT,

@@ -1397,6 +1397,33 @@ export async function onRequest(context) {
     if (prev && prev.pm === id && Number(prev.autorenew) === 1) return;
     // No confirmation email (29 Oct 2026, owner): the pay page already says the card renews each semester and how to cancel.
   }
+  // One reminder to pay, by email, to a student whose LOCKqz is installed (school email confirmed) but who
+  // has not paid this term PAY_NUDGE_HOURS (default 2) after the install. Once per email, ever (pay_nudge);
+  // installs older than 7 days are left alone. Runs from /pay/tick (hourly), a few emails per call.
+  async function payNudgeTick() {
+    if (!feeOn()) return { sent: 0, why: "fee off" };
+    if (!mailOn(env)) return { sent: 0, why: "mail off" };
+    const hrs = Number(env.PAY_NUDGE_HOURS ?? 2); if (!(hrs > 0)) return { sent: 0, why: "off" };
+    const t = Date.now(), upto = new Date(t - hrs * 3600000).toISOString(), from = new Date(t - 7 * 86400000).toISOString();
+    const rows = (await db.prepare(`SELECT DISTINCT lower(d.student) AS email FROM devices d WHERE d.student_verified=1 AND d.student IS NOT NULL
+        AND COALESCE(d.revoked,0)=0 AND d.installed_at>=? AND d.installed_at<=? AND lower(d.student) NOT IN (SELECT email FROM pay_nudge) LIMIT 10`).bind(from, upto).all()).results
+      .map(r => r.email).filter(e => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e || ""));
+    if (!rows.length) return { sent: 0 };
+    const paid = await paidEmails(rows);
+    const end = fmtDay(termEndOf(payTermFor(0, STUDENT_FEE))), zel = totalOf("student", "zelle"), other = totalOf("student", "card");
+    let sent = 0, skipped = 0;
+    for (const email of rows) {
+      if (paid.has(email)) { await db.prepare("INSERT OR IGNORE INTO pay_nudge (email,at,sent) VALUES (?,?,0)").bind(email, now()).run(); skipped++; continue; }
+      const text = `LOCKqz is installed on your computer. One step left: pay for this semester, or your Brightspace exams that use LOCKqz will not open.\n\n`
+        + `Pay now: ${await payLink(email)}\n\n`
+        + `$${zel.toLocaleString("en-US")} by Zelle, or $${other.toLocaleString("en-US")} by card or Venmo. One payment covers all your LOCKqz classes until ${end}.`;
+      try { await mailOut(email, "One step left: pay for LOCKqz", text, {}, "auto"); }
+      catch (e) { break; }   // mail budget reached: the rest wait for the next hour
+      await db.prepare("INSERT OR IGNORE INTO pay_nudge (email,at,sent) VALUES (?,?,1)").bind(email, now()).run();
+      sent++;
+    }
+    return { sent, skipped };
+  }
   async function cardRenewTick() {
     if (!autoRenewOn()) return { why: "off" };
     if (!mailOn(env)) return { why: "mail off" };   // never charge when email is down (confirmation + failure notices)
@@ -2598,7 +2625,9 @@ export async function onRequest(context) {
       let card; try { card = await cardRenewTick(); } catch (e) { card = { error: String(e && e.message || e).slice(0, 120) }; }
       // Workers Free: 50 subrequests per call; a busy card round leaves the renewal emails for the next hour.
       if (Number(card && card.sub) > 20) return json({ sent: 0, why: "card renewals busy", card, exams });
-      return json({ ...(await renewalTick()), card, exams });
+      const renew = await renewalTick();
+      let nudge; try { nudge = Number(renew.sent) > 10 ? { sent: 0, why: "renewals busy" } : await payNudgeTick(); } catch (e) { nudge = { error: String(e && e.message || e).slice(0, 120) }; }
+      return json({ ...renew, card, exams, nudge });
     }
     if (p === "/pay/notify" && request.method === "POST") {
       const secret = await paySecret();
