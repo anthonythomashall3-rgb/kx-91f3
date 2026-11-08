@@ -71,8 +71,18 @@
     <p class="tag" id="os"></p>
 
     <div id="install" hidden>
-      <div id="store" hidden style="margin:0 0 18px"><a class="btn" id="storebtn" href="#">Get LOCKqz from Microsoft Store</a></div>
+      <div class="opt" id="store" hidden>
+        <h2>Get it from Microsoft Store</h2>
+        <a class="btn" id="storebtn" href="#">Get LOCKqz from Microsoft Store</a>
+        <ol>
+          <li>Click <b>Get</b> in Microsoft Store.</li>
+          <li>Open LOCKqz and click <b>Yes</b> on the Windows prompt.</li>
+          <li>Follow LOCKqz&rsquo;s steps. Done.</li>
+        </ol>
+        <p style="margin:14px 0 0;font-size:13.5px"><a href="#" id="altlink" style="color:var(--usc)">Can&rsquo;t use Microsoft Store? Other ways to install</a></p>
+      </div>
 
+      <div id="alt">
       <div class="opt">
         <h2 id="lead">Paste one command</h2>
         <ol>
@@ -91,6 +101,7 @@
         <h2>Download the installer</h2>
         <a class="btn" id="dl" href="#">Download</a>
         <ol id="dlol"></ol>
+      </div>
       </div>
 
       <div id="warnbox" style="display:flex;align-items:center;gap:10px;margin:20px 0 0;padding:12px 14px;border:1px solid #f0c9c9;background:#fff6f6;border-radius:10px;text-align:left">
@@ -118,7 +129,7 @@
     $("install").hidden = false;
     if (android) {
       $("os").textContent = "for Android";
-      document.querySelector(".opt").hidden = true; $("orline").hidden = true;   // one way on a phone: the app
+      $("lead").parentNode.hidden = true; $("orline").hidden = true;   // one way on a phone: the app
       $("dl").href = "/download/lockqz-android.apk";
       $("dl").textContent = "Download for Android";
       $("dlol").innerHTML = ["Open the downloaded <b>lockqz-android.apk</b> (notification or Files).", "If asked, allow this browser to <b>install unknown apps</b>, then tap <b>Install</b>.", "Open LOCKqz and do its 4 steps (email, quiz detection, AI block, fee)."].map(function (x) { return "<li>" + x + "</li>"; }).join("");
@@ -147,10 +158,12 @@
       $("dl").href = "/download/lockqz-win.exe";
       $("dl").textContent = "Download for Windows";
       $("dlol").innerHTML = ["Open <b>lockqz-win.exe</b> from Downloads.", "If SmartScreen appears: <b>More info \u2192 Run anyway</b>.", "Click <b>Yes</b>, then follow the installer."].map(function (x) { return "<li>" + x + "</li>"; }).join("");
+      // Microsoft Store is the one way on Windows once its copy is the current release (/api/store says so):
+      // no SmartScreen warning, no PowerShell. The command + installer stay one click away for PCs without the Store.
       var showStore = function (id) { if (!id) return;
         $("store").hidden = false; $("storebtn").href = "https://apps.microsoft.com/detail/" + id;
-        $("lead").textContent = "Or paste one command"; };
-      // The Microsoft Store listing (no SmartScreen warning) shows here by itself once Microsoft has published it.
+        $("alt").hidden = true;
+        $("altlink").onclick = function (e) { e.preventDefault(); $("alt").hidden = false; this.parentNode.hidden = true; }; };
       if (STORE_ID) showStore(STORE_ID);
       else fetch("/api/store").then(function (r) { return r.json(); }).then(function (d) { showStore(d && d.id); }, function () {});
     }

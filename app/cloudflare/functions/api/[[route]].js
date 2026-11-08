@@ -1619,19 +1619,34 @@ export async function onRequest(context) {
     // ---- device endpoints (signed by the device key; see verifyDevice) ----
     if (p === "/blocklist") return json({ domains: AI_DOMAINS });
     // C7: what this host runs (deploy.sh compares lockqz.pages.dev and lockdownqz.pages.dev). No auth.
-    // Is LOCKqz's Microsoft Store listing live? (the download page then offers it first on Windows: no
-    // SmartScreen warning). Asked of Microsoft at most every 6 h (1 h while not live), cached at the edge.
+    // Microsoft Store: the download page sends Windows students to the Store (no SmartScreen warning, no
+    // PowerShell) only when the Store listing is live AND carries the current LOCKqz release, because Store
+    // installs update only from Store packages. Otherwise the page keeps the command + installer (always current).
+    // Microsoft is asked at most every 6 h (30 min while the Store copy is not current), cached at the edge.
     if (p === "/store") {
       const sid = /^[0-9A-Z]{12}$/.test(String(env.STORE_ID || "")) ? String(env.STORE_ID) : "9P7D1114N2LJ";
-      const ck = new Request("https://lockqz.pages.dev/__store/" + sid);
-      let live = null;
-      try { const c = typeof caches !== "undefined" && caches.default ? await caches.default.match(ck) : null; if (c) live = !!(await c.json()).live; } catch {}
-      if (env.STORE_LIVE_TEST != null) live = String(env.STORE_LIVE_TEST) === "1";   // tests only (no network)
-      if (live === null) {
-        try { const r = await fetch("https://storeedgefd.dsx.mp.microsoft.com/v9.0/products/" + sid + "?market=US&locale=en-us&deviceFamily=Windows.Desktop"); live = r.status === 200; } catch { live = false; }
-        try { if (typeof caches !== "undefined" && caches.default) await caches.default.put(ck, new Response(JSON.stringify({ live }), { headers: { "Content-Type": "application/json", "Cache-Control": "max-age=" + (live ? 21600 : 3600) } })); } catch {}
+      const ck = new Request("https://lockqz.pages.dev/__store2/" + sid);
+      const cur = String(env.STORE_CURRENT_TEST ?? buildInfo().version);   // tests may pin the release version
+      const vparts = v => String(v || "").split(".").slice(0, 3).map(n => parseInt(n, 10) || 0);
+      const atLeast = (a, b) => { const x = vparts(a), y = vparts(b); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i]; return true; };
+      let st = null;   // { live, version }
+      try { const c = typeof caches !== "undefined" && caches.default ? await caches.default.match(ck) : null; if (c) st = await c.json(); } catch {}
+      if (env.STORE_LIVE_TEST != null) st = { live: String(env.STORE_LIVE_TEST) === "1", version: env.STORE_VERSION_TEST ?? null };   // tests only (no network)
+      if (!st) {
+        st = { live: false, version: null };
+        try {
+          const r = await fetch("https://displaycatalog.mp.microsoft.com/v7.0/products?bigIds=" + sid + "&market=US&languages=en-us");
+          if (r.status === 200) {
+            const m = [...(await r.text()).matchAll(/_(\d+\.\d+\.\d+)(?:\.\d+)?_[A-Za-z0-9]+__/g)].map(x => x[1]);
+            st.live = m.length > 0;
+            st.version = m.sort((x, y) => atLeast(x, y) ? -1 : 1)[0] || null;
+          }
+        } catch {}
+        const fresh = st.live && st.version && (cur === "dev" || atLeast(st.version, cur));
+        try { if (typeof caches !== "undefined" && caches.default) await caches.default.put(ck, new Response(JSON.stringify(st), { headers: { "Content-Type": "application/json", "Cache-Control": "max-age=" + (fresh ? 21600 : 1800) } })); } catch {}
       }
-      return json({ id: live ? sid : null });
+      const ok = !!(st.live && st.version && (cur === "dev" || atLeast(st.version, cur)));
+      return json({ id: ok ? sid : null, store_version: st.version || null, current: cur });
     }
     if (p === "/version") return json({ ...buildInfo(), codes_on: codesOn, strict, fee_on: feeOn(), stripe: stripeOn(), google: env.GOOGLE_CLIENT_ID || null, google_hd: env.GOOGLE_CLIENT_ID ? String(env.GOOGLE_HD ?? "usc.edu") : null });
 

@@ -12,13 +12,20 @@ writeFileSync(join(tmp, "route.mjs"), readFileSync(join(CF, "functions", "api", 
 const { onRequest } = await import(pathToFileURL(join(tmp, "route.mjs")).href);
 let pass = 0, fail = 0;
 const check = (m, c, i = "") => { if (c) { pass++; console.log("  ok:", m); } else { fail++; console.log("  FAIL:", m + (i ? `  (${i})` : "")); } };
-const store = async live => { const r = await onRequest({ request: new Request("https://lockqz.test/api/store"), env: { DB: { prepare() { throw new Error("no db needed"); } }, STORE_LIVE_TEST: live } }); return r.json(); };
+const store = async (live, ver, cur) => { const env = { DB: { prepare() { throw new Error("no db needed"); } }, STORE_LIVE_TEST: live }; if (ver !== undefined) env.STORE_VERSION_TEST = ver; if (cur !== undefined) env.STORE_CURRENT_TEST = cur; const r = await onRequest({ request: new Request("https://lockqz.test/api/store"), env }); return r.json(); };
 
 console.log("S1 /api/store");
-check("not published yet -> no id (the page keeps the command + installer)", (await store("0")).id === null);
-check("published -> the product id", (await store("1")).id === "9P7D1114N2LJ");
+check("not published yet -> no id (the page keeps the command + installer)", (await store("0", null, "0.6.11")).id === null);
+check("published with the current release -> the product id", (await store("1", "0.6.11", "0.6.11")).id === "9P7D1114N2LJ");
+check("published, newer than the site -> the product id", (await store("1", "0.6.12", "0.6.11")).id === "9P7D1114N2LJ");
+check("published but an older release (0.6.6 < 0.6.11) -> no id: students get the current version from the site", (await store("1", "0.6.6", "0.6.11")).id === null);
+check("numeric compare (0.6.10 is newer than 0.6.9)", (await store("1", "0.6.10", "0.6.9")).id === "9P7D1114N2LJ" && (await store("1", "0.6.9", "0.6.10")).id === null);
+check("Store version unknown -> no id", (await store("1", null, "0.6.11")).id === null);
+check("answer says both versions", (await store("1", "0.6.6", "0.6.11")).store_version === "0.6.6");
 const idx = readFileSync(join(CF, "public", "index.html"), "utf8");
 check("download page (Windows) asks /api/store and shows the Store button first", idx.includes('fetch("/api/store")') && idx.includes("showStore(d && d.id)") && idx.includes('"https://apps.microsoft.com/detail/" + id'));
+check("Store current -> Store is the one way shown; command + installer one click away", idx.includes('$("alt").hidden = true') && idx.includes('id="altlink"') && /<div id="alt">[\s\S]*id="lead"[\s\S]*id="dlbox"[\s\S]*<\/div>\s*<\/div>/.test(idx));
+check("Android still hides the command box (not the Store box)", idx.includes('$("lead").parentNode.hidden = true'));
 
 console.log("S2 automatic Store submissions (CI)");
 const rel = readFileSync(join(ROOT, ".github", "workflows", "release.yml"), "utf8");
