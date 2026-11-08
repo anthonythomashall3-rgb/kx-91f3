@@ -168,7 +168,8 @@ console.log("S5 self-signup is rate-limited per IP; invite sign-ups are not");
 }
 
 console.log("S6 bank-details emails have a global daily cap (Gmail's quota is shared with students' email codes)");
-{ const st = [];
+{ const st = [];   // bank details go to professors only (students: card, Venmo, Zelle)
+  for (let i = 0; i < 3; i++) await invited(`bank${i}@usc.edu`); await invited("bank9@usc.edu");
   for (let i = 0; i < 3; i++) st.push((await call("/pay/bank", { email: `bank${i}@usc.edu` }, { ip: "10.66.0." + i, envx: { BANK_MAIL_DAILY_MAX: "2", STUDENT_FEE_FROM: "2020-01-01" } })).status);
   check("the 3rd address of the day is refused once the cap (2) is reached", st[0] === 200 && st[1] === 200 && st[2] === 429, st.join(","));
   r = await call("/pay/bank", { email: "bank9@usc.edu" }, { ip: "10.66.0.9", hdr: { "X-LOCKqz-Pay": env.PAY_SECRET }, envx: { BANK_MAIL_DAILY_MAX: "2", STUDENT_FEE_FROM: "2020-01-01" } });
