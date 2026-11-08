@@ -64,10 +64,11 @@ STUDENT_CARD_ONLY = "0"
 STUDENT_OTHER_TOTAL = "210"
 STUDENT_OTHER_TOTAL_PREV = "200"
 STUDENT_OTHER_FROM = "2026-11-08T20:00:00Z"
-# Professors (Anthony, 8 Nov 2026): $6,300 by Zelle or bank transfer, $6,500 by Venmo or card. No purchase orders.
+# Professors (Anthony, 8 Nov 2026): $6,300 by Zelle; $6,500 by bank transfer, Venmo or card. No purchase orders.
 PROF_TOTAL = "6500"
 PROF_CARD_TOTAL = "6500"
 PROF_ZELLE_TOTAL = "6300"
+PROF_BANK_TOTAL = "6500"
 PROF_OTHER_PRICE = "5000"
 # Bank transfer details emailed automatically: Pages SECRET BANK_DETAILS (bank, account holder, routing, account).
 # Stripe bank account (ACH) off: consumers can return ACH debits for 60 days. "1" turns it on.

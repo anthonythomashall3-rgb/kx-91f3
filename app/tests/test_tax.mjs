@@ -196,19 +196,22 @@ console.log("T10 students (8 Nov): $200 Zelle / bank, $210 Venmo / card / PO; ea
   check("$200 Zelle -> paid either way", rr.results[0].paid === true, JSON.stringify(rr));
   check("new payments are priced at $210 by Venmo even while old ones keep $200", (await call(LATER, "/pay/start", { email: "nz@usc.edu" })).data.ways.venmo.total === 210); }
 
-console.log("T11 professors (8 Nov): $6,300 Zelle / bank, $6,500 Venmo and card, no purchase orders");
-{ const P2 = { ...ON, PROF_TOTAL: "6500", PROF_CARD_TOTAL: "6500", PROF_ZELLE_TOTAL: "6300" };
+console.log("T11 professors (8 Nov): $6,300 Zelle; $6,500 bank transfer, Venmo and card; no purchase orders");
+{ const P2 = { ...ON, PROF_TOTAL: "6500", PROF_CARD_TOTAL: "6500", PROF_ZELLE_TOTAL: "6300", PROF_BANK_TOTAL: "6500" };
   await call(P2, "/signup", { email: "p8@usc.edu", password: "profpass11" });
   const pt = (await call(P2, "/login", { email: "p8@usc.edu", password: "profpass11" })).data.token;
   const ms2 = (await getc(P2, "/my-sections", { teacher: pt })).data;
-  check("Zelle $6,300 / bank $6,300", ms2.ways?.zelle.total === 6300 && ms2.ways.bank.total === 6300, JSON.stringify(ms2.ways));
+  check("Zelle $6,300 / bank transfer $6,500", ms2.ways?.zelle.total === 6300 && ms2.ways.bank.total === 6500, JSON.stringify(ms2.ways));
   check("Venmo $6,500 / card $6,500 (Stripe charges $6,500)", ms2.ways.venmo.total === 6500 && ms2.ways.card.total === 6500 && ms2.stripe?.card === 6500, JSON.stringify([ms2.ways, ms2.stripe]));
   check("no purchase-order option for professors", ms2.po === null, JSON.stringify(ms2.po));
   const notifyP = payments => onRequest({ request: new Request(BASE + "/api/pay/notify", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Pay": SECRET }, body: JSON.stringify({ payments }) }), env: P2 }).then(r => r.json());
   let rp = await notifyP([{ txn: "zelle:p8a", amount: 6300, note: ms2.memo, via: "zelle" }]);
   check("$6,300 by Zelle -> professor active", rp.results[0].paid === true && (await getc(P2, "/me", { teacher: pt })).data.active === true, JSON.stringify(rp));
   const wt = readFileSync(join(CF, "wrangler.toml"), "utf8");
-  check("wrangler: PROF_TOTAL 6500, PROF_CARD_TOTAL 6500, PROF_ZELLE_TOTAL 6300", /^PROF_TOTAL = "6500"$/m.test(wt) && /^PROF_CARD_TOTAL = "6500"$/m.test(wt) && /^PROF_ZELLE_TOTAL = "6300"$/m.test(wt));
+  check("wrangler: PROF_TOTAL 6500, PROF_CARD_TOTAL 6500, PROF_ZELLE_TOTAL 6300, PROF_BANK_TOTAL 6500", /^PROF_TOTAL = "6500"$/m.test(wt) && /^PROF_CARD_TOTAL = "6500"$/m.test(wt) && /^PROF_ZELLE_TOTAL = "6300"$/m.test(wt) && /^PROF_BANK_TOTAL = "6500"$/m.test(wt));
+  const p9 = (await call(P2, "/signup", { email: "p9@usc.edu", password: "profpass11" })).data; const pt9 = (await call(P2, "/login", { email: "p9@usc.edu", password: "profpass11" })).data.token; const m9 = (await getc(P2, "/my-sections", { teacher: pt9 })).data;
+  rp = await notifyP([{ txn: "gmail:p9a", amount: 6300, note: m9.memo, via: "bank" }]);
+  check("$6,300 by bank transfer is not enough ($6,500); $200 more activates", rp.results[0].paid === false && (await notifyP([{ txn: "gmail:p9b", amount: 200, note: m9.memo, via: "bank" }])).results[0].paid === true, JSON.stringify(rp));
   check("dashboard: no PO button in the professor payment panel", !/Purchase order \(PO\)/.test(readFileSync(join(CF, "public", "dashboard.html"), "utf8"))); }
 
 console.log("T9 pages");

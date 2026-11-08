@@ -962,7 +962,7 @@ export async function onRequest(context) {
   const TAX_RATE = taxOn() ? Math.min(0.6, Math.max(0, Number(env.TAX_RATE) || 0)) : 0;
   const grossUp = x => Math.round(Number(x) * 100 / (1 - TAX_RATE)) / 100;
   const WAYS = ["zelle", "bank", "venmo", "card", "po"];
-  const wayOf = via => { via = String(via || "").toLowerCase(); return via === "venmo" ? "venmo" : via === "stripe-card" ? "card" : via === "stripe-bank" ? "sbank" : via === "po" ? "po" : "zelle"; };
+  const wayOf = via => { via = String(via || "").toLowerCase(); return via === "venmo" ? "venmo" : via === "stripe-card" ? "card" : via === "stripe-bank" ? "sbank" : via === "po" ? "po" : via === "bank" ? "bank" : "zelle"; };
   const isStu = code => /^LQS[A-Z0-9]{5}$/.test(String(code || ""));
   const baseOf = (kind, way) => {
     const n = (v, d) => Number(v) > 0 ? Number(v) : d, other = way === "venmo" || way === "po";
@@ -971,19 +971,20 @@ export async function onRequest(context) {
   };
   const feeOf = kind => kind === "student" ? STUDENT_FEE : PRICE;
   // Whole-number totals (8 Nov 2026): students $200 Zelle / bank, $210 Venmo / card / PO; professors
-  // $6,300 Zelle / bank (PROF_ZELLE_TOTAL), $6,500 Venmo (PROF_TOTAL) and card (PROF_CARD_TOTAL). Tax & fees = TAX_RATE of the total. A way without a set total = base / (1 - TAX_RATE).
+  // $6,300 Zelle (PROF_ZELLE_TOTAL), $6,500 bank transfer (PROF_BANK_TOTAL), Venmo (PROF_TOTAL) and card (PROF_CARD_TOTAL). Tax & fees = TAX_RATE of the total. A way without a set total = base / (1 - TAX_RATE).
   // Students (8 Nov 2026): $210 by Venmo / card / PO, $200 by Zelle / bank transfer. A Venmo / card / PO payment
   // received before STUDENT_OTHER_FROM still counts against the total in force then (STUDENT_OTHER_TOTAL_PREV),
   // so nobody who already paid loses access when the price moves.
   const OTHER_FROM = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?Z)?$/.test(String(env.STUDENT_OTHER_FROM || "")) && Number(env.STUDENT_OTHER_TOTAL_PREV) > 0 ? String(env.STUDENT_OTHER_FROM) : "";
-  const setTotal = (kind, way, prev = false) => { const v = Number(kind === "student" ? (way === "zelle" ? env.STUDENT_TOTAL : way === "sbank" ? 0 : prev && OTHER_FROM ? env.STUDENT_OTHER_TOTAL_PREV : env.STUDENT_OTHER_TOTAL)
-                                                                       : (way === "card" ? env.PROF_CARD_TOTAL : way === "sbank" ? 0 : way === "zelle" && Number(env.PROF_ZELLE_TOTAL) > 0 ? env.PROF_ZELLE_TOTAL : env.PROF_TOTAL)); return v > 0 ? v : 0; };
-  const totalOf = (kind, way, prev = false) => { way = way === "bank" ? "zelle" : way; return setTotal(kind, way, prev) || grossUp(baseOf(kind, way)); };
+  // Professors: Zelle = PROF_ZELLE_TOTAL, bank transfer = PROF_BANK_TOTAL (each falls back to PROF_TOTAL); students: Zelle = bank = STUDENT_TOTAL.
+  const setTotal = (kind, way, prev = false) => { const v = Number(kind === "student" ? (way === "zelle" || way === "bank" ? env.STUDENT_TOTAL : way === "sbank" ? 0 : prev && OTHER_FROM ? env.STUDENT_OTHER_TOTAL_PREV : env.STUDENT_OTHER_TOTAL)
+                                                                       : (way === "card" ? env.PROF_CARD_TOTAL : way === "sbank" ? 0 : way === "zelle" && Number(env.PROF_ZELLE_TOTAL) > 0 ? env.PROF_ZELLE_TOTAL : way === "bank" && Number(env.PROF_BANK_TOTAL) > 0 ? env.PROF_BANK_TOTAL : env.PROF_TOTAL)); return v > 0 ? v : 0; };
+  const totalOf = (kind, way, prev = false) => setTotal(kind, way, prev) || grossUp(baseOf(kind, way));
   const factorOf = (kind, way, prev = false) => taxOn() ? feeOf(kind) / totalOf(kind, way, prev) : 1;
   const creditOf = (code, via, amount) => Number(amount) * factorOf(isStu(code) ? "student" : "professor", wayOf(via));
   // The same credit in SQL, for every SUM over payments.
   const CREDIT = () => { if (!taxOn()) return "amount";
-    const f = (k, prev = false) => { const w = way => factorOf(k, way, prev).toFixed(12); return `(CASE lower(COALESCE(via,'')) WHEN 'venmo' THEN ${w("venmo")} WHEN 'stripe-card' THEN ${w("card")} WHEN 'stripe-bank' THEN ${w("sbank")} WHEN 'po' THEN ${w("po")} ELSE ${w("zelle")} END)`; };
+    const f = (k, prev = false) => { const w = way => factorOf(k, way, prev).toFixed(12); return `(CASE lower(COALESCE(via,'')) WHEN 'venmo' THEN ${w("venmo")} WHEN 'stripe-card' THEN ${w("card")} WHEN 'stripe-bank' THEN ${w("sbank")} WHEN 'po' THEN ${w("po")} WHEN 'bank' THEN ${w("bank")} ELSE ${w("zelle")} END)`; };
     const stu = OTHER_FROM ? `(CASE WHEN COALESCE(received_at,'') < '${OTHER_FROM}' THEN ${f("student", true)} ELSE ${f("student")} END)` : f("student");
     return `(CASE WHEN COALESCE(received_at,'') < '${TAX_FROM}' THEN amount ELSE amount * (CASE WHEN length(code)=8 AND substr(code,1,3)='LQS' THEN ${stu} ELSE ${f("professor")} END) END)`; };
   const FULL = (sum, fee) => Number(sum) >= fee - 0.005;   // credits are fractions of cents
