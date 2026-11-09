@@ -296,7 +296,7 @@ async function verifyGoogleIdToken(env, jwt, nonce) {
   if (!(Number(pl.exp) > nowS - 60) || (pl.iat && Number(pl.iat) > nowS + 300)) return { ok: false, why: "expired" };
   if (nonce != null && pl.nonce !== nonce) return { ok: false, why: "nonce" };
   if (!(pl.email_verified === true || pl.email_verified === "true") || typeof pl.email !== "string" || !pl.email.includes("@")) return { ok: false, why: "email" };
-  return { ok: true, email: pl.email.trim().toLowerCase(), hd: typeof pl.hd === "string" ? pl.hd.toLowerCase() : null };
+  return { ok: true, email: pl.email.trim().toLowerCase(), hd: typeof pl.hd === "string" ? pl.hd.toLowerCase() : null, name: typeof pl.name === "string" ? pl.name.trim().slice(0, 100) || null : null };
 }
 
 async function verifyDevice(request, raw, db) {
@@ -383,16 +383,21 @@ async function smtpSend(open, { user, pass, to, subject, text, html = null, from
   } finally { try { await sock.close?.(); } catch {} }
   return true;
 }
+// The code email's text. web: false = the LOCKqz app on a computer, true = the download-page sign-in,
+// "prof" = professor sign-up on professor.lockqz.com.
+function codeText(env, to, code, web) {
+  if (web === "prof") return `Your LOCKqz sign-up code is ${code}\n\nType it on professor.lockqz.com to create your professor account. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
+  return web ? `Your LOCKqz sign-in code is ${code}\n\nType it on lockqz.com to open your account. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`
+    : (isExempt(env, to) ? WELCOME + "\n\n" : "") + `Your LOCKqz code is ${code}\n\nType it into the LOCKqz window on your computer. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
+}
 function codeMail(env, to, code, web = false) {
   const subject = `Your LOCKqz code: ${code}`;
-  const text = web ? `Your LOCKqz sign-in code is ${code}\n\nType it on lockqz.com to open your account. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`
-    : (isExempt(env, to) ? WELCOME + "\n\n" : "") + `Your LOCKqz code is ${code}\n\nType it into the LOCKqz window on your computer. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
+  const text = codeText(env, to, code, web);
   return { subject, text, html: autoHtml(text) };
 }
 async function sendCode(env, to, code, web = false) {
   const subject = `Your LOCKqz code: ${code}`;
-  const text = web ? `Your LOCKqz sign-in code is ${code}\n\nType it on lockqz.com to open your account. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`
-    : (isExempt(env, to) ? WELCOME + "\n\n" : "") + `Your LOCKqz code is ${code}\n\nType it into the LOCKqz window on your computer. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
+  const text = codeText(env, to, code, web);
   const html = mailLinks(env, autoHtml(text));
   if (typeof env.MAIL_SINK === "function") return env.MAIL_SINK({ to, subject, text, html, code });   // tests
   const open = typeof env.MAIL_OPEN === "function" ? env.MAIL_OPEN   // tests: fake SMTP server
@@ -665,6 +670,11 @@ export async function onRequest(context) {
   // A roster row r is TRUSTED when an admin or a verified professor has synced that course.
   // (teacher_id 'admin' = a sync made with the master key; real account ids never look like that.)
   const TRUSTED_TC = "EXISTS (SELECT 1 FROM teacher_courses tct LEFT JOIN teachers tet ON tet.id=tct.teacher_id WHERE tct.ou=r.ou AND (tct.teacher_id='admin' OR tet.role='admin' OR tet.verified=1))";
+  // Professor accounts are for instructors: an email that a synced class list names only as a student or TA (never
+  // as an instructor) cannot make one by itself (emailed code or Google). An admin invite still can.
+  const STUDENT_EMAIL_MSG = "This email is on a class list as a student or TA. Professor accounts are for instructors. Students get LOCKqz at lockqz.com.";
+  const lockedOnly = async em => !!(await db.prepare(`SELECT 1 FROM roster r WHERE r.email=? AND TRIM(COALESCE(r.role,''))<>'' AND NOT ${INSTR_SQL} AND ${TRUSTED_TC} LIMIT 1`).bind(em).first())
+    && !(await db.prepare(`SELECT 1 FROM roster r WHERE r.email=? AND ${INSTR_SQL} AND ${TRUSTED_TC} LIMIT 1`).bind(em).first());
   // Roles LOCKqz locks during quizzes: everyone except the course's instructors (Learners and TAs).
   const INSTR_RE = /nstructor|rofessor|aculty|eacher|ecturer|utor|ourse leader/i;
   const takesQuizzes = role => !INSTR_RE.test(String(role||"")) && !!String(role||"").trim();
@@ -2042,23 +2052,51 @@ export async function onRequest(context) {
     }
 
     // ---- teacher accounts ----
+    // Professor sign-up, step 1: LOCKqz emails a 6-digit code to the address (the students' code limits and mail
+    // budget). Typing it back proves the person owns the inbox, so the account is vouched -- the standing an admin
+    // invite gives -- and a professor whose email is already on a course roster claims it with no invite.
+    if (p === "/signup/code" && request.method === "POST") {
+      const email = String(body.email||"").trim().toLowerCase();
+      if (!EMAIL_OK(email)) return json({ error:"enter a valid email" }, 400);
+      if (!codesOn) return json({ error:"off", message:"Email codes are off right now. Use Sign in with Google." }, 503);
+      const ex = await db.prepare("SELECT role, vouched, verified FROM teachers WHERE email=?").bind(email).first();
+      if (ex && (ex.role === "admin" || Number(ex.vouched) === 1 || Number(ex.verified) === 1)) return json({ error:"that email already has an account — log in instead" }, 409);
+      if (await lockedOnly(email)) return json({ error:"student_email", message: STUDENT_EMAIL_MSG }, 403);
+      return (await issueEmailCode("prof:" + email, email, "prof")) || json({ ok:true, email });
+    }
     if (p === "/signup" && request.method === "POST") {
       const email = String(body.email||"").trim().toLowerCase(), pw = String(body.password||"");
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"enter a valid email" }, 400);
       if (pw.length < 8) return json({ error:"password must be at least 8 characters" }, 400);
       // An instructor email that an admin/verified professor has already put on a trusted roster is a
-      // real professor's identity. Self-signup can't claim it without an admin invite code (which only
-      // the admin issues to that person), so a student can't pre-register bristow@usc.edu.
+      // real professor's identity. Self-signup can't claim it without proof that the person owns the inbox:
+      // an admin invite code for that email, or the 6-digit code LOCKqz emailed to it (/signup/code). So a
+      // student can't pre-register bristow@usc.edu.
       const codeUp = String(body.invite||"").trim().toUpperCase();
       const invPre = codeUp ? await db.prepare("SELECT email FROM invites WHERE code=? AND used_at IS NULL AND (email IS NULL OR email=?)").bind(codeUp, email).first() : null;
+      // The emailed code (used when there is no invite): 15 minutes, 5 tries, only its hash is stored.
+      let proved = false;
+      const ecode = String(body.code||"").replace(/\D/g, "");
+      if (!invPre && ecode) {
+        const dev = "prof:" + email;
+        const row = await db.prepare("SELECT email, code_hash, expires, tries FROM email_codes WHERE device_id=?").bind(dev).first();
+        if (!row || row.email !== email || Number(row.expires) < Date.now()) return json({ error:"code_expired", message:"That code expired. Press Create account to get a new one." }, 400);
+        if (!sameHex(await sha256hex(enc.encode(dev + ":" + ecode)), row.code_hash)) {
+          if (Number(row.tries) + 1 >= CODE_TRIES) { await db.prepare("DELETE FROM email_codes WHERE device_id=?").bind(dev).run(); return json({ error:"too_many_tries", message:"Too many wrong codes. Press Create account to get a new one." }, 400); }
+          await db.prepare("UPDATE email_codes SET tries=tries+1 WHERE device_id=?").bind(dev).run();
+          return json({ error:"wrong_code", message:"Wrong code. Check your email and try again." }, 400);
+        }
+        if (await lockedOnly(email)) return json({ error:"student_email", message: STUDENT_EMAIL_MSG }, 403);
+        proved = true;
+      }
       const dup = await db.prepare("SELECT id, role, verified, vouched FROM teachers WHERE email=?").bind(email).first();
       // An account nobody vouched for (no invite) and that never verified may be squatting a
       // professor's email. The real professor's invite for that exact email takes it over (below).
-      const squat = dup && invPre && invPre.email === email && dup.role !== "admin" && Number(dup.vouched) !== 1 && Number(dup.verified) !== 1;
+      const squat = dup && (proved || (invPre && invPre.email === email)) && dup.role !== "admin" && Number(dup.vouched) !== 1 && Number(dup.verified) !== 1;
       if (dup && !squat) return json({ error:"that email already has an account — log in instead" }, 409);
-      if (!invPre) {
+      if (!invPre && !proved) {
         const claimed = await db.prepare(`SELECT 1 FROM roster r WHERE r.email=? AND ${INSTR_SQL} AND ${TRUSTED_TC} LIMIT 1`).bind(email).first();
-        if (claimed) return json({ error:"This email belongs to a professor already on a course roster. Ask the LOCKqz admin for an invite to claim it." }, 409);
+        if (claimed) return json({ error:"This email belongs to a professor on a course roster. Press Create account to get an emailed code that claims it." }, 409);
       }
       // The first account on the site is the admin. Anyone can still make an account after that (the
       // site only offers sign-up through an invite link), but it is UNVERIFIED and can protect nothing.
@@ -2067,7 +2105,7 @@ export async function onRequest(context) {
       // is seeded and later "verify" as him. The invite also sets the paid window.
       // Self-signup (no valid invite): 10 per IP per hour, checked before any password hashing or row is
       // written (else one script fills the D1 free plan's 100k rows/day and burns CPU on PBKDF2).
-      if (!invPre) {
+      if (!invPre && !proved) {
         const hr = new Date(Date.now() - 3600000).toISOString();
         if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='signup' AND " + RL_EV + " AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 10)
           return json({ error:"too many sign-ups from here — try again in an hour" }, 429);
@@ -2085,19 +2123,20 @@ export async function onRequest(context) {
           } else inv = null;
         }
       }
-      if (squat && !inv) return json({ error:"that email already has an account — log in instead" }, 409);
+      if (squat && !inv && !proved) return json({ error:"that email already has an account — log in instead" }, 409);
       const id = squat ? dup.id : rid(10), salt = rid(16), token = hex(crypto.getRandomValues(new Uint8Array(24)));
       // vouched = the admin vouched for whoever holds this account (an invite, or the first/admin
       // account). Only a vouched account can ever become a verified professor: a self-made account
       // proves nothing about owning its email, so it could otherwise claim a professor's identity.
-      const vouched = (inv || n === 0) ? 1 : 0;
+      const vouched = (inv || n === 0 || proved) ? 1 : 0;
       if (squat) {
         await db.prepare("DELETE FROM teacher_courses WHERE teacher_id=?").bind(id).run();
         await db.prepare("UPDATE teachers SET name=?, pw_hash=?, salt=?, token=?, sync_key=NULL, bs_user_id=NULL, verified=0, vouched=1, active_until=?, created_at=? WHERE id=?")
-          .bind(String(body.name||"").trim()||null, await hashPw(pw,salt,PEPPER), salt, token, inv.active_until, now(), id).run();
+          .bind(String(body.name||"").trim()||null, await hashPw(pw,salt,PEPPER), salt, token, inv ? inv.active_until : null, now(), id).run();
       } else
         await db.prepare("INSERT INTO teachers (id,email,name,pw_hash,salt,token,created_at,role,active_until,vouched) VALUES (?,?,?,?,?,?,?,?,?,?)")
           .bind(id, email, String(body.name||"").trim()||null, await hashPw(pw,salt,PEPPER), salt, token, now(), n===0?"admin":"teacher", inv ? inv.active_until : null, vouched).run();
+      if (proved) await db.prepare("DELETE FROM email_codes WHERE device_id=?").bind("prof:" + email).run();   // one code, one account
       // Welcome email (HTML): the two steps. Sent in the background; sign-up never waits for Gmail.
       if (mailOn(env)) { const w = MAIL.welcome({ last: lastName(body.name) || email.split("@")[0], free: isExempt(env, email) });
         const go = mailOut(email, w.subject, w.text, { html: w.html }, "auto").catch(() => {});
@@ -2133,8 +2172,31 @@ export async function onRequest(context) {
           db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(row.device_id, g.email, null, "email_verified", "google", now())]);
         return json({ ok: true, email: g.email });
       }
-      const t = await db.prepare("SELECT id,email,name,token FROM teachers WHERE email=?").bind(g.email).first();
-      if (!t) return json({ error: "No LOCKqz professor account for " + g.email + "." }, 404);
+      const t = await db.prepare("SELECT id,email,name,token,role,vouched,verified FROM teachers WHERE email=?").bind(g.email).first();
+      // No account yet, or only one nobody vouched for that never verified (it may be squatting this email): Google
+      // has just proved this person owns the address, so it becomes their account, vouched (as an emailed sign-up
+      // code makes it). School Google accounts only (GOOGLE_HD); students and TAs on a class list never get one.
+      if (!t || (t.role !== "admin" && Number(t.vouched) !== 1 && Number(t.verified) !== 1)) {
+        const hd = String(env.GOOGLE_HD ?? "usc.edu").trim().toLowerCase();
+        if (hd && g.hd !== hd && !g.email.endsWith("@" + hd)) return json({ error: "No LOCKqz professor account for " + g.email + ". Use your " + hd + " Google account." }, 404);
+        if (await lockedOnly(g.email)) return json({ error: STUDENT_EMAIL_MSG }, 403);
+        const hr = new Date(Date.now() - 3600000).toISOString();
+        if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='signup' AND " + RL_EV + " AND ts>? AND device_id=?").bind(hr, "ip:" + ip).first()).n) >= 10)
+          return json({ error: "too many sign-ups from here — try again in an hour" }, 429);
+        const salt = rid(16), token = hex(crypto.getRandomValues(new Uint8Array(24)));
+        // A random password nobody knows: Google signs them in (a password can be set later).
+        const pwh = await hashPw(hex(crypto.getRandomValues(new Uint8Array(24))), salt, PEPPER), name = g.name || t?.name || null;
+        if (t) await db.batch([
+            db.prepare("DELETE FROM teacher_courses WHERE teacher_id=?").bind(t.id),
+            db.prepare("UPDATE teachers SET name=?, pw_hash=?, salt=?, token=?, sync_key=NULL, bs_user_id=NULL, verified=0, vouched=1, created_at=? WHERE id=?").bind(name, pwh, salt, token, now(), t.id)]);
+        else await db.prepare("INSERT INTO teachers (id,email,name,pw_hash,salt,token,created_at,role,active_until,vouched) VALUES (?,?,?,?,?,?,?,?,?,?)")
+            .bind(rid(10), g.email, name, pwh, salt, token, now(), "teacher", null, 1).run();
+        await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + ip, null, null, "signup", "google", now()).run();
+        if (mailOn(env)) { const w = MAIL.welcome({ last: lastName(name) || g.email.split("@")[0], free: isExempt(env, g.email) });
+          const go = mailOut(g.email, w.subject, w.text, { html: w.html }, "auto").catch(() => {});
+          if (typeof context.waitUntil === "function") context.waitUntil(go); else await go; }
+        return json({ token, email: g.email, name, created: true });
+      }
       let token = t.token;
       if (!token) { token = hex(crypto.getRandomValues(new Uint8Array(24))); await db.prepare("UPDATE teachers SET token=? WHERE id=?").bind(token, t.id).run(); }
       return json({ token, email: t.email, name: t.name });

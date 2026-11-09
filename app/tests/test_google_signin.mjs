@@ -93,7 +93,9 @@ const tok = r.data?.token;
 r = await call("/auth/google", { credential: idToken({ email: "prof@usc.edu" }) });
 check("same token next time (one account, one session token)", r.data?.token === tok);
 r = await call("/auth/google", { credential: idToken({ email: "stranger@usc.edu" }) });
-check("no professor account -> 404, no account made", r.status === 404 && !sqlite.prepare("SELECT 1 FROM teachers WHERE email='stranger@usc.edu'").get());
+check("no professor account, school Google account -> the account is made (vouched; see test_prof_signup)", r.status === 200 && r.data?.created === true && sqlite.prepare("SELECT vouched FROM teachers WHERE email='stranger@usc.edu'").get()?.vouched === 1, JSON.stringify(r.data));
+r = await call("/auth/google", { credential: idToken({ email: "stranger@gmail.com", hd: undefined }) });
+check("no professor account, other Google account -> 404, no account made", r.status === 404 && !sqlite.prepare("SELECT 1 FROM teachers WHERE email='stranger@gmail.com'").get());
 
 console.log("G4 off switch, limits, public config");
 r = await call("/verify", { op: "google_start" }, { key: k2, device: "dev-g2", envx: { GOOGLE_CLIENT_ID: "" } });

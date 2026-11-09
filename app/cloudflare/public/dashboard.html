@@ -147,10 +147,12 @@
     <input id="name" placeholder="Your name" class="hide" autocomplete="name">
     <input id="email" type="email" placeholder="USC email" autocomplete="username">
     <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+    <input id="sucode" class="hide" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code from your email">
     <button id="lbtn" class="btn prime" onclick="go()">Sign in</button>
     <div id="gsign" class="hide" style="display:flex;justify-content:center;min-height:44px"></div>
     <div class="err" id="lerr"></div>
-    <div class="muted hide" id="signuprow"><a href="#" id="lswitch" onclick="toggle();return false">New here? Create an account</a></div>
+    <div class="muted hide" id="lmsg"></div>
+    <div class="muted" id="signuprow"><a href="#" id="lswitch" onclick="toggle();return false">New here? Create an account</a></div>
     <div class="muted" id="forgotrow"><a href="#" onclick="showForgot();return false">Forgot password?</a></div>
     <div id="forgot" class="hide" style="display:flex;flex-direction:column;gap:10px">
       <input id="femail" type="email" placeholder="Your account email">
@@ -177,7 +179,7 @@ const FF_XPI = false;   // deploy.sh sets it true once the Mozilla-signed Firefo
 const EXT_ZIP = { chrome: INSTALL + "/download/lockqz-prof-chromium.zip", edge: INSTALL + "/download/lockqz-prof-chromium.zip", firefox: INSTALL + "/download/lockqz-prof-firefox.zip", other: INSTALL + "/download/lockqz-prof-chromium.zip" };
 const BS_SITE = "https://brightspace.usc.edu";
 let token = localStorage.getItem("lockqz_token") || "";
-let signup = false, ME = null, BS = { courses: [] }, LEGACY = [], SYNCKEY = "", liveTimer = null, INVITE = "", LOADERR = "", AUTO = null;
+let CODEFOR = "", signup = false, ME = null, BS = { courses: [] }, LEGACY = [], SYNCKEY = "", liveTimer = null, INVITE = "", LOADERR = "", AUTO = null;
 const $ = id => document.getElementById(id);
 const H = () => ({ "X-LOCKqz-Teacher": token, "Content-Type":"application/json" });
 // Every API call returns an object; a failure always carries {error}. A dead session (401) goes back to sign-in.
@@ -201,12 +203,30 @@ const BACK = (to,label) => `<a class="back" href="#${esc(to)}"><svg aria-hidden=
 // ---- login (unchanged behaviour) ----
 function toggle(){ signup=!signup; $("name").classList.toggle("hide",!signup); $("ltitle").textContent=signup?"Create your professor account":"No AI during your exams.";
   $("lbtn").textContent=signup?"Create account":"Sign in"; $("lswitch").textContent=signup?"Already have an account? Sign in":"New here? Create an account"; $("lerr").textContent="";
-  $("forgotrow").classList.toggle("hide", signup); $("forgot").classList.add("hide"); }
-async function go(){
-  $("lerr").innerHTML = lqL(signup ? "Creating your account" : "Signing you in", "This takes about 2 seconds", {small:true});
-  const d = await post(signup?"/signup":"/login",{email:$("email").value,password:$("pw").value,name:$("name").value,invite:INVITE});
+  $("forgotrow").classList.toggle("hide", signup); $("forgot").classList.add("hide"); codeReset(); }
+// Sign-up without an invite link: LOCKqz first emails a 6-digit code to the address; typing it back proves the inbox.
+const CODEMSG = { too_many_codes: "Too many codes sent. Try again in an hour.", mail_busy: "Email is busy right now. Try again in a few minutes.", send_failed: "We could not email that address. Check it and try again." };
+function codeReset(){ CODEFOR = ""; $("sucode").value = ""; $("sucode").classList.add("hide"); $("lmsg").classList.add("hide"); $("lmsg").textContent = ""; }
+async function sendCode(em){
+  $("lerr").innerHTML = lqL("Emailing you a code", "This takes about 5 seconds", {small:true});
+  const c = await post("/signup/code", { email: em });
   $("lerr").textContent = "";
-  if(d.error){ $("lerr").textContent = !signup && d._status===401 ? "Incorrect password — try again." : d.error; return; }
+  if(c.error){ $("lerr").textContent = CODEMSG[c.error] || c.message || c.error; return; }
+  CODEFOR = em; $("sucode").value = ""; $("sucode").classList.remove("hide"); $("sucode").focus();
+  $("lmsg").textContent = "We emailed a 6-digit code to " + em + ". Type it above, then press Create account."; $("lmsg").classList.remove("hide");
+}
+async function go(){
+  if(signup && !INVITE){
+    const em = $("email").value.trim().toLowerCase();
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){ $("lerr").textContent = "Enter your USC email."; return; }
+    if($("pw").value.length < 8){ $("lerr").textContent = "Password must be at least 8 characters."; return; }
+    if(CODEFOR !== em || !$("sucode").value.trim()){ if(CODEFOR !== em) return sendCode(em); $("lerr").textContent = "Type the 6-digit code from your email."; return; }
+  }
+  $("lerr").innerHTML = lqL(signup ? "Creating your account" : "Signing you in", "This takes about 2 seconds", {small:true});
+  const d = await post(signup?"/signup":"/login",{email:$("email").value,password:$("pw").value,name:$("name").value,invite:INVITE,code:signup&&!INVITE?$("sucode").value.trim():""});
+  $("lerr").textContent = "";
+  if(d.error){ if(d.error==="code_expired"||d.error==="too_many_tries") codeReset();   // the next press emails a new code
+    $("lerr").textContent = !signup && d._status===401 ? "Incorrect password — try again." : (d.message || d.error); return; }
   token=d.token; localStorage.setItem("lockqz_token",token);
   if(INVITE){ INVITE=""; history.replaceState(null,"",location.pathname); }
   boot();
@@ -221,7 +241,7 @@ async function changePw(){ const old = prompt("Current password:"); if(old===nul
   token=d.token; localStorage.setItem("lockqz_token",token); SYNCKEY="";   // the server issued a new Sync key: refresh() hands it to the extension
   await refresh(); route();
   alert("Password changed."); }
-["email","pw","name"].forEach(i=>$(i).addEventListener("keydown",e=>{ if(e.key==="Enter") go(); }));
+["email","pw","name","sucode"].forEach(i=>$(i).addEventListener("keydown",e=>{ if(e.key==="Enter") go(); }));
 async function logout(){ await post("/logout"); token=""; localStorage.removeItem("lockqz_token"); location.hash=""; location.reload(); }
 
 // ---- boot ----
@@ -795,7 +815,8 @@ async function loadInvites(){ const d = await get("/invites"); const tb=document
   if(!(d.invites||[]).length) tb.innerHTML=`<tr><td colspan="5" class="muted">No invites yet.</td></tr>`; }
 async function cancelInvite(code){ if(!confirm("Cancel this invite?")) return; const d=await post("/uninvite",{code}); if(d.error){ alert(d.error); return; } if((window._ilink||"").endsWith("="+code)){ $("newinvite").innerHTML=""; window._ilink=window._icode=null; } loadInvites(); }
 
-// An invite link (/?invite=CODE or /dashboard?invite=CODE) opens the sign-up form; without one, only Sign in shows.
+// An invite link (/?invite=CODE or /dashboard?invite=CODE) opens the sign-up form with its email; without one,
+// "New here? Create an account" signs up with an emailed code.
 (async function initInvite(){
   INVITE = (new URLSearchParams(location.search).get("invite")||"").trim();
   if(!INVITE) return;
