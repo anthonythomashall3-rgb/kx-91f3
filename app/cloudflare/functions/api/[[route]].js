@@ -2265,7 +2265,9 @@ export async function onRequest(context) {
     // admin hands the new password to the teacher).
     if (p === "/teachers") {
       if (!me?.admin) return json({ error:"admin only" }, 403);
-      const r = await db.prepare("SELECT t.id,t.email,t.name,t.created_at,t.active_until,(SELECT COUNT(*) FROM paid_sections ps WHERE ps.teacher_id=t.id AND ps.until>=?) AS paid_sections,(SELECT code FROM pay_codes pc WHERE pc.teacher_id=t.id) AS memo FROM teachers t ORDER BY t.created_at DESC").bind(laToday()).all();
+      // Set-up progress per professor (the dashboard's 3 steps): extension check-in, Brightspace classes (+ verified),
+      // students emailed, protected exams.
+      const r = await db.prepare("SELECT t.id,t.email,t.name,t.created_at,t.active_until,t.verified,t.ext_seen,(SELECT COUNT(*) FROM paid_sections ps WHERE ps.teacher_id=t.id AND ps.until>=?) AS paid_sections,(SELECT code FROM pay_codes pc WHERE pc.teacher_id=t.id) AS memo,(SELECT COUNT(*) FROM teacher_courses tc WHERE tc.teacher_id=t.id AND COALESCE(tc.in_sync,1)=1) AS classes,(SELECT MAX(tc.synced_at) FROM teacher_courses tc WHERE tc.teacher_id=t.id) AS synced_at,(SELECT MAX(ms.at) FROM teacher_courses tc JOIN mail_sent ms ON ms.ou=tc.ou WHERE tc.teacher_id=t.id AND ms.kind IN ('all','missing')) AS mailed_at,(SELECT COUNT(*) FROM quizzes q WHERE q.teacher_id=t.id) AS protected FROM teachers t ORDER BY t.created_at DESC").bind(laToday()).all();
       return json({ teachers: r.results });
     }
     // Admin only: turn a teacher on (after payment) until a date, or off.

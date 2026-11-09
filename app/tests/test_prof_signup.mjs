@@ -165,5 +165,20 @@ check("'New here? Create an account' is shown without an invite", /<div class="m
 check("the code box and the two steps (code, then sign-up with it)", dash.includes('id="sucode"') && dash.includes('post("/signup/code", { email: em })') && dash.includes('code:signup&&!INVITE?$("sucode").value.trim():""'));
 check("an invite link skips the code", dash.includes("if(signup && !INVITE){"));
 
+console.log("P7 the admin's Professors list shows each professor's set-up");
+const pb = () => (r.data?.teachers || []).find(x => x.email === "dbristow@usc.edu");
+r = await call("/teachers", null, { get: true, token: ADMIN });
+check("before set-up: no extension, no classes, nobody emailed, nothing protected", pb() && !pb().ext_seen && pb().classes === 0 && !pb().mailed_at && pb().protected === 0 && pb().verified === 0, JSON.stringify(pb()));
+const BID = row("dbristow@usc.edu").id, at0 = nowIso();
+sqlite.prepare("UPDATE teachers SET ext_seen=? WHERE id=?").run(at0, BID);
+sqlite.prepare("INSERT INTO teacher_courses (teacher_id,ou,name,code,role,synced_at,in_sync) VALUES (?,?,?,?,?,?,1)").run(BID, "C1", "FBE C1", "C1", "Instructor", at0);
+sqlite.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('C1','all',?,40,?)").run(at0.slice(0, 10), at0);
+sqlite.prepare("INSERT INTO quizzes (quiz_id,title,qi,teacher_id,ou,created_at) VALUES ('C1-9','Exam 3','9',?,'C1',?)").run(BID, at0);
+r = await call("/teachers", null, { get: true, token: ADMIN });
+check("after: extension seen, 1 class synced, students emailed, 1 protected exam", pb()?.ext_seen === at0 && pb().classes === 1 && pb().synced_at === at0 && pb().mailed_at === at0 && pb().protected === 1, JSON.stringify(pb()));
+r = await call("/teachers", null, { get: true, token: BT });
+check("a professor cannot read the list", r.status === 403);
+check("the admin table has the four set-up columns", dash.includes("<th>Extension</th><th>Brightspace</th><th>Students emailed</th><th>Protected exams</th>") && dash.includes("t.ext_seen?OK+esc(ago(t.ext_seen)):NO"));
+
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
