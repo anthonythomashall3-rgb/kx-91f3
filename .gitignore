@@ -20,6 +20,7 @@ app/cloudflare/public/download/windows/
 app/cloudflare/public/download/update.json
 app/cloudflare/public/download/update.sig
 app/cloudflare/public/download/update.pub
+app/cloudflare/public/download/mac.json
 app/cloudflare/public/install.sh
 app/cloudflare/public/uninstall.sh
 app/cloudflare/public/install.ps1

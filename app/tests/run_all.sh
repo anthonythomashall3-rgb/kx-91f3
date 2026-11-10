@@ -69,6 +69,8 @@ run "Professor first visit: names from the class list, Chrome-only set-up on oth
 run "Professors confirmed by their verification email (no admin step; students and taken classes refused); welcome email for accounts that pay (real Chromium)" node --no-warnings test_prof_confirm.mjs
 run "Bug sweep 4: student install emails name the fee and every way to pay, course codes students know (no 20263_14792), renewal email prices" node --no-warnings test_sweep4.mjs
 run "Microsoft Store button by itself + automatic Store submissions; Firefox package signed by Mozilla" node --no-warnings test_store_ff.mjs
+run "Apple Developer ID: Mac installer signing + notarization wiring, signed package never replaced" bash test_signing_mac.sh
+run "Download page on a Mac: Apple-signed installer = one download, command one click away (real Chromium)" node --no-warnings test_download_mac.mjs
 if command -v xvfb-run >/dev/null 2>&1 && [ "$(id -u)" = 0 ]; then run "Real Chromium loads the quiz policy (AI refused, Web search + notes allowed, extensions off)" xvfb-run -a node --no-warnings test_chrome_policy_real.mjs; fi
 if command -v pwsh >/dev/null 2>&1; then
   run "Windows agent/engine logic (titles, unlock retry, policy restore)" pwsh -NoProfile -File test_windows_logic.ps1

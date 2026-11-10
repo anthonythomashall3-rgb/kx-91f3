@@ -10,6 +10,9 @@ name: Release
 #   CLOUDFLARE_API_TOKEN   Cloudflare API token with Pages:Edit + D1:Edit on the account
 #   CLOUDFLARE_ACCOUNT_ID  the Cloudflare account id
 # Until those exist, the deploy job prints what is missing and does nothing else.
+# Optional, Apple Developer ID (the Mac installer opens with no Terminal and no "Open Anyway"; see app/release/mac-sign.sh):
+#   MAC_INSTALLER_P12 + MAC_INSTALLER_P12_PASSWORD, and NOTARY_KEY_P8 + NOTARY_KEY_ID (+ NOTARY_ISSUER_ID)
+#   or APPLE_ID + APPLE_APP_PASSWORD + APPLE_TEAM_ID. Not set = the unsigned package ships, as before.
 
 on:
   push:
@@ -42,7 +45,9 @@ jobs:
         with: { fetch-depth: 0 }
       - name: What changed (decides which platform builds run)
         id: chg
-        env: { BEFORE: "${{ github.event.before }}" }
+        env:
+          BEFORE: "${{ github.event.before }}"
+          MAC_SIGN: "${{ secrets.MAC_INSTALLER_P12 != '' }}"
         run: |
           # Base = the commit that is live (api field of /api/version); fall back to the push's "before".
           live=$(curl -fsS -m 15 -A "LOCKqz/ci" https://lockqz.pages.dev/api/version | sed -n 's/.*"api":"\([0-9a-f]*\)".*/\1/p' || true)
@@ -58,7 +63,11 @@ jobs:
             echo "deploy=false" >> "$GITHUB_OUTPUT"; echo "mac=false" >> "$GITHUB_OUTPUT"; echo "win=false" >> "$GITHUB_OUTPUT"; echo "linux=false" >> "$GITHUB_OUTPUT"; echo "android=false" >> "$GITHUB_OUTPUT"; echo "nothing deployable changed since $base"; exit 0; fi
           echo "deploy=true" >> "$GITHUB_OUTPUT"
           common='^(app/release/|app/VERSION$|\.github/)'
-          echo "$files" | grep -qE "$common|^app/mac/|^app/tests/test_mac_" && echo "mac=true" >> "$GITHUB_OUTPUT" || echo "mac=false" >> "$GITHUB_OUTPUT"
+          echo "$files" | grep -qE "$common|^app/mac/|^app/tests/test_mac_" && mac=true || mac=false
+          # Apple signing set up (secret exists) while the live installer is not Apple-signed yet: build + sign it now.
+          if [ "$mac" = false ] && [ "$MAC_SIGN" = true ] && ! curl -fsS -m 15 -A "LOCKqz/ci" https://lockqz.pages.dev/download/mac.json 2>/dev/null | grep -qE '"signed": *true'; then
+            mac=true; echo "Mac signing is set up and the live installer is not Apple-signed: building + signing it"; fi
+          echo "mac=$mac" >> "$GITHUB_OUTPUT"
           echo "$files" | grep -qE "$common|^app/windows/|^app/tests/test_windows_" && echo "win=true" >> "$GITHUB_OUTPUT" || echo "win=false" >> "$GITHUB_OUTPUT"
           # Linux shares lockqzd.py / lockqz-agent.py / browser-policy.py / lockqz-core.sh / blocklist.txt with the Mac.
           echo "$files" | grep -qE "^app/android/|^app/VERSION$|^\.github/" && echo "android=true" >> "$GITHUB_OUTPUT" || echo "android=false" >> "$GITHUB_OUTPUT"
@@ -82,10 +91,27 @@ jobs:
     needs: test
     if: needs.test.outputs.mac == 'true'
     runs-on: macos-latest
+    outputs:
+      signed: ${{ steps.sign.outputs.signed }}
     steps:
       - uses: actions/checkout@v4
       - name: Build the .pkg, install it, lock/unlock, uninstall
         run: bash app/tests/test_mac_install.sh
+      # Apple Developer ID: a signed + notarized package opens straight into the installer (no Terminal, no
+      # "Open Anyway"). Skipped until the MAC_INSTALLER_* secrets exist; a failure never blocks the release
+      # (the deploy then keeps the live signed package).
+      - name: Sign + notarize the .pkg (Apple Developer ID)
+        id: sign
+        env:
+          MAC_INSTALLER_P12: ${{ secrets.MAC_INSTALLER_P12 }}
+          MAC_INSTALLER_P12_PASSWORD: ${{ secrets.MAC_INSTALLER_P12_PASSWORD }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bash app/release/mac-sign.sh sign /tmp/lockqz-mac.pkg
       - uses: actions/upload-artifact@v4
         with:
           name: lockqz-mac
@@ -237,6 +263,10 @@ jobs:
           STORE_CLIENT_ID: ${{ secrets.STORE_CLIENT_ID }}
           STORE_CLIENT_SECRET: ${{ secrets.STORE_CLIENT_SECRET }}
         run: |
+          # Only a version the Store does not have yet (a workflow-only push rebuilds the same version).
+          $v = (Get-Content app/VERSION -Raw).Trim(); $s = $null
+          try { $s = Invoke-RestMethod -Uri https://lockqz.pages.dev/api/store -TimeoutSec 20 } catch {}
+          if ($s -and "$($s.store_version)" -eq $v) { Write-Host "Microsoft Store already has $v - nothing to submit"; exit 0 }
           msstore reconfigure --tenantId $env:STORE_TENANT_ID --sellerId $env:STORE_SELLER_ID --clientId $env:STORE_CLIENT_ID --clientSecret $env:STORE_CLIENT_SECRET
           msstore publish "$env:RUNNER_TEMP\store\lockqz-store.msix" -id 9P7D1114N2LJ -v
           if ($LASTEXITCODE -ne 0) { Write-Host "::warning::Microsoft Store submission failed - the site still deploys; see the log" }
@@ -306,6 +336,12 @@ jobs:
             v=$(unzip -p app/extension-prof/dist/lockqz-prof-firefox.xpi manifest.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
             printf '{"addons":{"prof@lockqz.app":{"updates":[{"version":"%s","update_link":"https://lockqz.com/download/lockqz-prof-firefox.xpi"}]}}}\n' "$v" > "$d/lockqz-prof-firefox-updates.json"
           fi
+      - name: Mac installer - an Apple-signed one is never replaced by an unsigned one (writes download/mac.json)
+        if: steps.chk.outputs.ok == 'true'
+        env:
+          MAC_BUILT: ${{ needs.mac.result }}
+          MAC_SIGNED: ${{ needs.mac.outputs.signed }}
+        run: bash app/release/mac-sign.sh status app/cloudflare/public/download
       - name: Build the signed update manifest + one-line installers
         if: steps.chk.outputs.ok == 'true'
         env:
@@ -356,6 +392,7 @@ jobs:
                    [ "$(head -c ${#2} "$t/f")" = "$2" ] || { echo "::error::$1 is not $3 ($ct)"; exit 1; }
                    if echo "$ct" | grep -qi 'text/html'; then echo "::error::$1 served as HTML"; exit 1; fi; echo "ok $1 ($ct)"; }
           magic https://lockqz.pages.dev/download/lockqz-mac.pkg 'xar!' "a .pkg"
+          curl -fsS -A "LOCKqz/ci" https://lockqz.pages.dev/download/mac.json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d.get("signed"), bool), d; print("mac.json ok:", d)'
           magic https://lockqz.pages.dev/download/lockqz-win.exe 'MZ' "an .exe"
           magic https://lockqz.pages.dev/download/lockqz-android.apk 'PK' "an .apk"
           magic https://lockqz.pages.dev/install.sh '#!' "a shell script"
