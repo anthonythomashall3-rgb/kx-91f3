@@ -156,7 +156,10 @@
     <div class="muted" id="forgotrow"><a href="#" onclick="showForgot();return false">Forgot password?</a></div>
     <div id="forgot" class="hide" style="display:flex;flex-direction:column;gap:10px">
       <input id="femail" type="email" placeholder="Your account email">
-      <button class="btn" onclick="requestReset()">Request password reset</button>
+      <button class="btn" onclick="requestReset()">Email me a code</button>
+      <input id="fcode" class="hide" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code from your email">
+      <input id="fpw" class="hide" type="password" autocomplete="new-password" placeholder="New password (8+ characters)">
+      <button class="btn prime hide" id="fset" onclick="setNewPw()">Set new password</button>
       <div class="muted" id="fmsg"></div>
     </div>
     <p class="muted" style="font-size:13px"><a href="/privacy.html">Privacy</a></p>
@@ -233,7 +236,13 @@ async function go(){
 }
 function showForgot(){ $("forgot").classList.remove("hide"); $("femail").value=$("email").value||""; $("fmsg").textContent=""; }
 async function requestReset(){ const email=$("femail").value.trim(); if(!email){ $("fmsg").textContent="Enter your email."; return; }
-  const d = await post("/forgot",{email}); $("fmsg").textContent = d.error || "If that account exists, your LOCKqz admin has been notified and will give you a new password."; }
+  const d = await post("/forgot",{email}); if(d.error){ $("fmsg").textContent = d.message || d.error; return; }
+  ["fcode","fpw","fset"].forEach(i => $(i).classList.remove("hide")); $("fcode").focus();
+  $("fmsg").textContent = "If that account exists, we emailed it a 6-digit code. Type it here with your new password."; }
+async function setNewPw(){ const email=$("femail").value.trim(), code=$("fcode").value.trim(), pw=$("fpw").value;
+  if(pw.length<8){ $("fmsg").textContent="Password must be at least 8 characters."; return; }
+  const d = await post("/forgot/reset",{email,code,password:pw}); if(d.error){ $("fmsg").textContent = d.message || d.error; return; }
+  token=d.token; localStorage.setItem("lockqz_token",token); location.hash=""; location.reload(); }
 async function changePw(){ const old = prompt("Current password:"); if(old===null) return;
   const pw = prompt("Enter a new password (at least 8 characters):"); if(pw===null) return;
   if(pw.length<8){ alert("Password must be at least 8 characters."); return; }

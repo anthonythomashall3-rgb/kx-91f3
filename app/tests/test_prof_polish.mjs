@@ -75,6 +75,25 @@ check("Email students: signed 'Professor Duke Bristow', never the address", r.st
 const route = readFileSync(join(CF, "functions", "api", "[[route]].js"), "utf8");
 check("student email footer links lockqz.com/privacy (no 'cages' typo)", !/cages\.dev/.test(route) && /lockqz\.com\/privacy<\/a>/.test(route));
 
+console.log("R a professor resets his own password (no admin)");
+const before = mail.length;
+r = await api("/forgot", { email: "nobody-here@usc.edu" }, {}, "10.7.1.1");
+check("an unknown email: ok, nothing sent (never reveals who has an account)", r.status === 200 && r.data?.ok === true && mail.length === before);
+r = await api("/forgot", { email: "DBristow@usc.edu" }, {}, "10.7.1.1");
+const rc = mail.filter(m => m.to === "dbristow@usc.edu" && m.code).pop();
+check("his own email gets a 6-digit reset code", r.data?.ok === true && /^\d{6}$/.test(rc?.code || "") && /password reset code/.test(rc?.text || ""), JSON.stringify(r.data));
+r = await api("/forgot/reset", { email: "dbristow@usc.edu", code: rc.code === "000000" ? "111111" : "000000", password: "new-pass-123" }, {}, "10.7.1.1");
+check("a wrong code -> wrong_code, password unchanged", r.status === 400 && r.data?.error === "wrong_code" && (await api("/login", { email: "dbristow@usc.edu", password: "bristow-pass1" }, {}, "10.7.1.2")).status === 200, JSON.stringify(r.data));
+r = await api("/forgot/reset", { email: "dbristow@usc.edu", code: rc.code, password: "new-pass-123" }, {}, "10.7.1.1");
+check("the right code -> new password set and signed in", r.status === 200 && typeof r.data?.token === "string", JSON.stringify(r.data));
+const NBT = r.data?.token;
+check("the old password stops working, the new one works", (await api("/login", { email: "dbristow@usc.edu", password: "bristow-pass1" }, {}, "10.7.1.3")).status === 401 && (await api("/login", { email: "dbristow@usc.edu", password: "new-pass-123" }, {}, "10.7.1.3")).status === 200);
+check("the code is spent", (await api("/forgot/reset", { email: "dbristow@usc.edu", code: rc.code, password: "again-pass-1" }, {}, "10.7.1.1")).data?.error === "code_expired");
+check("the old session ends", (await api("/me", undefined, { "X-LOCKqz-Teacher": BT })).status === 401);
+const dashSrc = readFileSync(join(PUB, "dashboard.html"), "utf8");
+check("the page: Email me a code -> code + new password -> Set new password", dashSrc.includes('onclick="requestReset()">Email me a code') && dashSrc.includes('post("/forgot/reset",{email,code,password:pw})') && !/admin has been notified/.test(dashSrc));
+const BT2 = (await api("/login", { email: "dbristow@usc.edu", password: "new-pass-123" }, {}, "10.7.1.4")).data?.token;
+
 console.log("U/P/B/W/E in the page source");
 const dash = readFileSync(join(PUB, "dashboard.html"), "utf8");
 for (const f of readdirSync(PUB).filter(f => f.endsWith(".html"))) check(`tab icon on ${f}`, /<link rel="icon" type="image\/png" href="\/icon128\.png">/.test(readFileSync(join(PUB, f), "utf8")));
@@ -92,7 +111,7 @@ else {
     iphone: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
     chrome: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" };
   const browser = await chromium.launch({ headless: true });
-  async function open(ua, { token = BT, welcomed = true } = {}) {
+  async function open(ua, { token = BT2, welcomed = true } = {}) {
     const ctx = await browser.newContext({ userAgent: ua, viewport: ua === UA.iphone ? { width: 390, height: 844 } : { width: 1280, height: 860 } });
     await ctx.route("https://professor.lockqz.com/**", async rt => { const u = new URL(rt.request().url()); const f = u.pathname === "/" ? "dashboard.html" : u.pathname.slice(1);
       try { await rt.fulfill({ status: 200, contentType: f.endsWith(".js") ? "application/javascript" : f.endsWith(".png") ? "image/png" : "text/html", body: readFileSync(join(PUB, f)) }); } catch { await rt.fulfill({ status: 404, body: "" }); } });

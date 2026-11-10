@@ -386,6 +386,7 @@ async function smtpSend(open, { user, pass, to, subject, text, html = null, from
 // The code email's text. web: false = the LOCKqz app on a computer, true = the download-page sign-in,
 // "prof" = professor sign-up on professor.lockqz.com.
 function codeText(env, to, code, web) {
+  if (web === "reset") return `Your LOCKqz password reset code is ${code}\n\nType it on professor.lockqz.com with your new password. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email: your password stays the same.`;
   if (web === "prof") return `Your LOCKqz sign-up code is ${code}\n\nType it on professor.lockqz.com to create your professor account. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
   return web ? `Your LOCKqz sign-in code is ${code}\n\nType it on lockqz.com to open your account. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`
     : (isExempt(env, to) ? WELCOME + "\n\n" : "") + `Your LOCKqz code is ${code}\n\nType it into the LOCKqz window on your computer. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
@@ -2237,7 +2238,29 @@ export async function onRequest(context) {
       const hr = new Date(Date.now() - 3600000).toISOString();
       if (t) await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) SELECT ?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM events WHERE event='reset_request' AND " + RL_EV + " AND ts>? AND detail=?) AND (SELECT COUNT(*) FROM events WHERE event='reset_request' AND " + RL_EV + " AND ts>? AND device_id=?) < 10")
         .bind("ip:" + clientIp,null,null,"reset_request",email,now(), hr, email, hr, "ip:" + clientIp).run();
+      // The professor resets it himself: a 6-digit code to the account's own email (the students' code limits).
+      if (t && codesOn) { try { await issueEmailCode("reset:" + email, email, "reset"); } catch {} }
       return json({ ok:true });   // always ok — never reveal whether the email exists
+    }
+    // Step 2: the emailed code + a new password. Signs in; old sessions and the Sync key end (as /changepw).
+    if (p === "/forgot/reset" && request.method === "POST") {
+      const email = String(body.email||"").trim().toLowerCase(), pw = String(body.password||""), ecode = String(body.code||"").replace(/\D/g, "");
+      if (pw.length < 8) return json({ error:"password must be at least 8 characters" }, 400);
+      const dev = "reset:" + email;
+      const row = await db.prepare("SELECT email, code_hash, expires, tries FROM email_codes WHERE device_id=?").bind(dev).first();
+      const t = row ? await db.prepare("SELECT id, email, name FROM teachers WHERE email=?").bind(email).first() : null;
+      if (!row || !t || row.email !== email || Number(row.expires) < Date.now()) return json({ error:"code_expired", message:"That code expired. Ask for a new one." }, 400);
+      if (!sameHex(await sha256hex(enc.encode(dev + ":" + ecode)), row.code_hash)) {
+        if (Number(row.tries) + 1 >= CODE_TRIES) { await db.prepare("DELETE FROM email_codes WHERE device_id=?").bind(dev).run(); return json({ error:"too_many_tries", message:"Too many wrong codes. Ask for a new one." }, 400); }
+        await db.prepare("UPDATE email_codes SET tries=tries+1 WHERE device_id=?").bind(dev).run();
+        return json({ error:"wrong_code", message:"Wrong code. Check your email and try again." }, 400);
+      }
+      const salt = rid(16), token = hex(crypto.getRandomValues(new Uint8Array(24)));
+      const gating = await db.prepare("SELECT 1 FROM quizzes WHERE teacher_id=? AND gated=1 LIMIT 1").bind(t.id).first();
+      await db.batch([
+        db.prepare(`UPDATE teachers SET pw_hash=?, salt=?, token=?${gating ? ",sync_key_kept=1" : ",sync_key=NULL,sync_key_kept=0"} WHERE id=?`).bind(await hashPw(pw, salt, PEPPER), salt, token, t.id),
+        db.prepare("DELETE FROM email_codes WHERE device_id=?").bind(dev)]);
+      return json({ token, email: t.email, name: t.name });
     }
     // Public: is this invite link valid? (lets the sign-up form open and prefill the email)
     if (p === "/invite-check") {
