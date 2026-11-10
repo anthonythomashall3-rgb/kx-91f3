@@ -647,9 +647,15 @@ const LBL = {locked:["ok","Locked · working"],tamper:["red","Tampering detected
 function viewLive(id){
   const [ou,qi] = id.split("-"); const c = BS.courses.find(x=>x.ou===ou); const q = c && c.quizzes.find(x=>String(x.qi)===qi);
   const title = q ? q.name : (LEGACY.find(x=>(x.lock_id||x.quiz_id)===id)||{}).title || id;
+  // Before its start the page says "Not started · Starts ..."; after its end "Ended ..."; "Live" only in between.
+  const st = q && q.start_date ? Date.parse(q.start_date) : NaN, en = q && q.end_date ? Date.parse(q.end_date) : NaN;
+  const phase = !isNaN(en) && en <= now() ? "ended" : !isNaN(st) && st > now() ? "soon" : "live";
+  const badge = phase === "live" ? `<span class="pulse"></span><span style="font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ok)">Live</span>`
+    : `<span style="font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6b6861">${phase === "soon" ? "Not started" : "Ended"}</span>`;
+  const when0 = phase === "soon" ? "Starts " + when(q.start_date) + " · " : phase === "ended" ? "Ended " + when(q.end_date) + " · " : q && q.start_date ? "Started " + when(q.start_date) + " · " : "";
   return `${BACK(c?'class/'+ou:'', c?esc(cname(c)):'Home')}
-  <div class="band"><div><div style="display:flex;align-items:center;gap:10px"><span class="pulse"></span><span style="font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ok)">Live</span></div>
-    <h1 style="margin:4px 0 0;font-size:28px;font-weight:700;letter-spacing:-.015em">${esc(title)}</h1><p class="sub">${q&&q.start_date?"Started "+when(q.start_date)+" · ":""}<span id="livesub">updates every 10 seconds</span></p></div></div>
+  <div class="band"><div><div style="display:flex;align-items:center;gap:10px">${badge}</div>
+    <h1 style="margin:4px 0 0;font-size:28px;font-weight:700;letter-spacing:-.015em">${esc(title)}</h1><p class="sub">${when0}<span id="livesub">updates every 10 seconds</span></p></div></div>
   <div class="counts" id="lcounts"></div>
   <div id="lcode"></div>
   <section class="card" style="padding:8px 24px 12px"><ul class="list" id="lrows"><li class="d">${lqL("Loading live status", "This takes about 2 seconds")}</li></ul></section>

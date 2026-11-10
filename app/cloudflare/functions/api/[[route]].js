@@ -1036,9 +1036,11 @@ export async function onRequest(context) {
   const payVenmo = kind => kind === "student" ? stuVenmo() : ((env.VENMO_HANDLE || "").replace(/^@/, "") || null);
   const waysLine = kind => {
     const d$ = n => "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 });
-    const zel = (kind === "student" ? stuZelle() : env.ZELLE_TO) ? totalOf(kind, "zelle") : 0;
+    // Students in card-only mode (STUDENT_CARD_ONLY with Stripe on) see only the card, as on the pay page.
+    const cardOnly = kind === "student" && String(env.STUDENT_CARD_ONLY || "") === "1" && stripeOn();
+    const zel = !cardOnly && (kind === "student" ? stuZelle() : env.ZELLE_TO) ? totalOf(kind, "zelle") : 0;
     const others = [kind !== "student" && (env.INVOICE_EMAIL || env.ADMIN_EMAIL) ? ["bank transfer", totalOf(kind, "bank")] : null,
-      stripeOn() ? ["card", totalOf(kind, "card")] : null, payVenmo(kind) ? ["Venmo", totalOf(kind, "venmo")] : null].filter(Boolean);
+      stripeOn() ? ["card", totalOf(kind, "card")] : null, !cardOnly && payVenmo(kind) ? ["Venmo", totalOf(kind, "venmo")] : null].filter(Boolean);
     const byPrice = new Map(); for (const [w, a] of others) byPrice.set(a, [...(byPrice.get(a) || []), w]);
     const orList = ws => ws.length > 1 ? ws.slice(0, -1).join(", ") + " or " + ws[ws.length - 1] : ws[0];
     return [zel ? `${d$(zel)} by Zelle` : null, ...[...byPrice].map(([a, ws]) => `${d$(a)} by ${orList(ws)}`)].filter(Boolean).join(", or ");
@@ -1384,7 +1386,8 @@ export async function onRequest(context) {
     for (const r of due) {
       const email = String(r.email).toLowerCase(), kind = r.kind === "student" ? "student" : "professor";
       const link = kind === "student" ? await payLink(email) : DASH_URL + "/";
-      const zel = (kind === "student" ? stuZelle() : env.ZELLE_TO), venmo = payVenmo(kind), prices = waysLine(kind);
+      const co = kind === "student" && String(env.STUDENT_CARD_ONLY || "") === "1" && stripeOn();   // card only: no memo needed
+      const zel = !co && (kind === "student" ? stuZelle() : env.ZELLE_TO), venmo = !co && payVenmo(kind), prices = waysLine(kind);
       const text = `LOCKqz renews for ${termName(cur)}.\n\n${kind === "student" ? "Pay here" : "Pay on your LOCKqz dashboard"}: ${link}\n\n`
         + `${prices ? prices + "." : ""}${zel || venmo ? ` Memo for Zelle${venmo ? " or Venmo" : ""}: ${r.code}.` : ""}\n\n`
         + `Access turns on as soon as the payment arrives and lasts until ${fmtDay(termEndOf(cur))}.\n\nStop these emails: ${await payLink(email, "&renew=off")}`;
@@ -3503,7 +3506,8 @@ export async function onRequest(context) {
         const rows = part.flatMap(o => snaps.get(o) || []);
         if (rest.length) rows.push(...(await db.prepare(`SELECT ou,user_id,name,email,username,role FROM roster WHERE ou IN (${placeholders(rest.length)})`).bind(...rest).all()).results);
         rows.sort((a, b) => binCmp(a.ou, b.ou) || binCmp(a.user_id, b.user_id));
-        rows.sort((a, b) => binCmp(a.name, b.name));
+        // As people read a class list: "de la Cruz" among the Ds (not after "Zhang"), "Student 2" before "Student 10".
+        rows.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "en", { numeric: true, sensitivity: "base" }) || binCmp(a.name, b.name));
         roster.push(...rows.map(r => ({ ou: r.ou, user_id: r.user_id, name: r.name, email: r.email, username: r.username, role: r.role })));
         // Installed devices by email through devices(student) -- no scan of every device (I-B3). Each
         // distinct email once (the join read every class-list row of every course again).
@@ -3516,7 +3520,7 @@ export async function onRequest(context) {
       // Two plain reads matched here (the LEFT JOIN + ORDER BY read ~4 rows per quiz).
       const lq = new Map((await db.prepare(`SELECT ou,qi,password,lock_id,gated FROM quizzes WHERE ou IN (${sub}) AND qi IS NOT NULL`).bind(me.id).all()).results.map(q => [String(q.ou) + "\u0000" + String(q.qi), q]));
       const bq = (await db.prepare(`SELECT ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours,orig,prot_at,unprot_at FROM bs_quizzes WHERE ou IN (${sub})`).bind(me.id).all()).results;
-      bq.sort((a, b) => binCmp(a.name, b.name));
+      bq.sort((a, b) => binCmp(a.name, b.name));   // the Sync panel's order (sync.js byName)
       const qz = bq.map(b => { const q = lq.get(String(b.ou) + "\u0000" + String(b.qi)); return { ...b, password: q ? q.password : null, lock_id: q ? q.lock_id : null, gated: q ? q.gated : null }; })
         .map(q => own.has(String(q.ou)) ? withOrig(q) : withOrig({ ...q, orig: null, password: null, lock_id: null, gated: null }));
       const by = {}; devs.forEach(d => { (by[d.who] = by[d.who] || []).push(d); });

@@ -160,6 +160,9 @@ else {
   { const { ctx, pg, errs } = await open(ADA, "ada@usc.edu"); const t = await pg.innerText("#app");
     check("her students and switches are there, no 'not the instructor' line", /12 students/.test(t) && await pg.locator("#app .sw").count() > 0 && !/does not list you|Only this class's instructor/.test(t), t.slice(0, 400));
     check("header shows her name, not her email", /Ada Lovelace/.test(await pg.innerText("#who").catch(() => "")), await pg.innerText("#who").catch(() => "?"));
+    await pg.evaluate(() => { location.hash = "#live/880001-501"; }); await pg.waitForTimeout(900); const lv = await pg.innerText("#app");
+    check("live page of an exam that has not started: 'Not started · Starts ...' (never 'Live' / 'Started')", /Not started/i.test(lv) && /Starts /.test(lv) && !/\bLive\b/i.test(lv.split("\n").slice(0, 4).join(" ")) && !/Started /.test(lv), lv.slice(0, 200));
+    await pg.evaluate(() => { location.hash = ""; }); await pg.waitForTimeout(600);
     check("plurals: '12 addresses copied', '1 address', '2 students'", await pg.evaluate(() => [pl(12, "address"), pl(1, "address"), pl(2, "student")].join("|")) === "12 addresses|1 address|2 students");
     await pg.evaluate(() => { location.hash = "#class/880001"; }); await pg.waitForTimeout(700); const cOn = await pg.innerText("#app");
     await pg.evaluate(() => { location.hash = ""; }); await pg.waitForTimeout(700);

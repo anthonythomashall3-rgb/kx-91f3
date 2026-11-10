@@ -109,6 +109,16 @@ check("student: the end date in words ('lasts until May 12, 2027'), not 2027-05-
 check("professor: '$6,300 by Zelle, or $6,500 by bank transfer, card or Venmo', on his dashboard",
   /Pay on your LOCKqz dashboard: https:\/\/(professor\.lockqz\.com|prof\.lockqz\.pages\.dev)\/?\n\n\$6,300 by Zelle, or \$6,500 by bank transfer, card or Venmo\. Memo for Zelle or Venmo: LQPREN01\./.test(rp?.text || ""), rp?.text);
 
+{ // card-only mode (STUDENT_CARD_ONLY with Stripe on): the emails name only the card, as the pay page does
+  const r1 = await call("/email/students", { ou: OU, kind: "all" }, { token: PROF, envx: { ...feeOn, STUDENT_CARD_ONLY: "1" } });
+  check("card-only mode: the install email names only the card ('$210 by card'), no Zelle / Venmo", /2\. Pay for this semester when LOCKqz asks: \$210 by card\./.test(r1.data?.text || "") && !/Zelle|Venmo/.test(r1.data?.text || ""), (r1.data?.text || "").slice(0, 500)); }
+{ // class lists read the way people read them
+  for (const [u, nm] of [["5101", "de la Cruz, Ana"], ["5102", "Zhang, Wei"], ["5103", "Student 10"], ["5104", "Student 2"], ["5105", "Davis, Al"]]) ros.run(OU, u, nm, `n${u}@usc.edu`, "n" + u, "9", "Student", now());
+  sqlite.prepare("DELETE FROM roster_snap WHERE ou=?").run(OU);
+  const names = ((await call("/bs", null, { token: PROF, get: true })).data?.courses?.find(c => c.ou === OU)?.students || []).map(x => x.name);
+  const at = n => names.indexOf(n);
+  check("students sorted as people read them: 'de la Cruz' among the Ds (not after 'Zhang'), 'Student 2' before 'Student 10'",
+    at("Davis, Al") < at("de la Cruz, Ana") && at("de la Cruz, Ana") < at("Zhang, Wei") && at("Student 2") < at("Student 10") && at("Student 2") >= 0, JSON.stringify(names)); }
 console.log("P the student download page on a Chromebook");
 { const idx = readFileSync(join(CF, "public", "index.html"), "utf8");
   check("a Chromebook is told LOCKqz needs a Mac, Windows or Linux computer (not 'Open on your computer')", /\/CrOS\/\.test\(ua\)\) \$\("nope"\)\.textContent = "LOCKqz needs a Mac, Windows or Linux computer\. It does not run on Chromebooks\.";/.test(idx)); }
