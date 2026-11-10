@@ -67,6 +67,7 @@ run "Google sign-in: one-time link, ID token checks (key, issuer, audience, expi
 run "Professor sign-up by email code or USC Google (roster professors claim their email, students/TAs refused, invites still work)" node --no-warnings test_prof_signup.mjs
 run "Professor first visit: names from the class list, Chrome-only set-up on other browsers and phones, Email students chooser, plurals, menu (real Chromium)" node --no-warnings test_prof_polish.mjs
 run "Professors confirmed by their verification email (no admin step; students and taken classes refused); welcome email for accounts that pay (real Chromium)" node --no-warnings test_prof_confirm.mjs
+run "Bug sweep 4: student install emails name the fee and every way to pay, course codes students know (no 20263_14792), renewal email prices" node --no-warnings test_sweep4.mjs
 run "Microsoft Store button by itself + automatic Store submissions; Firefox package signed by Mozilla" node --no-warnings test_store_ff.mjs
 if command -v xvfb-run >/dev/null 2>&1 && [ "$(id -u)" = 0 ]; then run "Real Chromium loads the quiz policy (AI refused, Web search + notes allowed, extensions off)" xvfb-run -a node --no-warnings test_chrome_policy_real.mjs; fi
 if command -v pwsh >/dev/null 2>&1; then

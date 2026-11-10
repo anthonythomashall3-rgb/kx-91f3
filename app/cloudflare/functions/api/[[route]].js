@@ -514,13 +514,19 @@ const lastName = n => { let t = String(n || "").trim(); const m = t.match(/^([^,
   const w = t.split(/[\s,]+/).filter(x => x && !NAME_EXTRA.test(x)); if (!w.length) return "";
   let i = w.length - 1; while (i > 1 && /^(van|von|de|del|della|der|den|di|da|du|le|la|st\.?)$/i.test(w[i - 1])) i--;   // "Van Dyke", "de la Cruz"
   return w.slice(i).join(" "); };
-const courseLabel = c => { const name = String(c && c.name || "").replace(/^\d+_\S+\s*/, "").trim(), code = String(c && c.code || "").trim();
+// USC Brightspace's offering code ("20263_14792" = term_section) means nothing to a student: the course code is
+// the start of the name ("20263_14792 BUAD-306: Business Finance" -> "BUAD-306").
+const isOuCode = code => /^\d+_\d+$/.test(String(code || "").trim());
+const courseCode = c => { const raw = String(c && c.code || "").trim(); if (raw && !isOuCode(raw)) return raw;
+  const m = String(c && c.name || "").replace(/^\d+_\S+\s*/, "").trim().match(/^([A-Z]{2,6}[- ]?\d{2,4}[A-Z]{0,2})\s*:/); return m ? m[1] : ""; };
+const courseLabel = c => { const name = String(c && c.name || "").replace(/^\d+_\S+\s*/, "").trim(), code = isOuCode(c && c.code) ? "" : String(c && c.code || "").trim();
   return code && name && !name.toLowerCase().startsWith(code.toLowerCase()) ? `${code} \u2013 ${name}` : (name || code || "your class"); };
-const STEPS_TXT = `1. Download LOCKqz: ${SITE_URL} \u2014 choose Mac or Windows.\n2. Open the downloaded file and follow the on-screen steps (about one minute).\n3. Open Brightspace once: ${BS_URL} \u2014 LOCKqz will tell you it's ready.\n\nNothing else to do, ever.\n\nOn exam day: open the exam in Brightspace like normal. LOCKqz enters the password for you.`;
-const STEPS_HTML = `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 16px"><tr><td style="padding:6px 0;font-size:15px"><b>1.</b> ${mailBtn(SITE_URL, "Download LOCKqz")} <span style="color:#5c5952">\u2014 choose Mac or Windows.</span></td></tr>
-<tr><td style="padding:6px 0;font-size:15px"><b>2.</b> Open the downloaded file and follow the on-screen steps (about one minute).</td></tr>
-<tr><td style="padding:6px 0;font-size:15px"><b>3.</b> ${mailBtn(BS_URL, "Open Brightspace")} <span style="color:#5c5952">once \u2014 LOCKqz will tell you it's ready.</span></td></tr></table>
-${P("<b>Nothing else to do, ever.</b>")}${P("<b>On exam day:</b> open the exam in Brightspace like normal. LOCKqz enters the password for you.")}`;
+// Student install steps. fee: "$200 by Zelle, or $210 by card or Venmo" while the semester fee is on, else null.
+// lockqz.com shows the steps for the computer it is opened on (Mac command or installer, Microsoft Store, Linux, Android).
+const stepsTxt = fee => `1. Install LOCKqz on your computer: ${SITE_URL} \u2014 follow the steps there (about one minute).\n${fee ? `2. Pay for this semester when LOCKqz asks: ${fee}.\n3.` : "2."} Open Brightspace once: ${BS_URL} \u2014 LOCKqz will tell you it's ready.\n\n${fee ? "Nothing else to do this semester." : "Nothing else to do, ever."}\n\nOn exam day: open the exam in Brightspace like normal. LOCKqz enters the password for you.`;
+const stepsHtml = fee => `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 16px"><tr><td style="padding:6px 0;font-size:15px"><b>1.</b> ${mailBtn(SITE_URL, "Install LOCKqz")} <span style="color:#5c5952">on your computer \u2014 follow the steps there (about one minute).</span></td></tr>
+${fee ? `<tr><td style="padding:6px 0;font-size:15px"><b>2.</b> Pay for this semester when LOCKqz asks: ${hesc(fee)}.</td></tr>\n` : ""}<tr><td style="padding:6px 0;font-size:15px"><b>${fee ? 3 : 2}.</b> ${mailBtn(BS_URL, "Open Brightspace")} <span style="color:#5c5952">once \u2014 LOCKqz will tell you it's ready.</span></td></tr></table>
+${P(`<b>${fee ? "Nothing else to do this semester." : "Nothing else to do, ever."}</b>`)}${P("<b>On exam day:</b> open the exam in Brightspace like normal. LOCKqz enters the password for you.")}`;
 const signTxt = (prof, course) => `Respectfully,\n${prof ? `Professor ${prof}\n` : ""}${course}`;
 const signHtml = (prof, course) => P(`Respectfully,<br>${prof ? `Professor ${hesc(prof)}<br>` : ""}<span style="color:#5c5952">${hesc(course)}</span>`);
 const studentFooter = last => `Sent by LOCKqz on behalf of ${last ? `Professor ${hesc(last)}` : "your professor"}. Replies go to your professor. <a href="${SITE_URL}/privacy" style="color:#8a877f">lockqz.com/privacy</a>`;
@@ -563,18 +569,18 @@ const MAIL = {
     return { subject, text, html };
   },
   // To the class (kind "all"): install before the first exam.
-  student({ course, code, prof, last, firstExam }) {
+  student({ course, code, prof, last, firstExam, fee }) {
     const label = courseLabel({ name: course, code });
-    const subject = `${code || label}: install LOCKqz before your first exam`;
+    const subject = `${courseCode({ name: course, code }) || label}: install LOCKqz before your first exam`;
     const ex = firstExam && firstExam.name ? `First exam: ${firstExam.name}${firstExam.start_date ? ", " + mailWhen(firstExam.start_date) : ""}.` : "";
-    const text = `Hi,\n\n${label} uses LOCKqz for exams. LOCKqz blocks AI tools on your computer only while an exam is open and turns them back on when you submit. Your notes, files and the rest of the web stay available. No camera, no microphone, no recording.\n\nInstall it before the exam. If LOCKqz is not installed, the exam will not open.\n\n${STEPS_TXT}\n\n${ex ? ex + "\n\n" : ""}${signTxt(prof, label)}\n\n--\nSent by LOCKqz on behalf of ${last ? `Professor ${last}` : "your professor"}. Replies go to your professor. ${SITE_URL}/privacy`;
+    const text = `Hi,\n\n${label} uses LOCKqz for exams. LOCKqz blocks AI tools on your computer only while an exam is open and turns them back on when you submit. Your notes, files and the rest of the web stay available. No camera, no microphone, no recording.\n\n${fee ? "Install it and pay before the exam. Without both, the exam will not open." : "Install it before the exam. If LOCKqz is not installed, the exam will not open."}\n\n${stepsTxt(fee)}\n\n${ex ? ex + "\n\n" : ""}${signTxt(prof, label)}\n\n--\nSent by LOCKqz on behalf of ${last ? `Professor ${last}` : "your professor"}. Replies go to your professor. ${SITE_URL}/privacy`;
     const html = mailWrap(P("Hi,") + P(`<b>${hesc(label)}</b> uses LOCKqz for exams. LOCKqz blocks AI tools on your computer only while an exam is open and turns them back on when you submit. Your notes, files and the rest of the web stay available. No camera, no microphone, no recording.`) +
-      P("<b>Install it before the exam.</b> If LOCKqz is not installed, the exam will not open.") + STEPS_HTML + (ex ? P(`<b>${hesc(ex)}</b>`) : "") + signHtml(prof, label), studentFooter(last));
+      P(fee ? "<b>Install it and pay before the exam.</b> Without both, the exam will not open." : "<b>Install it before the exam.</b> If LOCKqz is not installed, the exam will not open.") + stepsHtml(fee) + (ex ? P(`<b>${hesc(ex)}</b>`) : "") + signHtml(prof, label), studentFooter(last));
     return { subject, text, html };
   },
   // To the students who have not installed (kind "missing", and the automatic 48 h / 3 h reminders).
   // unpaid: LOCKqz is installed on a confirmed computer but this term's fee is not paid.
-  reminder({ course, code, prof, last, exam, when, start_date, unpaid }) {
+  reminder({ course, code, prof, last, exam, when, start_date, unpaid, fee }) {
     const label = courseLabel({ name: course, code }), date = mailWhen(start_date);
     if (unpaid) {
       const PAYLINE = `LOCKqz is installed but your semester fee is not paid \u2014 pay at ${SITE_URL}/pay before the exam.`;
@@ -584,8 +590,8 @@ const MAIL = {
       return { subject, text, html };
     }
     const subject = `Reminder: install LOCKqz before ${exam}${date ? " on " + date : ""}`;
-    const text = `Hi,\n\nLOCKqz is not installed on your computer yet, and ${exam} for ${label} is ${when}. Without it the exam will not open.\n\n${STEPS_TXT}\n\n${signTxt(prof, label)}\n\n--\nSent by LOCKqz on behalf of ${last ? `Professor ${last}` : "your professor"}. Replies go to your professor. ${SITE_URL}/privacy`;
-    const html = mailWrap(P("Hi,") + P(`<b>LOCKqz is not installed on your computer yet</b>, and <b>${hesc(exam)}</b> for ${hesc(label)} is <b>${hesc(when)}</b>. Without it the exam will not open.`) + STEPS_HTML + signHtml(prof, label), studentFooter(last));
+    const text = `Hi,\n\nLOCKqz is not installed on your computer yet, and ${exam} for ${label} is ${when}. Without it the exam will not open.\n\n${stepsTxt(fee)}\n\n${signTxt(prof, label)}\n\n--\nSent by LOCKqz on behalf of ${last ? `Professor ${last}` : "your professor"}. Replies go to your professor. ${SITE_URL}/privacy`;
+    const html = mailWrap(P("Hi,") + P(`<b>LOCKqz is not installed on your computer yet</b>, and <b>${hesc(exam)}</b> for ${hesc(label)} is <b>${hesc(when)}</b>. Without it the exam will not open.`) + stepsHtml(fee) + signHtml(prof, label), studentFooter(last));
     return { subject, text, html };
   },
   // To a professor who never added the LOCKqz extension, once, when a protected exam is within a day.
@@ -1025,6 +1031,20 @@ export async function onRequest(context) {
   // nets $193.90; professor $5,150 nets $5,000.05), bank 0.8% capped at $5 (student $181.45 nets $180;
   // professor $5,005 nets $5,000). Only Stripe's signed webhook records a payment; the amount is Stripe's.
   const stripeOn = () => !!(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET);
+  // Every way this payer can pay now, each at its own price: "$200 by Zelle, or $210 by card or Venmo"
+  // (students: no bank transfer); professors "$6,300 by Zelle, or $6,500 by bank transfer, card or Venmo".
+  const payVenmo = kind => kind === "student" ? stuVenmo() : ((env.VENMO_HANDLE || "").replace(/^@/, "") || null);
+  const waysLine = kind => {
+    const d$ = n => "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 });
+    const zel = (kind === "student" ? stuZelle() : env.ZELLE_TO) ? totalOf(kind, "zelle") : 0;
+    const others = [kind !== "student" && (env.INVOICE_EMAIL || env.ADMIN_EMAIL) ? ["bank transfer", totalOf(kind, "bank")] : null,
+      stripeOn() ? ["card", totalOf(kind, "card")] : null, payVenmo(kind) ? ["Venmo", totalOf(kind, "venmo")] : null].filter(Boolean);
+    const byPrice = new Map(); for (const [w, a] of others) byPrice.set(a, [...(byPrice.get(a) || []), w]);
+    const orList = ws => ws.length > 1 ? ws.slice(0, -1).join(", ") + " or " + ws[ws.length - 1] : ws[0];
+    return [zel ? `${d$(zel)} by Zelle` : null, ...[...byPrice].map(([a, ws]) => `${d$(a)} by ${orList(ws)}`)].filter(Boolean).join(", or ");
+  };
+  // The student install emails name the fee while it is on.
+  const stuFee = () => feeOn() ? (waysLine("student") || null) : null;
   const cts = (v, d) => { const n = Math.round(Number(v || d) * 100); return n > 0 ? n : Math.round(d * 100); };
   // Cents to charge for what is still due (cents): the set price when nothing is paid yet, else the
   // remainder grossed up by Stripe's fee.
@@ -1362,9 +1382,12 @@ export async function onRequest(context) {
         AND (t.active_until IS NULL OR t.active_until < ?) LIMIT 20`).bind(prev, cur, cur, prev, cur, termEndOf(cur)).all()).results;
     let sent = 0;
     for (const r of due) {
-      const email = String(r.email).toLowerCase(), amt = totalOf(r.kind === "student" ? "student" : "professor", "zelle");
-      const link = r.kind === "student" ? await payLink(email) : DASH_URL + "/";
-      const text = `LOCKqz renews for the new semester.\n\n${r.kind === "student" ? `Pay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nZelle ${stuZelle()||""} (paste ${r.code} in the Zelle memo/note)${stripeOn() ? "  ·  Card" : ""}${stuVenmo() ? `  ·  Venmo @${stuVenmo()}` : ""}  ·  Bank transfer: email ${stuBank()||""}` : `Pay $${amt.toLocaleString("en-US")} with memo ${r.code}:\n${link}\n\nVenmo @${(env.VENMO_HANDLE||"").replace(/^@/,"")}  ·  Zelle ${env.ZELLE_TO||""}`}\n\nAccess turns on as soon as the payment arrives and lasts until ${termEndOf(cur)}.\n\nStop these emails: ${await payLink(email, "&renew=off")}`;
+      const email = String(r.email).toLowerCase(), kind = r.kind === "student" ? "student" : "professor";
+      const link = kind === "student" ? await payLink(email) : DASH_URL + "/";
+      const zel = (kind === "student" ? stuZelle() : env.ZELLE_TO), venmo = payVenmo(kind), prices = waysLine(kind);
+      const text = `LOCKqz renews for ${termName(cur)}.\n\n${kind === "student" ? "Pay here" : "Pay on your LOCKqz dashboard"}: ${link}\n\n`
+        + `${prices ? prices + "." : ""}${zel || venmo ? ` Memo for Zelle${venmo ? " or Venmo" : ""}: ${r.code}.` : ""}\n\n`
+        + `Access turns on as soon as the payment arrives and lasts until ${fmtDay(termEndOf(cur))}.\n\nStop these emails: ${await payLink(email, "&renew=off")}`;
       try {
         await mailOut(email, "Renew LOCKqz", text, {}, "auto");
         await db.prepare("INSERT OR IGNORE INTO renew_sent (email,term,at) VALUES (?,?,?)").bind(email, cur, now()).run();
@@ -1437,13 +1460,13 @@ export async function onRequest(context) {
       .map(r => r.email).filter(e => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e || ""));
     if (!rows.length) return { sent: 0 };
     const paid = await paidEmails(rows);
-    const end = fmtDay(termEndOf(payTermFor(0, STUDENT_FEE))), zel = totalOf("student", "zelle"), other = totalOf("student", "card");
+    const end = fmtDay(termEndOf(payTermFor(0, STUDENT_FEE)));
     let sent = 0, skipped = 0;
     for (const email of rows) {
       if (paid.has(email)) { await db.prepare("INSERT OR IGNORE INTO pay_nudge (email,at,sent) VALUES (?,?,0)").bind(email, now()).run(); skipped++; continue; }
       const text = `LOCKqz is installed on your computer. One step left: pay for this semester, or your Brightspace exams that use LOCKqz will not open.\n\n`
         + `Pay now: ${await payLink(email)}\n\n`
-        + `$${zel.toLocaleString("en-US")} by Zelle, or $${other.toLocaleString("en-US")} by card or Venmo. One payment covers all your LOCKqz classes until ${end}.`;
+        + `${waysLine("student") ? waysLine("student") + ". " : ""}One payment covers all your LOCKqz classes until ${end}.`;
       try { await mailOut(email, "One step left: pay for LOCKqz", text, {}, "auto"); }
       catch (e) { break; }   // mail budget reached: the rest wait for the next hour
       await db.prepare("INSERT OR IGNORE INTO pay_nudge (email,at,sent) VALUES (?,?,1)").bind(email, now()).run();
@@ -2716,7 +2739,7 @@ export async function onRequest(context) {
           else if (!(await mailRoom(list.length, "auto"))) out.skipped++;   // not marked sent: a later tick retries if room frees up
           else {
             sent.add(r.ou + "|" + kind);
-            const base = { course: r.course, code: r.code, prof, last, exam, when: inWords(lead), start_date: r.start_date };
+            const base = { course: r.course, code: r.code, prof, last, exam, when: inWords(lead), start_date: r.start_date, fee: stuFee() };
             let done = 0;
             try { for (const [grp, m] of [[list.filter(e => !unp.has(e)), MAIL.reminder(base)], [sp.unpaid, MAIL.reminder({ ...base, unpaid: true })]])
                 for (const part of chunk(grp, MAIL_BATCH)) { await mailOut(part, m.subject, m.text, { html: m.html, replyTo: r.email }, "auto"); sends++; done += part.length; } } catch { out.skipped++; }
@@ -2824,7 +2847,7 @@ export async function onRequest(context) {
     if (!teacher()) return json({ error: "unauthorized" }, 401);
 
     if ((p === "/quiz" || p === "/course" || p === "/protect" || p === "/class" || p === "/gate") && request.method === "POST" && !me.admin && !me.verified)
-      return json({ error: "Verify you teach this course first: open Brightspace and click LOCKqz Sync." }, 403);
+      return json({ error: "Brightspace does not list you as this class's instructor yet. Open Brightspace in Chrome: LOCKqz checks by itself." }, 403);
     // PAID ONLY: verification proves you are a professor; only the admin's Activate (after payment)
     // turns the tool on. Nothing that protects, gates or rotates a quiz works for an unpaid account.
     if ((p === "/quiz" || p === "/course" || ((p === "/protect" || p === "/class") && body.on) || (p === "/gate" && body.on) || p === "/rotating") && request.method === "POST") {
@@ -3261,13 +3284,13 @@ export async function onRequest(context) {
           if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this class can email it." }, 403);
           const c = await db.prepare("SELECT name, code FROM teacher_courses WHERE ou=? ORDER BY teacher_id=? DESC LIMIT 1").bind(ou, me.id).first() || {};
           const list = await classRecipients(ou, "all"); if (!list.length) continue;
-          list.forEach(e => to.add(e)); const nm = c.code || courseLabel(c); if (!names.includes(nm)) names.push(nm);
+          list.forEach(e => to.add(e)); const nm = courseCode(c) || courseLabel(c); if (!names.includes(nm)) names.push(nm);   // two sections of one course: named once
           await db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, "all", laToday(), list.length, now()).run();
         }
         if (!to.size) return json({ to: [], kind: "all", none: true });
         const prof = (await profName(me.name, me.email)), last = lastName(prof) || prof;
         const label = names.length > 1 ? names.slice(0, -1).join(", ") + " and " + names[names.length - 1] : names[0];
-        const m = MAIL.student({ course: label, code: null, prof, last, firstExam: null });
+        const m = MAIL.student({ course: label, code: null, prof, last, firstExam: null, fee: stuFee() });
         const text = String(m.text).replace(/\n\n--\nSent by LOCKqz on behalf of[^\n]*$/, "").replace(" uses LOCKqz for exams", names.length > 1 ? " use LOCKqz for exams" : " uses LOCKqz for exams");
         return json({ to: [...to], kind: "all", subject: "Install LOCKqz before your first exam", text });
       }
@@ -3282,12 +3305,12 @@ export async function onRequest(context) {
       // covered (on, signed-up professor). A class LOCKqz does not cover names no exam.
       const fe = (await courseCovered(ou)) ? await db.prepare("SELECT b.name AS name, b.start_date AS start_date FROM bs_quizzes b JOIN quizzes q ON q.ou=b.ou AND q.qi=b.qi WHERE b.ou=? AND b.start_date>? ORDER BY b.start_date LIMIT 1").bind(ou, now()).first() : null;
       let m;
-      if (kind === "all") m = MAIL.student({ course: c.name, code: c.code, prof, last, firstExam: fe });
+      if (kind === "all") m = MAIL.student({ course: c.name, code: c.code, prof, last, firstExam: fe, fee: stuFee() });
       else { const lead = fe && fe.start_date ? Date.parse(fe.start_date) - Date.now() : NaN, unp = new Set(sp.unpaid), notInst = list.some(e => !unp.has(e));
         // One draft: install wording when anyone has not installed; the pay line when anyone installed but has not paid.
-        m = MAIL.reminder({ course: c.name, code: c.code, prof, last, exam: fe && fe.name ? fe.name : "your next exam", when: isNaN(lead) ? "coming up" : inWords(lead), start_date: fe ? fe.start_date : null, unpaid: !notInst });
+        m = MAIL.reminder({ course: c.name, code: c.code, prof, last, exam: fe && fe.name ? fe.name : "your next exam", when: isNaN(lead) ? "coming up" : inWords(lead), start_date: fe ? fe.start_date : null, unpaid: !notInst, fee: stuFee() });
         if (notInst && unp.size) m = { ...m, text: String(m.text).replace("LOCKqz is not installed on your computer yet", "LOCKqz is not ready on your computer yet")
-          .replace("Without it the exam will not open.", `Without it the exam will not open.\n\nAlready installed LOCKqz? Then your semester fee is not paid \u2014 pay at ${SITE_URL} before the exam.`) }; }
+          .replace("Without it the exam will not open.", `Without it the exam will not open.\n\nAlready installed LOCKqz? Then your semester fee is not paid \u2014 pay at ${SITE_URL}/pay before the exam.`) }; }
       // The professor sends it themselves: drop LOCKqz's "sent on behalf of" footer from the draft.
       const text = String(m.text).replace(/\n\n--\nSent by LOCKqz on behalf of[^\n]*$/, "");
       await db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, kind, laToday(), list.length, now()).run();

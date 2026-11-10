@@ -175,6 +175,7 @@
     if (!android) served("/" + one, function (ok) { if (!ok) served(rel, function (ok2) { if (ok2) $("cmd").textContent = $("cmd").textContent.replace(site + "/" + one, site + rel); }); });
     if (!linux) served($("dl").getAttribute("href"), function (ok) { if (!ok) { $("dlbox").hidden = true; $("orline").hidden = true; if (android) $("nope").hidden = false; } });
   } else {
+    if (/CrOS/.test(ua)) $("nope").textContent = "LOCKqz needs a Mac, Windows or Linux computer. It does not run on Chromebooks.";   // a Chromebook is already "your computer"
     $("nope").hidden = false;
     var h = document.querySelector(".card h1"); if (h) h.insertAdjacentHTML("beforebegin", '<img src="/icon128.png" alt="" width="88" height="88" style="display:block;margin:0 auto 4px;border-radius:20px">');   // phone / tablet: lock logo, LOCKqz, one line
   }

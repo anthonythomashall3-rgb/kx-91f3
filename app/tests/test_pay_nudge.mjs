@@ -27,7 +27,9 @@ const mails = [];
 const SECRET = "test-pay-secret-0123456789";
 // Prices as in wrangler.toml (8 Nov): $200 Zelle, $210 card / Venmo.
 const env = { DB, TEACHER_KEY: "admin-key", PAY_SECRET: SECRET, MAIL_SINK: async m => { mails.push(m); },
-  STUDENT_FEE: "180", STUDENT_FEE_FROM: "2026-10-25", STUDENT_OTHER_PRICE: "210", STUDENT_TOTAL: "200", STUDENT_OTHER_TOTAL: "210", PAID_CACHE_MS: "0" };
+  STUDENT_FEE: "180", STUDENT_FEE_FROM: "2026-10-25", STUDENT_OTHER_PRICE: "210", STUDENT_TOTAL: "200", STUDENT_OTHER_TOTAL: "210", PAID_CACHE_MS: "0",
+  // the ways students pay in production (the email names each with its price)
+  ZELLE_TO: "(858) 900-4347", STUDENT_VENMO: "1", VENMO_HANDLE: "LOCKqz", STRIPE_SECRET_KEY: "sk_test_nudge", STRIPE_WEBHOOK_SECRET: "whsec_nudge" };
 const RealDate = Date; let fakeNow = RealDate.now();
 class FakeDate extends RealDate { constructor(...a) { if (a.length) super(...a); else super(fakeNow); } static now() { return fakeNow; } }
 globalThis.Date = FakeDate;

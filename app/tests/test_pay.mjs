@@ -181,7 +181,7 @@ console.log("P10 USC terms: access through the term's last day of finals; renewa
     let t = await tick(envM);
     check("renewal window: emails sent for Spring 2027", t.term === "20271" && t.sent >= 2, JSON.stringify(t));
     check("opted-out payer gets nothing", !sent.some(m => m.to === "bo@usc.edu"), JSON.stringify(sent.map(m => m.to)));
-    check("student renewal email: Zelle + bank transfer, no Venmo", sent.some(m => m.to === "al@usc.edu" && /Zelle/.test(m.text) && /Bank transfer/.test(m.text) && !/Venmo/.test(m.text)), JSON.stringify(sent.map(m => m.text)));
+    check("student renewal email: Zelle, no bank transfer (students cannot pay that way, owner 8 Nov), no Venmo (not offered here)", sent.some(m => m.to === "al@usc.edu" && /Zelle/.test(m.text) && !/[Bb]ank transfer/.test(m.text) && !/Venmo/.test(m.text)), JSON.stringify(sent.map(m => m.text)));
     check("student email has $5, memo, pay link and a stop link", sent.some(m => m.to === "al@usc.edu" && /\$5 /.test(m.text) && m.text.includes(CODE) && m.text.includes("renew=off")), JSON.stringify(sent.map(m => m.text.slice(0, 80))));
     check("professor reminded too", sent.some(m => m.to === "prof@usc.edu" && /\$5,000/.test(m.text)));
     const n = sent.length; t = await tick(envM);
