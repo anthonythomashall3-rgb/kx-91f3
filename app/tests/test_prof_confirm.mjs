@@ -198,6 +198,7 @@ else {
     check("the admin's own row: his classes, never 'not verified'", /class/.test(adminRow) && !/not verified/.test(adminRow), adminRow);
     const vrow = pg.locator("#payments tr", { hasText: "void" });
     check("a voided payment shows 'void' and no Void button", await vrow.count() === 1 && await vrow.locator("button", { hasText: "Void" }).count() === 0, await vrow.innerText().catch(() => "?"));
+    check("clock: exam emails just ran, renewals not seen yet -> not stopped (no false alarm after a deploy)", await pg.evaluate(() => !CLOCK({ cron: new Date().toISOString() }).stale && CLOCK({}).stale && CLOCK({ cron: new Date().toISOString(), tick: new Date(Date.now() - 4 * 3600e3).toISOString() }).stale));
     const old = new Date(Date.now() - 2 * 3600e3).toISOString();
     sqlite.prepare("INSERT OR REPLACE INTO sync_nudges (ou,qi,at) VALUES ('clock','cron',?),('clock','tick',?)").run(old, old);
     await pg.evaluate(() => loadPayments()); await pg.waitForTimeout(700);

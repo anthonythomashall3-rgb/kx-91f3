@@ -783,7 +783,7 @@ async function forget(){ const email=$("fgemail").value.trim().toLowerCase(); if
 // renewals about hourly. Stale = no exam-email run for 30 min, or no renewal run for 3 h.
 const CLOCK = c => { const age = t => t ? (Date.now() - Date.parse(t)) / 60000 : Infinity, a = age(c && c.cron), b = age(c && c.tick);
   const m = x => x === Infinity ? "never" : x < 1 ? "just now" : x < 90 ? Math.round(x) + " min ago" : Math.round(x / 60) + " h ago";
-  return { stale: a > 30 || b > 180, text: `LOCKqz clock (Gmail script "LOCKqz payments"): exam emails ran ${m(a)} · renewals ran ${m(b)}` }; };
+  return { stale: a > 30 || (b !== Infinity && b > 180), text: `LOCKqz clock (Gmail script "LOCKqz payments"): exam emails ran ${m(a)} · renewals ran ${m(b)}` }; };
 const CLOCK_FIX = "Open script.google.com, project LOCKqz payments, Triggers: the run trigger must fire every minute (re-authorize it if Google asks).";
 async function loadTeachers(){ const d = await get("/teachers"); const tb=document.querySelector("#teachers tbody"); if(!tb) return; tb.innerHTML=""; const today=laDay();
   if(d.error){ tb.innerHTML=`<tr><td colspan="11" class="err">${esc(d.error)}</td></tr>`; return; }
