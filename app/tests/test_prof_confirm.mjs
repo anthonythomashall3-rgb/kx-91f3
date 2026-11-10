@@ -58,6 +58,12 @@ const ADA = (await signUp("ada@usc.edu")).token;              // fee-exempt (fre
 const PAT = (await signUp("pat@usc.edu", { name: "Pat Payne" })).token;   // pays
 const inv = (await call("/invite", { email: "ivy@usc.edu", until: "2099-12-31" }, { token: ADMIN })).data;
 await call("/signup", { email: "ivy@usc.edu", password: "ivy-pass-123", name: "Ivy Invited", invite: inv?.code });
+{ // two invites for one email: signing up with one closes the other (the admin list never shows a joined professor as pending)
+  const i1 = (await call("/invite", { email: "two@usc.edu" }, { token: ADMIN })).data, i2 = (await call("/invite", { email: "two@usc.edu", until: "2099-12-31" }, { token: ADMIN })).data;
+  await call("/signup", { email: "two@usc.edu", password: "two-pass-123", name: "Tom Two", invite: i2?.code });
+  const left = sqlite.prepare("SELECT COUNT(*) AS n FROM invites WHERE email='two@usc.edu' AND used_at IS NULL").get().n;
+  check("two invites for one email: the account closes both", !!i1?.code && !!i2?.code && left === 0 && acct("two@usc.edu")?.vouched === 1, String(left));
+}
 const wPat = mailTo("pat@usc.edu", /^Welcome/).pop(), wAda = mailTo("ada@usc.edu", /^Welcome/).pop(), wIvy = mailTo("ivy@usc.edu", /^Welcome/).pop();
 check("an account that pays: '3 steps', activating LOCKqz on the dashboard comes first",
   /3 steps/.test(wPat?.subject || "") && /1\. Activate LOCKqz on your dashboard: https:\/\/(professor\.lockqz\.com|prof\.lockqz\.pages\.dev)\/?\n2\. Add LOCKqz to Chrome[^\n]*\n3\. Open Brightspace/.test(wPat?.text || ""), wPat?.subject + " | " + (wPat?.text || "").slice(0, 400));
@@ -78,6 +84,7 @@ const adaSync = () => call("/sync", { whoami: { id: "7001", name: "Ada Lovelace"
 let r = await adaSync();
 check("her sync is stored", r.status === 200, JSON.stringify(r.data).slice(0, 200));
 check("she stays unconfirmed (nobody trusted has synced these classes)", acct("ada@usc.edu")?.verified === 0 && acct("ada@usc.edu")?.vouched === 1, JSON.stringify(acct("ada@usc.edu")));
+check("...and is named from Brightspace (her dashboard header never shows her email)", acct("ada@usc.edu")?.name === "Ada Lovelace", JSON.stringify(acct("ada@usc.edu")));
 const ask = mailTo("admin@usc.edu", /^Confirm a professor/);
 check("the admin is emailed: 'Confirm a professor: Ada Lovelace (ada@usc.edu)'", ask.length === 1 && ask[0].subject === "Confirm a professor: Ada Lovelace (ada@usc.edu)", ask.map(m => m.subject).join(" | "));
 check("...listing each class with her Brightspace role and the USC Schedule of Classes instructor",
@@ -86,6 +93,16 @@ check("...listing each class with her Brightspace role and the USC Schedule of C
   && /synced 2 classes that no account you trust has synced/.test(ask[0]?.text || "") && /(professor\.lockqz\.com|prof\.lockqz\.pages\.dev)\/#admin/.test(ask[0]?.text || ""), (ask[0]?.text || "").slice(0, 600));
 await adaSync();
 check("a second sync does not email the admin again", mailTo("admin@usc.edu", /^Confirm a professor/).length === 1);
+{ // a send that fails (mail budget, Gmail down) is asked again at the next sync, not lost
+  const sink = env.MAIL_SINK; env.MAIL_SINK = async m => { if (/^Confirm a professor/.test(m.subject || "")) throw new Error("down"); return sink(m); };
+  const ZOE = (await signUp("zoe@usc.edu")).token;
+  const zs = () => call("/sync", { whoami: { id: "7401" }, courses: [{ ou: "880004", name: "FBE-527", code: "20263_30004", role: "Instructor",
+    classlist: [{ id: "7401", name: "Zoe Zed", email: "zoe@usc.edu", role: "Instructor" }], quizzes: [] }] }, { token: ZOE });
+  await zs(); const k1 = sqlite.prepare("SELECT COUNT(*) AS n FROM sync_nudges WHERE ou='confirm'").get().n;
+  env.MAIL_SINK = sink; await zs();
+  check("a failed ask is retried at the next sync (and then sent once)", mailTo("admin@usc.edu", /^Confirm a professor: zoe@usc\.edu$/).length === 1 && k1 === 1, String(k1));
+  await zs(); check("...and not again after that", mailTo("admin@usc.edu", /^Confirm a professor: zoe@usc\.edu$/).length === 1);
+}
 let bs = (await call("/bs", null, { token: ADA, get: true })).data;
 check("her classes are listed but hidden (no class list, no passwords) until she is confirmed",
   bs?.courses?.length === 2 && bs.courses.every(c => c.roster_hidden === true && c.students.length === 0) && bs.courses.flatMap(c => c.quizzes || []).every(q => !q.password), JSON.stringify(bs).slice(0, 300));
@@ -160,7 +177,15 @@ if (browser) {
 
 console.log("C3 after the admin confirmed her");
 const A1 = acct("ada@usc.edu");
-check("verified, bound to her Brightspace id, named from her class list ('Lovelace, Ada' -> 'Ada Lovelace')", A1.verified === 1 && A1.bs_user_id === "7001" && A1.name === "Ada Lovelace", JSON.stringify(A1));
+check("verified, bound to her Brightspace id, her name kept", A1.verified === 1 && A1.bs_user_id === "7001" && A1.name === "Ada Lovelace", JSON.stringify(A1));
+{ // a professor with no name anywhere until the admin confirms him: named from his own class list then ("Last, First" -> "First Last")
+  const LEO = (await signUp("leo@usc.edu")).token;
+  await call("/sync", { whoami: { id: "7501" }, courses: [{ ou: "880005", name: "FBE-593", code: "20263_30005", role: "Instructor",
+    classlist: [{ id: "7501", name: "Tolstoy, Leo", email: "leo@usc.edu", role: "Instructor" }], quizzes: [] }] }, { token: LEO });
+  const before = acct("leo@usc.edu")?.name;
+  r = await call("/teachers/confirm", { email: "leo@usc.edu" }, { token: ADMIN });
+  check("no name before; confirmed -> named 'Leo Tolstoy' from his class list", before == null && r.status === 200 && acct("leo@usc.edu")?.name === "Leo Tolstoy" && acct("leo@usc.edu")?.bs_user_id === "7501", JSON.stringify([before, r.data, acct("leo@usc.edu")]));
+}
 const done = mailTo("ada@usc.edu", /^LOCKqz: your classes are confirmed$/).pop();
 check("she is emailed: 'Hi Professor Lovelace, LOCKqz confirmed that you teach 20263_30001, 20263_30002. Open Brightspace ...'",
   /^Hi Professor Lovelace,\n\nLOCKqz confirmed that you teach 20263_30001, 20263_30002\. Open Brightspace in Chrome once and LOCKqz protects your exams from then on\./.test(done?.text || ""), done?.text);

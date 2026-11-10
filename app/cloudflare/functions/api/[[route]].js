@@ -2150,6 +2150,7 @@ export async function onRequest(context) {
           .bind(id, email, nm, await hashPw(pw,salt,PEPPER), salt, token, now(), n===0?"admin":"teacher", inv ? inv.active_until : null, vouched).run();
       if (proved) await db.batch([db.prepare("DELETE FROM email_codes WHERE device_id=?").bind("prof:" + email),   // one code, one account
         db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE email=? AND used_at IS NULL").bind(now(), email, email)]);   // a waiting invite is moot
+      else if (inv) await db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE email=? AND used_at IS NULL").bind(now(), email, email).run();   // a second invite for this email is moot too
       // Welcome email (HTML): the two steps. Sent in the background; sign-up never waits for Gmail.
       if (mailOn(env)) { const w = MAIL.welcome({ last: lastName(nm), free: isExempt(env, email), pay: !isExempt(env, email) && !(inv && inv.active_until && inv.active_until >= laToday()) && n !== 0 });
         const go = mailOut(email, w.subject, w.text, { html: w.html }, "auto").catch(() => {});
@@ -2334,7 +2335,7 @@ export async function onRequest(context) {
       if (mailOn(env)) {
         const cls = [...new Set(rows.map(x => x.code || x.course).filter(Boolean))].slice(0, 6), last = lastName(name);
         const text = `${last ? `Hi Professor ${last},` : "Hi,"}\n\nLOCKqz confirmed that you teach ${cls.length ? cls.join(", ") : "your classes"}. Open Brightspace in Chrome once and LOCKqz protects your exams from then on.\n\nDashboard: ${DASH_URL}\n\nRespectfully,\nThe LOCKqz Team`;
-        await mailOut(email, "LOCKqz: your classes are confirmed", text, {}, "auto").catch(() => {});
+        await mailOut(email, "LOCKqz: your classes are confirmed", text, {}, "essential").catch(() => {});
       }
       return json({ ok: true, email, verified: true });
     }
@@ -2960,7 +2961,8 @@ export async function onRequest(context) {
         if (b.meta.changes) me.bs_user_id = whoId;
       }
       const whoName = body.whoami && typeof body.whoami.name === "string" ? body.whoami.name.trim().slice(0, 100) : "";
-      if (!me.name && !me.admin && whoName && me.bs_user_id && me.bs_user_id === whoId) {
+      // Brightspace's own name for a professor who never typed one (a confirmed email; not another Brightspace id's).
+      if (!me.name && !me.admin && whoName && me.vouched && (!me.bs_user_id || me.bs_user_id === whoId)) {
         await db.prepare("UPDATE teachers SET name=? WHERE id=? AND TRIM(COALESCE(name,''))=''").bind(whoName, me.id).run(); me.name = whoName; }
       // C4: roles. A course whose LIS roles (Access.LISRoles) name the caller Instructor marks the
       // caller's own class-list row as instructor; TeachingAssistant never does. A user with no role
@@ -3154,7 +3156,9 @@ export async function onRequest(context) {
             const sec = (String(c.code || "").match(/_(\d{5})$/) || [])[1];
             return `- ${String(c.name || c.code || c.ou).slice(0, 120)}${c.code ? ` (${String(c.code).slice(0, 40)})` : ""}. Brightspace role: ${own && own.role ? String(own.role).slice(0, 40) : "not on its class list"}.${sec ? ` USC Schedule of Classes: ${usc.has(sec) ? usc.get(sec).join(", ") : "no instructor listed"}.` : ""}`; });
           const text = `${who} synced ${A.length} class${A.length === 1 ? "" : "es"} that no account you trust has synced. LOCKqz protects none of these exams until you confirm that this person teaches them.\n\n${lines.join("\n")}${A.length > list.length ? `\n- and ${A.length - list.length} more` : ""}\n\nConfirm: ${DASH_URL}/#admin (Professors, Confirm).`;
-          const go = mailOut(String(env.ADMIN_EMAIL), `Confirm a professor: ${who}`, text, {}, "auto").catch(() => {});
+          // Essential (rare, and he waits on it); a failed send frees the once-key so the next sync asks again.
+          const go = mailOut(String(env.ADMIN_EMAIL), `Confirm a professor: ${who}`, text, {}, "essential")
+            .catch(() => db.prepare("DELETE FROM sync_nudges WHERE ou='confirm' AND qi=?").bind(me.id).run().catch(() => {}));
           if (typeof context.waitUntil === "function") context.waitUntil(go); else await go;
         }
       }
