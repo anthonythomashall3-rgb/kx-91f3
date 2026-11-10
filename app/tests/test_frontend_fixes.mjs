@@ -313,7 +313,7 @@ d = dashTab(w, { token: ta }); await w.idle();
 await w.idle(); check("9 unpaid professor sees only the payment screen", /^<div id="pay">/.test(d.app()) && /Activate LOCKqz/.test(d.el("pay").innerHTML) && !/Processing your payment/.test(d.el("pay").innerHTML), d.el("pay").innerHTML.slice(0, 300));   // no "processing" lock before they start paying
 w.sqlite.prepare("UPDATE teachers SET active_until='2099-12-31' WHERE email='newprof@usc.edu'").run();
 d = dashTab(w, { token: ta }); await w.idle();
-check("9 unverified professor told LOCKqz is checking that he teaches the class (no switch on it)", /LOCKqz is checking that you teach this class\./.test(d.app()) && /Waiting for LOCKqz to confirm that you teach this class\./.test(d.app()), d.app().slice(0, 400));
+check("9 professor not listed as the class's instructor: told so, no switch on it", /Brightspace does not list you as the instructor of this class\./.test(d.app()) && /Only this class's instructor can turn LOCKqz on for it\./.test(d.app()) && !/aria-label="LOCKqz on for this class"/.test(d.app()), d.app().slice(0, 400));
 
 console.log("10 'off but Brightspace still has our password' counts as one more click");
 w = await world(); t = syncTab(w); await t.run();

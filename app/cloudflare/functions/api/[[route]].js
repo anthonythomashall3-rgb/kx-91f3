@@ -507,7 +507,13 @@ function autoHtml(text, { sign = true } = {}) {
 }
 const mailWhen = iso => { const t = iso ? Date.parse(iso) : NaN; if (isNaN(t)) return "";
   try { return new Date(t).toLocaleString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + " PT"; } catch { return new Date(t).toISOString(); } };
-const lastName = n => { const w = String(n || "").trim().split(/\s+/).filter(Boolean); return w.length ? w[w.length - 1] : ""; };
+// "Duke Bristow", "Bristow, Duke", "Dr. Duke Bristow, PhD", "Duke Bristow Jr." -> "Bristow" (for "Professor Bristow").
+const NAME_EXTRA = /^(jr|sr|ii|iii|iv|phd|ph\.?d|md|mba|jd|esq|dr|prof|professor)\.?$/i;
+const lastName = n => { let t = String(n || "").trim(); const m = t.match(/^([^,]+),\s*(.+)$/);
+  if (m && !NAME_EXTRA.test(m[2].trim())) t = m[2] + " " + m[1];
+  const w = t.split(/[\s,]+/).filter(x => x && !NAME_EXTRA.test(x)); if (!w.length) return "";
+  let i = w.length - 1; while (i > 1 && /^(van|von|de|del|della|der|den|di|da|du|le|la|st\.?)$/i.test(w[i - 1])) i--;   // "Van Dyke", "de la Cruz"
+  return w.slice(i).join(" "); };
 const courseLabel = c => { const name = String(c && c.name || "").replace(/^\d+_\S+\s*/, "").trim(), code = String(c && c.code || "").trim();
   return code && name && !name.toLowerCase().startsWith(code.toLowerCase()) ? `${code} \u2013 ${name}` : (name || code || "your class"); };
 const STEPS_TXT = `1. Download LOCKqz: ${SITE_URL} \u2014 choose Mac or Windows.\n2. Open the downloaded file and follow the on-screen steps (about one minute).\n3. Open Brightspace once: ${BS_URL} \u2014 LOCKqz will tell you it's ready.\n\nNothing else to do, ever.\n\nOn exam day: open the exam in Brightspace like normal. LOCKqz enters the password for you.`;
@@ -2149,7 +2155,8 @@ export async function onRequest(context) {
         await db.prepare("INSERT INTO teachers (id,email,name,pw_hash,salt,token,created_at,role,active_until,vouched) VALUES (?,?,?,?,?,?,?,?,?,?)")
           .bind(id, email, nm, await hashPw(pw,salt,PEPPER), salt, token, now(), n===0?"admin":"teacher", inv ? inv.active_until : null, vouched).run();
       if (proved) await db.batch([db.prepare("DELETE FROM email_codes WHERE device_id=?").bind("prof:" + email),   // one code, one account
-        db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE email=? AND used_at IS NULL").bind(now(), email, email)]);   // a waiting invite is moot
+        db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE email=? AND used_at IS NULL").bind(now(), email, email),   // a waiting invite is moot
+        db.prepare("INSERT INTO invites (code,email,active_until,created_at,used_at,used_by) VALUES (?,?,?,?,?,?)").bind("self-" + rid(10), email, null, now(), now(), email)]);   // the email is confirmed
       else if (inv) await db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE email=? AND used_at IS NULL").bind(now(), email, email).run();   // a second invite for this email is moot too
       // Welcome email (HTML): the two steps. Sent in the background; sign-up never waits for Gmail.
       if (mailOn(env)) { const w = MAIL.welcome({ last: lastName(nm), free: isExempt(env, email), pay: !isExempt(env, email) && !(inv && inv.active_until && inv.active_until >= laToday()) && n !== 0 });
@@ -2206,7 +2213,8 @@ export async function onRequest(context) {
         else await db.prepare("INSERT INTO teachers (id,email,name,pw_hash,salt,token,created_at,role,active_until,vouched) VALUES (?,?,?,?,?,?,?,?,?,?)")
             .bind(rid(10), g.email, name, pwh, salt, token, now(), "teacher", null, 1).run();
         await db.batch([db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + ip, null, null, "signup", "google", now()),
-          db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE email=? AND used_at IS NULL").bind(now(), g.email, g.email)]);
+          db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE email=? AND used_at IS NULL").bind(now(), g.email, g.email),
+          db.prepare("INSERT INTO invites (code,email,active_until,created_at,used_at,used_by) VALUES (?,?,?,?,?,?)").bind("self-" + rid(10), g.email, null, now(), now(), g.email)]);   // Google confirmed the email
         if (mailOn(env)) { const w = MAIL.welcome({ last: lastName(name), free: isExempt(env, g.email), pay: !isExempt(env, g.email) && !(t && t.active_until && t.active_until >= laToday()) });
           const go = mailOut(g.email, w.subject, w.text, { html: w.html }, "auto").catch(() => {});
           if (typeof context.waitUntil === "function") context.waitUntil(go); else await go; }
@@ -2306,38 +2314,8 @@ export async function onRequest(context) {
       if (!me?.admin) return json({ error:"admin only" }, 403);
       // Set-up progress per professor (the dashboard's 3 steps): extension check-in, Brightspace classes (+ verified),
       // students emailed, protected exams.
-      const r = await db.prepare("SELECT t.id,t.email,t.name,t.created_at,t.active_until,t.verified,t.ext_seen,(SELECT COUNT(*) FROM paid_sections ps WHERE ps.teacher_id=t.id AND ps.until>=?) AS paid_sections,(SELECT code FROM pay_codes pc WHERE pc.teacher_id=t.id) AS memo,(SELECT COUNT(*) FROM teacher_courses tc WHERE tc.teacher_id=t.id AND COALESCE(tc.in_sync,1)=1) AS classes,(SELECT MAX(tc.synced_at) FROM teacher_courses tc WHERE tc.teacher_id=t.id) AS synced_at,(SELECT MAX(ms.at) FROM teacher_courses tc JOIN mail_sent ms ON ms.ou=tc.ou WHERE tc.teacher_id=t.id AND ms.kind IN ('all','missing')) AS mailed_at,(SELECT COUNT(*) FROM quizzes q WHERE q.teacher_id=t.id) AS protected,t.vouched,CASE WHEN t.verified=1 OR t.role='admin' THEN NULL ELSE (SELECT COUNT(DISTINCT tc.ou) FROM teacher_courses tc JOIN roster r ON r.ou=tc.ou WHERE tc.teacher_id=t.id AND COALESCE(tc.in_sync,1)=1 AND r.email=t.email AND " + INSTR_SQL + ") END AS instr FROM teachers t ORDER BY t.created_at DESC").bind(laToday()).all();
+      const r = await db.prepare("SELECT t.id,t.email,t.name,t.created_at,t.active_until,t.verified,t.ext_seen,(SELECT COUNT(*) FROM paid_sections ps WHERE ps.teacher_id=t.id AND ps.until>=?) AS paid_sections,(SELECT code FROM pay_codes pc WHERE pc.teacher_id=t.id) AS memo,(SELECT COUNT(*) FROM teacher_courses tc WHERE tc.teacher_id=t.id AND COALESCE(tc.in_sync,1)=1) AS classes,(SELECT MAX(tc.synced_at) FROM teacher_courses tc WHERE tc.teacher_id=t.id) AS synced_at,(SELECT MAX(ms.at) FROM teacher_courses tc JOIN mail_sent ms ON ms.ou=tc.ou WHERE tc.teacher_id=t.id AND ms.kind IN ('all','missing')) AS mailed_at,(SELECT COUNT(*) FROM quizzes q WHERE q.teacher_id=t.id) AS protected FROM teachers t ORDER BY t.created_at DESC").bind(laToday()).all();
       return json({ teachers: r.results });
-    }
-    // Admin only: confirm a professor whose classes no trusted account has synced (a course outside the
-    // admin's own). His own Brightspace class lists must name his email as Instructor; the admin's word
-    // then stands where a trusted roster would: he is verified at once (bound to that Brightspace id), the
-    // same as an invited professor's own sync verifies him, and emailed.
-    if (p === "/teachers/confirm" && request.method === "POST") {
-      if (!me?.admin) return json({ error:"admin only" }, 403);
-      const email = String(body.email||"").trim().toLowerCase();
-      const t = await db.prepare("SELECT id,email,name,role,verified,vouched,bs_user_id FROM teachers WHERE email=?").bind(email).first();
-      if (!t) return json({ error:"no such professor" }, 404);
-      if (t.role === "admin" || Number(t.verified) === 1) return json({ error:"already confirmed" }, 409);
-      if (Number(t.vouched) !== 1) return json({ error:"this account never confirmed its email (sign-up code, Google or invite)" }, 409);
-      const rows = (await db.prepare(`SELECT DISTINCT r.user_id AS uid, tc.name AS course, tc.code AS code FROM teacher_courses tc JOIN roster r ON r.ou=tc.ou WHERE tc.teacher_id=? AND COALESCE(tc.in_sync,1)=1 AND r.email=? AND ${INSTR_SQL}`).bind(t.id, email).all()).results;
-      const ids = [...new Set(rows.map(x => String(x.uid || "")).filter(Boolean))];
-      if (!ids.length) return json({ error:"Brightspace does not list this email as the instructor of any class it synced" }, 409);
-      if (t.bs_user_id ? !ids.includes(String(t.bs_user_id)) : ids.length > 1) return json({ error:"these class lists show more than one Brightspace account for this email" }, 409);
-      const uid = String(t.bs_user_id || ids[0]);
-      const u = await db.prepare("UPDATE teachers SET bs_user_id=?, verified=1 WHERE id=? AND vouched=1 AND COALESCE(verified,0)=0").bind(uid, t.id).run();
-      if (!u.meta.changes) return json({ error:"already confirmed" }, 409);
-      // The admin's word, kept as a used invite for this email (what an invited professor's own sync verifies from).
-      await db.prepare("INSERT INTO invites (code,email,active_until,created_at,used_at,used_by) VALUES (?,?,?,?,?,?)").bind(rid(10), email, null, now(), now(), email).run();
-      tiCache.clear();
-      let name = String(t.name || "").trim();
-      if (!name && (name = await rosterName(email) || "")) await db.prepare("UPDATE teachers SET name=? WHERE id=? AND TRIM(COALESCE(name,''))=''").bind(name, t.id).run();
-      if (mailOn(env)) {
-        const cls = [...new Set(rows.map(x => x.code || x.course).filter(Boolean))].slice(0, 6), last = lastName(name);
-        const text = `${last ? `Hi Professor ${last},` : "Hi,"}\n\nLOCKqz confirmed that you teach ${cls.length ? cls.join(", ") : "your classes"}. Open Brightspace in Chrome once and LOCKqz protects your exams from then on.\n\nDashboard: ${DASH_URL}\n\nRespectfully,\nThe LOCKqz Team`;
-        await mailOut(email, "LOCKqz: your classes are confirmed", text, {}, "essential").catch(() => {});
-      }
-      return json({ ok: true, email, verified: true });
     }
     // Admin only: turn a teacher on (after payment) until a date, or off.
     if (p === "/activate" && request.method === "POST") {
@@ -2372,7 +2350,7 @@ export async function onRequest(context) {
       // Greeting: the name typed on the admin page, else the name Brightspace has for this email (one read).
       let nm = String(body.name || "").trim();
       if (!nm) { const r = await db.prepare("SELECT name FROM roster WHERE email=? AND name IS NOT NULL LIMIT 1").bind(inv.email).first().catch(() => null); nm = r && r.name || ""; }
-      const last = nm.includes(",") ? nm.split(",")[0].trim() : lastName(nm.replace(/^(?:prof(?:essor)?\.?|dr\.?)\s+/i, ""));
+      const last = lastName(nm);   // "Bristow, Duke", "Dr. Duke Bristow, PhD" -> "Bristow"
       const m = MAIL.invite({ link: DASH_URL + "/?invite=" + inv.code, last, free: isExempt(env, inv.email) });
       try { await mailOut(inv.email, m.subject, m.text, { html: m.html }, "essential"); } catch { return json({ error:"Could not send the email. Try again in a minute." }, 502); }
       return json({ ok:true, sent:inv.email });
@@ -2392,7 +2370,8 @@ export async function onRequest(context) {
     }
     if (p === "/invites") {
       if (!me?.admin) return json({ error:"admin only" }, 403);
-      const r = await db.prepare("SELECT code,email,active_until,created_at,used_at,used_by FROM invites ORDER BY created_at DESC LIMIT 100").all();
+      // 'self-' rows only record a professor's own email confirmation (sign-up code or Google): not invites.
+      const r = await db.prepare("SELECT code,email,active_until,created_at,used_at,used_by FROM invites WHERE code NOT LIKE 'self-%' ORDER BY created_at DESC LIMIT 100").all();
       return json({ invites: r.results });
     }
     if (p === "/uninvite" && request.method === "POST") {
@@ -3134,33 +3113,18 @@ export async function onRequest(context) {
         // OWN Sync: the account is vouched, its email was fixed by the admin's invite, and the class list
         // its own Brightspace login returned lists that email + its own Brightspace id as Instructor.
         // (Unvouched accounts never get here: canStore is false, so selfInstr stays false.)
-        if (selfInstr && !me.verified && me.vouched && (!me.bs_user_id || me.bs_user_id === whoId)
-            && await db.prepare("SELECT 1 FROM invites WHERE used_by=? AND email=? AND used_at IS NOT NULL LIMIT 1").bind(myEmail, myEmail).first()) {
+        // A professor who confirmed his email himself (sign-up code or school Google; kept as a 'self-' invite row)
+        // verifies the same way, with no admin step -- unless LOCKqz knows that email as a student (a confirmed
+        // student install, or a trusted class list naming it only as student/TA).
+        const pin = selfInstr && !me.verified && me.vouched && (!me.bs_user_id || me.bs_user_id === whoId)
+          ? await db.prepare("SELECT code FROM invites WHERE used_by=? AND email=? AND used_at IS NOT NULL ORDER BY (code LIKE 'self-%') LIMIT 1").bind(myEmail, myEmail).first() : null;
+        if (pin && (!String(pin.code).startsWith("self-")
+            || (!(await db.prepare("SELECT 1 FROM devices WHERE student=? AND student_verified=1 LIMIT 1").bind(myEmail).first()) && !(await lockedOnly(myEmail))))) {
           const u = await db.prepare("UPDATE teachers SET bs_user_id=?, verified=1 WHERE id=? AND vouched=1 AND (bs_user_id IS NULL OR bs_user_id='' OR bs_user_id=?)").bind(whoId, me.id, whoId).run();
           if (u.meta.changes) { me.bs_user_id = whoId; me.verified = true; }
         }
         const prof = me.vouched && me.bs_user_id ? await db.prepare(`SELECT 1 FROM roster r WHERE r.email=? AND r.user_id=? AND ${INSTR_SQL} AND ${TRUSTED_TC} LIMIT 1`).bind(myEmail, String(me.bs_user_id)).first() : null;
         if (!!prof !== !!me.verified) { await db.prepare("UPDATE teachers SET verified=? WHERE id=?").bind(prof ? 1 : 0, me.id).run(); me.verified = !!prof; }
-        // Still unconfirmed after syncing classes (nobody trusted has synced them): the admin is asked ONCE
-        // per account (sync_nudges 'confirm'/<id>) to confirm him (/teachers/confirm); his dashboard says so.
-        if (!me.verified && me.vouched && A.length && env.ADMIN_EMAIL && mailOn(env)
-            && (await db.prepare("INSERT OR IGNORE INTO sync_nudges (ou,qi,at) VALUES ('confirm',?,?)").bind(me.id, now()).run()).meta.changes) {
-          const list = A.slice(0, 10).map(o => byOu.get(o)), secs = new Map();
-          for (const c of list) { const m = String(c.code || "").match(/^(\d{5})_(\d{5})$/); if (m) secs.set(m[2], m[1]); }
-          const usc = new Map();
-          if (secs.size) (await db.prepare(`SELECT term,section,first,last FROM usc_sections WHERE section IN (${placeholders(secs.size)})`).bind(...secs.keys()).all().catch(() => ({ results: [] }))).results
-            .forEach(r => { if (secs.get(String(r.section)) === String(r.term)) usc.set(String(r.section), [...(usc.get(String(r.section)) || []), `${r.first || ""} ${r.last || ""}`.trim()]); });
-          const who = (me.name || whoName) ? `${me.name || whoName} (${myEmail})` : myEmail;
-          const lines = list.map(c => {
-            const own = (Array.isArray(c.classlist) ? c.classlist : []).find(x => x && (String(x.id ?? "") === whoId || String(x.email || "").toLowerCase() === myEmail));
-            const sec = (String(c.code || "").match(/_(\d{5})$/) || [])[1];
-            return `- ${String(c.name || c.code || c.ou).slice(0, 120)}${c.code ? ` (${String(c.code).slice(0, 40)})` : ""}. Brightspace role: ${own && own.role ? String(own.role).slice(0, 40) : "not on its class list"}.${sec ? ` USC Schedule of Classes: ${usc.has(sec) ? usc.get(sec).join(", ") : "no instructor listed"}.` : ""}`; });
-          const text = `${who} synced ${A.length} class${A.length === 1 ? "" : "es"} that no account you trust has synced. LOCKqz protects none of these exams until you confirm that this person teaches them.\n\n${lines.join("\n")}${A.length > list.length ? `\n- and ${A.length - list.length} more` : ""}\n\nConfirm: ${DASH_URL}/#admin (Professors, Confirm).`;
-          // Essential (rare, and he waits on it); a failed send frees the once-key so the next sync asks again.
-          const go = mailOut(String(env.ADMIN_EMAIL), `Confirm a professor: ${who}`, text, {}, "essential")
-            .catch(() => db.prepare("DELETE FROM sync_nudges WHERE ou='confirm' AND qi=?").bind(me.id).run().catch(() => {}));
-          if (typeof context.waitUntil === "function") context.waitUntil(go); else await go;
-        }
       }
       // Re-check AFTER the writes: a professor syncing a course for the first time becomes its trusted
       // instructor only now (their course row + roster are in), so seed eviction must come after.

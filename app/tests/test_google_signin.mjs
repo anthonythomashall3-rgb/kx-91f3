@@ -94,6 +94,9 @@ r = await call("/auth/google", { credential: idToken({ email: "prof@usc.edu" }) 
 check("same token next time (one account, one session token)", r.data?.token === tok);
 r = await call("/auth/google", { credential: idToken({ email: "stranger@usc.edu" }) });
 check("no professor account, school Google account -> the account is made (vouched; see test_prof_signup)", r.status === 200 && r.data?.created === true && sqlite.prepare("SELECT vouched FROM teachers WHERE email='stranger@usc.edu'").get()?.vouched === 1, JSON.stringify(r.data));
+{ const res = await onRequest({ request: new Request("https://lockqz.test/api/sync", { method: "POST", headers: { "Content-Type": "application/json", "CF-Connecting-IP": "10.9.9.8", "X-LOCKqz-Teacher": r.data?.token || "" },
+    body: JSON.stringify({ whoami: { id: "8801" }, courses: [{ ou: "990001", name: "FBE 101", classlist: [{ id: "8801", name: "Stranger, Sam", email: "stranger@usc.edu", role: "Instructor" }], quizzes: [] }] }) }), env });
+  check("...and Brightspace naming him Instructor confirms him at his first sync (Google confirmed his email)", res.status === 200 && sqlite.prepare("SELECT verified FROM teachers WHERE email='stranger@usc.edu'").get()?.verified === 1, String(res.status)); }
 r = await call("/auth/google", { credential: idToken({ email: "stranger@gmail.com", hd: undefined }) });
 check("no professor account, other Google account -> 404, no account made", r.status === 404 && !sqlite.prepare("SELECT 1 FROM teachers WHERE email='stranger@gmail.com'").get());
 

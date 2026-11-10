@@ -320,7 +320,7 @@ const postKey = () => { if (EXT() && SYNCKEY) window.postMessage({ lqz: "ext-key
 const MOBILE = (() => { try { return /iPhone|iPad|iPod|Android|Mobi/i.test(navigator.userAgent || "") || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1); } catch { return false; } })();
 // Firefox only once the Mozilla-signed package is on the site (FF_XPI); until then Firefox is told to use Chrome.
 const BROWSER = (() => { const u = navigator.userAgent || ""; return MOBILE ? "other" : /Edg\//.test(u) ? "edge" : /Firefox\//.test(u) ? (FF_XPI ? "firefox" : "other") : /Chrome\//.test(u) ? "chrome" : "other"; })();
-const pl = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+const pl = (n, w) => `${n} ${w}${n === 1 ? "" : /(s|sh|ch|x|z)$/.test(w) ? "es" : "s"}`;   // 2 students, 2 addresses
 const BROWSER_NAME = { edge: "Edge", firefox: "Firefox", chrome: "Chrome", other: "Chrome" }[BROWSER];
 const EXT_FROM_STORE = () => !!EXT_STORE[BROWSER.toUpperCase()];
 const EXT_URL = () => EXT_STORE[BROWSER.toUpperCase()] || (BROWSER === "firefox" && FF_XPI ? INSTALL + "/download/lockqz-prof-firefox.xpi" : "") || EXT_ZIP[BROWSER] || EXT_ZIP.other;
@@ -445,16 +445,14 @@ function viewHome(){
   if(LOADERR) h += `<div class="note red"><span>Could not load from LOCKqz: ${esc(LOADERR)}</span></div>`;
   if(!BS.courses.length) return h + setupBlock() + (EXT() ? `<p class="foot">LOCKqz is syncing your classes from Brightspace. They appear here by themselves.</p>` : "");
   h += setupBlock();
-  // Unconfirmed: the admin was emailed when these classes first synced; LOCKqz emails the professor when he confirms.
-  if(!ME.admin && !ME.verified) h += `<div class="note warn"><span>LOCKqz is checking that you teach ${BS.courses.length===1?"this class":"these classes"}. You will get an email when it is done, usually within one business day.</span></div>`;
-  // mine = classes this account protects; a hidden class (not confirmed yet, or another instructor's) is listed only.
+  // mine = classes this account protects; a hidden class (Brightspace lists someone else as its instructor) is listed only.
   const all = BS.courses.map(classStats), mine = all.filter((s,i)=>!BS.courses[i].roster_hidden);
   const exams = mine.reduce((n,s)=>n+s.cur.length,0), prot = mine.reduce((n,s)=>n+s.prot.length,0), students = BS.courses.reduce((n,c)=>n+c.students.length,0);
   const setN = mine.reduce((n,s)=>n+s.set.length,0), waitN = mine.reduce((n,s)=>n+s.waiting,0);
   const allOn = mine.every(s=>s.on), allOff = prot===0 && !mine.some(s=>s.on);
   const synced = oldestSync();
   const inprog = mine.flatMap(s=>s.inprog.map(q=>({q, c: BS.courses[all.indexOf(s)]})));
-  const headline = !mine.length ? (ME.admin || ME.verified ? "Brightspace does not list you as the instructor of these classes." : "LOCKqz is checking your classes.") : exams===0 ? (allOff ? "LOCKqz is off for your classes." : "No upcoming exams in Brightspace yet.") : allOff ? "LOCKqz is off. Students can use AI during your exams." : setN===exams ? (exams===1 ? "LOCKqz is on for your upcoming exam." : exams===2 ? "LOCKqz is on for both of your upcoming exams." : `LOCKqz is on for all ${exams} of your upcoming exams.`) : `LOCKqz is on for ${setN} of your ${pl(exams, "upcoming exam")}.${waitN?` ${waitN} waiting to be set in Brightspace.`:""}`;
+  const headline = !mine.length ? `Brightspace does not list you as the instructor of ${BS.courses.length===1?"this class":"these classes"}.` : exams===0 ? (allOff ? "LOCKqz is off for your classes." : "No upcoming exams in Brightspace yet.") : allOff ? "LOCKqz is off. Students can use AI during your exams." : setN===exams ? (exams===1 ? "LOCKqz is on for your upcoming exam." : exams===2 ? "LOCKqz is on for both of your upcoming exams." : `LOCKqz is on for all ${exams} of your upcoming exams.`) : `LOCKqz is on for ${setN} of your ${pl(exams, "upcoming exam")}.${waitN?` ${waitN} waiting to be set in Brightspace.`:""}`;
   h += `<section class="card band" aria-label="Status">
     <div style="display:flex;align-items:center;gap:20px;min-width:0">
       <div class="orb ${allOff?'off':''}">${SHIELD(allOff?'#6b6861':'#1a7f37',30)}</div>
@@ -595,8 +593,8 @@ const setQuiz = once(async function(ou,qi,on){ await after([await post("/protect
 async function delLegacy(id){ if(confirm("Remove this quiz from LOCKqz?")) await after([await post("/delete",{quiz_id:id})]); }
 
 // ---- CLASS ----
-// A class this account cannot protect: not confirmed yet, or Brightspace lists someone else as its instructor.
-const HIDDEN_TXT = () => ME.admin || ME.verified ? "Only this class's instructor can turn LOCKqz on for it." : "Waiting for LOCKqz to confirm that you teach this class.";
+// A class this account cannot protect: Brightspace lists someone else as its instructor.
+const HIDDEN_TXT = () => "Only this class's instructor can turn LOCKqz on for it.";
 function viewClass(ou){
   const c = BS.courses.find(x=>x.ou===ou); if(!c) return viewHome();
   const s = classStats(c), past = c.quizzes.filter(q=>ended(q) && Number(q.gated) !== 1);
@@ -773,13 +771,11 @@ async function loadResets(){ const d = await get("/reset-requests"); const tb=do
 async function forget(){ const email=$("fgemail").value.trim().toLowerCase(); if(!email) return;
   if(!confirm("Delete everything LOCKqz stores about "+email+"? This cannot be undone.")) return;
   const d=await post("/forget",{email}); alert(d.error||("Deleted "+email+": "+(d.devices??0)+" device(s), "+(d.roster_rows??0)+" class-list row(s).")); if(!d.error) $("fgemail").value=""; }
-// A professor whose classes no trusted account synced: the admin confirms he teaches them (emailed to the admin at his first sync).
-async function confirmProf(b){ b.disabled=true; const r = await post("/teachers/confirm",{email:b.dataset.em}); if(r && r.ok) return loadTeachers(); b.disabled=false; b.textContent=(r&&r.error)||"Try again"; }
 async function loadTeachers(){ const d = await get("/teachers"); const tb=document.querySelector("#teachers tbody"); if(!tb) return; tb.innerHTML=""; const today=laDay();
   if(d.error){ tb.innerHTML=`<tr><td colspan="11" class="err">${esc(d.error)}</td></tr>`; return; }
   const OK = '<b style="color:#1a7f37">✓</b> ', NO = '<span class="muted">Not yet</span>';
   (d.teachers||[]).forEach(t=>{ const on = t.active_until && t.active_until>=today;
-    tb.insertAdjacentHTML("beforeend",`<tr style="${on?'':'color:#888'}"><td>${esc(t.email)}</td><td>${esc(t.name||"")}</td><td>${when(t.created_at)}</td><td>${t.ext_seen?OK+esc(ago(t.ext_seen)):NO}</td><td>${t.classes?OK+t.classes+(t.classes>1?" classes":" class")+(t.verified?"":" · not verified")+(!t.verified&&Number(t.vouched)===1&&t.instr?` · instructor in ${t.instr} <button class="btn" data-em="${esc(t.email)}" onclick="confirmProf(this)">Confirm</button>`:""):NO}</td><td>${t.mailed_at?OK+esc(when(t.mailed_at)):NO}</td><td>${t.protected?OK+t.protected:NO}</td><td>${on?esc(t.active_until):"<b style='color:#990000'>off</b>"}</td><td>${t.paid_sections||0}</td><td>${esc(t.memo||"")}</td><td style="white-space:nowrap"><button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" onclick="secAdmin(this.dataset.email)">Sections</button> <input type="date" id="d_${esc(t.id)}" value="${esc(t.active_until||semEnd())}" style="padding:4px"> <button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" data-id="${esc(t.id)}" onclick="activate(this.dataset.email,this.dataset.id)">Activate</button> <button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" onclick="deactivate(this.dataset.email)">Off</button> <button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" onclick="resetPw(this.dataset.email)">Reset pw</button></td></tr>`); }); }
+    tb.insertAdjacentHTML("beforeend",`<tr style="${on?'':'color:#888'}"><td>${esc(t.email)}</td><td>${esc(t.name||"")}</td><td>${when(t.created_at)}</td><td>${t.ext_seen?OK+esc(ago(t.ext_seen)):NO}</td><td>${t.classes?OK+t.classes+(t.classes>1?" classes":" class")+(t.verified?"":" · not verified"):NO}</td><td>${t.mailed_at?OK+esc(when(t.mailed_at)):NO}</td><td>${t.protected?OK+t.protected:NO}</td><td>${on?esc(t.active_until):"<b style='color:#990000'>off</b>"}</td><td>${t.paid_sections||0}</td><td>${esc(t.memo||"")}</td><td style="white-space:nowrap"><button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" onclick="secAdmin(this.dataset.email)">Sections</button> <input type="date" id="d_${esc(t.id)}" value="${esc(t.active_until||semEnd())}" style="padding:4px"> <button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" data-id="${esc(t.id)}" onclick="activate(this.dataset.email,this.dataset.id)">Activate</button> <button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" onclick="deactivate(this.dataset.email)">Off</button> <button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" onclick="resetPw(this.dataset.email)">Reset pw</button></td></tr>`); }); }
 // ---- per-section payment ($1,000 per section per semester, Venmo) ----
 let PAY=null, PAYSEL=null, PAYAT=0;
 const termName = t => { t=String(t||""); return (({1:"Spring",2:"Summer",3:"Fall"})[t.slice(4)]||"")+" "+t.slice(0,4); };
