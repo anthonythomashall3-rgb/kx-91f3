@@ -67,6 +67,11 @@ class H(BaseHTTPRequestHandler):
                 det = b.get("detail") if isinstance(b.get("detail"), dict) else {}
                 try: why = open(LOG + ".unlock").read().strip()
                 except Exception: why = ""
+                if det.get("ask") and os.path.exists(LOG + ".busy"): return self.reply(503, {"error": "server_busy", "retry_minutes": 30})   # free-plan limit
+                if det.get("ask") and os.path.exists(LOG + ".html"):   # an error page / static fallback instead of LOCKqz's JSON
+                    pg = b"<!doctype html><title>LOCKqz</title>"; self.send_response(200); self.send_header("Content-Type", "text/html")
+                    self.send_header("Content-Length", str(len(pg))); self.end_headers(); self.wfile.write(pg); return
+                if det.get("ask") and os.path.exists(LOG + ".go"): LOCKS.pop((dev, b.get("quiz_id")), None); return self.reply(200, {"ok": True})   # gate off: LOCKqz says go
                 if det.get("ask") and not why: return self.reply(200, {"ok": True, "hold": True, "beat_s": 30})   # gate on, nothing vouches
                 LOCKS.pop((dev, b.get("quiz_id")), None)
             if b.get("event") in ("heartbeat", "lock"):
@@ -509,6 +514,27 @@ run_d "$TMP/m" "$CTRL_PORT"; DPID13=$DPID_; sleep 2
 t0=$(date +%s); r=$(curl -s -m 20 -X POST -H "X-LOCKqz-Token: $TOKEN" -H 'Content-Type: application/json' -d "{\"quiz_id\":\"98765-88888\",\"url\":\"$NP\"}" "http://127.0.0.1:$CTRL_PORT/lock"); t1=$(date +%s)
 echo "$r" | grep -q '"ok": true' && [ "$(stj 's["state"]')" = locked ] && [ $((t1 - t0)) -le 6 ] && ok "server unreachable: locked at once (no long wait)" || bad "offline pre-check: $r in $((t1 - t0)) s"
 kill $DPID13 2>/dev/null
+
+echo "T22 (10 Nov) an unlock ask answered with an error (busy server, error page) waits like no answer; LOCKqz's own answer decides"
+CTRL_PORT=$(free_port); M14=$(free_port); LOG14="$TMP/reports14.log"; mkdir -p "$TMP/n"; cp "$APP/mac/blocklist.txt" "$TMP/n/"; printf %s "$TOKEN" > "$TMP/n/helper.token"
+printf '{ "port": %s, "api_base": "http://127.0.0.1:%s/api", "device_id": "itest-busy" }\n' "$CTRL_PORT" "$M14" > "$TMP/n/config.json"
+echo "{\"console\": $SUID, \"alive\": [$SUID]}" > "$TMP/n/sessions.json"
+python3 "$TMP/mock.py" "$M14" "$LOG14" 0 & MPID14=$!
+run_d "$TMP/n" "$CTRL_PORT" LOCKQZ_TEST_SESSIONS="$TMP/n/sessions.json"; DPID14=$DPID_
+sleep 6
+UH="X-LOCKqz-Token: $(cat "$TMP/n/tokens/$SUID" 2>/dev/null)"
+for mode in busy html; do
+  q="98765-$([ $mode = busy ] && echo 31 || echo 32)"; rm -f "$LOG14.busy" "$LOG14.html" "$LOG14.go"; touch "$LOG14.$mode"
+  curl -s -X POST -H "$UH" -H 'Content-Type: application/json' -d "{\"quiz_id\":\"$q\"}" "http://127.0.0.1:$CTRL_PORT/lock" >/dev/null; sleep 1
+  code=$(curl -s -o /dev/null -w '%{http_code}' -m 60 -X POST -H "$UH" -H 'Content-Type: application/json' -d "{\"quiz_id\":\"$q\",\"reason\":\"quiz_left\"}" "http://127.0.0.1:$CTRL_PORT/unlock")
+  [ "$code" = 202 ] && [ "$(stj 's["state"]=="locked" and "ask_fail_since" in s')" = True ] && ok "$([ $mode = busy ] && echo '503 server_busy' || echo 'an HTML page with 200') answers the ask: AI stays off (202), the 10-minute wait starts" || bad "$mode: unlock answered $code, $(stj 's')"
+  curl -s -o /dev/null -X POST -H "X-LOCKqz-Token: $TOKEN" -H 'Content-Type: application/json' -d "{\"quiz_id\":\"$q\"}" "http://127.0.0.1:$CTRL_PORT/unlock"
+done
+rm -f "$LOG14.busy" "$LOG14.html"; touch "$LOG14.go"
+curl -s -X POST -H "$UH" -H 'Content-Type: application/json' -d '{"quiz_id":"98765-33"}' "http://127.0.0.1:$CTRL_PORT/lock" >/dev/null; sleep 1
+code=$(curl -s -o /dev/null -w '%{http_code}' -m 60 -X POST -H "$UH" -H 'Content-Type: application/json' -d '{"quiz_id":"98765-33","reason":"quiz_left"}' "http://127.0.0.1:$CTRL_PORT/unlock")
+[ "$code" = 200 ] && [ "$(stj 's["state"]')" = unlocked ] && ok "LOCKqz itself answers 'go' (gate off): the unlock stands at once" || bad "go answer: unlock answered $code, $(stj 's')"
+kill $DPID14 $MPID14 2>/dev/null
 CTRL_PORT=$CTRL1
 echo ""
 echo "RESULT: $pass passed, $fail failed"

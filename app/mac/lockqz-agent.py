@@ -912,6 +912,14 @@ class Agent:
 
     def start(self, url, app=None):
         quiz = lock_id(url)
+        if app in OPERA_APPS and not developer_mode():
+            # Opera has no policy layer (its Aria AI and built-in VPN stay on): a quiz open in Opera is neither
+            # locked nor given its password; the student is told once to open it in another browser.
+            self.nolock[quiz] = time.time() + 20
+            if getattr(self, "opera_told", None) != quiz:
+                self.opera_told = quiz
+                dialog("Opera cannot turn its AI off during a quiz.\n\nOpen this quiz in Chrome, Safari, Edge or Firefox to take it.")
+            log("quiz %s is open in %s (no AI policy) - not locked, no password" % (quiz, app)); return
         try:
             r = self.helper("/lock", {"quiz_id": quiz, "student": self.student, "url": url})
             if isinstance(r, dict) and r.get("not_protected"):
@@ -934,9 +942,6 @@ class Agent:
         log("LOCKED %s" % self.quiz)
         dev = developer_mode()
         note = "" if dev else self.close_for_quiz(app)
-        if app in OPERA_APPS and not dev:
-            self.opera_warned = True
-            dialog("Opera cannot turn its AI off during a quiz.\n\nPlease take this quiz in Chrome, Safari, Edge or Firefox.")
         self.pw, self.pay_shown, res = None, False, None
         for attempt in range(3):   # the helper fetches it (signed); retry a brief network blip
             try:
@@ -1094,7 +1099,8 @@ class Agent:
         if not self.locked:
             if open_quizzes:
                 url = next(iter(open_quizzes.values()))
-                self.start(url, next((a for (a, _, _, u) in tabs if u == url), None))
+                apps = [a for (a, _, _, u) in tabs if u == url]   # the same page open in Opera and Chrome: Chrome
+                self.start(url, next((a for a in apps if a not in OPERA_APPS), apps[0] if apps else None))
                 if self.locked: self.tabs_seen = len(tabs)
                 return
             if self.pending and now - self.pending_try >= 5:

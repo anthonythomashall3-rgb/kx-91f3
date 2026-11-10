@@ -488,7 +488,12 @@ A.ps_procs = lambda: procs
 g, h = agent(); T(g, [tab(ATT)])
 ok("lock message says Firefox and Opera were closed") if any("Firefox and Opera were closed" in m for m in msgs) and {p for p, _ in killed} >= {11, 12, 13} else bad("msgs %r killed %r" % (msgs, killed))
 g, h = agent(); msgs[:] = []; T(g, [("Opera", 0, 0, ATT)])
-ok("quiz in Opera: student told to use another browser") if any("Please take this quiz in" in m for m in msgs) else bad("no Opera warning: %r" % msgs)
+ok("quiz in Opera: student told to open it in another browser") if any("Open this quiz in Chrome, Safari, Edge or Firefox" in m for m in msgs) else bad("no Opera warning: %r" % msgs)
+ok("(10 Nov) quiz in Opera: not locked, no password asked (Opera's AI cannot be turned off)") if not g.locked and not any(p in ("/lock", "/password") for (p, _) in h.calls) else bad("calls %r" % h.calls)
+n = len(msgs); T(g, [("Opera", 0, 0, ATT)]); T(g, [("Opera", 0, 0, ATT)])
+ok("(10 Nov) told once per quiz, not every tick") if len(msgs) == n and not any(p == "/lock" for (p, _) in h.calls) else bad("msgs %r" % msgs[n:])
+g, h = agent(); msgs[:] = []; T(g, [("Opera", 0, 0, ATT), ("Google Chrome", 0, 0, ATT)])
+ok("(10 Nov) the same quiz open in Opera AND Chrome: locked in Chrome, no Opera message") if g.locked and g.quiz_app == "Google Chrome" and not any("Opera cannot" in m for m in msgs) else bad("locked %r app %r msgs %r" % (g.locked, g.quiz_app, msgs))
 """)
 _section(r"""
 print("T21 C9: a quiz the server released (submitted) is never re-locked; UA from the release version")

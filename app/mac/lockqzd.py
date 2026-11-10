@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.6.13"
+VERSION = "0.6.14"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -1077,8 +1077,12 @@ class H(BaseHTTPRequestHandler):
                 # beat after the submission arrives (or at the end). Server unreachable for 10 min -> stands.
                 det["ask"] = True
                 code, j = report("unlock", {"quiz_id": qid, "detail": det})
-                hold = isinstance(j, dict) and j.get("hold") is True
-                if code == 0:
+                # Only LOCKqz's own answer decides (HTTP 200 + ok). An error page, a busy or rate-limited server
+                # (free-plan limits in finals week) or a blocked connection counts as no answer: the block
+                # stays, and only 10 minutes without any answer let the unlock stand.
+                answered = code == 200 and isinstance(j, dict) and j.get("ok") is True
+                hold = answered and j.get("hold") is True
+                if not answered:
                     with LOCK:
                         STATE.setdefault("ask_fail_since", time.time())
                         hold = time.time() - STATE["ask_fail_since"] < 600

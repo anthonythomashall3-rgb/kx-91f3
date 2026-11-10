@@ -595,7 +595,9 @@ while ($true) {
   try {
     $wins = @(Get-BrowserWindows)
     if ((-not $ReadyTold) -and (@($wins | Where-Object { $_.Url -match '/d2l/' }).Count -gt 0)) { Check-Ready }
-    $quizWin = $wins | Where-Object { Is-Quiz $_.Url } | Select-Object -First 1
+    # A quiz open in Opera and in another browser: the other browser's window counts (Opera gets no lock).
+    $qws = @($wins | Where-Object { Is-Quiz $_.Url })
+    $quizWin = (@($qws | Where-Object { $NoPolicy -notcontains [string]$_.Proc }) + @($qws | Where-Object { $NoPolicy -contains [string]$_.Proc })) | Select-Object -First 1
     $openId = if ($quizWin) { Lock-Id $quizWin.Url } else { $null }
     Step-Caps $openId $(if ($quizWin) { $quizWin.Url } else { "" })
     if (-not $Verified) {
@@ -613,7 +615,13 @@ while ($true) {
       }
     }
     if (-not $Locked) {
-      if ($quizWin -and -not $Capped.ContainsKey($openId) -and -not (NoLock-Now ([string]$openId))) {
+      if ($quizWin -and ($NoPolicy -contains [string]$quizWin.Proc) -and -not $Capped.ContainsKey($openId) -and -not (NoLock-Now ([string]$openId))) {
+        # Opera has no policy layer (its Aria AI and built-in VPN stay on): a quiz open in Opera is neither locked
+        # nor given its password; the student is told once to open it in another browser.
+        $NoLock[[string]$openId] = [DateTime]::UtcNow.AddSeconds(20)
+        if ($script:OperaToldQuiz -ne [string]$openId) { $script:OperaToldQuiz = [string]$openId; Show-Message "Opera cannot turn its AI off during a quiz.`n`nOpen this quiz in Chrome, Edge or Firefox to take it." }
+        Log "quiz $openId is open in Opera (no AI policy) - not locked, no password"
+      } elseif ($quizWin -and -not $Capped.ContainsKey($openId) -and -not (NoLock-Now ([string]$openId))) {
         $Pending = $null
         $Quiz = $openId
         $QuizTab = Get-ActiveTab $quizWin; $QuizTitle = Clean-Title $quizWin.Title; $QuizProc = [string]$quizWin.Proc
@@ -632,7 +640,6 @@ while ($true) {
           if (Close-Browsers $NoPolicy $QuizProc) { $closed += "Opera"; $OperaWarned = $true }
           # Brave reads its quiz policies (Leo, Tor windows, VPN off) only when it starts: close it once.
           if (Close-Browsers @("brave") $QuizProc) { $closed += "Brave" }
-          if ($NoPolicy -contains $QuizProc) { $OperaWarned = $true; Show-Message "Opera cannot turn its AI off during a quiz.`n`nPlease take this quiz in Chrome, Edge or Firefox." }
           $note = if ($closed.Count -gt 1) { "`n`n" + (($closed[0..($closed.Count-2)]) -join ", ") + " and " + $closed[-1] + " were closed for the quiz so their AI stays off. You can reopen them; your tabs come back." } elseif ($closed.Count) { "`n`n" + $closed[0] + " was closed for the quiz so its AI stays off. You can reopen it; your tabs come back." } else { "" }
           $LastPw = $null; $StartTold = $null; $script:PayShown = $false; $res = $null
           for ($i = 0; ($i -lt 3) -and (-not $res); $i++) {

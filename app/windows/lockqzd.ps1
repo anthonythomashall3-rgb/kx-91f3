@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.6.13"
+$Version = "0.6.14"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = if ($env:LOCKQZ_CONFIG) { $env:LOCKQZ_CONFIG } else { "$env:ProgramData\LOCKqz\config.json" }
@@ -655,8 +655,11 @@ while ($listener.IsListening) {
         else {
           $det.ask = $true
           $r = Report "unlock" $det $null $q
-          if ($r.data -and ($r.data.hold -is [bool]) -and $r.data.hold) { $held = $true }
-          elseif ($r.code -eq 0) {
+          # Only LOCKqz's own answer decides (HTTP 200 + ok). An error page, a busy or rate-limited server or a
+          # blocked connection counts as no answer: the block stays; only 10 minutes without an answer let it go.
+          $answered = ($r.code -eq 200) -and ($null -ne $r.data) -and ($r.data -isnot [string]) -and ($r.data.ok -is [bool]) -and $r.data.ok
+          if ($answered -and ($r.data.hold -is [bool]) -and $r.data.hold) { $held = $true }
+          elseif (-not $answered) {
             if (-not $State.ask_fail_since) { $State.ask_fail_since = $now }
             if (($now - [int64]$State.ask_fail_since) -lt 600) { $held = $true }
           } else { $State.ask_fail_since = $null }
