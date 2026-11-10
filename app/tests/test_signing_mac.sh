@@ -21,7 +21,15 @@ if ! command -v productsign >/dev/null 2>&1; then
   check "secrets set but no Apple tools -> warning, exit 0, signed=false (never blocks the release)" c2
   c3(){ ! grep -qE "pw-SECRET-123|k-SECRET-456|bm90LWEtcDEy" "$T/l1" "$T/l2"; }
   check "never prints a secret" c3
-else echo "  skipped: secrets-set case (Apple's tools exist here; CI's Linux runner runs it)"; fi
+  run GITHUB_OUTPUT="$T/o5" MAC_SIGNING='{"p12": "bm90LWEtcDEy", "p12_password": "pw-SECRET-789", "notary_key_p8": "k-SECRET-012", "notary_key_id": "KEYID"}' bash "$S" sign "$T/new.pkg" > "$T/l5" 2>&1; rc5=$?
+  c5(){ [ $rc5 = 0 ] && grep -qx "signed=false" "$T/o5" && grep -q "no productsign/xcrun here" "$T/l5" && ! grep -q "MAC_INSTALLER_P12 is not set" "$T/l5"; }
+  check "one JSON secret (MAC_SIGNING) supplies the certificate + notary key" c5
+  run GITHUB_OUTPUT="$T/o6" MAC_SIGNING='not json' bash "$S" sign "$T/new.pkg" > "$T/l6" 2>&1; rc6=$?
+  c6(){ [ $rc6 = 0 ] && grep -qx "signed=false" "$T/o6" && grep -q "MAC_SIGNING is not a JSON object" "$T/l6"; }
+  check "MAC_SIGNING not JSON -> warning, exit 0, signed=false" c6
+  c7(){ ! grep -qE "pw-SECRET-789|k-SECRET-012|bm90LWEtcDEy|not json" "$T/l5" "$T/l6"; }
+  check "MAC_SIGNING values are never printed" c7
+else echo "  skipped: secrets-set cases (Apple's tools exist here; CI's Linux runner runs them)"; fi
 c4(){ ! run bash "$S" sign "$T/nope.pkg" >/dev/null 2>&1; }
 check "no package -> error" c4
 
@@ -55,13 +63,13 @@ echo "M3 release.yml + download page"
 check "mac job: signs after the install test, before the upload; outputs signed" \
   awk '/test_mac_install.sh/{a=NR} /mac-sign.sh sign \/tmp\/lockqz-mac.pkg/{b=NR} /name: lockqz-mac$/{c=NR} END{exit !(a && a<b && b<c)}' "$R"
 check "mac job output wired" has 'signed: ${{ steps.sign.outputs.signed }}' "$R"
-c(){ for s in MAC_INSTALLER_P12 MAC_INSTALLER_P12_PASSWORD NOTARY_KEY_P8 NOTARY_KEY_ID NOTARY_ISSUER_ID APPLE_ID APPLE_APP_PASSWORD APPLE_TEAM_ID; do has "$s: \${{ secrets.$s }}" "$R" || return 1; done; }
+c(){ for s in MAC_SIGNING MAC_INSTALLER_P12 MAC_INSTALLER_P12_PASSWORD NOTARY_KEY_P8 NOTARY_KEY_ID NOTARY_ISSUER_ID APPLE_ID APPLE_APP_PASSWORD APPLE_TEAM_ID; do has "$s: \${{ secrets.$s }}" "$R" || return 1; done; }
 check "every signing secret reaches the sign step" c
 check "deploy: status after the live installers are reused, before deploy.sh" \
   awk '/get lockqz-mac.pkg xar!/{a=NR} /mac-sign.sh status app\/cloudflare\/public\/download/{b=NR} /bash deploy.sh/{c=NR} END{exit !(a && a<b && b<c)}' "$R"
 c(){ has 'MAC_BUILT: ${{ needs.mac.result }}' "$R" && has 'MAC_SIGNED: ${{ needs.mac.outputs.signed }}' "$R"; }
 check "deploy: status gets the mac job's result + signed output" c
-c(){ has 'MAC_SIGN: "${{ secrets.MAC_INSTALLER_P12 != ' "$R" && has 'download/mac.json 2>/dev/null | grep -qE' "$R" && has 'echo "mac=$mac" >> "$GITHUB_OUTPUT"' "$R"; }
+c(){ has 'MAC_SIGN: "${{ secrets.MAC_SIGNING != '"''"' || secrets.MAC_INSTALLER_P12 != ' "$R" && has 'download/mac.json 2>/dev/null | grep -qE' "$R" && has 'echo "mac=$mac" >> "$GITHUB_OUTPUT"' "$R"; }
 check "secrets set + live installer not signed -> the Mac build runs by itself" c
 check "live check reads mac.json" has 'download/mac.json | python3 -c' "$R"
 check "Microsoft Store: a version it already has is not submitted again" has 'Microsoft Store already has $v - nothing to submit' "$R"

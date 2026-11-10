@@ -7,7 +7,9 @@
 # A signed + notarized package opens straight into the installer: no Terminal, no "Open Anyway".
 # The download page reads download/mac.json: {"signed": true} = the download is the one way shown on a Mac.
 #
-# Repo secrets (Settings -> Secrets and variables -> Actions):
+# Repo secrets (Settings -> Secrets and variables -> Actions). Simplest: ONE secret, MAC_SIGNING = JSON
+#   {"p12": "<base64 .p12>", "p12_password": "...", "notary_key_p8": "<.p8 text>", "notary_key_id": "...",
+#    "notary_issuer_id": "..."}  (or "apple_id" / "apple_app_password" / "apple_team_id"); or the separate secrets:
 #   MAC_INSTALLER_P12           base64 of a .p12 with the "Developer ID Installer" certificate + its private key
 #   MAC_INSTALLER_P12_PASSWORD  the .p12 password
 #   Apple notary login, one of:
@@ -28,8 +30,19 @@ trap cleanup EXIT
 unsigned(){ warn "$1 - this build's Mac package is not Apple-signed"; out signed=false; exit 0; }
 
 sign(){
-  local pkg="$1" pw id st sid
+  local pkg="$1" pw id st sid vars
   [ -s "$pkg" ] || { echo "::error::no package at $pkg"; exit 1; }
+  if [ -n "${MAC_SIGNING:-}" ]; then   # one JSON secret -> the separate variables (a separate secret, if set, wins)
+    vars="$(printf '%s' "$MAC_SIGNING" | python3 -c 'import json, shlex, sys
+d = json.load(sys.stdin); assert isinstance(d, dict)
+m = {"p12": "MAC_INSTALLER_P12", "p12_password": "MAC_INSTALLER_P12_PASSWORD", "notary_key_p8": "NOTARY_KEY_P8",
+     "notary_key_id": "NOTARY_KEY_ID", "notary_issuer_id": "NOTARY_ISSUER_ID", "apple_id": "APPLE_ID",
+     "apple_app_password": "APPLE_APP_PASSWORD", "apple_team_id": "APPLE_TEAM_ID"}
+for k, v in m.items():
+    if isinstance(d.get(k), str) and d[k]: print("[ -n \"${%s:-}\" ] || %s=%s" % (v, v, shlex.quote(d[k])))' 2>/dev/null)" \
+      || unsigned "MAC_SIGNING is not a JSON object"
+    eval "$vars"
+  fi
   if [ -z "${MAC_INSTALLER_P12:-}" ]; then
     echo "Mac package not Apple-signed: secret MAC_INSTALLER_P12 is not set (the unsigned package ships)"; out signed=false; exit 0; fi
   command -v productsign >/dev/null 2>&1 && command -v xcrun >/dev/null 2>&1 || unsigned "no productsign/xcrun here (macOS runner needed)"

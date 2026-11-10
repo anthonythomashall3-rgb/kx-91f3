@@ -11,7 +11,7 @@ name: Release
 #   CLOUDFLARE_ACCOUNT_ID  the Cloudflare account id
 # Until those exist, the deploy job prints what is missing and does nothing else.
 # Optional, Apple Developer ID (the Mac installer opens with no Terminal and no "Open Anyway"; see app/release/mac-sign.sh):
-#   MAC_INSTALLER_P12 + MAC_INSTALLER_P12_PASSWORD, and NOTARY_KEY_P8 + NOTARY_KEY_ID (+ NOTARY_ISSUER_ID)
+#   MAC_SIGNING (one JSON secret with all of them), or MAC_INSTALLER_P12 + MAC_INSTALLER_P12_PASSWORD, and NOTARY_KEY_P8 + NOTARY_KEY_ID (+ NOTARY_ISSUER_ID)
 #   or APPLE_ID + APPLE_APP_PASSWORD + APPLE_TEAM_ID. Not set = the unsigned package ships, as before.
 
 on:
@@ -47,7 +47,7 @@ jobs:
         id: chg
         env:
           BEFORE: "${{ github.event.before }}"
-          MAC_SIGN: "${{ secrets.MAC_INSTALLER_P12 != '' }}"
+          MAC_SIGN: "${{ secrets.MAC_SIGNING != '' || secrets.MAC_INSTALLER_P12 != '' }}"
         run: |
           # Base = the commit that is live (api field of /api/version); fall back to the push's "before".
           live=$(curl -fsS -m 15 -A "LOCKqz/ci" https://lockqz.pages.dev/api/version | sed -n 's/.*"api":"\([0-9a-f]*\)".*/\1/p' || true)
@@ -103,6 +103,7 @@ jobs:
       - name: Sign + notarize the .pkg (Apple Developer ID)
         id: sign
         env:
+          MAC_SIGNING: ${{ secrets.MAC_SIGNING }}
           MAC_INSTALLER_P12: ${{ secrets.MAC_INSTALLER_P12 }}
           MAC_INSTALLER_P12_PASSWORD: ${{ secrets.MAC_INSTALLER_P12_PASSWORD }}
           NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
