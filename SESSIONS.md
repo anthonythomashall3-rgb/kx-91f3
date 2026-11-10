@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-09 18:44 PT — 01UUDg7b: professor-side bug sweep (walked Professor Bristow's path in real Chromium): app/cloudflare/functions/api/[[route]].js (names in emails, /me, /sync, /signup, Google, student footer), app/cloudflare/public/dashboard.html (non-Chrome + phone set-up, Email students chooser, plurals, menu, welcome order), app/cloudflare/public/*.html (favicon), privacy.html, new app/tests/test_prof_polish.mjs, run_all.sh.
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
 
 ## Recently finished
