@@ -541,13 +541,15 @@ const MAIL = {
     return { subject, text, html };
   },
   // To the professor, right after sign-up.
-  welcome({ last, storeUrl, free }) {
+  welcome({ last, storeUrl, free, pay }) {
     const store = storeUrl || EXT_STORE_URL || (SITE_URL + "/download/lockqz-prof-chromium.zip");
-    const subject = "Welcome to LOCKqz \u2014 2 steps and you're done";
-    const text = `${last ? `Hi Professor ${last},` : "Hi,"}\n\nYour LOCKqz account is ready.${free ? " LOCKqz is free for you." : ""} Two steps, about one minute:\n\n1. Add LOCKqz to Chrome: ${store} \u2014 click Add to Chrome, then Add extension. If Chrome says Proceed with caution, click Continue to install.\n2. Open Brightspace: ${BS_URL} \u2014 and sign in as usual. Your classes appear on your LOCKqz dashboard within a minute.\n\nFrom then on LOCKqz protects every exam in every class automatically. You never set a password.\n\nOn exam day: keep Chrome open and signed in to Brightspace on a computer that's on, until the exam ends. If Chrome is closed, students wait at the start of the exam until you open it.\n\nWhen your classes appear, click Email students on each class so students install LOCKqz before the first exam.\n\nDashboard: ${DASH_URL}\n\nRespectfully,\nThe LOCKqz Team`;
-    const html = mailWrap(P(last ? `Hi Professor ${hesc(last)},` : "Hi,") + (free ? FREE_HTML : "") + P("Your LOCKqz account is ready. Two steps, about one minute:") +
-      `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 16px"><tr><td style="padding:6px 0;font-size:15px"><b>1.</b> ${mailBtn(store, "Add LOCKqz to Chrome")} <span style="color:#5c5952">\u2014 click <b>Add to Chrome</b>, then <b>Add extension</b>. If Chrome says <b>Proceed with caution</b>, click <b>Continue to install</b>.</span></td></tr>
-<tr><td style="padding:6px 0;font-size:15px"><b>2.</b> ${mailBtn(BS_URL, "Open Brightspace")} <span style="color:#5c5952">and sign in as usual. Your classes appear on your LOCKqz dashboard within a minute.</span></td></tr></table>` +
+    // pay: the account is not active yet (no invite date, not fee-exempt): activating comes first.
+    const n0 = pay ? 1 : 0;
+    const subject = `Welcome to LOCKqz \u2014 ${pay ? 3 : 2} steps and you're done`;
+    const text = `${last ? `Hi Professor ${last},` : "Hi,"}\n\nYour LOCKqz account is ready.${free ? " LOCKqz is free for you." : ""} ${pay ? "Three steps:" : "Two steps, about one minute:"}\n\n${pay ? `1. Activate LOCKqz on your dashboard: ${DASH_URL}\n` : ""}${1 + n0}. Add LOCKqz to Chrome: ${store} \u2014 click Add to Chrome, then Add extension. If Chrome says Proceed with caution, click Continue to install.\n${2 + n0}. Open Brightspace: ${BS_URL} \u2014 and sign in as usual. Your classes appear on your LOCKqz dashboard within a minute.\n\nFrom then on LOCKqz protects every exam in every class automatically. You never set a password.\n\nOn exam day: keep Chrome open and signed in to Brightspace on a computer that's on, until the exam ends. If Chrome is closed, students wait at the start of the exam until you open it.\n\nWhen your classes appear, click Email students on each class so students install LOCKqz before the first exam.\n\nDashboard: ${DASH_URL}\n\nRespectfully,\nThe LOCKqz Team`;
+    const html = mailWrap(P(last ? `Hi Professor ${hesc(last)},` : "Hi,") + (free ? FREE_HTML : "") + P(`Your LOCKqz account is ready. ${pay ? "Three steps:" : "Two steps, about one minute:"}`) +
+      `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 16px">${pay ? `<tr><td style="padding:6px 0;font-size:15px"><b>1.</b> ${mailBtn(DASH_URL, "Activate LOCKqz")} <span style="color:#5c5952">on your dashboard.</span></td></tr>` : ""}<tr><td style="padding:6px 0;font-size:15px"><b>${1 + n0}.</b> ${mailBtn(store, "Add LOCKqz to Chrome")} <span style="color:#5c5952">\u2014 click <b>Add to Chrome</b>, then <b>Add extension</b>. If Chrome says <b>Proceed with caution</b>, click <b>Continue to install</b>.</span></td></tr>
+<tr><td style="padding:6px 0;font-size:15px"><b>${2 + n0}.</b> ${mailBtn(BS_URL, "Open Brightspace")} <span style="color:#5c5952">and sign in as usual. Your classes appear on your LOCKqz dashboard within a minute.</span></td></tr></table>` +
       P("From then on LOCKqz protects every exam in every class automatically. You never set a password.") +
       P("<b>On exam day: keep Chrome open and signed in to Brightspace</b> on a computer that's on, until the exam ends. If Chrome is closed, students wait at the start of the exam until you open it.") +
       P("When your classes appear, click <b>Email students</b> on each class so students install LOCKqz before the first exam.") +
@@ -2149,7 +2151,7 @@ export async function onRequest(context) {
       if (proved) await db.batch([db.prepare("DELETE FROM email_codes WHERE device_id=?").bind("prof:" + email),   // one code, one account
         db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE email=? AND used_at IS NULL").bind(now(), email, email)]);   // a waiting invite is moot
       // Welcome email (HTML): the two steps. Sent in the background; sign-up never waits for Gmail.
-      if (mailOn(env)) { const w = MAIL.welcome({ last: lastName(nm), free: isExempt(env, email) });
+      if (mailOn(env)) { const w = MAIL.welcome({ last: lastName(nm), free: isExempt(env, email), pay: !isExempt(env, email) && !(inv && inv.active_until && inv.active_until >= laToday()) && n !== 0 });
         const go = mailOut(email, w.subject, w.text, { html: w.html }, "auto").catch(() => {});
         if (typeof context.waitUntil === "function") context.waitUntil(go); else await go; }
       return json({ token, email, name: nm });
@@ -2183,7 +2185,7 @@ export async function onRequest(context) {
           db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(row.device_id, g.email, null, "email_verified", "google", now())]);
         return json({ ok: true, email: g.email });
       }
-      const t = await db.prepare("SELECT id,email,name,token,role,vouched,verified FROM teachers WHERE email=?").bind(g.email).first();
+      const t = await db.prepare("SELECT id,email,name,token,role,vouched,verified,active_until FROM teachers WHERE email=?").bind(g.email).first();
       // No account yet, or only one nobody vouched for that never verified (it may be squatting this email): Google
       // has just proved this person owns the address, so it becomes their account, vouched (as an emailed sign-up
       // code makes it). School Google accounts only (GOOGLE_HD); students and TAs on a class list never get one.
@@ -2204,7 +2206,7 @@ export async function onRequest(context) {
             .bind(rid(10), g.email, name, pwh, salt, token, now(), "teacher", null, 1).run();
         await db.batch([db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + ip, null, null, "signup", "google", now()),
           db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE email=? AND used_at IS NULL").bind(now(), g.email, g.email)]);
-        if (mailOn(env)) { const w = MAIL.welcome({ last: lastName(name), free: isExempt(env, g.email) });
+        if (mailOn(env)) { const w = MAIL.welcome({ last: lastName(name), free: isExempt(env, g.email), pay: !isExempt(env, g.email) && !(t && t.active_until && t.active_until >= laToday()) });
           const go = mailOut(g.email, w.subject, w.text, { html: w.html }, "auto").catch(() => {});
           if (typeof context.waitUntil === "function") context.waitUntil(go); else await go; }
         return json({ token, email: g.email, name, created: true });
@@ -2303,8 +2305,38 @@ export async function onRequest(context) {
       if (!me?.admin) return json({ error:"admin only" }, 403);
       // Set-up progress per professor (the dashboard's 3 steps): extension check-in, Brightspace classes (+ verified),
       // students emailed, protected exams.
-      const r = await db.prepare("SELECT t.id,t.email,t.name,t.created_at,t.active_until,t.verified,t.ext_seen,(SELECT COUNT(*) FROM paid_sections ps WHERE ps.teacher_id=t.id AND ps.until>=?) AS paid_sections,(SELECT code FROM pay_codes pc WHERE pc.teacher_id=t.id) AS memo,(SELECT COUNT(*) FROM teacher_courses tc WHERE tc.teacher_id=t.id AND COALESCE(tc.in_sync,1)=1) AS classes,(SELECT MAX(tc.synced_at) FROM teacher_courses tc WHERE tc.teacher_id=t.id) AS synced_at,(SELECT MAX(ms.at) FROM teacher_courses tc JOIN mail_sent ms ON ms.ou=tc.ou WHERE tc.teacher_id=t.id AND ms.kind IN ('all','missing')) AS mailed_at,(SELECT COUNT(*) FROM quizzes q WHERE q.teacher_id=t.id) AS protected FROM teachers t ORDER BY t.created_at DESC").bind(laToday()).all();
+      const r = await db.prepare("SELECT t.id,t.email,t.name,t.created_at,t.active_until,t.verified,t.ext_seen,(SELECT COUNT(*) FROM paid_sections ps WHERE ps.teacher_id=t.id AND ps.until>=?) AS paid_sections,(SELECT code FROM pay_codes pc WHERE pc.teacher_id=t.id) AS memo,(SELECT COUNT(*) FROM teacher_courses tc WHERE tc.teacher_id=t.id AND COALESCE(tc.in_sync,1)=1) AS classes,(SELECT MAX(tc.synced_at) FROM teacher_courses tc WHERE tc.teacher_id=t.id) AS synced_at,(SELECT MAX(ms.at) FROM teacher_courses tc JOIN mail_sent ms ON ms.ou=tc.ou WHERE tc.teacher_id=t.id AND ms.kind IN ('all','missing')) AS mailed_at,(SELECT COUNT(*) FROM quizzes q WHERE q.teacher_id=t.id) AS protected,t.vouched,CASE WHEN t.verified=1 OR t.role='admin' THEN NULL ELSE (SELECT COUNT(DISTINCT tc.ou) FROM teacher_courses tc JOIN roster r ON r.ou=tc.ou WHERE tc.teacher_id=t.id AND COALESCE(tc.in_sync,1)=1 AND r.email=t.email AND " + INSTR_SQL + ") END AS instr FROM teachers t ORDER BY t.created_at DESC").bind(laToday()).all();
       return json({ teachers: r.results });
+    }
+    // Admin only: confirm a professor whose classes no trusted account has synced (a course outside the
+    // admin's own). His own Brightspace class lists must name his email as Instructor; the admin's word
+    // then stands where a trusted roster would: he is verified at once (bound to that Brightspace id), the
+    // same as an invited professor's own sync verifies him, and emailed.
+    if (p === "/teachers/confirm" && request.method === "POST") {
+      if (!me?.admin) return json({ error:"admin only" }, 403);
+      const email = String(body.email||"").trim().toLowerCase();
+      const t = await db.prepare("SELECT id,email,name,role,verified,vouched,bs_user_id FROM teachers WHERE email=?").bind(email).first();
+      if (!t) return json({ error:"no such professor" }, 404);
+      if (t.role === "admin" || Number(t.verified) === 1) return json({ error:"already confirmed" }, 409);
+      if (Number(t.vouched) !== 1) return json({ error:"this account never confirmed its email (sign-up code, Google or invite)" }, 409);
+      const rows = (await db.prepare(`SELECT DISTINCT r.user_id AS uid, tc.name AS course, tc.code AS code FROM teacher_courses tc JOIN roster r ON r.ou=tc.ou WHERE tc.teacher_id=? AND COALESCE(tc.in_sync,1)=1 AND r.email=? AND ${INSTR_SQL}`).bind(t.id, email).all()).results;
+      const ids = [...new Set(rows.map(x => String(x.uid || "")).filter(Boolean))];
+      if (!ids.length) return json({ error:"Brightspace does not list this email as the instructor of any class it synced" }, 409);
+      if (t.bs_user_id ? !ids.includes(String(t.bs_user_id)) : ids.length > 1) return json({ error:"these class lists show more than one Brightspace account for this email" }, 409);
+      const uid = String(t.bs_user_id || ids[0]);
+      const u = await db.prepare("UPDATE teachers SET bs_user_id=?, verified=1 WHERE id=? AND vouched=1 AND COALESCE(verified,0)=0").bind(uid, t.id).run();
+      if (!u.meta.changes) return json({ error:"already confirmed" }, 409);
+      // The admin's word, kept as a used invite for this email (what an invited professor's own sync verifies from).
+      await db.prepare("INSERT INTO invites (code,email,active_until,created_at,used_at,used_by) VALUES (?,?,?,?,?,?)").bind(rid(10), email, null, now(), now(), email).run();
+      tiCache.clear();
+      let name = String(t.name || "").trim();
+      if (!name && (name = await rosterName(email) || "")) await db.prepare("UPDATE teachers SET name=? WHERE id=? AND TRIM(COALESCE(name,''))=''").bind(name, t.id).run();
+      if (mailOn(env)) {
+        const cls = [...new Set(rows.map(x => x.code || x.course).filter(Boolean))].slice(0, 6), last = lastName(name);
+        const text = `${last ? `Hi Professor ${last},` : "Hi,"}\n\nLOCKqz confirmed that you teach ${cls.length ? cls.join(", ") : "your classes"}. Open Brightspace in Chrome once and LOCKqz protects your exams from then on.\n\nDashboard: ${DASH_URL}\n\nRespectfully,\nThe LOCKqz Team`;
+        await mailOut(email, "LOCKqz: your classes are confirmed", text, {}, "auto").catch(() => {});
+      }
+      return json({ ok: true, email, verified: true });
     }
     // Admin only: turn a teacher on (after payment) until a date, or off.
     if (p === "/activate" && request.method === "POST") {
@@ -3107,6 +3139,24 @@ export async function onRequest(context) {
         }
         const prof = me.vouched && me.bs_user_id ? await db.prepare(`SELECT 1 FROM roster r WHERE r.email=? AND r.user_id=? AND ${INSTR_SQL} AND ${TRUSTED_TC} LIMIT 1`).bind(myEmail, String(me.bs_user_id)).first() : null;
         if (!!prof !== !!me.verified) { await db.prepare("UPDATE teachers SET verified=? WHERE id=?").bind(prof ? 1 : 0, me.id).run(); me.verified = !!prof; }
+        // Still unconfirmed after syncing classes (nobody trusted has synced them): the admin is asked ONCE
+        // per account (sync_nudges 'confirm'/<id>) to confirm him (/teachers/confirm); his dashboard says so.
+        if (!me.verified && me.vouched && A.length && env.ADMIN_EMAIL && mailOn(env)
+            && (await db.prepare("INSERT OR IGNORE INTO sync_nudges (ou,qi,at) VALUES ('confirm',?,?)").bind(me.id, now()).run()).meta.changes) {
+          const list = A.slice(0, 10).map(o => byOu.get(o)), secs = new Map();
+          for (const c of list) { const m = String(c.code || "").match(/^(\d{5})_(\d{5})$/); if (m) secs.set(m[2], m[1]); }
+          const usc = new Map();
+          if (secs.size) (await db.prepare(`SELECT term,section,first,last FROM usc_sections WHERE section IN (${placeholders(secs.size)})`).bind(...secs.keys()).all().catch(() => ({ results: [] }))).results
+            .forEach(r => { if (secs.get(String(r.section)) === String(r.term)) usc.set(String(r.section), [...(usc.get(String(r.section)) || []), `${r.first || ""} ${r.last || ""}`.trim()]); });
+          const who = (me.name || whoName) ? `${me.name || whoName} (${myEmail})` : myEmail;
+          const lines = list.map(c => {
+            const own = (Array.isArray(c.classlist) ? c.classlist : []).find(x => x && (String(x.id ?? "") === whoId || String(x.email || "").toLowerCase() === myEmail));
+            const sec = (String(c.code || "").match(/_(\d{5})$/) || [])[1];
+            return `- ${String(c.name || c.code || c.ou).slice(0, 120)}${c.code ? ` (${String(c.code).slice(0, 40)})` : ""}. Brightspace role: ${own && own.role ? String(own.role).slice(0, 40) : "not on its class list"}.${sec ? ` USC Schedule of Classes: ${usc.has(sec) ? usc.get(sec).join(", ") : "no instructor listed"}.` : ""}`; });
+          const text = `${who} synced ${A.length} class${A.length === 1 ? "" : "es"} that no account you trust has synced. LOCKqz protects none of these exams until you confirm that this person teaches them.\n\n${lines.join("\n")}${A.length > list.length ? `\n- and ${A.length - list.length} more` : ""}\n\nConfirm: ${DASH_URL}/#admin (Professors, Confirm).`;
+          const go = mailOut(String(env.ADMIN_EMAIL), `Confirm a professor: ${who}`, text, {}, "auto").catch(() => {});
+          if (typeof context.waitUntil === "function") context.waitUntil(go); else await go;
+        }
       }
       // Re-check AFTER the writes: a professor syncing a course for the first time becomes its trusted
       // instructor only now (their course row + roster are in), so seed eviction must come after.

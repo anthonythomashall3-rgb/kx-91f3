@@ -56,9 +56,9 @@ const PROF = (await api("/signup", { email: "prof@usc.edu", password: "profpass1
 console.log("Z3a welcome email on sign-up");
 const w = mailsTo("prof@usc.edu")[0];
 check("one welcome email to the professor", mailsTo("prof@usc.edu").length === 1);
-check("subject: Welcome to LOCKqz — 2 steps and you're done", w && w.subject === "Welcome to LOCKqz — 2 steps and you're done", w && w.subject);
+check("subject: Welcome to LOCKqz — 3 steps and you're done (not active yet: activating comes first)", w && w.subject === "Welcome to LOCKqz — 3 steps and you're done", w && w.subject);
 check("HTML: logo, cardinal header, Add to Chrome + Open Brightspace buttons, 560px", w && /icon-white\.png/.test(w.html) && /#990000/.test(w.html) && /Add LOCKqz to Chrome/.test(w.html) && /Open Brightspace/.test(w.html) && /max-width:560px/.test(w.html));
-check("text: Hi Professor Bristow, the two steps, Respectfully", w && /^Hi Professor Bristow,/.test(w.text) && /1\. Add LOCKqz to Chrome/.test(w.text) && /2\. Open Brightspace/.test(w.text) && /Respectfully,\nThe LOCKqz Team/.test(w.text));
+check("text: Hi Professor Bristow, activate + the two steps, Respectfully", w && /^Hi Professor Bristow,/.test(w.text) && /1\. Activate LOCKqz on your dashboard/.test(w.text) && /2\. Add LOCKqz to Chrome/.test(w.text) && /3\. Open Brightspace/.test(w.text) && /Respectfully,\nThe LOCKqz Team/.test(w.text));
 check("store link + Proceed with caution -> Continue to install (text + HTML)", w && /chromewebstore\.google\.com\/detail\/bidlfpkdggdpmfbfkpjcnbjhfkfligkk/.test(w.text) && /Continue to install/.test(w.text) && /Continue to install/.test(w.html));
 sqlite.prepare("UPDATE teachers SET verified=1, active_until='2099-12-31', bs_user_id='4000' WHERE email='prof@usc.edu'").run();
 const KEY = (await api("/synckey", undefined, { "X-LOCKqz-Teacher": PROF })).data.key;
@@ -251,7 +251,7 @@ console.log("Z5 SMTP: multipart/alternative, Reply-To, RFC 2047 subject, several
   await api("/signup", { email: "new@usc.edu", password: "newpass123", name: "Ada Lovelace" }, {}, { ...smtpEnv, MAIL_OPEN: fakeSmtp(OK.slice(0, 5).concat(OK.slice(6))) });
   await new Promise(r => setTimeout(r, 50));
   const wb = said.find(x => x.startsWith("MSG:")) || "";
-  check("a subject with an em dash (the welcome) is RFC 2047 encoded", /Subject: =\?utf-8\?B\?[A-Za-z0-9+\/=]+\?=\r\n/.test(wb) && Buffer.from((wb.match(/Subject: =\?utf-8\?B\?([A-Za-z0-9+\/=]+)\?=/) || [])[1] || "", "base64").toString() === "Welcome to LOCKqz \u2014 2 steps and you're done", (wb.match(/Subject: [^\r]*/) || [])[0]);
+  check("a subject with an em dash (the welcome) is RFC 2047 encoded", /Subject: =\?utf-8\?B\?[A-Za-z0-9+\/=]+\?=\r\n/.test(wb) && Buffer.from((wb.match(/Subject: =\?utf-8\?B\?([A-Za-z0-9+\/=]+)\?=/) || [])[1] || "", "base64").toString() === "Welcome to LOCKqz \u2014 3 steps and you're done", (wb.match(/Subject: [^\r]*/) || [])[0]);
 }
 
 console.log("Z6 sources");
