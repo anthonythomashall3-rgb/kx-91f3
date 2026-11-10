@@ -820,7 +820,13 @@ export async function onRequest(context) {
       catch (e) { await sesFail(e); }
     }
     if (!gmailOn(env) || !(await mailRoom(k, cls))) { const e = new Error("mail_budget"); e.budget = true; throw e; }
-    await sendMail(env, to, subject, text, opts);
+    // A failed Gmail send is kept (time + reason in the activity log) and a good one clears it, so the admin
+    // sees at once when sign-in codes and reminders stop going out (e.g. the Gmail connection was revoked).
+    try { await sendMail(env, to, subject, text, opts); }
+    catch (e) { await clockMark("mail_fail");
+      try { await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("mail", null, null, "mail_fail", String(e && e.message || e).slice(0, 300), now()).run(); } catch {}
+      throw e; }
+    await clockMark("mail_ok");
     try { await mailCount(k); } catch {}
     return "gmail";
   }
@@ -1171,6 +1177,11 @@ export async function onRequest(context) {
   const payOk = async (email, t) => !!(me && (me.admin || String(me.email||"").toLowerCase() === String(email||"").trim().toLowerCase())) || (!!t && sameHex(String(t), await statusToken(email)));
   // The Gmail script's key: PAY_SECRET if set, else derived from the server's own secret (the admin
   // copies it from Admin -> Payments into the script once). Nothing new to configure in Cloudflare.
+  // LOCKqz's clock is the Gmail script (Pages has no cron): /cron about every 10 min (exam emails, T-70 check-ins),
+  // /pay/tick about hourly (renewals, card renewals, pay reminders). Each call is kept (one row each, sync_nudges
+  // 'clock'/<job>) so the admin sees at once when the script stops.
+  const clockMark = job => db.prepare("INSERT OR REPLACE INTO sync_nudges (ou,qi,at) VALUES ('clock',?,?)").bind(job, now()).run().catch(() => {});
+  const clockState = async () => Object.fromEntries(((await db.prepare("SELECT qi, at FROM sync_nudges WHERE ou='clock'").all().catch(() => ({ results: [] }))).results || []).map(r => [r.qi, r.at]));
   const paySecret = async () => env.PAY_SECRET ? String(env.PAY_SECRET) : ((env.ROT_SECRET || env.TEACHER_KEY) ? "lqp_" + (await hmacHex(String(env.ROT_SECRET || env.TEACHER_KEY), "lockqz-pay-notify")).slice(0, 40) : "");
   // limitIp: the public /pay/start passes the caller's IP, so random emails cannot write unlimited rows.
   async function studentCode(email, limitIp = null) {
@@ -1667,8 +1678,9 @@ export async function onRequest(context) {
     let sent = false;
     if (ses && used + 1 <= cap) { const cm = codeMail(env, email, code, web);
       try { await sesSend(env, email, cm.subject, cm.text, { html: cm.html }); sent = true; try { await sesCount(1); } catch {} } catch (e) { await sesFail(e); } }
-    try { if (!sent) { if (!gmailOn(env)) throw new Error("no mail channel"); await sendCode(env, email, code, web); try { await mailCount(1); } catch {} } }
-    catch (e) { await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(dev, email, null, "code_send_failed", String(e).slice(0, 200), now()).run(); return json({ error: "send_failed" }, 502); }
+    try { if (!sent) { if (!gmailOn(env)) throw new Error("no mail channel"); await sendCode(env, email, code, web); await clockMark("mail_ok"); try { await mailCount(1); } catch {} } }
+    catch (e) { await clockMark("mail_fail");   // the admin's home shows it until a send works again
+      await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(dev, email, null, "code_send_failed", String(e).slice(0, 200), now()).run(); return json({ error: "send_failed" }, 502); }
     await db.batch([
       db.prepare("INSERT OR REPLACE INTO email_codes (device_id,email,code_hash,expires,tries,created_at) VALUES (?,?,?,?,0,?)")
         .bind(dev, email, await sha256hex(enc.encode(dev + ":" + code)), Date.now() + CODE_MS, now()),
@@ -2314,7 +2326,7 @@ export async function onRequest(context) {
         if (n) { await db.prepare("UPDATE teachers SET name=? WHERE id=? AND TRIM(COALESCE(name,''))=''").bind(n, me.id).run(); me.name = n; } }
       if (me.trial && me.id !== "admin") { const end = termEndOf(curTerms()[0]);
         if (!me.active_until || me.active_until < end) { await db.prepare("UPDATE teachers SET active_until=? WHERE id=?").bind(end, me.id).run(); me.active_until = end; } }
-      return json({ email: me.email, name: me.name, admin: me.admin, verified: !!me.verified, active: me.active, active_until: me.active_until, ...(me.trial ? { trial: true } : {}) });
+      return json({ email: me.email, name: me.name, admin: me.admin, verified: !!me.verified, active: me.active, active_until: me.active_until, ...(me.trial ? { trial: true } : {}), ...(me.admin ? { clock: await clockState() } : {}) });
     }
     if (p === "/logout" && request.method === "POST") {
       // Every real account (admins included) loses its session token; only the master key has no row.
@@ -2755,6 +2767,7 @@ export async function onRequest(context) {
     if (p === "/cron" && request.method === "POST") {
       const secret = await paySecret();
       if (secret.length < 16 || !sameHex(String(request.headers.get("X-LOCKqz-Pay") || ""), secret)) return json({ error:"unauthorized" }, 401);   // constant-time
+      await clockMark("cron");
       let r; try { r = await examMailTick(); } catch (e) { r = { error: String(e && e.message || e).slice(0, 120) }; }
       return json({ ok: true, exams: r });
     }
@@ -2762,6 +2775,7 @@ export async function onRequest(context) {
     if (p === "/pay/tick" && request.method === "POST") {
       const secret = await paySecret();
       if (secret.length < 16 || !sameHex(String(request.headers.get("X-LOCKqz-Pay") || ""), secret)) return json({ error:"unauthorized" }, 401);   // constant-time
+      await clockMark("tick");
       let exams; try { exams = await examMailTick(); } catch (e) { exams = { error: String(e && e.message || e).slice(0, 120) }; }
       let card; try { card = await cardRenewTick(); } catch (e) { card = { error: String(e && e.message || e).slice(0, 120) }; }
       // Workers Free: 50 subrequests per call; a busy card round leaves the renewal emails for the next hour.
@@ -2781,7 +2795,7 @@ export async function onRequest(context) {
       if (!me?.admin) return json({ error:"admin only" }, 403);
       const r = await db.prepare("SELECT p.txn,p.code,p.amount,p.via,p.payer,p.note,p.term,p.received_at,p.matched,COALESCE(s.email,t.email) AS who FROM payments p LEFT JOIN pay_codes_students s ON s.code=p.code LEFT JOIN pay_codes pc ON pc.code=p.code LEFT JOIN teachers t ON t.id=pc.teacher_id ORDER BY p.received_at DESC LIMIT 300").all();
       // fee_paid: what a student actually pays (Zelle, card); fee is the base the credit factors count against.
-      return json({ payments: r.results.map(x => ({ ...x, review: x.matched === "review", void: x.matched === "void" })), fee_on: feeOn(), fee: STUDENT_FEE, fee_paid: { zelle: totalOf("student", "zelle"), card: totalOf("student", "card") }, fee_from: env.STUDENT_FEE_FROM || null, script_key: await paySecret() });
+      return json({ payments: r.results.map(x => ({ ...x, review: x.matched === "review", void: x.matched === "void" })), fee_on: feeOn(), fee: STUDENT_FEE, fee_paid: { zelle: totalOf("student", "zelle"), card: totalOf("student", "card") }, clock: await clockState(), fee_from: env.STUDENT_FEE_FROM || null, script_key: await paySecret() });
     }
     // Admin: put any payment on a code (an email = that student's code); also clears void/review.
     // Optional amount for a review row whose amount the script could not read.

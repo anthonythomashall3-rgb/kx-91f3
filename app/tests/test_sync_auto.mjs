@@ -232,7 +232,7 @@ await open(444);
 check("after 6 h: the other new quiz emails once", MAIL.length === 2, MAIL.length);
 await open(444);
 check("and only once", MAIL.length === 2, MAIL.length);
-check("each email wrote one row only", sqlite.prepare("SELECT COUNT(*) AS n FROM sync_nudges").get().n === 2);
+check("each email wrote one row only", sqlite.prepare("SELECT COUNT(*) AS n FROM sync_nudges WHERE ou<>'clock'").get().n === 2);   // ('clock' = the admin's mail / clock health record)
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

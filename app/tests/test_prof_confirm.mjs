@@ -198,6 +198,13 @@ else {
     check("the admin's own row: his classes, never 'not verified'", /class/.test(adminRow) && !/not verified/.test(adminRow), adminRow);
     const vrow = pg.locator("#payments tr", { hasText: "void" });
     check("a voided payment shows 'void' and no Void button", await vrow.count() === 1 && await vrow.locator("button", { hasText: "Void" }).count() === 0, await vrow.innerText().catch(() => "?"));
+    const old = new Date(Date.now() - 2 * 3600e3).toISOString();
+    sqlite.prepare("INSERT OR REPLACE INTO sync_nudges (ou,qi,at) VALUES ('clock','cron',?),('clock','tick',?)").run(old, old);
+    await pg.evaluate(() => loadPayments()); await pg.waitForTimeout(700);
+    const ci = await pg.innerText("#clockinfo").catch(() => "");
+    check("Payments: the clock line says when the Gmail script last ran, and that it stopped (with what to do)", /exam emails ran 2 h ago · renewals ran 2 h ago\. Stopped: Open script\.google\.com/.test(ci), ci);
+    await pg.evaluate(async () => { ME = await get("/me"); location.hash = "#x"; location.hash = ""; }); await pg.waitForTimeout(900);
+    check("admin home warns when the clock has stopped", /LOCKqz's clock has stopped: exam reminder emails and professors' exam-day check-ins are not going out\./.test(await pg.innerText("#app")), (await pg.innerText("#app")).slice(0, 300));
     check("no page errors (admin)", !errs.length, errs.join(" | ")); await ctx.close(); }
   await browser.close();
 }

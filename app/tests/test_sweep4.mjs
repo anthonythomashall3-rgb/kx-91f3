@@ -126,6 +126,29 @@ check("professor: '$6,300 by Zelle, or $6,500 by bank transfer, card or Venmo', 
   const got = [await st("Dr. Jane Smith, PhD"), await st("Bristow, Duke"), await st("Duke Bristow")];
   sqlite.prepare("UPDATE teachers SET name='Duke Bristow' WHERE id=?").run(PID);
   check("extension popup name: 'Dr. Jane Smith, PhD' -> 'Jane Smith', 'Bristow, Duke' -> 'Duke Bristow' (so it greets 'Prof. Smith', 'Prof. Bristow')", JSON.stringify(got) === JSON.stringify(["Jane Smith", "Duke Bristow", "Duke Bristow"]), JSON.stringify(got)); }
+{ // owner, 10 Nov: TA Joseph Cohen uses LOCKqz free (FEE_EXEMPT: never pays the student fee)
+  const ex = (readFileSync(join(CF, "wrangler.toml"), "utf8").match(/^FEE_EXEMPT = "([^"]*)"/m) || [])[1] || "";
+  check("TA Joseph Cohen (jscohen@usc.edu) is fee-exempt in production (wrangler.toml FEE_EXEMPT)", ex.split(",").map(x => x.trim()).includes("jscohen@usc.edu"), ex); }
+console.log("C LOCKqz's clock (the Gmail script) is watched");
+{ const hdr = { "X-LOCKqz-Pay": SECRET };
+  const before = (await call("/me", null, { token: ADMIN, get: true })).data?.clock || {};
+  await call("/cron", {}, { hdr }); await call("/pay/tick", {}, { hdr });
+  const me1 = (await call("/me", null, { token: ADMIN, get: true })).data, pay1 = (await call("/payments", null, { token: ADMIN, get: true })).data;
+  const fresh = t => t && Date.now() - Date.parse(t) < 60000;
+  check("each /cron and /pay/tick call is recorded; the admin's /me and Payments show when each last ran", fresh(me1?.clock?.cron) && fresh(me1?.clock?.tick) && fresh(pay1?.clock?.cron) && !before.cron, JSON.stringify([before, me1?.clock, pay1?.clock]));
+  check("a professor's /me does not carry it", !("clock" in ((await call("/me", null, { token: PROF, get: true })).data || {})));
+  // a Gmail send that fails is kept (time + reason in the activity log); the next good send clears it
+  sqlite.prepare("DELETE FROM sync_nudges WHERE ou='clock' AND qi IN ('mail_ok','mail_fail')").run();   // (the renewal test above ran on a fake clock)
+  const sink = env.MAIL_SINK; env.MAIL_SINK = async () => { throw new Error("invalid_grant: Token has been expired or revoked."); };
+  await call("/forgot", { email: "prof@usc.edu" }); env.MAIL_SINK = sink;
+  const c1 = (await call("/me", null, { token: ADMIN, get: true })).data?.clock || {};
+  const ev = sqlite.prepare("SELECT detail FROM events WHERE event IN ('mail_fail','code_send_failed') ORDER BY ts DESC LIMIT 1").get();
+  check("a failed email send is recorded for the admin (time + reason 'invalid_grant ...' in the activity log)", !!c1.mail_fail && !(c1.mail_ok > c1.mail_fail) && /invalid_grant/.test(ev?.detail || ""), JSON.stringify([c1, ev]));
+  await new Promise(r => setTimeout(r, 5)); await call("/forgot", { email: "payer@usc.edu" });
+  const c2 = (await call("/me", null, { token: ADMIN, get: true })).data?.clock || {};
+  check("...and the next good send clears it (mail_ok after mail_fail)", c2.mail_ok > c2.mail_fail, JSON.stringify(c2));
+  const bad = await call("/cron", {}, { hdr: { "X-LOCKqz-Pay": "wrong-secret-0000000000" } });
+  check("a call without the script's secret is refused and not recorded", bad.status === 401); }
 console.log("P the student download page on a Chromebook");
 { const idx = readFileSync(join(CF, "public", "index.html"), "utf8");
   check("a Chromebook is told LOCKqz needs a Mac, Windows or Linux computer (not 'Open on your computer')", /\/CrOS\/\.test\(ua\)\) \$\("nope"\)\.textContent = "LOCKqz needs a Mac, Windows or Linux computer\. It does not run on Chromebooks\.";/.test(idx)); }

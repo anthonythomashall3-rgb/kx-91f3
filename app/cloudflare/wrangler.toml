@@ -79,7 +79,7 @@ STRIPE_BANK = "0"
 STUDENT_AUTORENEW = "1"
 RENEW_MAIL_DAY_MAX = "150"
 # Trial testers: never pay (student or professor fee) and get the test-run welcome. Comma-separated.
-FEE_EXEMPT = "dbristow@usc.edu,dbristow@marshall.usc.edu,huutienn@usc.edu"
+FEE_EXEMPT = "dbristow@usc.edu,dbristow@marshall.usc.edu,huutienn@usc.edu,jscohen@usc.edu"
 # Every LOCKqz-protected quiz is gated: the professor's Sync tab hides it and admits only students LOCKqz is
 # locking (it starts the gate by itself from 1 h before the start), and no password is given for an
 # ungated protected quiz until it ends (the professor is emailed to open the Sync tab). "0" = off.

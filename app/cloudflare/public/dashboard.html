@@ -445,6 +445,8 @@ function viewHome(){
   if(LOADERR) h += `<div class="note red"><span>Could not load from LOCKqz: ${esc(LOADERR)}</span></div>`;
   if(!BS.courses.length) return h + setupBlock() + (EXT() ? `<p class="foot">LOCKqz is syncing your classes from Brightspace. They appear here by themselves.</p>` : "");
   h += setupBlock();
+  if(ME.admin && ME.clock && CLOCK(ME.clock).stale) h += `<div class="note warn"><span>LOCKqz's clock has stopped: exam reminder emails and professors' exam-day check-ins are not going out. ${esc(CLOCK_FIX)}</span></div>`;
+  if(ME.admin && ME.clock && ME.clock.mail_fail && !(ME.clock.mail_ok > ME.clock.mail_fail)) h += `<div class="note warn"><span>LOCKqz could not send email (last try ${esc(ago(ME.clock.mail_fail))}): student sign-in codes and reminders are not going out. The reason is in the Activity log (mail_fail or code_send_failed).</span></div>`;
   // mine = classes this account protects; a hidden class (Brightspace lists someone else as its instructor) is listed only.
   const all = BS.courses.map(classStats), mine = all.filter((s,i)=>!BS.courses[i].roster_hidden);
   const exams = mine.reduce((n,s)=>n+s.cur.length,0), prot = mine.reduce((n,s)=>n+s.prot.length,0), students = BS.courses.reduce((n,c)=>n+c.students.length,0);
@@ -765,7 +767,7 @@ function viewAdmin(){ return `${BACK('', 'Home')}
     <div id="secpanel"></div>
     <p class="muted">Payments with the professor's memo code activate them automatically. Otherwise pick the semester end date and Activate.</p>
   </section>
-  <section class="card"><div class="hrow"><h2>Payments</h2><span id="feeinfo"></span></div>
+  <section class="card"><div class="hrow"><h2>Payments</h2><span id="feeinfo"></span></div><p id="clockinfo" class="muted" style="margin:0 0 8px;font-size:13px"></p>
     <p class="muted" style="margin:0 0 10px">Gmail script key: <code id="skey" style="user-select:all"></code></p>
     <div style="overflow-x:auto"><table id="payments"><thead><tr><th>Received</th><th>Amount</th><th>Via</th><th>From</th><th>Memo</th><th>Who</th><th></th></tr></thead><tbody></tbody></table></div>
 </section>
@@ -777,6 +779,12 @@ async function loadResets(){ const d = await get("/reset-requests"); const tb=do
 async function forget(){ const email=$("fgemail").value.trim().toLowerCase(); if(!email) return;
   if(!confirm("Delete everything LOCKqz stores about "+email+"? This cannot be undone.")) return;
   const d=await post("/forget",{email}); alert(d.error||("Deleted "+email+": "+(d.devices??0)+" device(s), "+(d.roster_rows??0)+" class-list row(s).")); if(!d.error) $("fgemail").value=""; }
+// LOCKqz's clock is the Gmail script "LOCKqz payments" (Pages has no cron): exam emails about every 10 min,
+// renewals about hourly. Stale = no exam-email run for 30 min, or no renewal run for 3 h.
+const CLOCK = c => { const age = t => t ? (Date.now() - Date.parse(t)) / 60000 : Infinity, a = age(c && c.cron), b = age(c && c.tick);
+  const m = x => x === Infinity ? "never" : x < 1 ? "just now" : x < 90 ? Math.round(x) + " min ago" : Math.round(x / 60) + " h ago";
+  return { stale: a > 30 || b > 180, text: `LOCKqz clock (Gmail script "LOCKqz payments"): exam emails ran ${m(a)} · renewals ran ${m(b)}` }; };
+const CLOCK_FIX = "Open script.google.com, project LOCKqz payments, Triggers: the run trigger must fire every minute (re-authorize it if Google asks).";
 async function loadTeachers(){ const d = await get("/teachers"); const tb=document.querySelector("#teachers tbody"); if(!tb) return; tb.innerHTML=""; const today=laDay();
   if(d.error){ tb.innerHTML=`<tr><td colspan="11" class="err">${esc(d.error)}</td></tr>`; return; }
   const OK = '<b style="color:#1a7f37">✓</b> ', NO = '<span class="muted">Not yet</span>';
@@ -846,6 +854,7 @@ async function markSecs(email,term,off){ const sections=[...document.querySelect
 async function loadPayments(){ const d = await get("/payments"); const tb=document.querySelector("#payments tbody"); if(!tb) return;
   if(d.error){ tb.innerHTML=`<tr><td colspan="7" class="err">${esc(d.error)}</td></tr>`; return; }
   $("skey").textContent = d.script_key||""; $("feeinfo").textContent = d.fee_on ? (d.fee_paid ? `Student fee on: ${money(d.fee_paid.zelle)} Zelle · ${money(d.fee_paid.card)} card or Venmo` : `Student fee $${d.fee} on`) : (d.fee_from ? `Student fee starts ${d.fee_from}` : "Student fee off");
+  if($("clockinfo") && d.clock){ const k = CLOCK(d.clock); $("clockinfo").textContent = k.text + (k.stale ? ". Stopped: " + CLOCK_FIX : ""); $("clockinfo").style.color = k.stale ? "var(--usc)" : ""; }
   tb.innerHTML = (d.payments||[]).map(p=>`<tr><td>${when(p.received_at)}</td><td>${money(p.amount)}</td><td>${esc(p.via||"")}</td><td>${esc(p.payer||"")}</td><td>${esc(p.note||"")}</td><td>${p.void||p.voided?"<b>void</b>":p.who?esc(p.who):"<b style='color:#990000'>unmatched</b>"}</td><td style="white-space:nowrap"><input id="as_${esc(p.txn)}" placeholder="email or code" style="padding:4px;width:150px"> <button class="btn" style="min-height:32px;padding:4px 10px" data-txn="${esc(p.txn)}" onclick="assignPay(this.dataset.txn)">${p.who?"Reassign":"Assign"}</button> ${p.void||p.voided?"":`<button class="btn" style="min-height:32px;padding:4px 10px" data-txn="${esc(p.txn)}" onclick="voidPay(this.dataset.txn)">Void</button>`}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">No payments yet.</td></tr>`; }
 async function assignPay(txn){ const i=document.getElementById("as_"+txn), v=i?i.value.trim():""; if(!v) return;
   const d=await post("/pay-assign",{txn,code:v}); if(d.error) alert(d.error); loadPayments(); }
