@@ -63,4 +63,10 @@ rel = open(os.path.join(APP, "..", ".github/workflows/release.yml")).read()
 check("download page: Android gets the APK + 3 steps", "/download/lockqz-android.apk" in idx and "install unknown apps" in idx)
 check("wrong-device guard: Android recognised, iPhone told plainly", '"android"' in guard and "cannot run on an iPhone or iPad" in guard)
 check("release.yml: android job (unit tests + signed APK), artifact into the deploy, live magic check", "assembleRelease" in rel and "lockqz-android.apk 'PK'" in rel and "name: lockqz-android" in rel)
+check("(10 Nov) each quiz starts its 10-minute 'server unreachable' wait fresh; one server ask per 30 s while held",
+      q.count("askFailSince = 0") >= 3 and "holdUntil = 0; askFailSince = 0; pwNext = 0" in q and "if (held && now < holdUntil) return" in q)
+_m = rd("app/src/main/java/app/lockqz/MainActivity.kt"); _a = rd("app/src/main/java/app/lockqz/Api.kt")
+check("(10 Nov) a JSON null is never shown or saved as the word 'null' (email not on a class list: 'Not on a class list yet', not 'null')",
+      'fun JSONObject?.str(k: String): String? = if (this == null || isNull(k)) null' in _a and 'chk.str("name")' in _m and 'optString("vtoken")' not in _m and 'optString("student")' not in _m)
+check("(10 Nov) unpaid notice: every way at its own price + the memo for Zelle / Venmo", 'pay.isNull("line")' in q and "Memo for Zelle or Venmo" in q)
 print("\nRESULT: %d passed, %d failed" % (PASS, FAIL)); sys.exit(1 if FAIL else 0)

@@ -15,6 +15,9 @@ import javax.crypto.spec.SecretKeySpec
 /** Device identity + the signed LOCKqz API, the same protocol as the Mac/Windows/Linux helpers:
  *  register once (trust on first use), then every POST carries
  *  X-LOCKqz-Device / X-LOCKqz-Time / X-LOCKqz-Sig = hex(HMAC-SHA256(key, "POST\n<path>\n<time>\n<sha256(body)>")). */
+/** A string field, or null when it is missing, empty or JSON null (optString turns JSON null into "null"). */
+fun JSONObject?.str(k: String): String? = if (this == null || isNull(k)) null else optString(k).ifEmpty { null }
+
 object Api {
     const val SITE = "https://lockqz.pages.dev"   // the API (the address every installed app uses)
     const val WEB = "https://lockqz.com"           // pages people open

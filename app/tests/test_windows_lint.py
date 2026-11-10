@@ -189,6 +189,16 @@ ok("engine: 'test' verb = the AI block without closing VMs, remote-control tools
 ok("helper: a test uses the engine's test verb (start + re-apply); quiz locks keep the full block") if '(Engine "test")' in t_handler and 'WEngine "test"' in t_watch and 'Engine "test"' not in seg(dmn, '"/lock"      {', '"/unlock"    {') else bad("helper test does not use the test verb")
 agt_src = open(os.path.join(WIN, "lockqz-agent.ps1"), encoding="utf-8").read()
 ok("agent never adopts a test as a quiz lock") if '(($st.state -eq "locked") -or ($st.state -eq "developer")) -and $st.quiz_id' in agt_src and '"test"' not in agt_src else bad("agent may adopt a test lock")
+# 10 Nov: a held unlock (202 pending) never says "AI is unlocked"; said once the retried unlock is confirmed
+_fx = 'Show-Message "AI is unlocked. Restart Firefox to get its AI features back."'
+_ue = agt_src[agt_src.index('if (-not (Send-Unlock $Quiz $reason))'):][:700]
+ok("agent: 'AI is unlocked' only after a confirmed unlock (held: no; retried + confirmed: yes)") if agt_src.count(_fx) == 2 and _ue.index("elseif") < _ue.index(_fx) and "proc = $QuizProc" in _ue and agt_src.index(_fx) > agt_src.index('if (Send-Unlock $Pending.quiz $Pending.reason) {') else bad("Firefox note shown while the unlock is held")
+# 10 Nov: a quiz's hold and 10-minute 'server unreachable' wait never carry into the next quiz
+ok("helper: hold state reset at each new lock and at every release") if dmn.count("$State.ask_fail_since = $null") >= 3 and "$State.hold_until=$null; $State.ask_fail_since=$null" in dmn else bad("hold state not reset per quiz")
+# 10 Nov: the server's 'not_protected' (a class not using LOCKqz) reaches the agent and AI comes back at once, unreported
+ok("helper: /password passes 'not_protected' to the agent and releases the quiz unreported (was a bare 502)") if '(($r.code -eq 200) -and ($why -eq "not_protected"))' in dmn and 'Release-Quiz $State.quiz_id "not_protected" $false' in dmn and "if ($report) { Report \"unlock\"" in dmn and "(-not $det.ask) -and $wasLocked" in dmn else bad("not_protected dropped by the helper")
+# 10 Nov: the helper forwards the Google setup link request (it answered "bad op": Google sign-in never showed on Windows)
+ok("helper: /verify forwards google_start (one-click USC Google setup)") if '"token","google_start") -notcontains $op' in dmn else bad("google_start refused by the helper")
 cs = open(os.path.join(WIN, "store", "LOCKqz.cs"), encoding="utf-8").read()
 ok("Store app: Test it now button -> /test (2 min), Stop test -> {stop:true}, token from config.json, no proxy") if all(x in cs for x in ('"Test it now"', '"/test", "{\\"secs\\":120}"', '"/test", "{\\"stop\\":true}"', '"config.json"', "rq.Proxy = null", '"X-LOCKqz-Token"')) else bad("Store app test button incomplete")
 ok("Store app: a running quiz is never ended from the app (no /unlock call)") if '"/unlock"' not in cs else bad("Store app calls /unlock")

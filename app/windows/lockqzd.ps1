@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.6.11"
+$Version = "0.6.12"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = if ($env:LOCKQZ_CONFIG) { $env:LOCKQZ_CONFIG } else { "$env:ProgramData\LOCKqz\config.json" }
@@ -387,15 +387,16 @@ function Report-Install {
   $r = Report "install" @{ platform="windows"; version=$Version }
   if ($r.code -eq 200) { try { @{ version=$Version; student=$State.student; at=$now } | ConvertTo-Json -Compress | Set-Content -Path $InstFile -Encoding UTF8 } catch { } }
 }
-function Release-Quiz($q, [string]$reason) {
+function Release-Quiz($q, [string]$reason, [bool]$report = $true) {
   # The server says this quiz is over (C9), or it is not a LOCKqz school (C10): AI back now; the agent
   # is told (status capped_quiz) not to re-lock it. Main thread only (the watcher has its own copy).
   if (($State.state -ne "locked") -or ($State.quiz_id -ne $q)) { return $false }
   $State.capped_quiz = $q; $State.capped_at = [int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); $State.capped_reason = $reason
   $State.state = "unlocked"; $State.quiz_id = $null; $State.locked_since = 0; $State.cap_at = 0; $State.applied = $false
+  $State.release_pending = $false; $State.hold_until = $null; $State.ask_fail_since = $null
   $ok = (Engine "unlock") -cmatch "LOCKqz: UNLOCKED"   # if not, the watcher finishes it within 15 s
   Clear-Lock
-  Report "unlock" @{ reason = $reason; requester = "server"; engine_ok = $ok } $null $q | Out-Null
+  if ($report) { Report "unlock" @{ reason = $reason; requester = "server"; engine_ok = $ok } $null $q | Out-Null }
   return $true
 }
 
@@ -436,6 +437,7 @@ $watcher.AddScript({
       if (($State.state -eq "locked") -and $q -and ($State.quiz_id -eq $q)) {
         $State.capped_quiz = $q; $State.capped_at = [int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); $State.capped_reason = $reason
         $State.state = "unlocked"; $State.quiz_id = $null; $State.locked_since = 0; $State.cap_at = 0; $State.applied = $false
+        $State.release_pending = $false; $State.hold_until = $null; $State.ask_fail_since = $null
         $ok = (WEngine "unlock") -cmatch "LOCKqz: UNLOCKED"
         Remove-Item -Path $lf -Force -ErrorAction SilentlyContinue
         $did = $true
@@ -607,6 +609,7 @@ while ($listener.IsListening) {
         $State.cap_at = [int64]$State.locked_since + 60 * [int64]$State.max_minutes; $State.end_known = $false
         $State.mono_since = [int64]([Diagnostics.Stopwatch]::GetTimestamp() / [Diagnostics.Stopwatch]::Frequency)
         Set-Assist $null @() | Out-Null   # another quiz's allowance never carries over
+        $State.release_pending = $false; $State.hold_until = $null; $State.ask_fail_since = $null   # nor another quiz's hold
       }
       if ($State.capped_quiz -eq $body.quiz_id) { $State.capped_quiz = $null; $State.capped_at = 0; $State.capped_reason = $null }
       $ok = (Engine "lock") -cmatch "LOCKqz: LOCKED"
@@ -624,6 +627,7 @@ while ($listener.IsListening) {
         break
       }
       $q = if ($State.quiz_id) { $State.quiz_id } else { $body.quiz_id }
+      $wasLocked = ($State.state -eq "locked")   # nothing locked (already released, or never): nothing to report
       $who = Get-Requester $req
       $why = LQ-UnlockReason $body.reason $who
       $det = @{ reason = $why; requester = $who.kind; local = $true }
@@ -652,12 +656,12 @@ while ($listener.IsListening) {
       if ($held) {
         $res.StatusCode = 202; $out.state = "locked"; $out.pending = "brightspace"; $out.ok = $false
       } else {
-        $State.state="unlocked"; $State.quiz_id=$null; $State.locked_since=0; $State.applied=$false; $State.release_pending=$false; $State.hold_until=$null
+        $State.state="unlocked"; $State.quiz_id=$null; $State.locked_since=0; $State.applied=$false; $State.release_pending=$false; $State.hold_until=$null; $State.ask_fail_since=$null
         $ok = (Engine "unlock") -cmatch "LOCKqz: UNLOCKED"   # if not, the watcher finishes it within 5 s
         Clear-Lock
         $det.engine_ok = $ok
-        if (-not $det.ask) { Report "unlock" $det $null $q | Out-Null }
-        if (($why -eq "quiz_left") -or ($why -eq "quiz_tab_closed")) { Report "quiz_left" $why "agent" $q | Out-Null }
+        if ((-not $det.ask) -and $wasLocked) { Report "unlock" $det $null $q | Out-Null }
+        if ($wasLocked -and (($why -eq "quiz_left") -or ($why -eq "quiz_tab_closed"))) { Report "quiz_left" $why "agent" $q | Out-Null }
         $out.state="unlocked"; $out.engine_unlocked=$ok
       }
     }
@@ -684,7 +688,7 @@ while ($listener.IsListening) {
       # One-time student email setup (status | check | send | code), signed with the SYSTEM-only key
       # so an email can only ever be bound to THIS computer.
       $op = [string]$body.op
-      if (@("status","check","send","code","token") -notcontains $op) { $res.StatusCode = 400; $out = @{ error = "bad op" } }
+      if (@("status","check","send","code","token","google_start") -notcontains $op) { $res.StatusCode = 400; $out = @{ error = "bad op" } }   # google_start: the one-click USC Google setup link
       else {
         $q = @{ op = $op; device_id = $Device }
         if ($body.email) { $em = [string]$body.email; $q.email = $em.Substring(0, [Math]::Min(200, $em.Length)) }
@@ -735,6 +739,11 @@ while ($listener.IsListening) {
           } elseif (($r.code -eq 403) -and ($why -eq "other_school")) {
             $out.reason = $why   # C10: not a LOCKqz school -> nothing to protect, AI back now
             Release-Quiz $State.quiz_id "other_school" | Out-Null
+          } elseif (($r.code -eq 200) -and ($why -eq "not_protected")) {
+            # Per-class scope: this class does not use LOCKqz (the server's own word) -> AI back now, not
+            # re-locked while the page stays open, nothing reported.
+            $out.reason = $why
+            Release-Quiz $State.quiz_id "not_protected" $false | Out-Null
           } elseif (($r.code -eq 403) -and ($why -eq "vm")) { $out.reason = $why   # inside a virtual machine: no password
           } elseif (($r.code -eq 402) -and $why) { $out.reason = $why }
           if ((-not $pw) -and (-not $pay) -and (-not $out.reason)) { $res.StatusCode = 502 }

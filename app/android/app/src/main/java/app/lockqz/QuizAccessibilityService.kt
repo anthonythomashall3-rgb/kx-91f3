@@ -162,7 +162,7 @@ class QuizAccessibilityService : AccessibilityService() {
         if (!DnsVpnService.running) { try { DnsVpnService.start(this) } catch (e: Exception) { Log.w(TAG, "vpn start: $e") }; Thread.sleep(1500) }
         if (!DnsVpnService.running) { notifyOnce("vpn", "LOCKqz is off", "Open LOCKqz and allow the AI block (VPN) to get the quiz password."); return }
         DnsVpnService.setBlocklist(Api.blocklist(this))
-        DnsVpnService.locked = true; quiz = id; quizUrl = url; lastSeen = System.currentTimeMillis(); missingSince = 0; pwShown = null; held = false; pwNext = 0
+        DnsVpnService.locked = true; quiz = id; quizUrl = url; lastSeen = System.currentTimeMillis(); missingSince = 0; pwShown = null; held = false; holdUntil = 0; askFailSince = 0; pwNext = 0
         getSharedPreferences("lockqz", Context.MODE_PRIVATE).edit().putString("locked_quiz", id).apply()
         checkOtherProfiles(id)
         Log.i(TAG, "locked $id")
@@ -208,7 +208,9 @@ class QuizAccessibilityService : AccessibilityService() {
         if (pay != null) {
             if (!getSharedPreferences("lockqz", Context.MODE_PRIVATE).getBoolean("pay_shown_$id", false)) {
                 getSharedPreferences("lockqz", Context.MODE_PRIVATE).edit().putBoolean("pay_shown_$id", true).apply()
-                notify("Pay for LOCKqz this semester", "The quiz password comes as soon as your payment arrives. Memo: ${pay.optString("code")}")
+                val line = if (pay.isNull("line")) "" else pay.optString("line").trim().trimEnd('.')   // each way at its own price: "$200 by Zelle, or $210 by card or Venmo"
+                val memo = if (!pay.isNull("zelle") || !pay.isNull("venmo")) " Memo for Zelle or Venmo: ${pay.optString("code")}." else ""
+                notify("Pay for LOCKqz this semester", (if (line.isNotEmpty()) "$line.$memo " else "Memo: ${pay.optString("code")}. ") + "The quiz password comes as soon as your payment arrives.")
                 try { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(pay.optString("url", "${Api.WEB}/pay"))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) {}
             }
             main.postDelayed({ if (quiz == id && pwShown == null) exec.execute { password(quizUrl ?: url, id) } }, 15_000); return
@@ -246,6 +248,7 @@ class QuizAccessibilityService : AccessibilityService() {
         val id = quiz ?: return
         if (!report) { unlockNow(id, reason, report = false); return }
         val now = System.currentTimeMillis()
+        if (held && now < holdUntil) return   // asked < 30 s ago (ticks queued while the answer was on its way): one ask per 30 s
         val det = JSONObject().put("reason", reason).put("local", true).put("ask", true)
         val (code, j) = Api.report(this, "unlock", id, JSONObject().put("detail", det))
         var hold = j?.optBoolean("hold") == true
@@ -259,7 +262,7 @@ class QuizAccessibilityService : AccessibilityService() {
     }
 
     private fun unlockNow(id: String, reason: String, report: Boolean) {
-        quiz = null; quizUrl = null; pwShown = null; held = false
+        quiz = null; quizUrl = null; pwShown = null; held = false; holdUntil = 0; askFailSince = 0   // the next quiz's 10-minute wait starts fresh
         DnsVpnService.locked = false
         getSharedPreferences("lockqz", Context.MODE_PRIVATE).edit().remove("locked_quiz").apply()
         Log.i(TAG, "unlocked $id ($reason)")

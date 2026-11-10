@@ -188,6 +188,17 @@ check("logged as unlock_held (not as an unlock)", !!one("SELECT 1 FROM events WH
 check("hold answer asks for 30 s beats", h.data?.beat_s === 30);
 h = await ask(D3, "quiz_submitted");
 check("a claimed 'quiz_submitted' with no submission is held just the same", h.data?.hold === true);
+check("(10 Nov) asked again within 10 min: one 'unlock_held' row, not one per ask (free plan)", one("SELECT COUNT(*) AS n FROM events WHERE device_id=? AND event='unlock_held'", D3.id)?.n === 1);
+{ // (10 Nov) a device at its daily report limit: an unlock ask is still answered with the hold (never let through early)
+  const ins = sqlite.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)");
+  for (let i = 0; i < 300; i++) ins.run(D3.id, "s0@usc.edu", "500-1", "quiz_left", null, iso(-60000));
+  const before = one("SELECT COUNT(*) AS n FROM events WHERE device_id=?", D3.id).n;
+  const h2 = await ask(D3, "quiz_tab_closed");
+  check("(10 Nov) at the daily report limit an unlock ask is still held (hold:true, not 429)", h2.status === 200 && h2.data?.hold === true && !!one("SELECT 1 FROM locks WHERE device_id=? AND quiz_id='500-1'", D3.id), `${h2.status} ${JSON.stringify(h2.data)}`);
+  const q = await call("/report", { event: "quiz_left", quiz_id: "500-1" }, { dev: D3 });
+  check("(10 Nov) other reports over the limit are still dropped (429), nothing logged", q.status === 429 && one("SELECT COUNT(*) AS n FROM events WHERE device_id=?", D3.id).n === before, `${q.status}`);
+  sqlite.prepare("DELETE FROM events WHERE device_id=? AND event='quiz_left'").run(D3.id);
+}
 // the Sync tab reports the submission -> the next beat releases it
 sqlite.prepare("UPDATE locks SET locked_at=? WHERE device_id=?").run(iso(-10 * 60000), D3.id);
 await call("/submitted", { ou: "500", qi: "1", users: [{ id: "9100", completed: iso(-60000) }] }, { teacher: P });

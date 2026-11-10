@@ -102,7 +102,7 @@ check("fee off: password released", r.status === 200 && r.data?.password === "LQ
 console.log("P2 fee on, unpaid: no password, payment info instead");
 r = await pw(ON);
 check("unpaid: 402", r.status === 402, `got ${r.status}`);
-check("pay info: $5, Zelle only (no bank/Venmo/PO), LQS code, pay page", r.data?.pay?.amount === 5 && r.data.pay.venmo === null && r.data.pay.bank === null && r.data.pay.po === null && r.data.pay.zelle === "(858) 900-4347" && /^LQS[A-Z0-9]{5}$/.test(r.data.pay.code||"") && r.data.pay.url === "https://lockqz.pages.dev/pay?email=al%40usc.edu&t=" + payT(ON, "al@usc.edu"), JSON.stringify(r.data));
+check("pay info: $5, Zelle only (no bank/Venmo/PO), LQS code, pay page (an app before 0.6.12 reads 'Pay $5 by Zelle for LOCKqz ...')", r.data?.pay?.amount === "5 by Zelle" && r.data?.pay?.line === "$5 by Zelle" && r.data.pay.venmo === null && r.data.pay.bank === null && r.data.pay.po === null && r.data.pay.zelle === "(858) 900-4347" && /^LQS[A-Z0-9]{5}$/.test(r.data.pay.code||"") && r.data.pay.url === "https://lockqz.pages.dev/pay?email=al%40usc.edu&t=" + payT(ON, "al@usc.edu"), JSON.stringify(r.data));
 const CODE = r.data.pay.code;
 r = await call(ON, "/pay/start", { email: "AL@usc.edu" });
 check("pay page gives the same code", r.data?.code === CODE && r.data.paid === false && r.data.required === true, JSON.stringify(r.data));

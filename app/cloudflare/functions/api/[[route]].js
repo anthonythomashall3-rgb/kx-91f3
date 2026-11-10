@@ -1019,6 +1019,7 @@ export async function onRequest(context) {
   const setTotal = (kind, way, prev = false) => { const v = Number(kind === "student" ? (way === "zelle" || way === "bank" ? env.STUDENT_TOTAL : way === "sbank" ? 0 : prev && OTHER_FROM ? env.STUDENT_OTHER_TOTAL_PREV : env.STUDENT_OTHER_TOTAL)
                                                                        : (way === "card" ? env.PROF_CARD_TOTAL : way === "sbank" ? 0 : way === "zelle" && Number(env.PROF_ZELLE_TOTAL) > 0 ? env.PROF_ZELLE_TOTAL : way === "bank" && Number(env.PROF_BANK_TOTAL) > 0 ? env.PROF_BANK_TOTAL : env.PROF_TOTAL)); return v > 0 ? v : 0; };
   const totalOf = (kind, way, prev = false) => setTotal(kind, way, prev) || grossUp(baseOf(kind, way));
+  const totalOfFull = (kind, way) => totalOf(kind, way);
   const factorOf = (kind, way, prev = false) => taxOn() ? feeOf(kind) / totalOf(kind, way, prev) : 1;
   const creditOf = (code, via, amount) => Number(amount) * factorOf(isStu(code) ? "student" : "professor", wayOf(via));
   // The same credit in SQL, for every SUM over payments.
@@ -1040,8 +1041,10 @@ export async function onRequest(context) {
   // Every way this payer can pay now, each at its own price: "$200 by Zelle, or $210 by card or Venmo"
   // (students: no bank transfer); professors "$6,300 by Zelle, or $6,500 by bank transfer, card or Venmo".
   const payVenmo = kind => kind === "student" ? stuVenmo() : ((env.VENMO_HANDLE || "").replace(/^@/, "") || null);
-  const waysLine = kind => {
+  // left: what is still due (a part already paid); none = the full price.
+  const waysLine = (kind, left = null) => {
     const d$ = n => "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 });
+    const totalOf = (k, w) => left == null ? totalOfFull(k, w) : waysFor(k, left)[w].total;
     // Students in card-only mode (STUDENT_CARD_ONLY with Stripe on) see only the card, as on the pay page.
     const cardOnly = kind === "student" && String(env.STUDENT_CARD_ONLY || "") === "1" && stripeOn();
     const zel = !cardOnly && (kind === "student" ? stuZelle() : env.ZELLE_TO) ? totalOf(kind, "zelle") : 0;
@@ -1282,6 +1285,9 @@ export async function onRequest(context) {
   // Apps older than 0.6.5 only open LOCKqz pages on lockqz.pages.dev (the address before lockqz.com):
   // they get that address, which still serves the same site.
   const OLD_SITE = "https://lockqz.pages.dev";
+  // Apps older than 0.6.12 say "Pay $<amount> for LOCKqz this semester ...": they get every price in that
+  // place ("$200 by Zelle, or $210 by card or Venmo"), not the $180 base price.
+  const oldAppPay = (info, dev) => { if (info && info.line && !(dev && newerOrSame(dev.version, "0.6.12"))) info.amount = String(info.line).replace(/^\$/, ""); return info; };
   const oldAppUrl = (info, dev) => { if (info && info.url && dev && !newerOrSame(dev.version, "0.6.5")) info.url = String(info.url).replace(SITE_URL, OLD_SITE); return info; };
   async function payInfo(email, limitIp = null, slot = false) {
     const code = await studentCode(email, limitIp);
@@ -1294,6 +1300,7 @@ export async function onRequest(context) {
     return { amount: STUDENT_FEE, code, venmo: cardOnly ? null : stuVenmo(), zelle: cardOnly ? null : stuZelle(), bank: null, po: null, zelle_amount: cardOnly ? null : zelle_amount, stripe: stripeInfo("student", due),
              tax: taxInfo(), ways: taxOn() ? waysFor("student", Math.max(0, STUDENT_FEE - got)) : null, bank_auto: true,
              card_renew: autoRenewOn() && stripeInfo("student", due) ? cardFullCents() / 100 : null,
+             line: waysLine("student", got > 0 ? Math.max(0, STUDENT_FEE - got) : null) || null,   // the apps' pay message: each way at its price
              url: email ? await payLink(email) : PAY_URL };
   }
   // Memo codes typed by people: "lqs-ab12c", "LQS AB12C", "LQ AB12C". Student (LQS+5) first, then
@@ -1872,9 +1879,13 @@ export async function onRequest(context) {
       const qidOk = typeof quiz_id === "string" && /^\d+-\d+$/.test(quiz_id) ? quiz_id : null;
       // D1 free plan = 100k row writes/day for everyone: one device may log at most 300 events a day (a real exam
       // day is ~10). Beyond that its reports are acknowledged and dropped (the lock rows already say what matters).
+      // An unlock ASK over the limit is still answered (hold or not), only not logged: the limit must never let
+      // a held block go early.
+      const asking = ev === "unlock" && v.ok && !!detail && typeof detail === "object" && detail.ask === true;
+      let skipLog = false;
       if (ev !== "heartbeat" && device_id) {
         const n = await db.prepare("SELECT COUNT(*) AS n FROM events WHERE device_id=? AND ts>=?").bind(device_id, new Date(Date.now() - 86400000).toISOString()).first();
-        if (n && Number(n.n) >= 300) return json({ ok: true, dropped: "too_many_reports" }, 429);
+        if (n && Number(n.n) >= 300) { if (!asking) return json({ ok: true, dropped: "too_many_reports" }, 429); skipLog = true; }
       }
       const studentStr = lowMail(str(student));
       // Unlock reports carry {reason} (quiz_submitted / quiz_left / quiz_tab_closed / cap ...): keep it
@@ -1897,7 +1908,11 @@ export async function onRequest(context) {
         if (!why && detail.ask === true) {
           const [ou, qi] = quiz_id.split("-");
           const g = await db.prepare("SELECT gated FROM quizzes WHERE ou=? AND qi=?").bind(ou, qi).first();
-          if (g && Number(g.gated) === 1) { hold = true; detailObj = { ...detailObj, held: true }; }
+          if (g && Number(g.gated) === 1) {
+            hold = true; detailObj = { ...detailObj, held: true };
+            // A held helper asks again every 30 s: one 'unlock_held' row per 10 minutes is enough (free plan).
+            if (!skipLog && await db.prepare("SELECT 1 FROM events WHERE device_id=? AND quiz_id=? AND event='unlock_held' AND ts>? LIMIT 1").bind(v.id, quiz_id, new Date(Date.now() - 600000).toISOString()).first()) skipLog = true;
+          }
         }
       }
       const detailStr = detailObj ? JSON.stringify(detailObj).slice(0, 2000) : null;
@@ -1911,13 +1926,13 @@ export async function onRequest(context) {
       const quietDay = !dev || !dev.last_seen || dev.last_seen < new Date(Date.now() - 7 * 86400000).toISOString();
       const changed = !!dev && ((ver && ver !== dev.version) || (plat && plat !== dev.platform));
       const logIt = ev !== "heartbeat" && (ev !== "install" || !dev || changed || quietDay);
-      if (logIt) st.push(db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(device_id||null, studentStr, qidOk, evName, detailStr, now()));
+      if (logIt && !skipLog) st.push(db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(device_id||null, studentStr, qidOk, evName, detailStr, now()));
       if (device_id && !dev) st.push(db.prepare("INSERT OR IGNORE INTO devices (device_id,installed_at) VALUES (?,?)").bind(device_id, now()));
       if (ev === "install" && changed) st.push(db.prepare("UPDATE devices SET version=COALESCE(?,version), platform=COALESCE(?,platform) WHERE device_id=?").bind(ver, plat, device_id));
       // D1 free plan = 100k row writes/day: a heartbeat refreshes last_seen at most every 60 minutes
       // (an UPDATE that matches no row writes nothing). Real events always update it; the student
       // (indexed) is written only when it actually changes.
-      if (ev === "heartbeat" || (ev === "install" && !logIt))
+      if (ev === "heartbeat" || (ev === "install" && !logIt) || hold)
         st.push(db.prepare("UPDATE devices SET last_seen=? WHERE device_id=? AND (last_seen IS NULL OR last_seen < ?)").bind(now(), device_id||null, new Date(Date.now() - 3600000).toISOString()));
       else {
         st.push(db.prepare("UPDATE devices SET last_seen=? WHERE device_id=?").bind(now(), device_id||null));
@@ -1987,6 +2002,11 @@ export async function onRequest(context) {
       // signed up (active + synced + on). Any other Brightspace quiz is not ours -> the app restores AI,
       // and no student is charged and nothing is reported.
       if (!(await courseCovered(ou))) return json({ password: null, reason: "not_protected" }, 200);
+      // Per exam: one the professor's dashboard shows as "Not protected" (synced from Brightspace, no LOCKqz
+      // password, none being taken out) is not ours either -> AI back, nothing charged. A quiz newer than the
+      // last Sync is not known yet: it waits (the Sync protects it by default).
+      const qp = await db.prepare("SELECT (SELECT 1 FROM quizzes WHERE ou=? AND qi=?) AS qrow, (SELECT 1 FROM bs_quizzes WHERE ou=? AND qi=?) AS bq, (SELECT 1 FROM pending_clear WHERE ou=? AND qi=?) AS pc").bind(ou, qi, ou, qi, ou, qi).first();
+      if (qp && !qp.qrow && qp.bq && !qp.pc) return json({ password: null, reason: "not_protected" }, 200);
       // Virtual machine: LOCKqz inside a VM locks only the VM; the real computer around it keeps AI.
       // No password (the admin may test in one). Logged once per quiz for the professor's live view.
       const vmKind = typeof body.vm === "string" ? body.vm.trim().slice(0, 40) : "";
@@ -2010,7 +2030,7 @@ export async function onRequest(context) {
         const who = unconfirmed ? null : stu?.student;
         if (!(await studentPaid(who))) return unconfirmed
           ? json({ password: null, reason: "verify", needs_verify: true }, 402)   // no pay block: the agent re-runs email setup
-          : json({ password: null, reason: "unpaid", pay: await oldAppUrl(await payInfo(who), v.ok ? v.dev : null) }, 402);
+          : json({ password: null, reason: "unpaid", pay: oldAppPay(await oldAppUrl(await payInfo(who), v.ok ? v.dev : null), v.ok ? v.dev : null) }, 402);
         // One payment = one student. A paid email cannot be shared: (1) never on two computers in a quiz
         // at the same time; (2) at most 2 computers per email (seen in the last 30 days, not revoked).
         // Staff (professors / admin) are exempt.

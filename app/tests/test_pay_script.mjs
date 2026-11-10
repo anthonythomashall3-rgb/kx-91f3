@@ -65,4 +65,13 @@ check("alert not naming LOCKqz's account -> review (someone else's bank)", p2 &&
 check("zellepay.com with ZELLEPAY_OK=1 -> counts", p && !p.needs_review && p.amount === 5, JSON.stringify(p));
 p = parse(msg(VENMO_OK, "Al paid you $5.00", "LQS4M8TX"), {});
 check("owner address unknown -> review only", p && p.needs_review === true, JSON.stringify(p));
+{ // (10 Nov) run(): a full page of 50 threads keeps the time window, so the rest come next run (a backlog is never skipped)
+  const mk = n => { const t = String(Math.floor(Date.now() / 1000)), props = { PAY_SECRET: "k", LAST_RUN: "1000", LAST_ASK: t, LAST_CRON: t, LAST_TICK: t };
+    const c = { PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] ?? null, setProperty: (k, v) => { props[k] = v; } }) },
+      GmailApp: { getUserLabelByName: () => ({}), createLabel: () => ({}), search: () => Array.from({ length: n }, () => ({ getMessages: () => [], addLabel() {} })) },
+      UrlFetchApp: { fetch: () => ({ getResponseCode: () => 200, getContentText: () => "" }) }, Session: { getEffectiveUser: () => ({ getEmail: () => OWN }) }, Logger: { log() {} } };
+    vm.createContext(c); vm.runInContext(src + "\nthis.run = run;", c); c.run(); return props.LAST_RUN; };
+  check("run(): 50 threads (a full page) -> the window stays (older alerts come next run)", mk(50) === "1000");
+  check("run(): fewer than 50 -> the window moves on", mk(3) !== "1000");
+}
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

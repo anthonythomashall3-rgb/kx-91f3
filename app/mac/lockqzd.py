@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.6.11"
+VERSION = "0.6.12"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -408,6 +408,7 @@ def unlock_now(qid):
     the watcher retries every cycle. Caller holds LOCK."""
     STATE.update(state="unlocked", quiz_id=None, locked_at=None, locked_since=0.0, owner_uid=None, release_pending=False)
     STATE.pop("hold_until", None)
+    STATE.pop("ask_fail_since", None)   # the 10-minute "server unreachable" wait starts again for the next quiz
     set_assist(None, [])
     ok = engine("unlock")
     if ok:
@@ -1012,7 +1013,9 @@ class H(BaseHTTPRequestHandler):
                 if not same:   # a repeat /lock for the running quiz never extends the cap
                     now = time.time()
                     STATE.update(max_minutes=mx, locked_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                                 locked_since=now, cap_at=now + mx * 60, end_known=False, mono_since=time.monotonic())
+                                 locked_since=now, cap_at=now + mx * 60, end_known=False, mono_since=time.monotonic(),
+                                 release_pending=False)
+                    for k in ("hold_until", "ask_fail_since"): STATE.pop(k, None)   # another quiz's hold never carries over
                     set_assist(None, [])   # another quiz's allowance never carries over
                 if STATE["capped_quiz"] == qid: forget_capped()
                 save_lock(); engine("lock")
@@ -1034,7 +1037,7 @@ class H(BaseHTTPRequestHandler):
                 if self._other_owner(who):
                     return self._send(409, {"ok": False, "error": "other_user_lock"})
                 qid = STATE["quiz_id"] or asked   # report WHICH quiz ended (live monitor "done")
-                was_locked = STATE["state"] == "locked"
+                was_locked, was_dev = STATE["state"] == "locked", STATE["state"] == "developer"
                 before_end = was_locked and (not STATE["end_known"] or time.time() < STATE["cap_at"] - END_GRACE)
                 held = int(time.time() - STATE["locked_since"]) if was_locked and STATE["locked_since"] else None
                 ask = who != "root" and was_locked and before_end and bool(qid)
@@ -1066,7 +1069,8 @@ class H(BaseHTTPRequestHandler):
             with LOCK:
                 STATE["release_pending"] = False; STATE.pop("hold_until", None)
                 ok = unlock_now(qid) if STATE["state"] != "developer" else (STATE.update(state="unlocked", quiz_id=None) or True)
-            if not ask: report_async("unlock", {"quiz_id": qid, "detail": det})
+            # Nothing was locked (already released by the server or the cap, or never locked): nothing to report.
+            if not ask and (was_locked or was_dev): report_async("unlock", {"quiz_id": qid, "detail": det})
             if not ok:
                 return self._send(500, {"ok": False, "state": "unlocking", "error": "unlock incomplete - retrying"})
             return self._send(200, {"ok": True, "state": "unlocked"})
@@ -1078,7 +1082,7 @@ class H(BaseHTTPRequestHandler):
             # One-time student email setup (status | check | send | code), signed with the device key
             # so an email can only ever be bound to THIS computer.
             op = str(body.get("op") or "")
-            if op not in ("status", "check", "send", "code", "token"): return self._send(400, {"error": "bad op"})
+            if op not in ("status", "check", "send", "code", "token", "google_start"): return self._send(400, {"error": "bad op"})   # google_start: the one-click USC Google setup link
             req = {"op": op, "device_id": DEVICE}
             for k in ("email", "code", "vtoken"):
                 if body.get(k) is not None: req[k] = str(body[k])[:200]
@@ -1148,6 +1152,13 @@ class H(BaseHTTPRequestHandler):
                         save_capped(qid, "other_school"); unlock_now(qid)
                     else: qid = None
                 if qid: report_async("unlock", {"quiz_id": qid, "detail": {"reason": "other_school"}})
+            elif code == 200 and reason == "not_protected":
+                # Per-class scope: this class does not use LOCKqz (the server's own word) -> AI back now,
+                # not re-locked while the page stays open, nothing reported (the server asked for nothing).
+                out["reason"] = reason
+                with LOCK:
+                    if STATE["state"] == "locked" and STATE["quiz_id"] == qid:
+                        save_capped(qid, "not_protected"); unlock_now(qid)
             elif code == 402 and reason:
                 out["reason"] = reason   # "verify": the student must confirm their school email first
             elif code == 403 and reason == "vm":

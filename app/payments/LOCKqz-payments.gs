@@ -88,7 +88,9 @@ function run() {
     if (r.getResponseCode() !== 200) throw new Error("LOCKqz said " + r.getResponseCode() + ": " + r.getContentText().slice(0, 200));
   }
   threads.forEach(th => th.addLabel(label));
-  props.setProperty("LAST_RUN", String(started));
+  // A full page (50 threads) can leave older alerts behind (e.g. the script was stopped for a day): keep the
+  // window, so the next run (which skips the labelled threads) takes the rest.
+  if (threads.length < 50) props.setProperty("LAST_RUN", String(started));
   // Bank-transfer questions every ~5 min (a second Gmail search every minute would spend Google's 90 min/day
   // trigger-runtime allowance for free accounts; payment alerts above stay every minute).
   if (started - Number(props.getProperty("LAST_ASK") || 0) > 4 * 60) {

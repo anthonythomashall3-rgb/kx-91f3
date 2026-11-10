@@ -77,11 +77,11 @@ class MainActivity : Activity() {
         exec.execute {
             val st = Api.verify(this, "status")
             if (st == null) { say("LOCKqz can't reach its server right now. Try again in a minute."); return@execute }
-            if (st.optBoolean("verified") && st.has("student")) { Api.setStudent(this, st.optString("student"), true, st.optString("vtoken").ifEmpty { null }); main.post { refresh() }; return@execute }
+            if (st.optBoolean("verified") && st.str("student") != null) { Api.setStudent(this, st.str("student")!!, true, st.str("vtoken")); main.post { refresh() }; return@execute }
             val saved = Api.student(this); val vt = Api.vtoken(this)
             if (saved != null && vt != null) {
                 val r = Api.verify(this, "token", email = saved, vtoken = vt)
-                if (r?.optBoolean("verified") == true) { Api.setStudent(this, saved, true, r.optString("vtoken").ifEmpty { vt }); main.post { refresh() }; return@execute }
+                if (r?.optBoolean("verified") == true) { Api.setStudent(this, saved, true, r.str("vtoken") ?: vt); main.post { refresh() }; return@execute }
             }
             // One tap instead of an emailed code: sign in with the school Google account (off on the server = code).
             val g = Api.verify(this, "google_start")
@@ -100,8 +100,8 @@ class MainActivity : Activity() {
                     while (System.currentTimeMillis() < end) {
                         Thread.sleep(4000)
                         val st = Api.verify(this, "status") ?: continue
-                        if (st.optBoolean("verified") && st.has("student")) {
-                            Api.setStudent(this, st.optString("student"), true, st.optString("vtoken").ifEmpty { null })
+                        if (st.optBoolean("verified") && st.str("student") != null) {
+                            Api.setStudent(this, st.str("student")!!, true, st.str("vtoken"))
                             say("Done. LOCKqz is set up and won't ask again."); main.post { refresh() }; return@execute
                         }
                     }
@@ -116,7 +116,7 @@ class MainActivity : Activity() {
                 if (!Regex("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$").matches(email)) { say("That is not an email address."); return@setPositiveButton }
                 exec.execute {
                     val chk = Api.verify(this, "check", email = email)
-                    val name = chk?.optString("name", "")?.ifEmpty { null }
+                    val name = chk.str("name")
                     main.post {
                         AlertDialog.Builder(this).setTitle(if (name != null) "Is this you?" else "Not on a class list yet")
                             .setMessage(if (name != null) "$name\n$email" else "$email is not on a LOCKqz class list yet. Check the spelling.")
@@ -144,7 +144,7 @@ class MainActivity : Activity() {
                 exec.execute {
                     val r = Api.verify(this, "code", email = email, code = code)
                     when {
-                        r?.optBoolean("verified") == true -> { Api.setStudent(this, email, true, r.optString("vtoken").ifEmpty { null }); say("Done. LOCKqz is set up and won't ask again."); main.post { refresh() } }
+                        r?.optBoolean("verified") == true -> { Api.setStudent(this, email, true, r.str("vtoken")); say("Done. LOCKqz is set up and won't ask again."); main.post { refresh() } }
                         r?.optBoolean("resent") == true -> main.post { askCode(email, if (r.optString("error") == "expired") "That code expired. We sent a new one.\n\n" else "Too many wrong tries. We sent a new code.\n\n") }
                         r?.optString("error") == "wrong_code" -> main.post { askCode(email, "That code is wrong (${r.optInt("tries_left")} tries left).\n\n") }
                         else -> say("Could not check the code (${r?.optString("error") ?: "no answer"}). Try again.")

@@ -68,6 +68,7 @@ run "Professor sign-up by email code or USC Google (roster professors claim thei
 run "Professor first visit: names from the class list, Chrome-only set-up on other browsers and phones, Email students chooser, plurals, menu (real Chromium)" node --no-warnings test_prof_polish.mjs
 run "Professors confirmed by their verification email (no admin step; students and taken classes refused); welcome email for accounts that pay (real Chromium)" node --no-warnings test_prof_confirm.mjs
 run "Bug sweep 4: student install emails name the fee and every way to pay, course codes students know (no 20263_14792), renewal email prices" node --no-warnings test_sweep4.mjs
+run "Bug sweep 7: the apps' unpaid message names every way at its own price (never the 180-dollar base)" node --no-warnings test_sweep7.mjs
 run "Microsoft Store button by itself + automatic Store submissions; Firefox package signed by Mozilla" node --no-warnings test_store_ff.mjs
 run "Apple Developer ID: Mac installer signing + notarization wiring, signed package never replaced" bash test_signing_mac.sh
 run "Download page on a Mac: Apple-signed installer = one download, command one click away (real Chromium)" node --no-warnings test_download_mac.mjs

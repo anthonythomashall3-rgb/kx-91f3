@@ -675,6 +675,17 @@ def setup_identity(call, ui, saved="", save=None, state=None):
                 note = "That code is wrong (%s tries left).\n\n" % r.get("tries_left"); continue
             log("code check failed (%s): will retry quietly" % (e or "no answer")); return None
 
+def pay_text(pay):
+    """The unpaid message: every way at its own price ("$200 by Zelle, or $210 by card or Venmo"), the memo for
+    Zelle / Venmo. An older server sends one amount."""
+    line, code = pay.get("line"), str(pay.get("code") or "")
+    if isinstance(line, str) and line.strip():
+        t = "Pay for LOCKqz this semester to get the quiz password: %s." % line.strip().rstrip(".")
+        if code and (pay.get("zelle") or pay.get("venmo")): t += "\n\nMemo for Zelle or Venmo:  %s" % code
+    else:
+        t = "Pay $%s for LOCKqz this semester to get the quiz password.\n\nMemo:  %s" % (pay.get("amount") or "", code)
+    return t + "\n\nThe payment page is open. LOCKqz shows the password here as soon as your payment arrives."
+
 def clipboard(text):
     try: subprocess.run(["pbcopy"], input=text.encode(), timeout=5)
     except Exception: pass
@@ -778,8 +789,7 @@ class Agent:
             if u.startswith(("https://lockqz.com/", "https://lockqz.pages.dev/")):
                 try: subprocess.run(["open", u], timeout=10)
                 except Exception: pass
-            dialog("Pay $%s for LOCKqz this semester to get the quiz password.\n\nMemo:  %s\n\nThe payment page is open. LOCKqz shows the password here as soon as your payment arrives."
-                   % (pay.get("amount") or 5, pay.get("code") or ""))
+            dialog(pay_text(pay))
         return True
 
     def helper(self, path, body=None, timeout=90):
@@ -956,12 +966,15 @@ class Agent:
                 self.api_post("/report", {"device_id": self.device, "event": "quiz_left", "quiz_id": quiz,
                                           "student": self.student, "source": "agent", "detail": reason})
         log("UNLOCKED (%s)%s" % (reason, " - helper did not confirm, retrying" if self.pending else ""))
-        # A Firefox started during the quiz read the quiz policies at start and keeps them until it restarts.
+        if not self.pending: self.firefox_note()   # held / not confirmed: said once AI is really back
+        self.locked, self.quiz, self.url, self.missing_since = False, None, None, None
+
+    def firefox_note(self):
+        """A Firefox started during the quiz read the quiz policies at start and keeps them until it restarts."""
         try:
             if not developer_mode() and gecko_pids(ps_procs(), self.quiz_app):
                 dialog("AI is unlocked. Restart Firefox to get its AI features back.")
         except Exception: pass
-        self.locked, self.quiz, self.url, self.missing_since = False, None, None, None
 
     def adopt(self, st, present):
         """The helper is locked but this agent is not (agent restarted, or the helper resumed a lock
@@ -1080,6 +1093,7 @@ class Agent:
                 self.pending_try = now
                 if self.send_unlock(*self.pending):
                     log("pending unlock confirmed (%s)" % self.pending[1]); self.pending = None
+                    self.firefox_note()
                 return
             # Unlocked here: make sure the helper is not still locked (a lost unlock, a resumed lock).
             if now - self.last_check > 10:

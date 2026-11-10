@@ -176,8 +176,13 @@ function Show-Pay($r) {
     $script:PayShown = $true
     $u = [string]$r.pay.url; if (-not ($u.StartsWith("https://lockqz.com/") -or $u.StartsWith("https://lockqz.pages.dev/"))) { $u = "https://lockqz.com/pay" }
     try { Start-Process $u } catch {}
-    $amt = if ($r.pay.amount) { $r.pay.amount } else { 5 }
-    Show-Message ("Pay `$$amt for LOCKqz this semester to get the quiz password.`n`nMemo:  " + $r.pay.code + "`n`nThe payment page is open. LOCKqz shows the password here as soon as your payment arrives.")
+    # Every way at its own price ("$200 by Zelle, or $210 by card or Venmo") and the memo for Zelle / Venmo; an older server sends one amount.
+    $line = [string]$r.pay.line
+    if ($line.Trim()) {
+      $t = "Pay for LOCKqz this semester to get the quiz password: " + $line.Trim().TrimEnd(".") + "."
+      if ($r.pay.code -and ($r.pay.zelle -or $r.pay.venmo)) { $t += "`n`nMemo for Zelle or Venmo:  " + $r.pay.code }
+    } else { $t = "Pay `$" + [string]$r.pay.amount + " for LOCKqz this semester to get the quiz password.`n`nMemo:  " + $r.pay.code }
+    Show-Message ($t + "`n`nThe payment page is open. LOCKqz shows the password here as soon as your payment arrives.")
   }
   return $true
 }
@@ -597,7 +602,11 @@ while ($true) {
     # An unlock the helper did not confirm is retried every 5 s until it is (AI must come back).
     if ($Pending -and (-not $quizWin) -and (([DateTime]::UtcNow - $PendingAt).TotalSeconds -ge 5)) {
       $PendingAt = [DateTime]::UtcNow
-      if (Send-Unlock $Pending.quiz $Pending.reason) { Log "UNLOCKED on retry ($($Pending.reason))"; $Pending = $null }
+      if (Send-Unlock $Pending.quiz $Pending.reason) {
+        Log "UNLOCKED on retry ($($Pending.reason))"
+        if (($FirefoxFamily -notcontains [string]$Pending.proc) -and (@($wins | Where-Object { $FirefoxFamily -contains $_.Proc }).Count -gt 0)) { Show-Message "AI is unlocked. Restart Firefox to get its AI features back." }
+        $Pending = $null
+      }
     }
     if (-not $Locked) {
       if ($quizWin -and -not $Capped.ContainsKey($openId)) {
@@ -679,9 +688,8 @@ while ($true) {
       if ($reason -and $Locked) {
         # The helper reports the unlock (signed) with this reason; quiz_left / quiz_tab_closed are also
         # reported as "quiz_left" by the helper. Not confirmed -> retried until it is.
-        if (-not (Send-Unlock $Quiz $reason)) { $Pending = @{ quiz = $Quiz; reason = $reason }; $PendingAt = [DateTime]::UtcNow; Log "unlock not confirmed ($reason) - will retry" }
-        # A Firefox started during the quiz keeps the quiz policies until it restarts.
-        if (($FirefoxFamily -notcontains $QuizProc) -and (@($wins | Where-Object { $FirefoxFamily -contains $_.Proc }).Count -gt 0)) { Show-Message "AI is unlocked. Restart Firefox to get its AI features back." }
+        if (-not (Send-Unlock $Quiz $reason)) { $Pending = @{ quiz = $Quiz; reason = $reason; proc = $QuizProc }; $PendingAt = [DateTime]::UtcNow; Log "unlock not confirmed ($reason) - will retry" }
+        elseif (($FirefoxFamily -notcontains $QuizProc) -and (@($wins | Where-Object { $FirefoxFamily -contains $_.Proc }).Count -gt 0)) { Show-Message "AI is unlocked. Restart Firefox to get its AI features back." }   # Firefox keeps the quiz policies until it restarts (said once AI is really back)
         Log "UNLOCKED ($reason)"; Clear-Quiz
         $LastCheck = [DateTime]::UtcNow
       } elseif ($Locked -and (-not $HelperOk) -and (([DateTime]::UtcNow - $LastBeat).TotalSeconds -gt $Beat)) {

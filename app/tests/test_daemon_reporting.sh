@@ -82,6 +82,7 @@ class H(BaseHTTPRequestHandler):
             t = LOCKS.get((dev, lid))
             if t and now() - t < 60:
                 if qi and qi.group(1) == "33333": return self.reply(403, {"reason": "not started", "start": iso(now() + 600)})
+                if qi and qi.group(1) == "77777": return self.reply(200, {"password": None, "reason": "not_protected"})   # a class not using LOCKqz
                 LOCKS[(dev, lid)] = now()   # C1: a signed /password refreshes the lock row itself
                 end = iso(now() - 7200) if qi and qi.group(1) == "22222" else iso(now() + 3600)
                 if qi and qi.group(1) == "66666":   # an accommodation is added mid-quiz: the server stops naming an end
@@ -451,6 +452,42 @@ curl -s -X POST -H "$UH" -H 'Content-Type: application/json' -d '{"quiz_id":"987
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "X-LOCKqz-Token: $TOKEN" -H 'Content-Type: application/json' -d '{"quiz_id":"98765-12345"}' "http://127.0.0.1:$CTRL_PORT/unlock")
 [ "$code" = 200 ] && ok "master (root) token unlocks at once (installer tests, admin)" || bad "root unlock answered $code"
 kill $DPID9 $MPID9 2>/dev/null
+
+echo "T19 (10 Nov) the 10-minute 'server unreachable' wait starts again for every quiz"
+CTRL_PORT=$(free_port); DEAD=$(free_port); mkdir -p "$TMP/j"; cp "$APP/mac/blocklist.txt" "$TMP/j/"; printf %s "$TOKEN" > "$TMP/j/helper.token"
+printf '{ "port": %s, "api_base": "http://127.0.0.1:%s/api", "device_id": "itest-wait" }\n' "$CTRL_PORT" "$DEAD" > "$TMP/j/config.json"
+echo "{\"console\": $SUID, \"alive\": [$SUID]}" > "$TMP/j/sessions.json"
+run_d "$TMP/j" "$CTRL_PORT" LOCKQZ_TEST_SESSIONS="$TMP/j/sessions.json"; DPID10=$DPID_
+sleep 6
+UH="X-LOCKqz-Token: $(cat "$TMP/j/tokens/$SUID" 2>/dev/null)"
+curl -s -X POST -H "$UH" -H 'Content-Type: application/json' -d '{"quiz_id":"98765-1"}' "http://127.0.0.1:$CTRL_PORT/lock" >/dev/null
+code=$(curl -s -o /dev/null -w '%{http_code}' -m 60 -X POST -H "$UH" -H 'Content-Type: application/json' -d '{"quiz_id":"98765-1","reason":"quiz_submitted"}' "http://127.0.0.1:$CTRL_PORT/unlock")
+[ "$code" = 202 ] && [ "$(stj '"ask_fail_since" in s')" = True ] && ok "server unreachable: the unlock waits (202) and the wait has started" || bad "unreachable server: unlock answered $code, $(stj 's')"
+curl -s -o /dev/null -X POST -H "X-LOCKqz-Token: $TOKEN" -H 'Content-Type: application/json' -d '{"quiz_id":"98765-1"}' "http://127.0.0.1:$CTRL_PORT/unlock"
+[ "$(stj 's["state"]=="unlocked" and "ask_fail_since" not in s and "hold_until" not in s and not s.get("release_pending")')" = True ] && ok "quiz over: its wait and hold are forgotten" || bad "left after the unlock: $(stj 's')"
+curl -s -X POST -H "$UH" -H 'Content-Type: application/json' -d '{"quiz_id":"98765-2"}' "http://127.0.0.1:$CTRL_PORT/lock" >/dev/null
+[ "$(stj 's["state"]=="locked" and "ask_fail_since" not in s and "hold_until" not in s and not s.get("release_pending")')" = True ] && ok "the next quiz starts with no wait carried over" || bad "carried into the next quiz: $(stj 's')"
+code=$(curl -s -o /dev/null -w '%{http_code}' -m 60 -X POST -H "$UH" -H 'Content-Type: application/json' -d '{"quiz_id":"98765-2","reason":"quiz_left"}' "http://127.0.0.1:$CTRL_PORT/unlock")
+[ "$code" = 202 ] && ok "next quiz, server unreachable: waits again from the start" || bad "next quiz unlock answered $code"
+kill $DPID10 2>/dev/null
+
+echo "T20 (10 Nov) a quiz in a class not using LOCKqz: AI comes back at once, nothing reported"
+CTRL_PORT=$(free_port); M11=$(free_port); LOG11="$TMP/reports11.log"; mkdir -p "$TMP/k"; cp "$APP/mac/blocklist.txt" "$TMP/k/"; printf %s "$TOKEN" > "$TMP/k/helper.token"
+printf '{ "port": %s, "api_base": "http://127.0.0.1:%s/api", "device_id": "itest-np" }\n' "$CTRL_PORT" "$M11" > "$TMP/k/config.json"
+echo "{\"console\": $SUID, \"alive\": [$SUID]}" > "$TMP/k/sessions.json"
+python3 "$TMP/mock.py" "$M11" "$LOG11" 0 & MPID11=$!
+run_d "$TMP/k" "$CTRL_PORT" LOCKQZ_TEST_SESSIONS="$TMP/k/sessions.json"; DPID11=$DPID_
+sleep 6
+UH="X-LOCKqz-Token: $(cat "$TMP/k/tokens/$SUID" 2>/dev/null)"
+curl -s -X POST -H "$UH" -H 'Content-Type: application/json' -d '{"quiz_id":"98765-77777"}' "http://127.0.0.1:$CTRL_PORT/lock" >/dev/null; sleep 2
+r=$(curl -s -w ' %{http_code}' -X POST -H "$UH" -H 'Content-Type: application/json' -d '{"url":"https://usc.brightspace.com/d2l/lms/quizzing/user/quiz_summary.d2l?qi=77777&ou=98765"}' "http://127.0.0.1:$CTRL_PORT/password")
+echo "$r" | grep -q '"reason": "not_protected"' && echo "$r" | grep -q ' 200$' && ok "the agent is told 'not_protected' (was a bare 502: the student stayed locked for the whole quiz)" || bad "password answer: $r"
+[ "$(stj 's["state"]=="unlocked" and s.get("capped_quiz")=="98765-77777"')" = True ] && ok "AI back at once; the quiz is not re-locked while its page stays open" || bad "after not_protected: $(stj 's')"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$UH" -H 'Content-Type: application/json' -d '{"quiz_id":"98765-77777","reason":"not_protected"}' "http://127.0.0.1:$CTRL_PORT/unlock"); sleep 1
+[ "$code" = 200 ] && ! grep -q '"event": "unlock"' "$LOG11" && ok "the agent's follow-up unlock is answered; no unlock is reported for a class not using LOCKqz" || bad "unlock $code; reports: $(grep -c '"event": "unlock"' "$LOG11")"
+r=$(curl -s -w ' %{http_code}' -X POST -H "$UH" -H 'Content-Type: application/json' -d '{"op":"google_start"}' "http://127.0.0.1:$CTRL_PORT/verify")
+echo "$r" | grep -q ' 200$' && grep -q '"op": "google_start"' "$LOG11" && ok "the one-click Google setup link is asked of the server, signed (was 'bad op': Google sign-in never showed)" || bad "google_start: $r"
+kill $DPID11 $MPID11 2>/dev/null
 CTRL_PORT=$CTRL1
 echo ""
 echo "RESULT: $pass passed, $fail failed"

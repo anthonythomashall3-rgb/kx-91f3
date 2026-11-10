@@ -628,4 +628,23 @@ U6 = GUI([])
 A.setup_identity(evilserver, U6, "", None, {})
 ok("a link to any other site is never opened") if not U6.opened and U6.asked and "school email" in U6.asked[0][0] else bad("evil link %r" % U6.opened)
 
+_section(r"""
+print("T22 (10 Nov) a held unlock never says 'AI is unlocked'; it is said once AI is really back")
+class HH(FakeHelper):
+    def __init__(self): FakeHelper.__init__(self); self.hold = 1
+    def __call__(self, path, body=None, timeout=90):
+        if path == "/unlock" and self.hold:
+            self.hold -= 1; self.calls.append((path, body)); return {"ok": False, "state": "locked", "pending": "brightspace"}
+        return FakeHelper.__call__(self, path, body, timeout)
+msgs = []; A.dialog = lambda m, *a, **k: msgs.append(m)
+A.ps_procs = lambda: [(11, 5, "/Applications/Firefox.app/Contents/MacOS/firefox")]
+A.close_pids = lambda pids: bool(pids)
+g = A.Agent(); h = HH(); g.helper = h; g.verified = True; g.ready_told = True
+T(g, [tab(ATT)]); msgs[:] = []
+T(g, [tab(SUBM)])
+ok("held: the hold message, no 'AI is unlocked'") if g.pending and any("stays off" in m for m in msgs) and not any("AI is unlocked" in m for m in msgs) else bad("msgs %r pending %r" % (msgs, g.pending))
+g.pending_try = 0; T(g, [])
+ok("released: 'AI is unlocked. Restart Firefox ...' once") if g.pending is None and sum("AI is unlocked" in m for m in msgs) == 1 else bad("msgs %r pending %r" % (msgs, g.pending))
+""")
+
 print(""); print(f"RESULT: {passed} passed, {failed} failed"); sys.exit(0 if failed == 0 else 1)
