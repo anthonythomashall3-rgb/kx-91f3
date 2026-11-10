@@ -46,7 +46,8 @@
 
   // ---- open / close ----
   function isOpen() { return !menu.hidden; }
-  function open() { menu.hidden = false; btn.setAttribute("aria-expanded", "true"); render(); var f = menu.querySelector("input,button,a"); if (f) f.focus(); }
+  // Reopening after a failed load (no connection) tries again instead of showing the old error.
+  function open() { if (state.step === "in" && !state.data && !state.busy) state.msg = ""; menu.hidden = false; btn.setAttribute("aria-expanded", "true"); render(); var f = menu.querySelector("input,button,a"); if (f) f.focus(); }
   function close(back) { menu.hidden = true; btn.setAttribute("aria-expanded", "false"); state.confirm = null; if (back) btn.focus(); }
   btn.addEventListener("click", function () { isOpen() ? close(false) : open(); });
   document.addEventListener("keydown", function (e) { if ((e.key === "Escape" || e.key === "Esc") && isOpen()) { e.preventDefault(); close(true); } });

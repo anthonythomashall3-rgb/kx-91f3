@@ -69,6 +69,7 @@ run "Professor first visit: names from the class list, Chrome-only set-up on oth
 run "Professors confirmed by their verification email (no admin step; students and taken classes refused); welcome email for accounts that pay (real Chromium)" node --no-warnings test_prof_confirm.mjs
 run "Bug sweep 4: student install emails name the fee and every way to pay, course codes students know (no 20263_14792), renewal email prices" node --no-warnings test_sweep4.mjs
 run "Bug sweep 7: the apps' unpaid message names every way at its own price (never the 180-dollar base)" node --no-warnings test_sweep7.mjs
+run "Bug sweep 8: card renewals never within 7 days of the card's own payment, partial refunds, held unlocks when D1 is full, account panel retry" node --no-warnings test_sweep8.mjs
 run "Microsoft Store button by itself + automatic Store submissions; Firefox package signed by Mozilla" node --no-warnings test_store_ff.mjs
 run "Apple Developer ID: Mac installer signing + notarization wiring, signed package never replaced" bash test_signing_mac.sh
 run "Download page on a Mac: Apple-signed installer = one download, command one click away (real Chromium)" node --no-warnings test_download_mac.mjs

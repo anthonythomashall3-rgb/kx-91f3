@@ -111,6 +111,10 @@ const laToday = () => {
   if (LA_FMT) { const p = {}; for (const x of LA_FMT.formatToParts(new Date(Date.now()))) p[x.type] = x.value; if (p.year && p.month && p.day) return `${p.year}-${p.month}-${p.day}`; }
   return new Date(Date.now() - 8*3600000).toISOString().slice(0,10);
 };
+// The Pacific date (YYYY-MM-DD) of a moment given as ISO text or ms; null when it is not a date.
+const laDayOf = t => { const ms = typeof t === "number" ? t : Date.parse(String(t || "")); if (isNaN(ms)) return null;
+  if (LA_FMT) { const p = {}; for (const x of LA_FMT.formatToParts(new Date(ms))) p[x.type] = x.value; if (p.year && p.month && p.day) return `${p.year}-${p.month}-${p.day}`; }
+  return new Date(ms - 8*3600000).toISOString().slice(0,10); };
 // A real calendar date "YYYY-MM-DD" (rejects "12/31/2026", "2026-02-31", "tomorrow").
 const isDate = s => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && (() => { const d = new Date(s + "T00:00:00Z"); return !isNaN(d) && d.toISOString().slice(0,10) === s; })();
 // Optional text field from a client body -> string or null (never an object: D1 would 500 on it).
@@ -1513,16 +1517,23 @@ export async function onRequest(context) {
     const paidFor = async rows => { const m = new Map(), codes = [...new Set(rows.map(r => r.code).filter(Boolean))];
       for (const part of chunk(codes, 98)) (await db.prepare(`SELECT code, COALESCE(SUM(${CREDIT()}),0) AS s FROM payments WHERE code IN (${placeholders(part.length)}) AND term=? AND ${COUNTS} GROUP BY code`).bind(...part, R).all()).results.forEach(r => m.set(r.code, Number(r.s)));
       return m; };
-    const keepUntil = fmtDay(termEndOf(curTerms()[0]));
+    // A card is never billed for the next term sooner than RENEW_LEAD days after it last paid (the date the account
+    // page shows): a student who pays for this term by card inside the renewal window (from ~23 Nov for Spring) is
+    // not charged again the same day, or the same week.
+    const lastCard = async rows => { const m = new Map(), codes = [...new Set(rows.map(r => r.code).filter(Boolean))];
+      for (const part of chunk(codes, 98)) (await db.prepare(`SELECT code, MAX(received_at) AS at FROM payments WHERE code IN (${placeholders(part.length)}) AND via='stripe-card' AND ${COUNTS} GROUP BY code`).bind(...part).all()).results.forEach(r => m.set(r.code, r.at));
+      return m; };
+    const notBefore = at => { const d = at ? laDayOf(at) : null; return d ? dayAdd(d, RENEW_LEAD) : ""; };
+    const latest = (...days) => days.reduce((a, b) => (b || "") > a ? b : a, "");
     // 1) Arm each saved card for this term's renewal. No reminder email (Anthony 27 Oct -- not required). The
     //    row is just scheduled: state 'reminded' here only means "armed for charge" (the charge step reads it).
     if (day <= dayAdd(termStartOf(R), 7)) {
       const rows = (await db.prepare("SELECT c.email AS email, s.code AS code FROM card_renew c JOIN pay_codes_students s ON s.email=c.email WHERE c.autorenew=1 AND c.pm IS NOT NULL AND (c.rterm IS NULL OR c.rterm<>?) LIMIT 200").bind(R).all()).results;
-      const paid = await paidFor(rows);
+      const paid = await paidFor(rows), last = await lastCard(rows);
       for (const r of rows) {
         const got = paid.get(r.code) || 0;
         if (FULL(got, STUDENT_FEE)) { acts.push(db.prepare("UPDATE card_renew SET rterm=?, state='paid', updated_at=? WHERE email=?").bind(R, t, r.email)); out.paid++; continue; }
-        const amt = stripeCents("student", "card", feeC - Math.round(got * 100)), on = renewDayOf(R) > day ? renewDayOf(R) : day;
+        const amt = stripeCents("student", "card", feeC - Math.round(got * 100)), on = latest(renewDayOf(R), day, notBefore(last.get(r.code)));
         acts.push(db.prepare("UPDATE card_renew SET rterm=?, state='reminded', charge_on=?, amount=?, reminded_at=?, tries=0, fail_day=NULL, fail_msg=NULL, pi=NULL, updated_at=? WHERE email=?").bind(R, on, amt, t, t, r.email));
         out.armed = (out.armed || 0) + 1;
       }
@@ -1531,10 +1542,13 @@ export async function onRequest(context) {
     // 2) Charges that are due (at most once a day after a failure).
     const due = (await db.prepare("SELECT c.email AS email, c.customer AS customer, c.pm AS pm, c.brand AS brand, c.last4 AS last4, c.tries AS tries, s.code AS code FROM card_renew c JOIN pay_codes_students s ON s.email=c.email WHERE c.autorenew=1 AND c.rterm=? AND c.state IN ('reminded','failed') AND c.charge_on<=? AND (c.fail_day IS NULL OR c.fail_day<?) AND COALESCE(c.tries,0)<? AND c.pm IS NOT NULL AND c.customer IS NOT NULL LIMIT 10")
       .bind(R, day, day, RENEW_TRIES).all()).results;
-    const paid2 = await paidFor(due);
+    const paid2 = await paidFor(due), last2 = await lastCard(due);
     for (const r of due) {
       const got = paid2.get(r.code) || 0;
       if (FULL(got, STUDENT_FEE)) { acts.push(db.prepare("UPDATE card_renew SET state='paid', updated_at=? WHERE email=?").bind(t, r.email)); out.paid++; continue; }
+      // Paid by card in the last RENEW_LEAD days (a card armed before that payment): the charge moves to that day.
+      const nb = notBefore(last2.get(r.code));
+      if (nb > day) { acts.push(db.prepare("UPDATE card_renew SET charge_on=?, updated_at=? WHERE email=?").bind(nb, t, r.email)); out.later = (out.later || 0) + 1; continue; }
       const amt = stripeCents("student", "card", feeC - Math.round(got * 100)), tries = Number(r.tries) || 0;
       const f = new URLSearchParams({ amount: String(amt), currency: "usd", customer: r.customer, payment_method: r.pm, off_session: "true", confirm: "true",
         description: "LOCKqz " + r.code + " renewal", "metadata[code]": r.code, "metadata[kind]": "student", "metadata[term]": R, "metadata[renew]": "1" });
@@ -1964,7 +1978,8 @@ export async function onRequest(context) {
         else st.push(db.prepare("UPDATE locks SET last_lock=?, helper_seen=?, signed=?, ip=COALESCE(?,ip) WHERE device_id=? AND quiz_id=? AND last_lock<?").bind(now(), now(), signed, clientIp, device_id, qidOk, new Date(Date.now() - 20000).toISOString()));   // a beat storm writes nothing (20 s floor)
       }
       if (purgeDue()) st.push(...purgeStmts());   // retention without a Sync (same batch: no extra query)
-      await runBatches(db, st);
+      // A held block is answered (hold:true) even when D1's daily writes are used up (finals week on the free plan).
+      try { await runBatches(db, st); } catch (e) { if (!(hold && WRITE_CAP(e))) throw e; }
       if (hold) return json({ ok: true, hold: true, beat_s: 30 });   // keep the block; beat every 30 s until released
       // C9: the server knows this student submitted (professor's Sync tab) or the quiz is over -> tell
       // the helper to unlock now. Only for the helper's own signed lock/heartbeat (old clients ignore it).
@@ -2647,7 +2662,18 @@ export async function onRequest(context) {
       }
       if (["charge.refunded", "charge.dispute.created"].includes(ev.type)) {
         const pi = String(o.payment_intent || "");
-        const pr = pi ? await db.prepare("SELECT code FROM payments WHERE txn=?").bind("stripe:" + pi).first() : null;
+        const pr = pi ? await db.prepare("SELECT code, amount, matched FROM payments WHERE txn=?").bind("stripe:" + pi).first() : null;
+        // A PARTIAL refund (charge.refunded, refunded:false) gives back only part: the payment keeps what LOCKqz still
+        // holds, and access stays only while that covers the fee (the pay page asks for the rest). A full refund or
+        // a dispute voids it.
+        const kept = ev.type === "charge.refunded" && o.refunded === false && Number(o.amount) > 0 && Number(o.amount_refunded) > 0
+          ? Math.round(Number(o.amount) - Number(o.amount_refunded)) / 100 : 0;
+        if (pr && kept > 0 && pr.matched !== "void") {
+          await db.prepare("UPDATE payments SET amount=?, note=substr(COALESCE(note,'') || ' [partly refunded]', 1, 400) WHERE txn=? AND COALESCE(matched,'')<>'void'")
+            .bind(Math.min(Number(pr.amount) || kept, kept), "stripe:" + pi).run();
+          await unsettle(pr.code);
+          return json({ ok: true, voided: false, kept });
+        }
         if (pr) { await db.prepare("UPDATE payments SET matched='void' WHERE txn=?").bind("stripe:" + pi).run(); await unsettle(pr.code);
           // Money pulled back = no more automatic charges on that card (the student can turn it back on).
           if (isStu(pr.code)) await db.prepare("UPDATE card_renew SET autorenew=0, updated_at=? WHERE email=(SELECT email FROM pay_codes_students WHERE code=?)").bind(now(), pr.code).run(); }
