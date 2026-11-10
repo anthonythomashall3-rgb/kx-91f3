@@ -379,7 +379,7 @@ d.run(`ME={name:"P",email:"p@usc.edu",verified:true,active:true}; BS={courses:[{
 const big = d.run("viewHome()"), mails = [...big.matchAll(/href="(mailto:[^"]*)"/g)].map(m => m[1]);
 const src = readFileSync(join(CF, "public", "dashboard.html"), "utf8");
 check("low big class has its Email students button (no address list baked into the page)", /onclick="emailClass\(/.test(big) && mails.length === 0 && !big.includes("student.number1@"), big.length);
-check("low a class too big for a mailto link: addresses copied for Bcc (or shown to copy), mailto under 1900 characters", /full\.length <= 1900/.test(src) && /navigator\.clipboard\.writeText\(d\.to\.join/.test(src) && /showAddresses\(d\.to\)/.test(src));
+check("low a class too big for a mailto link: addresses copied for Bcc (or shown to copy), mailto under 1900 characters", /appB\.length <= 1900/.test(src) && /gmailB\.length <= 7000/.test(src) && /copy\(all,/.test(src) && /navigator\.clipboard\.writeText\(t\)/.test(src) && /showAddresses\(d\.to\)/.test(src));
 
 console.log("12 student pay page");
 w = await world(); let p = payTab(w, "al@usc.edu"); await w.idle();

@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head>
 
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8"><link rel="icon" type="image/png" href="/icon128.png"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>LOCKqz</title>
 <style>
   :root{--usc:#990000;--ink:#1a1a1a;--mute:#5c5952;--faint:#8a877f;--line:#e6e3dc;--bg:#f6f5f2;--ok:#1a7f37;--okbg:#e3f3e8;--warn:#b45309;--warnbg:#fff6e8;--warnline:#f3dcb3;--off:#c9c5bb}
@@ -255,7 +255,7 @@ async function boot(){
   $("who").insertAdjacentHTML("afterbegin", esc(m.name||m.email));
   if(m.admin) $("m-admin").classList.remove("hide");
   await refresh(); route();
-  if(m.trial && typeof lqWelcome === "function") lqWelcome(m.email);
+  if(m.trial && (m.admin || welcomed()) && typeof lqWelcome === "function") lqWelcome(m.email);
   if(!AUTO) AUTO = setInterval(autoRefresh, 900000);
 }
 async function refresh(){
@@ -306,13 +306,19 @@ let SYNCHELPON = false;
 // window messages tagged lqzExt; this page hands it the Sync key. Store links: filled in once published.
 const EXT = () => { try { return !!document.documentElement.dataset.lqzExt; } catch { return false; } };
 const postKey = () => { if (EXT() && SYNCKEY) window.postMessage({ lqz: "ext-key", key: SYNCKEY }, location.origin); };
-const BROWSER = (() => { const u = navigator.userAgent || ""; return /Edg\//.test(u) ? "edge" : /Firefox\//.test(u) ? "firefox" : /Chrome\//.test(u) ? "chrome" : "other"; })();
-const BROWSER_NAME = { edge: "Edge", firefox: "Firefox", chrome: "Chrome", other: "your browser" }[BROWSER];
+// A phone or tablet cannot add a browser extension: set-up happens on the professor's computer.
+const MOBILE = (() => { try { return /iPhone|iPad|iPod|Android|Mobi/i.test(navigator.userAgent || "") || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1); } catch { return false; } })();
+// Firefox only once the Mozilla-signed package is on the site (FF_XPI); until then Firefox is told to use Chrome.
+const BROWSER = (() => { const u = navigator.userAgent || ""; return MOBILE ? "other" : /Edg\//.test(u) ? "edge" : /Firefox\//.test(u) ? (FF_XPI ? "firefox" : "other") : /Chrome\//.test(u) ? "chrome" : "other"; })();
+const pl = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+const BROWSER_NAME = { edge: "Edge", firefox: "Firefox", chrome: "Chrome", other: "Chrome" }[BROWSER];
 const EXT_FROM_STORE = () => !!EXT_STORE[BROWSER.toUpperCase()];
 const EXT_URL = () => EXT_STORE[BROWSER.toUpperCase()] || (BROWSER === "firefox" && FF_XPI ? INSTALL + "/download/lockqz-prof-firefox.xpi" : "") || EXT_ZIP[BROWSER] || EXT_ZIP.other;
 const EXT_PAGE = { edge: "edge://extensions", firefox: "about:debugging#/runtime/this-firefox", chrome: "chrome://extensions", other: "chrome://extensions" }[BROWSER];
 // Safari (and anything else): LOCKqz's extension is for Chrome, Edge and Firefox.
-const EXTBTN = () => BROWSER === "other" ? `<span>LOCKqz works in Chrome, Edge or Firefox. <a href="https://www.google.com/chrome/" target="_blank" rel="noopener">Get Chrome</a>, then open this page there.</span>` :
+const GET_CHROME = `<a class="btn prime" href="https://www.google.com/chrome/" target="_blank" rel="noopener">Get Chrome</a>`;
+const OTHER_TXT = () => MOBILE ? "Open this page on your computer, in Chrome." : "Open this page in Chrome.";
+const EXTBTN = () => BROWSER === "other" ? `<span>${OTHER_TXT()}</span>${MOBILE ? "" : " " + GET_CHROME}` :
   `<a class="btn prime" href="${esc(EXT_URL())}" target="_blank" rel="noopener">Add LOCKqz to ${BROWSER_NAME}</a>` +
   (BROWSER === "firefox" && FF_XPI ? `<span class="muted" style="display:block;margin-top:6px;font-size:13px"><b>Continue to Installation</b> → <b>Add</b>.</span>` :
    EXT_FROM_STORE() ? `<span class="muted" style="display:block;margin-top:6px;font-size:13px">${BROWSER === "edge" ? "<b>Allow extensions from other stores</b> → " : ""}<b>Add to Chrome</b> → <b>Add extension</b>. If Chrome warns, click <b>Continue to install</b>.</span>` : `<span class="muted" style="display:block;margin-top:6px;font-size:13px">Unzip it, open <b>${EXT_PAGE}</b>, turn on Developer mode, click <b>${BROWSER === "firefox" ? "Load Temporary Add-on" : "Load unpacked"}</b> and pick the folder.</span>`);
@@ -436,11 +442,11 @@ function viewHome(){
   const allOn = all.every(s=>s.on), allOff = prot===0 && !all.some(s=>s.on);
   const synced = oldestSync();
   const inprog = all.flatMap(s=>s.inprog.map(q=>({q, c: BS.courses[all.indexOf(s)]})));
-  const headline = exams===0 ? (allOff ? "LOCKqz is off for your classes." : "No upcoming exams in Brightspace yet.") : allOff ? "LOCKqz is off. Students can use AI during your exams." : setN===exams ? `LOCKqz is on for all ${exams} of your upcoming exam${exams===1?"":"s"}.` : `LOCKqz is on for ${setN} of your ${exams} upcoming exams.${waitN?` ${waitN} waiting to be set in Brightspace.`:""}`;
+  const headline = exams===0 ? (allOff ? "LOCKqz is off for your classes." : "No upcoming exams in Brightspace yet.") : allOff ? "LOCKqz is off. Students can use AI during your exams." : setN===exams ? (exams===1 ? "LOCKqz is on for your upcoming exam." : exams===2 ? "LOCKqz is on for both of your upcoming exams." : `LOCKqz is on for all ${exams} of your upcoming exams.`) : `LOCKqz is on for ${setN} of your ${pl(exams, "upcoming exam")}.${waitN?` ${waitN} waiting to be set in Brightspace.`:""}`;
   h += `<section class="card band" aria-label="Status">
     <div style="display:flex;align-items:center;gap:20px;min-width:0">
       <div class="orb ${allOff?'off':''}">${SHIELD(allOff?'#6b6861':'#1a7f37',30)}</div>
-      <div><h1>${headline}</h1><p class="sub">Synced with Brightspace ${ago(synced)} · ${BS.courses.length} class${BS.courses.length===1?"":"es"} · ${students} students${pendingSync()?"":" · nothing for you to do"}</p>
+      <div><h1>${headline}</h1><p class="sub">Synced with Brightspace ${ago(synced)} · ${BS.courses.length} class${BS.courses.length===1?"":"es"} · ${pl(students, "student")}${pendingSync()?"":" · nothing for you to do"}</p>
         <div class="sub" style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">${SYNCBTN()}</div></div>
     </div>
     <button class="sw big" aria-pressed="${allOn}" aria-label="LOCKqz on for all classes" onclick="setAll(${!allOn})"><b>${allOn?"On":"Off"}</b><i></i></button>
@@ -457,13 +463,13 @@ function viewHome(){
     const s = all[i], pct = c.students.length ? Math.round(100*s.ready/c.students.length) : 0;
     h += `<article class="card cls ${s.on?'':'off'}">
       <div class="top">
-        <a href="#class/${esc(c.ou)}"><span class="nm">${esc(cname(c))}</span><span class="sm">${esc(c.code||"")}${c.code?" · ":""}${c.students.length} students</span></a>
+        <a href="#class/${esc(c.ou)}"><span class="nm">${esc(cname(c))}</span><span class="sm">${esc(c.code||"")}${c.code?" · ":""}${pl(c.students.length, "student")}</span></a>
         <button class="sw" aria-pressed="${s.on}" aria-label="LOCKqz on for this class" data-ou="${esc(c.ou)}" onclick="setClass(this.dataset.ou,${!s.on})"><b>${s.on?"On":"Off"}</b><i></i></button>
       </div>
       <div class="nx">${s.next ? `Next exam: <b>${esc(s.next.name)}</b> · ${when(s.next.start_date)}` : s.cur.length ? `${s.cur.length} upcoming exam${s.cur.length===1?"":"s"}` : (s.on ? "No upcoming exams · new ones are protected by themselves" : "No upcoming exams · LOCKqz is off")}</div>
-      ${s.missing.length ? `<div class="note warn"><span><b>${s.ready} of ${c.students.length}</b> students ready${s.unpaid.length?" · "+s.unpaid.length+" installed, not paid":""}${s.next?" · "+s.missing.length+" not ready for "+esc(s.next.name):""}.</span>${mailBtns(c,s)}</div>`
-        : `<div class="note ok"><span>${c.students.length?`<b>${s.ready} of ${c.students.length}</b> students ready. Every student has LOCKqz.`:"No students on the Brightspace roster yet."}</span>${mailBtns(c,s)}</div>`}
-      ${BS.mail_on ? `<label class="rem"><input type="checkbox" data-ou="${esc(c.ou)}"${c.reminders===false?"":" checked"} onchange="setReminders(this.dataset.ou,this.checked,this)"> Remind students without LOCKqz by email 2 days and 3 hours before each exam</label>` : ""}
+      ${s.missing.length ? `<div class="note warn"><span><b>${s.ready} of ${c.students.length}</b> student${c.students.length===1?"":"s"} ready${s.next?" for "+esc(s.next.name):""}${s.unpaid.length?" · "+s.unpaid.length+" installed, not paid":""}.</span>${mailBtns(c,s)}</div>`
+        : `<div class="note ok"><span>${c.students.length?`<b>${s.ready} of ${c.students.length}</b> student${c.students.length===1?"":"s"} ready. Every student has LOCKqz.`:"No students on the Brightspace roster yet."}</span>${mailBtns(c,s)}</div>`}
+      ${BS.mail_on ? `<label class="rem"><input type="checkbox" data-ou="${esc(c.ou)}"${c.reminders===false?"":" checked"} onchange="setReminders(this.dataset.ou,this.checked,this)"> Remind students without LOCKqz by email 2 days and again 3 hours before each exam</label>` : ""}
     </article>`;
   });
   h += `</section>`;
@@ -481,8 +487,8 @@ function setupBlock(){
   if (done === 3) return "";
   const card = (i, t, d, act) => `<div class="step${steps[i] ? " done" : ""}"><span class="num">${steps[i] ? "✓" : i + 1}</span><span class="t">${t}</span><span class="d">${d}</span>${steps[i] ? `<span class="ok"><span class="ck" aria-hidden="true">✓</span>Done</span>` : act}</div>`;
   const store = EXT_FROM_STORE(), edge = BROWSER === "edge";
-  const ext = BROWSER === "other" ? EXTBTN() : `<a class="btn prime" href="${esc(EXT_URL())}" target="_blank" rel="noopener">Add to ${BROWSER_NAME}</a>`;
-  const extD = BROWSER === "firefox" && FF_XPI ? `<b>Continue to Installation</b> → <b>Add</b>.`
+  const ext = BROWSER === "other" ? (MOBILE ? "" : GET_CHROME) : `<a class="btn prime" href="${esc(EXT_URL())}" target="_blank" rel="noopener">Add to ${BROWSER_NAME}</a>`;
+  const extD = BROWSER === "other" ? OTHER_TXT() : BROWSER === "firefox" && FF_XPI ? `<b>Continue to Installation</b> → <b>Add</b>.`
     : !store ? `Unzip, open <b>${EXT_PAGE}</b>, turn on Developer mode, <b>${BROWSER === "firefox" ? "Load Temporary Add-on" : "Load unpacked"}</b>.`
     : `${edge ? "<b>Allow</b> other stores, then " : ""}<b>Add to Chrome</b> → <b>Add extension</b>.<br>Warning? <b>Continue to install</b>.`;
   return `<section class="card" aria-label="Set up"><h2 style="margin:0">Set up — ${done} of 3 done</h2><div class="setup">` +
@@ -509,16 +515,36 @@ async function emailClass(ou, kind, b){
   if (b) b.disabled = false;
   if (d.error) { alert(d.message || d.error); return; }
   if (!d.to || !d.to.length) { toast("Nobody to email yet"); return; }
-  const tail = `subject=${encodeURIComponent(d.subject)}&body=${encodeURIComponent(d.text)}`;
-  const full = `mailto:?bcc=${encodeURIComponent(d.to.join(","))}&${tail}`;
-  if (full.length <= 1900) { location.href = full; toast(`Your email is open with ${d.to.length} student${d.to.length===1?"":"s"} in Bcc. Press Send.`); }
-  else {
-    let copied = false; try { await navigator.clipboard.writeText(d.to.join(", ")); copied = true; } catch {}
-    location.href = `mailto:?${tail}`;
-    if (copied) toast(`${d.to.length} addresses copied. Paste them into Bcc, then press Send.`);
-    else showAddresses(d.to);
-  }
+  mailPick(d);
   setTimeout(async () => { await refresh(); route(); }, 1500);
+}
+// Where the professor writes it: Outlook (web), Gmail or the computer's mail app. Students always go in Bcc
+// (they never see each other). Outlook's web link has no Bcc, and a long list does not fit in a link: then the
+// addresses are copied and pasted into Bcc. Copy buttons work with any email.
+function mailPick(d){
+  const n = d.to.length, all = d.to.join(", "), su = encodeURIComponent(d.subject), bo = encodeURIComponent(d.text), bcc = encodeURIComponent(d.to.join(","));
+  const gmail = `https://mail.google.com/mail/?view=cm&fs=1&su=${su}&body=${bo}`, gmailB = gmail + `&bcc=${bcc}`;
+  const app = `mailto:?subject=${su}&body=${bo}`, appB = `mailto:?bcc=${bcc}&subject=${su}&body=${bo}`;
+  const opts = [["Outlook", `https://outlook.office.com/mail/deeplink/compose?subject=${su}&body=${bo}`, false],
+    ["Gmail", gmailB.length <= 7000 ? gmailB : gmail, gmailB.length <= 7000], ["Mail app", appB.length <= 1900 ? appB : app, appB.length <= 1900]];
+  const w = document.createElement("div"); w.className = "lqaddr";
+  w.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:50;padding:0 16px;overflow:auto";
+  w.innerHTML = `<div class="card" role="dialog" aria-modal="true" aria-label="Email students" style="max-width:520px;margin:10vh auto;padding:22px">
+    <h2 style="margin:0 0 4px">Email ${pl(n, "student")}</h2><p class="sub" style="margin:0 0 14px">Open your email, then press Send.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">${opts.map(([t, u, has], i) => `<a class="btn prime" data-i="${i}" href="${esc(u)}"${u.startsWith("mailto:") ? "" : ` target="_blank" rel="noopener"`}>${t}</a>`).join("")}</div>
+    <p class="sub" id="lqmh" style="margin:12px 0 0;min-height:1.2em"></p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn" data-c="to">Copy addresses</button><button class="btn" data-c="msg">Copy message</button><button class="btn" data-x="1">Done</button></div></div>`;
+  const hint = t => { w.querySelector("#lqmh").textContent = t; };
+  const copy = async (t, ok) => { try { await navigator.clipboard.writeText(t); hint(ok); return true; } catch { return false; } };
+  w.querySelectorAll("a[data-i]").forEach(a => a.addEventListener("click", async () => {
+    if (opts[+a.dataset.i][2]) { hint(`Your students are in Bcc. Press Send.`); return; }
+    if (!(await copy(all, `${pl(n, "address")} copied. Paste them into Bcc, then press Send.`))) showAddresses(d.to);
+  }));
+  w.querySelector('[data-c="to"]').onclick = async () => { if (!(await copy(all, `${pl(n, "address")} copied. Paste them into Bcc.`))) showAddresses(d.to); };
+  w.querySelector('[data-c="msg"]').onclick = () => copy(d.subject + "\n\n" + d.text, "Message copied.");
+  w.querySelector("[data-x]").onclick = () => w.remove();
+  w.addEventListener("click", e => { if (e.target === w) w.remove(); });
+  document.body.appendChild(w);
 }
 // Clipboard blocked: the addresses in a box to copy by hand.
 function showAddresses(list){
@@ -537,7 +563,7 @@ function mailBtns(c,s){
   // When it was emailed, not "everyone was emailed" (students added later were not).
   const em = c.mailed_at ? `<span class="muted" style="white-space:nowrap">Emailed ${esc(when(c.mailed_at))}</span> ` : "";
   return em + (kind === "missing"
-    ? `<button class="btn ${c.mailed_at ? "warn" : "prime"} mailbtn" data-ou="${esc(c.ou)}" data-kind="missing" onclick="emailClass(this.dataset.ou,this.dataset.kind,this)">${c.mailed_at ? `Remind the ${s.missing.length} who aren't ready` : "Email students"}</button>`
+    ? `<button class="btn ${c.mailed_at ? "warn" : "prime"} mailbtn" data-ou="${esc(c.ou)}" data-kind="missing" onclick="emailClass(this.dataset.ou,this.dataset.kind,this)">${c.mailed_at ? (s.missing.length === 1 ? "Remind the 1 who isn't ready" : `Remind the ${s.missing.length} who aren't ready`) : "Email students"}</button>`
     : `<button class="btn mailbtn" data-ou="${esc(c.ou)}" data-kind="all" onclick="emailClass(this.dataset.ou,this.dataset.kind,this)">Email students</button>`);
 }
 // Change, then re-draw from the server (so the page shows what is really saved), then say what failed.
@@ -561,7 +587,7 @@ function viewClass(ou){
     return `<li><div class="grow"><span class="t" style="color:${on?'var(--ink)':'#6b6861'}">${esc(q.name)}</span><span class="d">${q.active===0?"hidden in Brightspace · ":""}${q.start_date?when(q.start_date):"no start date"}${q.end_date?" – "+when(q.end_date):""}${live(q)?` · <a href="${lv}">in progress — watch</a>`:on?` · <a href="${lv}">watch live</a>`:""}</span></div>
       <button class="sw" aria-pressed="${on}" aria-label="Protect this exam" data-ou="${esc(ou)}" data-qi="${esc(q.qi)}" onclick="this.disabled=true;setQuiz(this.dataset.ou,this.dataset.qi,${!on})"><b class="st ${p?'warn':on?'ok':''}" style="min-width:110px;text-align:right">${on?(p?"Waiting for Brightspace":"Protected"):(p?"Off · 1 click left":"Not protected")}</b><i></i></button></li>`; };
   return `${BACK('', 'All classes')}
-  <div class="band"><div><h1 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-.015em">${esc(cname(c))}</h1><p class="sub">${esc(c.code||"")}${c.code?" · ":""}${c.students.length} students · from Brightspace, updated ${ago(c.synced_at)}</p></div>
+  <div class="band"><div><h1 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-.015em">${esc(cname(c))}</h1><p class="sub">${esc(c.code||"")}${c.code?" · ":""}${pl(c.students.length, "student")} · from Brightspace, updated ${ago(c.synced_at)}</p></div>
     <button class="sw" aria-pressed="${s.on}" aria-label="LOCKqz on for this class" data-ou="${esc(ou)}" onclick="setClass(this.dataset.ou,${!s.on})"><b>LOCKqz ${s.on?"on":"off"}</b><i></i></button></div>
   <div class="two">
     <section class="card"><div class="hrow"><h2>Exams</h2><span>every exam starts protected</span></div>
@@ -673,7 +699,7 @@ function viewConnect(){
 // ---- WELCOME (first visit after sign-up; "How LOCKqz works" in the menu) ----
 const WELKEY = () => "lockqz_welcome_" + String((ME && ME.email) || "").toLowerCase();
 const welcomed = () => { try { return !!localStorage.getItem(WELKEY()); } catch (e) { return true; } };
-function welcomeDone(){ try { localStorage.setItem(WELKEY(), "1"); } catch (e) {} nav(""); route(); }
+function welcomeDone(){ try { localStorage.setItem(WELKEY(), "1"); } catch (e) {} nav(""); route(); if (ME && ME.trial && typeof lqWelcome === "function") lqWelcome(ME.email); }
 function viewWelcome(){
   return `<section class="card wel" aria-label="Welcome" style="display:flex;flex-direction:column;gap:18px;max-width:560px;margin-left:auto;margin-right:auto">
     <div><h1 style="margin:0;font-size:26px;font-weight:700;letter-spacing:-.015em">Welcome to LOCKqz</h1>
@@ -683,6 +709,7 @@ function viewWelcome(){
       <li><b>Open Brightspace in ${BROWSER_NAME} and sign in.</b></li>
       <li><b>Email your students.</b></li>
     </ol>
+    ${BROWSER === "other" ? `<div class="note warn" style="margin:0"><span>${OTHER_TXT()}</span></div>` : ""}
     <div class="note warn" style="margin:0"><span><b>Exam day:</b> keep ${BROWSER_NAME} open and signed in to Brightspace until the exam ends.</span></div>
     <div><button class="btn prime" onclick="welcomeDone()">Got it</button></div>
   </section>`;
@@ -816,6 +843,13 @@ async function loadInvites(){ const d = await get("/invites"); const tb=document
   if(!(d.invites||[]).length) tb.innerHTML=`<tr><td colspan="5" class="muted">No invites yet.</td></tr>`; }
 async function cancelInvite(code){ if(!confirm("Cancel this invite?")) return; const d=await post("/uninvite",{code}); if(d.error){ alert(d.error); return; } if((window._ilink||"").endsWith("="+code)){ $("newinvite").innerHTML=""; window._ilink=window._icode=null; } loadInvites(); }
 
+document.addEventListener("click", e => { const m = $("menu"); if (m && m.open && !m.contains(e.target)) m.removeAttribute("open"); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") { const m = $("menu"); if (m && m.open) m.removeAttribute("open"); } });
+// Chrome adds a new extension only to pages opened after it: after "Add to Chrome", this tab reloads once when
+// the professor comes back to it, so the set-up step turns green here too.
+let EXTCLICK = 0;
+document.addEventListener("click", e => { const a = e.target && e.target.closest ? e.target.closest("a") : null; if (a && /chromewebstore\.google\.com|\/download\/lockqz-prof/.test(a.href || "")) EXTCLICK = Date.now(); }, true);
+window.addEventListener("focus", () => { if (EXTCLICK && !EXT() && Date.now() - EXTCLICK > 3000) { EXTCLICK = 0; location.reload(); } });
 // An invite link (/?invite=CODE or /dashboard?invite=CODE) opens the sign-up form with its email; without one,
 // "New here? Create an account" signs up with an emailed code.
 (async function initInvite(){

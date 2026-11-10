@@ -514,9 +514,9 @@ const STEPS_HTML = `<table role="presentation" cellspacing="0" cellpadding="0" s
 <tr><td style="padding:6px 0;font-size:15px"><b>2.</b> Open the downloaded file and follow the on-screen steps (about one minute).</td></tr>
 <tr><td style="padding:6px 0;font-size:15px"><b>3.</b> ${mailBtn(BS_URL, "Open Brightspace")} <span style="color:#5c5952">once \u2014 LOCKqz will tell you it's ready.</span></td></tr></table>
 ${P("<b>Nothing else to do, ever.</b>")}${P("<b>On exam day:</b> open the exam in Brightspace like normal. LOCKqz enters the password for you.")}`;
-const signTxt = (prof, course) => `Respectfully,\nProfessor ${prof}\n${course}`;
-const signHtml = (prof, course) => P(`Respectfully,<br>Professor ${hesc(prof)}<br><span style="color:#5c5952">${hesc(course)}</span>`);
-const studentFooter = last => `Sent by LOCKqz on behalf of Professor ${hesc(last)}. Replies go to your professor. <a href="${SITE_URL}/privacy" style="color:#8a877f">lockqz.cages.dev/privacy</a>`;
+const signTxt = (prof, course) => `Respectfully,\n${prof ? `Professor ${prof}\n` : ""}${course}`;
+const signHtml = (prof, course) => P(`Respectfully,<br>${prof ? `Professor ${hesc(prof)}<br>` : ""}<span style="color:#5c5952">${hesc(course)}</span>`);
+const studentFooter = last => `Sent by LOCKqz on behalf of ${last ? `Professor ${hesc(last)}` : "your professor"}. Replies go to your professor. <a href="${SITE_URL}/privacy" style="color:#8a877f">lockqz.com/privacy</a>`;
 // "Free for you" line for fee-exempt professors (FEE_EXEMPT): a soft box in the LOCKqz colours.
 const FREE_HTML = `<p style="margin:0 0 14px"><span style="display:inline-block;background:#fbeaea;border:1px solid #f0caca;color:#990000;font-weight:700;border-radius:8px;padding:8px 12px">LOCKqz is free for you.</span></p>`;
 const MAIL = {
@@ -543,8 +543,8 @@ const MAIL = {
   welcome({ last, storeUrl, free }) {
     const store = storeUrl || EXT_STORE_URL || (SITE_URL + "/download/lockqz-prof-chromium.zip");
     const subject = "Welcome to LOCKqz \u2014 2 steps and you're done";
-    const text = `Hi Professor ${last},\n\nYour LOCKqz account is ready.${free ? " LOCKqz is free for you." : ""} Two steps, about one minute:\n\n1. Add LOCKqz to Chrome: ${store} \u2014 click Add to Chrome, then Add extension. If Chrome says Proceed with caution, click Continue to install.\n2. Open Brightspace: ${BS_URL} \u2014 and sign in as usual. Your classes appear on your LOCKqz dashboard within a minute.\n\nFrom then on LOCKqz protects every exam in every class automatically. You never set a password.\n\nOn exam day: keep Chrome open and signed in to Brightspace on a computer that's on, until the exam ends. If Chrome is closed, students wait at the start of the exam until you open it.\n\nWhen your classes appear, click Email students on each class so students install LOCKqz before the first exam.\n\nDashboard: ${DASH_URL}\n\nRespectfully,\nThe LOCKqz Team`;
-    const html = mailWrap(P(`Hi Professor ${hesc(last)},`) + (free ? FREE_HTML : "") + P("Your LOCKqz account is ready. Two steps, about one minute:") +
+    const text = `${last ? `Hi Professor ${last},` : "Hi,"}\n\nYour LOCKqz account is ready.${free ? " LOCKqz is free for you." : ""} Two steps, about one minute:\n\n1. Add LOCKqz to Chrome: ${store} \u2014 click Add to Chrome, then Add extension. If Chrome says Proceed with caution, click Continue to install.\n2. Open Brightspace: ${BS_URL} \u2014 and sign in as usual. Your classes appear on your LOCKqz dashboard within a minute.\n\nFrom then on LOCKqz protects every exam in every class automatically. You never set a password.\n\nOn exam day: keep Chrome open and signed in to Brightspace on a computer that's on, until the exam ends. If Chrome is closed, students wait at the start of the exam until you open it.\n\nWhen your classes appear, click Email students on each class so students install LOCKqz before the first exam.\n\nDashboard: ${DASH_URL}\n\nRespectfully,\nThe LOCKqz Team`;
+    const html = mailWrap(P(last ? `Hi Professor ${hesc(last)},` : "Hi,") + (free ? FREE_HTML : "") + P("Your LOCKqz account is ready. Two steps, about one minute:") +
       `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 16px"><tr><td style="padding:6px 0;font-size:15px"><b>1.</b> ${mailBtn(store, "Add LOCKqz to Chrome")} <span style="color:#5c5952">\u2014 click <b>Add to Chrome</b>, then <b>Add extension</b>. If Chrome says <b>Proceed with caution</b>, click <b>Continue to install</b>.</span></td></tr>
 <tr><td style="padding:6px 0;font-size:15px"><b>2.</b> ${mailBtn(BS_URL, "Open Brightspace")} <span style="color:#5c5952">and sign in as usual. Your classes appear on your LOCKqz dashboard within a minute.</span></td></tr></table>` +
       P("From then on LOCKqz protects every exam in every class automatically. You never set a password.") +
@@ -558,7 +558,7 @@ const MAIL = {
     const label = courseLabel({ name: course, code });
     const subject = `${code || label}: install LOCKqz before your first exam`;
     const ex = firstExam && firstExam.name ? `First exam: ${firstExam.name}${firstExam.start_date ? ", " + mailWhen(firstExam.start_date) : ""}.` : "";
-    const text = `Hi,\n\n${label} uses LOCKqz for exams. LOCKqz blocks AI tools on your computer only while an exam is open and turns them back on when you submit. Your notes, files and the rest of the web stay available. No camera, no microphone, no recording.\n\nInstall it before the exam. If LOCKqz is not installed, the exam will not open.\n\n${STEPS_TXT}\n\n${ex ? ex + "\n\n" : ""}${signTxt(prof, label)}\n\n--\nSent by LOCKqz on behalf of Professor ${last}. Replies go to your professor. ${SITE_URL}/privacy`;
+    const text = `Hi,\n\n${label} uses LOCKqz for exams. LOCKqz blocks AI tools on your computer only while an exam is open and turns them back on when you submit. Your notes, files and the rest of the web stay available. No camera, no microphone, no recording.\n\nInstall it before the exam. If LOCKqz is not installed, the exam will not open.\n\n${STEPS_TXT}\n\n${ex ? ex + "\n\n" : ""}${signTxt(prof, label)}\n\n--\nSent by LOCKqz on behalf of ${last ? `Professor ${last}` : "your professor"}. Replies go to your professor. ${SITE_URL}/privacy`;
     const html = mailWrap(P("Hi,") + P(`<b>${hesc(label)}</b> uses LOCKqz for exams. LOCKqz blocks AI tools on your computer only while an exam is open and turns them back on when you submit. Your notes, files and the rest of the web stay available. No camera, no microphone, no recording.`) +
       P("<b>Install it before the exam.</b> If LOCKqz is not installed, the exam will not open.") + STEPS_HTML + (ex ? P(`<b>${hesc(ex)}</b>`) : "") + signHtml(prof, label), studentFooter(last));
     return { subject, text, html };
@@ -570,12 +570,12 @@ const MAIL = {
     if (unpaid) {
       const PAYLINE = `LOCKqz is installed but your semester fee is not paid \u2014 pay at ${SITE_URL} before the exam.`;
       const subject = `Reminder: ${exam}${date ? " on " + date : ""} \u2014 your LOCKqz fee is not paid`;
-      const text = `Hi,\n\n${exam} for ${label} is ${when}.\n\n${PAYLINE}\n\n${signTxt(prof, label)}\n\n--\nSent by LOCKqz on behalf of Professor ${last}. Replies go to your professor. ${SITE_URL}/privacy`;
+      const text = `Hi,\n\n${exam} for ${label} is ${when}.\n\n${PAYLINE}\n\n${signTxt(prof, label)}\n\n--\nSent by LOCKqz on behalf of ${last ? `Professor ${last}` : "your professor"}. Replies go to your professor. ${SITE_URL}/privacy`;
       const html = mailWrap(P("Hi,") + P(`<b>${hesc(exam)}</b> for ${hesc(label)} is <b>${hesc(when)}</b>.`) + P(`<b>LOCKqz is installed but your semester fee is not paid</b> \u2014 pay at <a href="${SITE_URL}" style="color:#990000">lockqz.com</a> before the exam.`) + signHtml(prof, label), studentFooter(last));
       return { subject, text, html };
     }
     const subject = `Reminder: install LOCKqz before ${exam}${date ? " on " + date : ""}`;
-    const text = `Hi,\n\nLOCKqz is not installed on your computer yet, and ${exam} for ${label} is ${when}. Without it the exam will not open.\n\n${STEPS_TXT}\n\n${signTxt(prof, label)}\n\n--\nSent by LOCKqz on behalf of Professor ${last}. Replies go to your professor. ${SITE_URL}/privacy`;
+    const text = `Hi,\n\nLOCKqz is not installed on your computer yet, and ${exam} for ${label} is ${when}. Without it the exam will not open.\n\n${STEPS_TXT}\n\n${signTxt(prof, label)}\n\n--\nSent by LOCKqz on behalf of ${last ? `Professor ${last}` : "your professor"}. Replies go to your professor. ${SITE_URL}/privacy`;
     const html = mailWrap(P("Hi,") + P(`<b>LOCKqz is not installed on your computer yet</b>, and <b>${hesc(exam)}</b> for ${hesc(label)} is <b>${hesc(when)}</b>. Without it the exam will not open.`) + STEPS_HTML + signHtml(prof, label), studentFooter(last));
     return { subject, text, html };
   },
@@ -672,6 +672,14 @@ export async function onRequest(context) {
   const TRUSTED_TC = "EXISTS (SELECT 1 FROM teacher_courses tct LEFT JOIN teachers tet ON tet.id=tct.teacher_id WHERE tct.ou=r.ou AND (tct.teacher_id='admin' OR tet.role='admin' OR tet.verified=1))";
   // Professor accounts are for instructors: an email that a synced class list names only as a student or TA (never
   // as an instructor) cannot make one by itself (emailed code or Google). An admin invite still can.
+  // A professor's name from a trusted class list ("Bristow, Duke" -> "Duke Bristow"), for one who never typed it:
+  // the dashboard header and every email then say "Professor Bristow", never the email address.
+  const rosterName = async em => {
+    const r = await db.prepare(`SELECT r.name FROM roster r WHERE r.email=? AND ${INSTR_SQL} AND ${TRUSTED_TC} AND TRIM(COALESCE(r.name,''))<>'' LIMIT 1`).bind(String(em || "").toLowerCase()).first().catch(() => null);
+    const n = String(r?.name || "").trim(), m = n.match(/^([^,]+),\s*(.+)$/);
+    return n ? (m ? m[2].trim() + " " + m[1].trim() : n).slice(0, 100) : null;
+  };
+  const profName = async (name, em) => String(name || "").trim() || await rosterName(em) || "";
   const STUDENT_EMAIL_MSG = "This email is on a class list as a student or TA. Professor accounts are for instructors. Students get LOCKqz at lockqz.com.";
   const lockedOnly = async em => !!(await db.prepare(`SELECT 1 FROM roster r WHERE r.email=? AND TRIM(COALESCE(r.role,''))<>'' AND NOT ${INSTR_SQL} AND ${TRUSTED_TC} LIMIT 1`).bind(em).first())
     && !(await db.prepare(`SELECT 1 FROM roster r WHERE r.email=? AND ${INSTR_SQL} AND ${TRUSTED_TC} LIMIT 1`).bind(em).first());
@@ -2125,6 +2133,7 @@ export async function onRequest(context) {
       }
       if (squat && !inv && !proved) return json({ error:"that email already has an account — log in instead" }, 409);
       const id = squat ? dup.id : rid(10), salt = rid(16), token = hex(crypto.getRandomValues(new Uint8Array(24)));
+      const nm = (await profName(body.name, email)) || null;
       // vouched = the admin vouched for whoever holds this account (an invite, or the first/admin
       // account). Only a vouched account can ever become a verified professor: a self-made account
       // proves nothing about owning its email, so it could otherwise claim a professor's identity.
@@ -2132,16 +2141,16 @@ export async function onRequest(context) {
       if (squat) {
         await db.prepare("DELETE FROM teacher_courses WHERE teacher_id=?").bind(id).run();
         await db.prepare("UPDATE teachers SET name=?, pw_hash=?, salt=?, token=?, sync_key=NULL, bs_user_id=NULL, verified=0, vouched=1, active_until=?, created_at=? WHERE id=?")
-          .bind(String(body.name||"").trim()||null, await hashPw(pw,salt,PEPPER), salt, token, inv ? inv.active_until : null, now(), id).run();
+          .bind(nm, await hashPw(pw,salt,PEPPER), salt, token, inv ? inv.active_until : null, now(), id).run();
       } else
         await db.prepare("INSERT INTO teachers (id,email,name,pw_hash,salt,token,created_at,role,active_until,vouched) VALUES (?,?,?,?,?,?,?,?,?,?)")
-          .bind(id, email, String(body.name||"").trim()||null, await hashPw(pw,salt,PEPPER), salt, token, now(), n===0?"admin":"teacher", inv ? inv.active_until : null, vouched).run();
+          .bind(id, email, nm, await hashPw(pw,salt,PEPPER), salt, token, now(), n===0?"admin":"teacher", inv ? inv.active_until : null, vouched).run();
       if (proved) await db.prepare("DELETE FROM email_codes WHERE device_id=?").bind("prof:" + email).run();   // one code, one account
       // Welcome email (HTML): the two steps. Sent in the background; sign-up never waits for Gmail.
-      if (mailOn(env)) { const w = MAIL.welcome({ last: lastName(body.name) || email.split("@")[0], free: isExempt(env, email) });
+      if (mailOn(env)) { const w = MAIL.welcome({ last: lastName(nm), free: isExempt(env, email) });
         const go = mailOut(email, w.subject, w.text, { html: w.html }, "auto").catch(() => {});
         if (typeof context.waitUntil === "function") context.waitUntil(go); else await go; }
-      return json({ token, email, name: body.name||null });
+      return json({ token, email, name: nm });
     }
     // Google sign-in (public): a computer's one-time setup (body.n, from /verify google_start) or a
     // professor signing in to the dashboard. Failures share the sign-in limit of /login (per IP).
@@ -2185,14 +2194,14 @@ export async function onRequest(context) {
           return json({ error: "too many sign-ups from here — try again in an hour" }, 429);
         const salt = rid(16), token = hex(crypto.getRandomValues(new Uint8Array(24)));
         // A random password nobody knows: Google signs them in (a password can be set later).
-        const pwh = await hashPw(hex(crypto.getRandomValues(new Uint8Array(24))), salt, PEPPER), name = g.name || t?.name || null;
+        const pwh = await hashPw(hex(crypto.getRandomValues(new Uint8Array(24))), salt, PEPPER), name = g.name || t?.name || (await rosterName(g.email)) || null;
         if (t) await db.batch([
             db.prepare("DELETE FROM teacher_courses WHERE teacher_id=?").bind(t.id),
             db.prepare("UPDATE teachers SET name=?, pw_hash=?, salt=?, token=?, sync_key=NULL, bs_user_id=NULL, verified=0, vouched=1, created_at=? WHERE id=?").bind(name, pwh, salt, token, now(), t.id)]);
         else await db.prepare("INSERT INTO teachers (id,email,name,pw_hash,salt,token,created_at,role,active_until,vouched) VALUES (?,?,?,?,?,?,?,?,?,?)")
             .bind(rid(10), g.email, name, pwh, salt, token, now(), "teacher", null, 1).run();
         await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + ip, null, null, "signup", "google", now()).run();
-        if (mailOn(env)) { const w = MAIL.welcome({ last: lastName(name) || g.email.split("@")[0], free: isExempt(env, g.email) });
+        if (mailOn(env)) { const w = MAIL.welcome({ last: lastName(name), free: isExempt(env, g.email) });
           const go = mailOut(g.email, w.subject, w.text, { html: w.html }, "auto").catch(() => {});
           if (typeof context.waitUntil === "function") context.waitUntil(go); else await go; }
         return json({ token, email: g.email, name, created: true });
@@ -2238,6 +2247,8 @@ export async function onRequest(context) {
     }
     if (p === "/me") {
       if (!me) return json({ error:"unauthorized" }, 401);
+      if (!me.name && me.id !== "admin") { const n = await rosterName(me.email);
+        if (n) { await db.prepare("UPDATE teachers SET name=? WHERE id=? AND TRIM(COALESCE(name,''))=''").bind(n, me.id).run(); me.name = n; } }
       if (me.trial && me.id !== "admin") { const end = termEndOf(curTerms()[0]);
         if (!me.active_until || me.active_until < end) { await db.prepare("UPDATE teachers SET active_until=? WHERE id=?").bind(end, me.id).run(); me.active_until = end; } }
       return json({ email: me.email, name: me.name, admin: me.admin, verified: !!me.verified, active: me.active, active_until: me.active_until, ...(me.trial ? { trial: true } : {}) });
@@ -2640,7 +2651,7 @@ export async function onRequest(context) {
         const key = String(r.ou) + "-" + String(r.qi); if (seenQ.has(key)) continue; seenQ.add(key);   // one professor per exam (the first non-admin)
         if (sends >= 12) break;   // Workers subrequest budget per call; the next tick continues
         const lead = Date.parse(r.start_date) - nowMs; if (isNaN(lead) || lead <= 0) continue;
-        const exam = String(r.name || "your exam").slice(0, 120), prof = String(r.tname || r.email).trim(), last = lastName(prof) || prof;
+        const exam = String(r.name || "your exam").slice(0, 120), prof = (await profName(r.tname, r.email)), last = lastName(prof) || prof;
         // To the professor first (one email; their whole class depends on it).
         // A professor who never added the extension: once a day while a protected exam is within 24 h.
         const ix = "ix:" + r.tid;
@@ -2891,6 +2902,9 @@ export async function onRequest(context) {
           .bind(whoId, me.id, myEmail, whoId).run();
         if (b.meta.changes) me.bs_user_id = whoId;
       }
+      const whoName = body.whoami && typeof body.whoami.name === "string" ? body.whoami.name.trim().slice(0, 100) : "";
+      if (!me.name && !me.admin && whoName && me.bs_user_id && me.bs_user_id === whoId) {
+        await db.prepare("UPDATE teachers SET name=? WHERE id=? AND TRIM(COALESCE(name,''))=''").bind(whoName, me.id).run(); me.name = whoName; }
       // C4: roles. A course whose LIS roles (Access.LISRoles) name the caller Instructor marks the
       // caller's own class-list row as instructor; TeachingAssistant never does. A user with no role
       // name but the role_id Brightspace gives its learners is a learner.
@@ -3204,7 +3218,7 @@ export async function onRequest(context) {
           await db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, "all", laToday(), list.length, now()).run();
         }
         if (!to.size) return json({ to: [], kind: "all", none: true });
-        const prof = String(me.name || me.email).trim(), last = lastName(prof) || prof;
+        const prof = (await profName(me.name, me.email)), last = lastName(prof) || prof;
         const label = names.length > 1 ? names.slice(0, -1).join(", ") + " and " + names[names.length - 1] : names[0];
         const m = MAIL.student({ course: label, code: null, prof, last, firstExam: null });
         const text = String(m.text).replace(/\n\n--\nSent by LOCKqz on behalf of[^\n]*$/, "").replace(" uses LOCKqz for exams", names.length > 1 ? " use LOCKqz for exams" : " uses LOCKqz for exams");
@@ -3216,7 +3230,7 @@ export async function onRequest(context) {
       const c = await db.prepare("SELECT name, code FROM teacher_courses WHERE ou=? ORDER BY teacher_id=? DESC LIMIT 1").bind(ou, me.id).first() || {};
       const sp = kind === "missing" ? await classRecipients(ou, "split") : null, list = sp ? sp.missing : await classRecipients(ou, kind);
       if (!list.length) return json({ to: [], kind, none: true });
-      const prof = String(me.name || me.email).trim(), last = lastName(prof) || prof;
+      const prof = (await profName(me.name, me.email)), last = lastName(prof) || prof;
       // The first exam LOCKqz actually covers: a protected quiz (password set or waiting) in a class that is
       // covered (on, signed-up professor). A class LOCKqz does not cover names no exam.
       const fe = (await courseCovered(ou)) ? await db.prepare("SELECT b.name AS name, b.start_date AS start_date FROM bs_quizzes b JOIN quizzes q ON q.ou=b.ou AND q.qi=b.qi WHERE b.ou=? AND b.start_date>? ORDER BY b.start_date LIMIT 1").bind(ou, now()).first() : null;

@@ -65,6 +65,7 @@ run "Virtual machines: no password inside a VM/emulator, live view + gate, admin
 run "Professor fallbacks: let a student in without LOCKqz (gate + code), backup card, extension keep-awake" node --no-warnings test_letin.mjs
 run "Google sign-in: one-time link, ID token checks (key, issuer, audience, expiry, nonce, domain), professor sign-in, apps offer it first" node --no-warnings test_google_signin.mjs
 run "Professor sign-up by email code or USC Google (roster professors claim their email, students/TAs refused, invites still work)" node --no-warnings test_prof_signup.mjs
+run "Professor first visit: names from the class list, Chrome-only set-up on other browsers and phones, Email students chooser, plurals, menu (real Chromium)" node --no-warnings test_prof_polish.mjs
 run "Microsoft Store button by itself + automatic Store submissions; Firefox package signed by Mozilla" node --no-warnings test_store_ff.mjs
 if command -v xvfb-run >/dev/null 2>&1 && [ "$(id -u)" = 0 ]; then run "Real Chromium loads the quiz policy (AI refused, Web search + notes allowed, extensions off)" xvfb-run -a node --no-warnings test_chrome_policy_real.mjs; fi
 if command -v pwsh >/dev/null 2>&1; then
