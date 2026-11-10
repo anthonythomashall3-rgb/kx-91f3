@@ -94,12 +94,21 @@ const dashSrc = readFileSync(join(PUB, "dashboard.html"), "utf8");
 check("the page: Email me a code -> code + new password -> Set new password", dashSrc.includes('onclick="requestReset()">Email me a code') && dashSrc.includes('post("/forgot/reset",{email,code,password:pw})') && !/admin has been notified/.test(dashSrc));
 const BT2 = (await api("/login", { email: "dbristow@usc.edu", password: "new-pass-123" }, {}, "10.7.1.4")).data?.token;
 
+console.log("I an invite still waiting for an email ends when that professor signs up by himself");
+await api("/invite", { email: "inv2@usc.edu" }, ADMIN);
+await api("/signup/code", { email: "inv2@usc.edu" }, {}, "10.7.2.1");
+const c2 = mail.filter(m => m.to === "inv2@usc.edu" && m.code).pop()?.code;
+r = await api("/signup", { email: "inv2@usc.edu", password: "inv2-pass-123", code: c2 }, {}, "10.7.2.1");
+check("code sign-up works and the waiting invite is marked used", r.status === 200 && !sqlite.prepare("SELECT 1 FROM invites WHERE email='inv2@usc.edu' AND used_at IS NULL").get(), JSON.stringify(r.data));
+check("fee reminders send students to lockqz.com/pay", route.includes("pay at ${SITE_URL}/pay before the exam.") && route.includes('href="${SITE_URL}/pay" style="color:#990000">lockqz.com/pay</a>'));
+
 console.log("U/P/B/W/E in the page source");
 const dash = readFileSync(join(PUB, "dashboard.html"), "utf8");
 for (const f of readdirSync(PUB).filter(f => f.endsWith(".html"))) check(`tab icon on ${f}`, /<link rel="icon" type="image\/png" href="\/icon128\.png">/.test(readFileSync(join(PUB, f), "utf8")));
 check("no developer-mode steps offered to Safari / phones (they get 'Open this page in Chrome')", dash.includes('const extD = BROWSER === "other" ? OTHER_TXT()') && dash.includes('"Open this page on your computer, in Chrome."'));
 check("Firefox without the signed package counts as 'use Chrome'", /Firefox\\\/\/\.test\(u\) \? \(FF_XPI \? "firefox" : "other"\)/.test(dash));
 check("reminder wording", dash.includes("2 days and again 3 hours before each exam"));
+check("the Email students chooser closes when the page changes", dash.includes('window.addEventListener("hashchange", () => document.querySelectorAll(".lqaddr").forEach(e => e.remove()));'));
 
 // ---- real Chromium: the page itself ----
 let chromium; try { ({ chromium } = createRequire(import.meta.url)("playwright")); } catch {}

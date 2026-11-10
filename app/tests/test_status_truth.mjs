@@ -74,7 +74,7 @@ check("ed (installed, fee unpaid): installed, paid false, NOT ready", st["ed@usc
 check("fy (no device): not ready", st["fy@usc.edu"].ready === false);
 
 console.log("T2 'missing' email + reminders: everyone not ready; the unpaid get the pay line");
-const PAYLINE = "LOCKqz is installed but your semester fee is not paid — pay at https://lockqz.pages.dev before the exam.";
+const PAYLINE = "LOCKqz is installed but your semester fee is not paid — pay at https://lockqz.pages.dev/pay before the exam.";
 MAILS.length = 0;
 let r = await api("/email/students", { ou: String(OU), kind: "missing" }, T);
 // The professor sends it from their own mail app: a draft to bo, cy, di, ed, fy (everyone not ready, never al).

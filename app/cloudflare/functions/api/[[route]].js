@@ -569,10 +569,10 @@ const MAIL = {
   reminder({ course, code, prof, last, exam, when, start_date, unpaid }) {
     const label = courseLabel({ name: course, code }), date = mailWhen(start_date);
     if (unpaid) {
-      const PAYLINE = `LOCKqz is installed but your semester fee is not paid \u2014 pay at ${SITE_URL} before the exam.`;
+      const PAYLINE = `LOCKqz is installed but your semester fee is not paid \u2014 pay at ${SITE_URL}/pay before the exam.`;
       const subject = `Reminder: ${exam}${date ? " on " + date : ""} \u2014 your LOCKqz fee is not paid`;
       const text = `Hi,\n\n${exam} for ${label} is ${when}.\n\n${PAYLINE}\n\n${signTxt(prof, label)}\n\n--\nSent by LOCKqz on behalf of ${last ? `Professor ${last}` : "your professor"}. Replies go to your professor. ${SITE_URL}/privacy`;
-      const html = mailWrap(P("Hi,") + P(`<b>${hesc(exam)}</b> for ${hesc(label)} is <b>${hesc(when)}</b>.`) + P(`<b>LOCKqz is installed but your semester fee is not paid</b> \u2014 pay at <a href="${SITE_URL}" style="color:#990000">lockqz.com</a> before the exam.`) + signHtml(prof, label), studentFooter(last));
+      const html = mailWrap(P("Hi,") + P(`<b>${hesc(exam)}</b> for ${hesc(label)} is <b>${hesc(when)}</b>.`) + P(`<b>LOCKqz is installed but your semester fee is not paid</b> \u2014 pay at <a href="${SITE_URL}/pay" style="color:#990000">lockqz.com/pay</a> before the exam.`) + signHtml(prof, label), studentFooter(last));
       return { subject, text, html };
     }
     const subject = `Reminder: install LOCKqz before ${exam}${date ? " on " + date : ""}`;
@@ -2146,7 +2146,8 @@ export async function onRequest(context) {
       } else
         await db.prepare("INSERT INTO teachers (id,email,name,pw_hash,salt,token,created_at,role,active_until,vouched) VALUES (?,?,?,?,?,?,?,?,?,?)")
           .bind(id, email, nm, await hashPw(pw,salt,PEPPER), salt, token, now(), n===0?"admin":"teacher", inv ? inv.active_until : null, vouched).run();
-      if (proved) await db.prepare("DELETE FROM email_codes WHERE device_id=?").bind("prof:" + email).run();   // one code, one account
+      if (proved) await db.batch([db.prepare("DELETE FROM email_codes WHERE device_id=?").bind("prof:" + email),   // one code, one account
+        db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE email=? AND used_at IS NULL").bind(now(), email, email)]);   // a waiting invite is moot
       // Welcome email (HTML): the two steps. Sent in the background; sign-up never waits for Gmail.
       if (mailOn(env)) { const w = MAIL.welcome({ last: lastName(nm), free: isExempt(env, email) });
         const go = mailOut(email, w.subject, w.text, { html: w.html }, "auto").catch(() => {});
@@ -2201,7 +2202,8 @@ export async function onRequest(context) {
             db.prepare("UPDATE teachers SET name=?, pw_hash=?, salt=?, token=?, sync_key=NULL, bs_user_id=NULL, verified=0, vouched=1, created_at=? WHERE id=?").bind(name, pwh, salt, token, now(), t.id)]);
         else await db.prepare("INSERT INTO teachers (id,email,name,pw_hash,salt,token,created_at,role,active_until,vouched) VALUES (?,?,?,?,?,?,?,?,?,?)")
             .bind(rid(10), g.email, name, pwh, salt, token, now(), "teacher", null, 1).run();
-        await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + ip, null, null, "signup", "google", now()).run();
+        await db.batch([db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + ip, null, null, "signup", "google", now()),
+          db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE email=? AND used_at IS NULL").bind(now(), g.email, g.email)]);
         if (mailOn(env)) { const w = MAIL.welcome({ last: lastName(name), free: isExempt(env, g.email) });
           const go = mailOut(g.email, w.subject, w.text, { html: w.html }, "auto").catch(() => {});
           if (typeof context.waitUntil === "function") context.waitUntil(go); else await go; }

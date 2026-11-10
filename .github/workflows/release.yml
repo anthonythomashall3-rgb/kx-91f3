@@ -301,7 +301,11 @@ jobs:
           # Professor extension packages: always the current build (they went stale when copied by hand), plus the
           # Mozilla-signed Firefox package once the Chrome Web Store workflow has made one.
           cp app/extension-prof/dist/lockqz-prof-chromium.zip app/extension-prof/dist/lockqz-prof-firefox.zip "$d/"
-          if [ -s app/extension-prof/dist/lockqz-prof-firefox.xpi ]; then cp app/extension-prof/dist/lockqz-prof-firefox.xpi "$d/"; fi
+          if [ -s app/extension-prof/dist/lockqz-prof-firefox.xpi ]; then cp app/extension-prof/dist/lockqz-prof-firefox.xpi "$d/"
+            # Firefox checks this (manifest gecko.update_url) and installs a newer signed package by itself.
+            v=$(unzip -p app/extension-prof/dist/lockqz-prof-firefox.xpi manifest.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+            printf '{"addons":{"prof@lockqz.app":{"updates":[{"version":"%s","update_link":"https://lockqz.com/download/lockqz-prof-firefox.xpi"}]}}}\n' "$v" > "$d/lockqz-prof-firefox-updates.json"
+          fi
       - name: Build the signed update manifest + one-line installers
         if: steps.chk.outputs.ok == 'true'
         env:

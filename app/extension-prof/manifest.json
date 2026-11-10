@@ -73,6 +73,7 @@
     "gecko": {
       "id": "prof@lockqz.app",
       "strict_min_version": "121.0",
+      "update_url": "https://lockqz.com/download/lockqz-prof-firefox-updates.json",
       "data_collection_permissions": {
         "required": [
           "personallyIdentifyingInfo",

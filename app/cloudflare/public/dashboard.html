@@ -853,6 +853,8 @@ async function loadInvites(){ const d = await get("/invites"); const tb=document
 async function cancelInvite(code){ if(!confirm("Cancel this invite?")) return; const d=await post("/uninvite",{code}); if(d.error){ alert(d.error); return; } if((window._ilink||"").endsWith("="+code)){ $("newinvite").innerHTML=""; window._ilink=window._icode=null; } loadInvites(); }
 
 document.addEventListener("click", e => { const m = $("menu"); if (m && m.open && !m.contains(e.target)) m.removeAttribute("open"); });
+// The Email students chooser belongs to the page it was opened on.
+window.addEventListener("hashchange", () => document.querySelectorAll(".lqaddr").forEach(e => e.remove()));
 document.addEventListener("keydown", e => { if (e.key === "Escape") { const m = $("menu"); if (m && m.open) m.removeAttribute("open"); } });
 // Chrome adds a new extension only to pages opened after it: after "Add to Chrome", this tab reloads once when
 // the professor comes back to it, so the set-up step turns green here too.
