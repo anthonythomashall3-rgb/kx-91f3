@@ -119,6 +119,13 @@ check("professor: '$6,300 by Zelle, or $6,500 by bank transfer, card or Venmo', 
   const at = n => names.indexOf(n);
   check("students sorted as people read them: 'de la Cruz' among the Ds (not after 'Zhang'), 'Student 2' before 'Student 10'",
     at("Davis, Al") < at("de la Cruz, Ana") && at("de la Cruz, Ana") < at("Zhang, Wei") && at("Student 2") < at("Student 10") && at("Student 2") >= 0, JSON.stringify(names)); }
+{ // the toolbar popup greets "Prof. <last word>": /ext-status sends a name with no title, degree or suffix
+  const key = (await call("/synckey", null, { token: PROF, get: true })).data?.key;
+  const st = async nm => { sqlite.prepare("UPDATE teachers SET name=? WHERE id=?").run(nm, PID);
+    const res = await onRequest({ request: new Request("https://lockqz.test/api/ext-status", { headers: { "X-LOCKqz-Sync": key, "CF-Connecting-IP": "10.5.0.9" } }), env, waitUntil: () => {} }); return (await res.json()).name; };
+  const got = [await st("Dr. Jane Smith, PhD"), await st("Bristow, Duke"), await st("Duke Bristow")];
+  sqlite.prepare("UPDATE teachers SET name='Duke Bristow' WHERE id=?").run(PID);
+  check("extension popup name: 'Dr. Jane Smith, PhD' -> 'Jane Smith', 'Bristow, Duke' -> 'Duke Bristow' (so it greets 'Prof. Smith', 'Prof. Bristow')", JSON.stringify(got) === JSON.stringify(["Jane Smith", "Duke Bristow", "Duke Bristow"]), JSON.stringify(got)); }
 console.log("P the student download page on a Chromebook");
 { const idx = readFileSync(join(CF, "public", "index.html"), "utf8");
   check("a Chromebook is told LOCKqz needs a Mac, Windows or Linux computer (not 'Open on your computer')", /\/CrOS\/\.test\(ua\)\) \$\("nope"\)\.textContent = "LOCKqz needs a Mac, Windows or Linux computer\. It does not run on Chromebooks\.";/.test(idx)); }

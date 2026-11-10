@@ -3262,7 +3262,11 @@ export async function onRequest(context) {
       }
       if (!me.admin) { const cut = new Date(Date.now() - 4 * 3600000).toISOString();
         await db.prepare("UPDATE teachers SET ext_seen=? WHERE id=? AND (ext_seen IS NULL OR ext_seen<?)").bind(now(), me.id, cut).run(); }
-      return json({ name: me.name || null, classes: cs.length, exams, waiting, next, last_sync: cs.map(c => c.synced_at).filter(Boolean).sort().pop() || null });
+      // name: the toolbar popup greets "Prof. <last word of name>", so it gets "First Last" with no title, degree or
+      // suffix ("Dr. Jane Smith, PhD" -> "Jane Smith", "Bristow, Duke" -> "Duke Bristow").
+      const shown = me.name ? (() => { let t = String(me.name).trim(); const m = t.match(/^([^,]+),\s*(.+)$/); if (m && !NAME_EXTRA.test(m[2].trim())) t = m[2] + " " + m[1];
+        return t.split(/[\s,]+/).filter(x => x && !NAME_EXTRA.test(x)).join(" ") || null; })() : null;
+      return json({ name: shown, classes: cs.length, exams, waiting, next, last_sync: cs.map(c => c.synced_at).filter(Boolean).sort().pop() || null });
     }
     // Automatic reminders (48 h / 3 h before each exam, to students without LOCKqz) on or off for a class.
     if (p === "/class-mail" && request.method === "POST") {
