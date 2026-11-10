@@ -54,10 +54,10 @@ const code = (await call("/invite", { email: "p@usc.edu", until: "2099-12-31" },
 const P = (await call("/signup", { email: "p@usc.edu", password: "profpass12", name: "Pat Prof", invite: code })).data?.token;
 await call("/sync", { whoami: { id: "8001" }, courses: [{ ou: "500", name: "ECON 203", classlist: roster, quizzes: [{ qi: "1", name: "Q1", active: true }] }] }, { teacher: P });
 let ipN = 0;
-async function device(id, email, version) {
+async function device(id, email, version, platform = "mac") {
   const d = { id, key: randomBytes(32).toString("hex") };
-  await call("/register", { device_id: id, key: d.key, platform: "mac", version }, { ip: "10.9.7." + (++ipN) });
-  await call("/report", { event: "install", platform: "mac", version }, { dev: d });
+  await call("/register", { device_id: id, key: d.key, platform, version }, { ip: "10.9.7." + (++ipN) });
+  await call("/report", { event: "install", platform, version }, { dev: d });
   const k = MAILS.length; await call("/verify", { op: "send", email }, { dev: d }); const m = MAILS.slice(k).find(x => x.to === email);
   if (m) await call("/verify", { op: "code", email, code: m.code }, { dev: d });
   return d;
@@ -96,6 +96,40 @@ console.log("S3 an exam the dashboard shows as 'Not protected' gives AI back (an
   const pr = await ask(NEW, "1");
   check("a protected exam is unchanged (pay first)", pr.status === 402 && pr.data?.reason === "unpaid", `${pr.status}`);
 }
+
+console.log("S4 the admin's Forget deletes everything kept for the email (as the privacy page says), the saved card included");
+{
+  const E = "s0@usc.edu", t = new Date().toISOString(), calls = [], realFetch = globalThis.fetch;
+  globalThis.fetch = async (u, o) => { if (String(u).startsWith("https://api.stripe.com/")) { calls.push(String(u)); return new Response("{}", { status: 200 }); } return realFetch(u, o); };
+  sqlite.prepare("INSERT INTO card_renew (email,customer,pm,brand,last4,autorenew,created_at) VALUES (?,?,?,?,?,1,?)").run(E, "cus_s7", "pm_s7", "visa", "4242", t);
+  sqlite.prepare("INSERT INTO renew_sent (email,term,at) VALUES (?,?,?)").run(E, "Spring 2027", t);
+  sqlite.prepare("INSERT INTO renew_optout (email,at) VALUES (?,?)").run(E, t);
+  sqlite.prepare("INSERT INTO pay_nudge (email,at) VALUES (?,?)").run(E, t);
+  sqlite.prepare("INSERT INTO assist (ou,email,tools,at) VALUES ('500',?,'[\"readwrite\"]',?)").run(E, t);
+  sqlite.prepare("INSERT INTO letin (ou,qi,email,at) VALUES ('500','1',?,?)").run(E, t);
+  sqlite.prepare("INSERT INTO gsign (n,device_id,at,email,done) VALUES ('n-s7','mac-s7-old',?,?,1)").run(t, E);
+  const f = await call("/forget", { email: E }, { teacher: ADMIN });
+  const left = ["card_renew", "renew_sent", "renew_optout", "pay_nudge", "assist", "letin", "gsign", "devices", "roster", "pay_codes_students"]
+    .filter(tb => sqlite.prepare(`SELECT 1 FROM ${tb} WHERE ${tb === "devices" ? "student" : "email"}=?`).get(E));
+  check("forgotten: no row left for the email (saved card, renewals, reminders, allowances, let-ins, Google links, devices, class lists)", f.status === 200 && left.length === 0, `${f.status} left: ${left}`);
+  check("the card saved at Stripe for renewals is detached (never charged next semester)", calls.some(u => u === "https://api.stripe.com/v1/payment_methods/pm_s7/detach"), JSON.stringify(calls));
+  globalThis.fetch = realFetch;
+}
+
+console.log("S5 the student's account page names each computer plainly (Linux, Android; not 'linux-ubuntu-24.04')");
+{
+  const E = "s9@usc.edu";
+  await device("lnx-s7", E, "0.6.12", "linux-ubuntu-24.04"); await device("and-s7", E, "0.6.12", "android-14-samsung");
+  const k = MAILS.length; await call("/account", { op: "send", email: E }); const m = MAILS.slice(k).find(x => x.to === E);
+  const tok = (await call("/account", { op: "code", email: E, code: m?.code })).data?.token;
+  const st = await call("/account", { op: "status", token: tok });
+  const os = (st.data?.devices || []).map(d => d.os).sort();
+  check("account: Android, Linux", JSON.stringify(os) === JSON.stringify(["Android", "Linux"]), JSON.stringify(st.data?.devices || st.data));
+}
+
+{ const dash = readFileSync(join(CF, "public", "dashboard.html"), "utf8"), m = dash.match(/const osName = (p => \{[^\n]*\});/);
+  const osName = m ? eval(m[1]) : () => "?";
+  check("professor's class list: 'Ready · Mac' / Windows / Linux / Android (not 'mac-14.6')", ["mac-14.6", "windows", "linux-ubuntu-24.04", "android-14-samsung", null].map(osName).join(",") === "Mac,Windows,Linux,Android," && /"Ready" \+ \(osName\(x\.platform\)/.test(dash)); }
 
 console.log("S2 the Mac app's message (pay_text)");
 {

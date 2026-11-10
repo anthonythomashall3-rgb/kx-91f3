@@ -624,7 +624,9 @@ function viewClass(ou){
 }
 
 // A student's status, from the server's ready rule: Ready / Installed · not paid / Needs LOCKqz.
-const stuLabel = x => isReady(x) ? "Ready" + (x.platform ? " · " + esc(x.platform) : "") : x.installed ? "Installed · not paid" : "Needs LOCKqz";
+// "mac-14.6" / "windows" / "linux-ubuntu-24.04" / "android-14-samsung" -> Mac / Windows / Linux / Android.
+const osName = p => { p = String(p || ""); return /win/i.test(p) ? "Windows" : /mac|darwin/i.test(p) ? "Mac" : /android/i.test(p) ? "Android" : /linux/i.test(p) ? "Linux" : ""; };
+const stuLabel = x => isReady(x) ? "Ready" + (osName(x.platform) ? " · " + osName(x.platform) : "") : x.installed ? "Installed · not paid" : "Needs LOCKqz";
 // The OLDEST class sync: "Synced X ago" must hold for every class, not just the freshest one.
 const oldestSync = () => BS.courses.length ? (BS.courses.map(c=>c.synced_at||"").sort()[0] || null) : null;
 // Assistive tools one student may keep during locked exams (OSAS accommodation). Browser extensions are

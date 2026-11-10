@@ -2511,7 +2511,7 @@ export async function onRequest(context) {
         }
         const devs = (await db.prepare("SELECT device_id, platform, version, installed_at, last_seen FROM devices WHERE student=? AND student_verified=1 AND COALESCE(revoked,0)=0 ORDER BY last_seen DESC, device_id LIMIT 10").bind(email).all()).results;
         return json({ email, required: feeOn(), paid, term: termName(paid ? upTerm : st.term), until: paid ? termEndOf(upTerm) : null, pay_url: paid ? null : await payLink(email),
-          renew, devices: devs.map(d => ({ id: d.device_id, os: /win/i.test(String(d.platform || "")) ? "Windows" : /mac|darwin/i.test(String(d.platform || "")) ? "Mac" : (d.platform || "Computer"), version: d.version || null, last_seen: d.last_seen || d.installed_at || null })) });
+          renew, devices: devs.map(d => ({ id: d.device_id, os: /win/i.test(String(d.platform || "")) ? "Windows" : /mac|darwin/i.test(String(d.platform || "")) ? "Mac" : /android/i.test(String(d.platform || "")) ? "Android" : /linux/i.test(String(d.platform || "")) ? "Linux" : "Computer", version: d.version || null, last_seen: d.last_seen || d.installed_at || null })) });
       }
       if (op === "renew") {
         const cr = await db.prepare("SELECT pm FROM card_renew WHERE email=?").bind(email).first();
@@ -2862,6 +2862,7 @@ export async function onRequest(context) {
       const devIds = (await db.prepare("SELECT device_id FROM devices WHERE student=? OR lower(student)=?").bind(email, email).all()).results.map(r => r.device_id);
       const ros = (await db.prepare("SELECT ou, user_id FROM roster WHERE email=?").bind(email).all()).results;
       const pc = await db.prepare("SELECT code FROM pay_codes_students WHERE email=?").bind(email).first();
+      const card = await db.prepare("SELECT pm FROM card_renew WHERE email=?").bind(email).first().catch(() => null);
       const st = [];
       for (const part of chunk(devIds, 99)) {
         const ph = placeholders(part.length);
@@ -2875,8 +2876,13 @@ export async function onRequest(context) {
       const fOus = [...new Set(ros.map(r => String(r.ou)))];
       if (fOus.length) st.push(db.prepare("DELETE FROM roster_snap WHERE ou IN (SELECT value FROM json_each(?))").bind(JSON.stringify(fOus)));
       if (pc) st.push(db.prepare("UPDATE payments SET payer=NULL, note=NULL WHERE code=?").bind(pc.code), db.prepare("DELETE FROM pay_codes_students WHERE email=?").bind(email));
+      // Everything else kept per email: the saved card and its semester renewals (never charged again),
+      // renewal / pay reminder records, a professor's assistive-tool allowance or let-in, Google set-up links.
+      for (const t of ["card_renew", "renew_optout", "renew_sent", "pay_nudge", "assist", "letin", "gsign"]) st.push(db.prepare(`DELETE FROM ${t} WHERE email=?`).bind(email));
       st.push(db.prepare("INSERT OR REPLACE INTO forgotten (email, at) VALUES (?,?)").bind(email, now()));
       await runBatches(db, st);
+      // The card saved at Stripe for the renewals is taken off too (Stripe keeps the payment records it must).
+      if (card && card.pm && stripeOn()) await stripeApi("payment_methods/" + encodeURIComponent(card.pm) + "/detach", new URLSearchParams()).catch(() => {});
       return json({ ok:true, email, devices: devIds.length, roster_rows: ros.length });
     }
 
