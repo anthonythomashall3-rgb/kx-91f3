@@ -69,4 +69,7 @@ _m = rd("app/src/main/java/app/lockqz/MainActivity.kt"); _a = rd("app/src/main/j
 check("(10 Nov) a JSON null is never shown or saved as the word 'null' (email not on a class list: 'Not on a class list yet', not 'null')",
       'fun JSONObject?.str(k: String): String? = if (this == null || isNull(k)) null' in _a and 'chk.str("name")' in _m and 'optString("vtoken")' not in _m and 'optString("student")' not in _m)
 check("(10 Nov) unpaid notice: every way at its own price + the memo for Zelle / Venmo", 'pay.isNull("line")' in q and "Memo for Zelle or Venmo" in q)
+check("(10 Nov) Android apps learn of a new release: /api/version at most once a day, one notification per version (never during a quiz), tap downloads the APK",
+      'fun latestVersion(c: Context): String?' in _a and '"$BASE/version"' in _a and "fun newer(a: String, b: String): Boolean" in _a
+      and "private fun checkUpdate()" in q and 'Api.newer(v, BuildConfig.VERSION_NAME)' in q and '"update_told"' in q and "download/lockqz-android.apk" in q and "if (quiz == null && now - lastVerCheck > 6 * 3600_000L)" in q)
 print("\nRESULT: %d passed, %d failed" % (PASS, FAIL)); sys.exit(1 if FAIL else 0)

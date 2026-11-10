@@ -132,6 +132,23 @@ object Api {
     }
 
     /** The served AI blocklist (plain hosts), cached; the built-in seed until the first fetch succeeds. */
+    /** The newest LOCKqz release on the site (/api/version "version"), asked at most once a day; null = unknown. */
+    fun latestVersion(c: Context): String? {
+        val p = prefs(c)
+        if (System.currentTimeMillis() - p.getLong("ver_at", 0) < 24 * 3600_000L) return p.getString("ver", null)
+        return try {
+            val conn = (URL("$BASE/version").openConnection() as HttpURLConnection).apply { connectTimeout = 8000; readTimeout = 8000; setRequestProperty("User-Agent", "LOCKqz/${BuildConfig.VERSION_NAME} (Android)") }
+            val v = JSONObject(conn.inputStream.use { s -> ByteArrayOutputStream().also { s.copyTo(it) }.toString("UTF-8") }).optString("version", "")
+            if (Regex("^\\d+\\.\\d+\\.\\d+$").matches(v)) { p.edit().putString("ver", v).putLong("ver_at", System.currentTimeMillis()).apply(); v } else null
+        } catch (e: Exception) { Log.w(TAG, "version: $e"); null }
+    }
+    /** "0.6.13" newer than "0.6.12"? */
+    fun newer(a: String, b: String): Boolean {
+        val x = a.split('.').map { it.toIntOrNull() ?: 0 }; val y = b.split('.').map { it.toIntOrNull() ?: 0 }
+        for (i in 0 until 3) { val d = x.getOrElse(i) { 0 } - y.getOrElse(i) { 0 }; if (d != 0) return d > 0 }
+        return false
+    }
+
     fun blocklist(c: Context, refresh: Boolean = false): List<String> {
         val p = prefs(c)
         val cached = p.getString("blocklist", null)

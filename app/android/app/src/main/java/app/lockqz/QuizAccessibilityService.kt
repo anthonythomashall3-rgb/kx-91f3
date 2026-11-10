@@ -83,6 +83,7 @@ class QuizAccessibilityService : AccessibilityService() {
     @Volatile private var holdUntil = 0L
     @Volatile private var askFailSince = 0L
     @Volatile private var pwNext = 0L
+    @Volatile private var lastVerCheck = 0L
     private val capped = java.util.concurrent.ConcurrentHashMap<String, Long>()   // released quiz id -> last time its page was seen
     private val browsers = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()   // every app that opens https links
     @Volatile private var otherProfileTold = false
@@ -147,6 +148,7 @@ class QuizAccessibilityService : AccessibilityService() {
     /** Every 2 s: the quiz page has not been seen for the grace period -> unlock; heartbeat while locked. */
     private fun tick() {
         val now = System.currentTimeMillis()
+        if (quiz == null && now - lastVerCheck > 6 * 3600_000L) { lastVerCheck = now; exec.execute { checkUpdate() } }
         for ((id, seen) in capped) if (now - seen > 2 * GRACE_MS) capped.remove(id)   // page gone for a minute: a new attempt locks again
         val q = quiz ?: return
         if (!held && now - lastSeen > GRACE_MS) { exec.execute { end("quiz_closed") }; return }
@@ -283,6 +285,22 @@ class QuizAccessibilityService : AccessibilityService() {
     private fun vpnNote() { /* the VPN notification text follows the lock state */ try { startService(Intent(this, DnsVpnService::class.java).setAction(DnsVpnService.ACTION_START)) } catch (_: Exception) {} }
 
     private val told = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    /** A newer LOCKqz on the site: one notification per version (never during a quiz); tapping it downloads the
+     *  new app, which installs over this one (same signing key). Android apps do not update themselves. */
+    private fun checkUpdate() {
+        val v = Api.latestVersion(this) ?: return
+        if (quiz != null || !Api.newer(v, BuildConfig.VERSION_NAME)) return
+        val p = getSharedPreferences("lockqz", Context.MODE_PRIVATE)
+        if (p.getString("update_told", null) == v) return
+        p.edit().putString("update_told", v).apply()
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.createNotificationChannel(NotificationChannel("lockqz-quiz", "LOCKqz quiz", NotificationManager.IMPORTANCE_HIGH))
+            val open = PendingIntent.getActivity(this, 1, Intent(Intent.ACTION_VIEW, android.net.Uri.parse("${Api.WEB}/download/lockqz-android.apk")), PendingIntent.FLAG_IMMUTABLE)
+            nm.notify(3, android.app.Notification.Builder(this, "lockqz-quiz").setSmallIcon(R.drawable.ic_lock).setContentTitle("Update LOCKqz")
+                .setContentText("Version $v is ready. Tap to download it, then open the file to install.").setAutoCancel(true).setContentIntent(open).build())
+        } catch (e: Exception) { Log.w(TAG, "update notice: $e") }
+    }
     private fun notifyOnce(key: String, title: String, text: String) {   // the same notice at most every 10 min
         val now = System.currentTimeMillis()
         if (now - (told[key] ?: 0L) < 600_000) return
