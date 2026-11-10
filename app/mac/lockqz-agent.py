@@ -567,6 +567,7 @@ CODE_FRESH = 12 * 60   # a code sent less than 12 min ago is still good (server:
 # The email is asked ONCE. The moment the student types it, it is saved on this computer (save());
 # every later try goes straight to the emailed code. Server/network trouble is NEVER shown as a popup:
 # setup just stops quietly (state["r"] = "server") and the agent retries in the background.
+NOLOCK_AGAIN = 180   # a quiz LOCKqz does not protect: asked again every 3 minutes while its page stays open
 GOOGLE_POLL, GOOGLE_WAIT = 4, 600   # Google sign-in: check every 4 s, give up (-> email code) after 10 min
 GOOGLE_URL = re.compile(r"^%s/google\?n=[0-9a-f]{32}$" % (re.escape(os.environ["LOCKQZ_SITE"].rstrip("/")) if os.environ.get("LOCKQZ_SITE") else r"https://lockqz\.(?:com|pages\.dev)"))
 def _google(call, ui, state):
@@ -719,6 +720,7 @@ class Agent:
         self.pending_try = 0.0
         self.capped = {}             # quiz id -> last time its page was seen (released by the safety cap or the server)
         self.cap_left = {}           # quiz id -> its page left the attempt pages since the release (summary seen)
+        self.nolock = {}             # quiz id -> when to ask again: the helper did not lock it (not LOCKqz's quiz)
         self.cap_forgot = {}         # quiz id -> when this agent forgot its release (the helper's older one is ignored)
         self.tabs_seen = 0           # how many tabs were open while the quiz was open
         self.ready_told = os.path.exists(READY_FLAG)   # the one-time "LOCKqz is ready" notice (first Brightspace visit)
@@ -912,6 +914,11 @@ class Agent:
         quiz = lock_id(url)
         try:
             r = self.helper("/lock", {"quiz_id": quiz, "student": self.student, "url": url})
+            if isinstance(r, dict) and r.get("not_protected"):
+                # Not LOCKqz's quiz (a class or exam not using LOCKqz): nothing locked, nothing closed, nothing
+                # said. Asked again every 3 minutes while its page stays open (its professor may turn LOCKqz on).
+                self.nolock[quiz] = time.time() + NOLOCK_AGAIN
+                log("not protected: %s (%s) - not locked" % (quiz, r.get("reason") or "not_protected")); return
             if not (isinstance(r, dict) and r.get("ok")): raise RuntimeError("helper answered %r" % (r,))
         except Exception as e:
             log("helper lock failed: %s" % e)
@@ -1080,7 +1087,8 @@ class Agent:
         # A quiz released by the safety cap or by the server is never re-locked while it stays open; once
         # its page has been gone for the grace period, a new attempt locks normally again.
         self.cap_step(present, now)
-        open_quizzes = {q: u for q, u in present.items() if q not in self.capped}
+        for q in [q for q, t in self.nolock.items() if t <= now or q not in present]: self.nolock.pop(q, None)
+        open_quizzes = {q: u for q, u in present.items() if q not in self.capped and q not in self.nolock}
         if not self.verified:
             self.ensure_identity(quiz=bool(open_quizzes))
         if not self.locked:
@@ -1145,7 +1153,11 @@ class Agent:
                     return
                 if st.get("state") not in ("locked", "developer"):
                     log("helper not locked during an open quiz (%s) — re-locking" % st.get("state"))
-                    self.helper("/lock", {"quiz_id": self.quiz, "student": self.student, "url": self.url or ""})
+                    rl = self.helper("/lock", {"quiz_id": self.quiz, "student": self.student, "url": self.url or ""})
+                    if isinstance(rl, dict) and rl.get("not_protected"):
+                        self.nolock[self.quiz] = now + NOLOCK_AGAIN; log("not protected: %s - not locked" % self.quiz)
+                        self.locked, self.quiz, self.url, self.missing_since = False, None, None, None
+                        return
             except Exception as e:
                 self.helper_ok = False; log("helper check failed: %s" % e)
         if not dev:

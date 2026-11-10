@@ -783,6 +783,14 @@ export async function onRequest(context) {
   // professor has not turned off. A class with no such professor is not LOCKqz's to touch (no lock, no
   // charge, no report). "active" mirrors me.active + releaseUnpaid: admin, trial(exempt), active_until, or
   // a paid section. One indexed read.
+  // A quiz LOCKqz does not protect: its class does not use LOCKqz (courseCovered), or its exam is shown as
+  // "Not protected" (synced from Brightspace, no LOCKqz password, none being taken out). A quiz newer than
+  // the last Sync is not known yet: it counts as protected (the Sync protects it by default).
+  const examNotOurs = async (ou, qi) => {
+    if (!(await courseCovered(ou))) return true;
+    const qp = await db.prepare("SELECT (SELECT 1 FROM quizzes WHERE ou=? AND qi=?) AS qrow, (SELECT 1 FROM bs_quizzes WHERE ou=? AND qi=?) AS bq, (SELECT 1 FROM pending_clear WHERE ou=? AND qi=?) AS pc").bind(ou, qi, ou, qi, ou, qi).first();
+    return !!(qp && !qp.qrow && qp.bq && !qp.pc);
+  };
   const courseCovered = async ou => {
     const o = String(ou), d = laToday(), ex = [...exemptSet(env)];
     const exSql = ex.length ? ` OR lower(t.email) IN (${placeholders(ex.length)})` : "";
@@ -1970,6 +1978,18 @@ export async function onRequest(context) {
 
     // Release the quiz/course password ONLY while this device is locked for this page. The request
     // and the lock must both be signed by the device's key (strict mode / registered devices).
+    // Before a quiz page locks (apps 0.6.13+): is it LOCKqz's? A class or exam not using LOCKqz is never
+    // locked at all (no app closed, AI never off). Signed by the device; reads only. No answer -> the app
+    // locks as before, and /password decides.
+    if (p === "/covered" && request.method === "POST") {
+      const v = await verifyDevice(request, raw, db);
+      if (!v.ok) return denied(v);
+      const qurl = String(body.url || ""), { qi, ou } = ids(qurl);
+      if (!/^\d+$/.test(String(qi || "")) || !/^\d+$/.test(String(ou || ""))) return json({ covered: true });
+      const qhost = hostOf(qurl);
+      if (qhost && !bsHosts(env).includes(qhost)) return json({ covered: false, reason: "other_school" });
+      return (await examNotOurs(ou, qi)) ? json({ covered: false, reason: "not_protected" }) : json({ covered: true });
+    }
     if (p === "/password" && request.method === "POST") {
       const v = await verifyDevice(request, raw, db);
       const claimed = body.device_id ? String(body.device_id) : "";
@@ -2001,12 +2021,8 @@ export async function onRequest(context) {
       // Per-class scope (Anthony 27 Oct): LOCKqz only locks and charges in a class whose own professor
       // signed up (active + synced + on). Any other Brightspace quiz is not ours -> the app restores AI,
       // and no student is charged and nothing is reported.
-      if (!(await courseCovered(ou))) return json({ password: null, reason: "not_protected" }, 200);
-      // Per exam: one the professor's dashboard shows as "Not protected" (synced from Brightspace, no LOCKqz
-      // password, none being taken out) is not ours either -> AI back, nothing charged. A quiz newer than the
-      // last Sync is not known yet: it waits (the Sync protects it by default).
-      const qp = await db.prepare("SELECT (SELECT 1 FROM quizzes WHERE ou=? AND qi=?) AS qrow, (SELECT 1 FROM bs_quizzes WHERE ou=? AND qi=?) AS bq, (SELECT 1 FROM pending_clear WHERE ou=? AND qi=?) AS pc").bind(ou, qi, ou, qi, ou, qi).first();
-      if (qp && !qp.qrow && qp.bq && !qp.pc) return json({ password: null, reason: "not_protected" }, 200);
+      // ... and per exam (one the dashboard shows as "Not protected"): AI back, nothing charged.
+      if (await examNotOurs(ou, qi)) return json({ password: null, reason: "not_protected" }, 200);
       // Virtual machine: LOCKqz inside a VM locks only the VM; the real computer around it keeps AI.
       // No password (the admin may test in one). Logged once per quiz for the professor's live view.
       const vmKind = typeof body.vm === "string" ? body.vm.trim().slice(0, 40) : "";

@@ -74,6 +74,8 @@ class H(BaseHTTPRequestHandler):
                 except Exception: why = ""
                 if why: return self.reply(200, {"ok": True, "unlock": True, "reason": why})
             return self.reply(200, {"ok": True})
+        if path.endswith("/covered"):   # 88888: a quiz in a class not using LOCKqz
+            return self.reply(200, {"covered": False, "reason": "not_protected"} if "qi=88888" in b.get("url", "") else {"covered": True})
         if path.endswith("/password"):
             u = b.get("url", ""); qi = re.search(r"[?&]qi=(\d+)", u); ou = re.search(r"[?&]ou=(\d+)", u)
             lid = "%s-%s" % (ou.group(1) if ou else "x", qi.group(1) if qi else "x")
@@ -488,6 +490,25 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$UH" -H 'Content-Type:
 r=$(curl -s -w ' %{http_code}' -X POST -H "$UH" -H 'Content-Type: application/json' -d '{"op":"google_start"}' "http://127.0.0.1:$CTRL_PORT/verify")
 echo "$r" | grep -q ' 200$' && grep -q '"op": "google_start"' "$LOG11" && ok "the one-click Google setup link is asked of the server, signed (was 'bad op': Google sign-in never showed)" || bad "google_start: $r"
 kill $DPID11 $MPID11 2>/dev/null
+
+echo "T21 (10 Nov) a quiz LOCKqz does not protect is never locked (asked before the lock); no answer -> locked as before"
+CTRL_PORT=$(free_port); M12=$(free_port); LOG12="$TMP/reports12.log"; mkdir -p "$TMP/l"; cp "$APP/mac/blocklist.txt" "$TMP/l/"; printf %s "$TOKEN" > "$TMP/l/helper.token"
+printf '{ "port": %s, "api_base": "http://127.0.0.1:%s/api", "device_id": "itest-cov" }\n' "$CTRL_PORT" "$M12" > "$TMP/l/config.json"
+python3 "$TMP/mock.py" "$M12" "$LOG12" 0 & MPID12=$!
+run_d "$TMP/l" "$CTRL_PORT"; DPID12=$DPID_; sleep 2
+NP='https://usc.brightspace.com/d2l/lms/quizzing/user/quiz_summary.d2l?qi=88888&ou=98765'
+r=$(curl -s -X POST -H "X-LOCKqz-Token: $TOKEN" -H 'Content-Type: application/json' -d "{\"quiz_id\":\"98765-88888\",\"url\":\"$NP\"}" "http://127.0.0.1:$CTRL_PORT/lock"); sleep 1
+echo "$r" | grep -q '"not_protected": true' && [ "$(stj 's["state"]')" = unlocked ] && ! grep -q '"event": "lock"' "$LOG12" && grep -q '^/api/covered signed=1' "$LOG12" && ok "not LOCKqz's quiz: not locked, nothing reported (signed pre-check)" || bad "pre-check: $r / $(stj 's["state"]')"
+PQ='https://usc.brightspace.com/d2l/lms/quizzing/user/quiz_summary.d2l?qi=12345&ou=98765'
+r=$(curl -s -X POST -H "X-LOCKqz-Token: $TOKEN" -H 'Content-Type: application/json' -d "{\"quiz_id\":\"98765-12345\",\"url\":\"$PQ\"}" "http://127.0.0.1:$CTRL_PORT/lock")
+echo "$r" | grep -q '"ok": true' && [ "$(stj 's["state"]')" = locked ] && ok "a LOCKqz quiz locks as before" || bad "covered quiz: $r"
+kill $DPID12 $MPID12 2>/dev/null; sleep 0.5
+CTRL_PORT=$(free_port); DEAD2=$(free_port); mkdir -p "$TMP/m"; cp "$APP/mac/blocklist.txt" "$TMP/m/"; printf %s "$TOKEN" > "$TMP/m/helper.token"
+printf '{ "port": %s, "api_base": "http://127.0.0.1:%s/api", "device_id": "itest-cov2" }\n' "$CTRL_PORT" "$DEAD2" > "$TMP/m/config.json"
+run_d "$TMP/m" "$CTRL_PORT"; DPID13=$DPID_; sleep 2
+t0=$(date +%s); r=$(curl -s -m 20 -X POST -H "X-LOCKqz-Token: $TOKEN" -H 'Content-Type: application/json' -d "{\"quiz_id\":\"98765-88888\",\"url\":\"$NP\"}" "http://127.0.0.1:$CTRL_PORT/lock"); t1=$(date +%s)
+echo "$r" | grep -q '"ok": true' && [ "$(stj 's["state"]')" = locked ] && [ $((t1 - t0)) -le 6 ] && ok "server unreachable: locked at once (no long wait)" || bad "offline pre-check: $r in $((t1 - t0)) s"
+kill $DPID13 2>/dev/null
 CTRL_PORT=$CTRL1
 echo ""
 echo "RESULT: $pass passed, $fail failed"

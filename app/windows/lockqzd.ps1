@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.6.12"
+$Version = "0.6.13"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = if ($env:LOCKQZ_CONFIG) { $env:LOCKQZ_CONFIG } else { "$env:ProgramData\LOCKqz\config.json" }
@@ -67,13 +67,13 @@ function LQ-Sign([string]$key, [string]$path, [string]$ts, [byte[]]$raw) {
   $h.Key = [Text.Encoding]::ASCII.GetBytes($key)
   LQ-Hex $h.ComputeHash([Text.Encoding]::UTF8.GetBytes($msg))
 }
-function LQ-Call($api, $path, $obj, $device, $key, $state, [bool]$signed) {
+function LQ-Call($api, $path, $obj, $device, $key, $state, [bool]$signed, [int]$tries = 3, [int]$timeout = 8) {
   # POST JSON to the LOCKqz API. Returns @{ code = <http status, 0 = no answer>; data = <reply> }.
   # Signed with the device key; corrects a wrong PC clock and re-registers on a 401. Never throws.
   if (-not $api) { return @{ code = 0; data = $null } }
   $url = $api + $path
   $raw = [Text.Encoding]::UTF8.GetBytes(($obj | ConvertTo-Json -Compress))
-  for ($i = 0; $i -lt 3; $i++) {
+  for ($i = 0; $i -lt $tries; $i++) {
     $hd = @{}
     if ($signed) {
       $ts = [string]([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + [int64]$state.skew)
@@ -83,19 +83,19 @@ function LQ-Call($api, $path, $obj, $device, $key, $state, [bool]$signed) {
     }
     try {
       $ua = "LOCKqz/" + $(if ($Version) { $Version } else { "0" }) + " (Windows)"
-      $d = Invoke-RestMethod -Uri $url -Method Post -Body $raw -Headers $hd -ContentType "application/json; charset=utf-8" -TimeoutSec 8 -UserAgent $ua
+      $d = Invoke-RestMethod -Uri $url -Method Post -Body $raw -Headers $hd -ContentType "application/json; charset=utf-8" -TimeoutSec $timeout -UserAgent $ua
       return @{ code = 200; data = $d }
     } catch {
       $code = 0; $data = $null
       if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
       if ($_.ErrorDetails -and $_.ErrorDetails.Message) { try { $data = $_.ErrorDetails.Message | ConvertFrom-Json } catch {} }
-      if ($code -eq 401 -and $signed -and $data -and $i -lt 2) {
+      if ($code -eq 401 -and $signed -and $data -and $i -lt ($tries - 1)) {
         if ($data.server_time) { $state.skew = [int64]$data.server_time - [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }
         if ($data.why -eq "unregistered") { $state.registered = $false; LQ-Register $api $device $key $state | Out-Null }
         continue
       }
       if ($code -ne 0) { return @{ code = $code; data = $data } }
-      Start-Sleep -Seconds (2 * ($i + 1))
+      if ($i -lt ($tries - 1)) { Start-Sleep -Seconds (2 * ($i + 1)) }
     }
   }
   return @{ code = 0; data = $null }
@@ -600,6 +600,16 @@ while ($listener.IsListening) {
       # "locking" while the engine runs: the watcher neither checks for tampering nor sweeps a
       # "stray" block until the block is really in place.
       $same = ($State.state -eq "locked") -and ($State.quiz_id -eq $body.quiz_id)
+      # Before a NEW lock: is this quiz LOCKqz's? A class or exam not using LOCKqz is never locked (no
+      # browser or app closed, AI never off). One quick signed ask; no answer -> lock as before.
+      $u = [string]$body.url
+      if ((-not $same) -and $u -and ((Lock-Id $u) -eq [string]$body.quiz_id) -and ($State.state -ne "test")) {
+        $cv = LQ-Call $Api "/covered" @{ url = $u.Substring(0, [Math]::Min(2000, $u.Length)); device_id = $Device } $Device $Key $State $true 1 4
+        if (($cv.code -eq 200) -and $cv.data -and ($cv.data.covered -is [bool]) -and (-not $cv.data.covered)) {
+          $out = @{ ok = $false; state = $State.state; not_protected = $true; reason = [string]$cv.data.reason }
+          break
+        }
+      }
       $State.state="locking"; $State.quiz_id=$body.quiz_id; if($body.student){$State.student=$body.student}
       if (-not $same) {
         # a new lock starts on the unknown-end cap (6 h); a caller may only ask for LESS; the server's

@@ -647,4 +647,22 @@ g.pending_try = 0; T(g, [])
 ok("released: 'AI is unlocked. Restart Firefox ...' once") if g.pending is None and sum("AI is unlocked" in m for m in msgs) == 1 else bad("msgs %r pending %r" % (msgs, g.pending))
 """)
 
+_section(r"""
+print("T23 (10 Nov) a quiz LOCKqz does not protect: not locked, nothing closed or said; asked again after 3 minutes")
+class HN(FakeHelper):
+    def __call__(self, path, body=None, timeout=90):
+        if path == "/lock": self.calls.append((path, body)); return {"ok": False, "not_protected": True, "state": "unlocked"}
+        return FakeHelper.__call__(self, path, body, timeout)
+msgs = []; A.dialog = lambda m, *a, **k: msgs.append(m)
+killed = []; A.close_pids = lambda pids: killed.extend(pids) or bool(pids)
+A.ps_procs = lambda: [(11, 5, "/Applications/Firefox.app/Contents/MacOS/firefox")]
+g = A.Agent(); h = HN(); g.helper = h; g.verified = True; g.ready_told = True
+for _ in range(3): T(g, [tab(ATT)])
+n = sum(1 for (p, _) in h.calls if p == "/lock")
+ok("not locked, asked once, nothing closed, no dialog") if not g.locked and n == 1 and not killed and not msgs else bad("locked=%r n=%d killed=%r msgs=%r" % (g.locked, n, killed, msgs))
+g.nolock["123-456"] = 0; T(g, [tab(ATT)])
+ok("after 3 minutes it is asked again (its professor may have turned LOCKqz on)") if sum(1 for (p, _) in h.calls if p == "/lock") == 2 else bad("not re-asked")
+T(g, []); ok("page closed: forgotten (asked again on the next visit)") if "123-456" not in g.nolock else bad("kept %r" % g.nolock)
+""")
+
 print(""); print(f"RESULT: {passed} passed, {failed} failed"); sys.exit(0 if failed == 0 else 1)

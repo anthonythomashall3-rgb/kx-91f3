@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.6.12"
+VERSION = "0.6.13"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -588,6 +588,25 @@ def call(path, body, signed=True):
             time.sleep(2 * (attempt + 1))
     return (0, None)
 
+def call_once(path, body, timeout=4):
+    """One quick signed POST, no retries: (status, json); (0, None) without an answer."""
+    if not API: return (0, None)
+    url, raw = API + path, json.dumps(body).encode()
+    try:
+        r = urllib.request.urlopen(urllib.request.Request(url, data=raw, headers={"Content-Type": "application/json", **UA, **signed_headers(url, raw)}),
+                                   timeout=timeout, context=ssl.create_default_context())
+        return (r.status, _json(r.read()))
+    except urllib.error.HTTPError as e:
+        return (e.code, _json(e.read()))
+    except Exception:
+        return (0, None)
+
+def covered(url):
+    """Before a NEW lock: False only when the server says this quiz is not LOCKqz's (a class or exam not using
+    LOCKqz: never locked, nothing closed). No answer, or an older server: True (lock as before)."""
+    code, j = call_once("/covered", {"url": url[:2000], "device_id": DEVICE})
+    return not (code == 200 and isinstance(j, dict) and j.get("covered") is False)
+
 def register():
     """Register this install's key with the server once (trust on first use)."""
     if NET["registered"] or not API or DEVICE in ("", "unknown"): return NET["registered"]
@@ -996,6 +1015,10 @@ class H(BaseHTTPRequestHandler):
             who = getattr(self, "_whoami", "root")
             if self._other_owner(who):
                 return self._send(409, {"error": "other_user_lock"})
+            url = str(body.get("url") or "")
+            with LOCK: already = STATE["state"] == "locked" and STATE["quiz_id"] == qid
+            if not already and url and lock_id(url) == qid and not developer_mode() and not covered(url):
+                return self._send(200, {"ok": False, "not_protected": True, "state": STATE["state"]})
             if developer_mode():
                 with LOCK:
                     unlock_now(STATE["quiz_id"])

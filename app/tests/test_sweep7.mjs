@@ -131,6 +131,22 @@ console.log("S5 the student's account page names each computer plainly (Linux, A
   const osName = m ? eval(m[1]) : () => "?";
   check("professor's class list: 'Ready · Mac' / Windows / Linux / Android (not 'mac-14.6')", ["mac-14.6", "windows", "linux-ubuntu-24.04", "android-14-samsung", null].map(osName).join(",") === "Mac,Windows,Linux,Android," && /"Ready" \+ \(osName\(x\.platform\)/.test(dash)); }
 
+console.log("S6 /covered: the apps ask before a lock whether the quiz is LOCKqz's (signed, reads only)");
+{
+  const cv = (url, dev = NEW) => call("/covered", { url, device_id: dev?.id }, { dev });
+  const U = (ou, qi, host = "usc.brightspace.com") => `https://${host}/d2l/lms/quizzing/user/quiz_summary.d2l?qi=${qi}&ou=${ou}`;
+  const w = sqlite.prepare("SELECT COUNT(*) AS n FROM events").get().n;
+  const a = await cv(U(500, 1)), b2 = await cv(U(500, 2)), c = await cv(U(999, 1)), d = await cv(U(500, 1, "other.brightspace.com")), e = await cv("https://usc.brightspace.com/d2l/home/500");
+  check("a protected exam: covered", a.data?.covered === true, JSON.stringify(a.data));
+  check("an exam shown 'Not protected': not covered (not_protected)", b2.data?.covered === false && b2.data?.reason === "not_protected", JSON.stringify(b2.data));
+  check("a class not using LOCKqz: not covered", c.data?.covered === false, JSON.stringify(c.data));
+  check("another school's Brightspace: not covered (other_school)", d.data?.covered === false && d.data?.reason === "other_school", JSON.stringify(d.data));
+  check("not a quiz address: covered (the app locks as before; /password decides)", e.data?.covered === true, JSON.stringify(e.data));
+  const un = await call("/covered", { url: U(500, 1) });
+  check("unsigned: refused", un.status === 401 || un.status === 403, String(un.status));
+  check("nothing written", sqlite.prepare("SELECT COUNT(*) AS n FROM events").get().n === w);
+}
+
 console.log("S2 the Mac app's message (pay_text)");
 {
   const { execFileSync } = await import("node:child_process");

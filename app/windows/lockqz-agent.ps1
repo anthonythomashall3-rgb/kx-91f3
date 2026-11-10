@@ -466,6 +466,10 @@ $Pending = $null; $PendingAt = Get-Date "2000-01-01"; $OperaWarned = $false
 # Quizzes the helper released (safety cap, the server's "submitted"/"ended", another school): never
 # re-locked while their page stays open; forgotten once the page has been gone for the grace period.
 $Capped = @{}
+# Quizzes the helper did not lock because LOCKqz does not protect them (class or exam not using LOCKqz):
+# asked again every 3 minutes while the page stays open (its professor may turn LOCKqz on).
+$NoLock = @{}
+function NoLock-Now([string]$q) { $NoLock.ContainsKey($q) -and ([DateTime]::UtcNow -lt $NoLock[$q]) }
 $CapLeft = @{}     # quiz id -> its page left the attempt pages since the release (summary seen)
 $CapForgot = @{}   # quiz id -> unix time this agent forgot its release (the helper's older one is ignored)
 function Add-Cap([string]$q) { if (-not $script:Capped.ContainsKey($q)) { $script:CapLeft[$q] = $false }; $script:Capped[$q] = [DateTime]::UtcNow }
@@ -609,12 +613,15 @@ while ($true) {
       }
     }
     if (-not $Locked) {
-      if ($quizWin -and -not $Capped.ContainsKey($openId)) {
+      if ($quizWin -and -not $Capped.ContainsKey($openId) -and -not (NoLock-Now ([string]$openId))) {
         $Pending = $null
         $Quiz = $openId
         $QuizTab = Get-ActiveTab $quizWin; $QuizTitle = Clean-Title $quizWin.Title; $QuizProc = [string]$quizWin.Proc
         $r = $null; try { $r = Helper "/lock" @{ quiz_id = $Quiz; student = $Student; url = $quizWin.Url } } catch {}
-        if ($r -and $r.ok -and ($r.capped_quiz -eq $Quiz)) {
+        if ($r -and $r.not_protected) {
+          # Not LOCKqz's quiz: nothing locked, nothing closed, nothing said.
+          $NoLock[[string]$Quiz] = [DateTime]::UtcNow.AddSeconds(180); Log "not protected: $Quiz ($($r.reason)) - not locked"; Clear-Quiz
+        } elseif ($r -and $r.ok -and ($r.capped_quiz -eq $Quiz)) {
           # C9: the server says this student already finished this quiz - the helper did not lock.
           Add-Cap ([string]$Quiz); Log "server: $Quiz is over ($($r.capped_reason)) - not locked"; Clear-Quiz
         } elseif ($r -and $r.ok) {
@@ -681,7 +688,11 @@ while ($true) {
               Add-Cap ([string]$Quiz)
               Log "$(if ($st.capped_reason) { $st.capped_reason } else { 'safety cap' }) released $Quiz - not re-locking"
               Clear-Quiz; $reason = $null
-            } elseif (($hs -ne "locked") -and ($hs -ne "developer")) { Log "helper not locked during an open quiz ($hs) - re-locking"; Helper "/lock" @{ quiz_id = $Quiz; student = $Student; url = $QuizUrl } | Out-Null }
+            } elseif (($hs -ne "locked") -and ($hs -ne "developer")) {
+              Log "helper not locked during an open quiz ($hs) - re-locking"
+              $rl = Helper "/lock" @{ quiz_id = $Quiz; student = $Student; url = $QuizUrl }
+              if ($rl -and $rl.not_protected) { $NoLock[[string]$Quiz] = [DateTime]::UtcNow.AddSeconds(180); Log "not protected: $Quiz - not locked"; Clear-Quiz; $reason = $null }
+            }
           } catch { $HelperOk = $false; Log "helper check failed: $_" }
         }
       }
