@@ -358,7 +358,11 @@
       var nextQ = openQ(c).filter(function (q) { var st = dt(q.start); return st !== null && st > Date.now(); })
         .sort(function (a, b) { return dt(a.start) - dt(b.start); })[0];
       var subj = "Install LOCKqz before " + (nextQ ? nextQ.name : "our next exam") + " (" + cname(c) + ")";
-      var body = "Hi,\n\nOur Brightspace exams in " + cname(c) + " use LOCKqz. You need it installed once, or the exam will not open for you.\n\n1. Go to " + INSTALL + "\n2. Click Download and run the installer.\n\nIf you already installed LOCKqz, you are all set. That is all. It only blocks AI tools while an exam is open and turns itself off after.\n\n" + myName;
+      // The same steps as the dashboard's Email students: one install step for any computer, the fee while it is on.
+      var fee = state && typeof state.fee === "string" && state.fee ? state.fee : "";
+      var body = "Hi,\n\nOur Brightspace exams in " + cname(c) + " use LOCKqz. " + (fee ? "Install it and pay before the exam, or the exam will not open for you." : "You need it installed, or the exam will not open for you.") +
+        "\n\n1. Install LOCKqz on your computer: " + INSTALL + " (follow the steps there, about one minute)." + (fee ? "\n2. Pay for this semester when LOCKqz asks: " + fee + "." : "") +
+        "\n\nIf you already did, you are all set. LOCKqz only blocks AI tools while an exam is open and turns itself off after.\n\n" + myName;
       var bcc = learnersL.map(function (s) { return s.email; }).filter(Boolean).join(",");
       var href = "mailto:?" + (bcc ? "bcc=" + encodeURIComponent(bcc) + "&" : "") + "subject=" + encodeURIComponent(subj) + "&body=" + encodeURIComponent(body);
       if (href.length > 1900) href = "mailto:?subject=" + encodeURIComponent(subj) + "&body=" + encodeURIComponent(body);   // mail apps drop longer links
@@ -412,7 +416,7 @@
         past.map(function (q) { return '<div style="padding:4px 0">' + esc(q.name) + "</div>"; }).join("") + "</details>";
     });
     say('<style>.lqsw{position:relative;display:inline-block;width:40px;height:24px;flex:none}.lqsw input{position:absolute;opacity:0;width:0;height:0;margin:0}.lqsl{position:absolute;inset:0;background:#ccc;border-radius:24px;transition:.15s;cursor:pointer}.lqsl:before{content:"";position:absolute;height:18px;width:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.15s}.lqsw input:checked+.lqsl{background:#990000}.lqsw input:checked+.lqsl:before{transform:translateX(16px)}.lqsw input:disabled+.lqsl{opacity:.55;cursor:default}</style><div style="background:#eafbea;padding:8px 10px;border-radius:8px">Synced ' + view.length + " class" + (view.length === 1 ? "" : "es") +
-      ", " + students + " students, " + nq + " quizzes.</div>" +
+      ", " + students + " student" + (students === 1 ? "" : "s") + ", " + nq + " quiz" + (nq === 1 ? "" : "zes") + ".</div>" +
       (notMine ? '<div style="color:#888;font-size:12px;margin-top:6px">' + notMine + " other Brightspace course" + (notMine === 1 ? " is" : "s are") + " not on your LOCKqz account (another professor runs LOCKqz there, or Brightspace does not list you as its instructor yet).</div>" : "") +
       (unread ? '<div style="color:#990000;margin-top:8px">' + unread + " course" + (unread === 1 ? "" : "s") + " not read: LOCKqz kept the quizzes it had.</div>" : "") +
       (errors.length ? '<div style="color:#990000;margin-top:8px">Could not update: ' + esc(errors.join("; ")) + "</div>" : "") +

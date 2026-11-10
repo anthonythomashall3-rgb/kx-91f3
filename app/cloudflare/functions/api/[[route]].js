@@ -3196,7 +3196,8 @@ export async function onRequest(context) {
       // Only hand back passwords for courses this caller instructs (never leak another course's).
       // ous: the classes the dashboard shows after this Sync (the panel shows exactly these);
       // class_off: those of them the professor turned LOCKqz off for.
-      return json({ ...(add.length || released ? await bsState(mineA) : pre), auto_gate: gateRequired(), ous: A, class_off: [...offSet] });
+      // fee: what students pay this semester (the Sync panel's Send email names it), null while the fee is off.
+      return json({ ...(add.length || released ? await bsState(mineA) : pre), auto_gate: gateRequired(), ous: A, class_off: [...offSet], fee: stuFee() });
     }
     if (p === "/sync-result" && request.method === "POST") {
       const list = (Array.isArray(body.results) ? body.results : []).slice(0, 1000).filter(r => r && typeof r === "object");
