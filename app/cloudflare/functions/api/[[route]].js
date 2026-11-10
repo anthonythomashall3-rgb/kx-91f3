@@ -2272,7 +2272,8 @@ export async function onRequest(context) {
       const gating = await db.prepare("SELECT 1 FROM quizzes WHERE teacher_id=? AND gated=1 LIMIT 1").bind(t.id).first();
       await db.batch([
         db.prepare(`UPDATE teachers SET pw_hash=?, salt=?, token=?${gating ? ",sync_key_kept=1" : ",sync_key=NULL,sync_key_kept=0"} WHERE id=?`).bind(await hashPw(pw, salt, PEPPER), salt, token, t.id),
-        db.prepare("DELETE FROM email_codes WHERE device_id=?").bind(dev)]);
+        db.prepare("DELETE FROM email_codes WHERE device_id=?").bind(dev),
+        db.prepare("DELETE FROM events WHERE event='reset_request' AND " + RL_EV + " AND detail=?").bind(t.email)]);   // done: off the admin's "Password reset requests"
       return json({ token, email: t.email, name: t.name });
     }
     // Public: is this invite link valid? (lets the sign-up form open and prefill the email)
@@ -2305,7 +2306,8 @@ export async function onRequest(context) {
       // Like /reset: the Sync bookmark key dies with the old password -- except while a gate runs (the
       // gate's Sync tab must keep working); then it is cleared when the last gate stops (I-M2, I-M6).
       const gating = await db.prepare("SELECT 1 FROM quizzes WHERE teacher_id=? AND gated=1 LIMIT 1").bind(me.id).first();
-      await db.prepare(`UPDATE teachers SET pw_hash=?, salt=?, token=?${gating ? ",sync_key_kept=1" : ",sync_key=NULL,sync_key_kept=0"} WHERE id=?`).bind(await hashPw(pw,salt,PEPPER), salt, token, me.id).run();
+      await db.batch([db.prepare(`UPDATE teachers SET pw_hash=?, salt=?, token=?${gating ? ",sync_key_kept=1" : ",sync_key=NULL,sync_key_kept=0"} WHERE id=?`).bind(await hashPw(pw,salt,PEPPER), salt, token, me.id),
+        db.prepare("DELETE FROM events WHERE event='reset_request' AND " + RL_EV + " AND detail=?").bind(me.email)]);   // a reset request for this account is done
       return json({ ok:true, token, ...(gating ? { sync_key_kept: "a gate is running; the Sync bookmark keeps working until it stops" } : {}) });
     }
     // Admin only: list teachers / reset a teacher's password (no email service, so the
@@ -2314,7 +2316,7 @@ export async function onRequest(context) {
       if (!me?.admin) return json({ error:"admin only" }, 403);
       // Set-up progress per professor (the dashboard's 3 steps): extension check-in, Brightspace classes (+ verified),
       // students emailed, protected exams.
-      const r = await db.prepare("SELECT t.id,t.email,t.name,t.created_at,t.active_until,t.verified,t.ext_seen,(SELECT COUNT(*) FROM paid_sections ps WHERE ps.teacher_id=t.id AND ps.until>=?) AS paid_sections,(SELECT code FROM pay_codes pc WHERE pc.teacher_id=t.id) AS memo,(SELECT COUNT(*) FROM teacher_courses tc WHERE tc.teacher_id=t.id AND COALESCE(tc.in_sync,1)=1) AS classes,(SELECT MAX(tc.synced_at) FROM teacher_courses tc WHERE tc.teacher_id=t.id) AS synced_at,(SELECT MAX(ms.at) FROM teacher_courses tc JOIN mail_sent ms ON ms.ou=tc.ou WHERE tc.teacher_id=t.id AND ms.kind IN ('all','missing')) AS mailed_at,(SELECT COUNT(*) FROM quizzes q WHERE q.teacher_id=t.id) AS protected FROM teachers t ORDER BY t.created_at DESC").bind(laToday()).all();
+      const r = await db.prepare("SELECT t.id,t.email,t.name,t.role,t.created_at,t.active_until,t.verified,t.ext_seen,(SELECT COUNT(*) FROM paid_sections ps WHERE ps.teacher_id=t.id AND ps.until>=?) AS paid_sections,(SELECT code FROM pay_codes pc WHERE pc.teacher_id=t.id) AS memo,(SELECT COUNT(*) FROM teacher_courses tc WHERE tc.teacher_id=t.id AND COALESCE(tc.in_sync,1)=1) AS classes,(SELECT MAX(tc.synced_at) FROM teacher_courses tc WHERE tc.teacher_id=t.id) AS synced_at,(SELECT MAX(ms.at) FROM teacher_courses tc JOIN mail_sent ms ON ms.ou=tc.ou WHERE tc.teacher_id=t.id AND ms.kind IN ('all','missing')) AS mailed_at,(SELECT COUNT(*) FROM quizzes q WHERE q.teacher_id=t.id) AS protected FROM teachers t ORDER BY t.created_at DESC").bind(laToday()).all();
       return json({ teachers: r.results });
     }
     // Admin only: turn a teacher on (after payment) until a date, or off.
@@ -2336,6 +2338,7 @@ export async function onRequest(context) {
       // The old Sync bookmark key dies with the old password (it is a login for the Sync endpoints).
       const gating = await db.prepare("SELECT 1 FROM quizzes q JOIN teachers t ON t.id=q.teacher_id WHERE t.email=? AND q.gated=1 LIMIT 1").bind(email).first();
       const r = await db.prepare(`UPDATE teachers SET pw_hash=?,salt=?,token=NULL${gating ? ",sync_key_kept=1" : ",sync_key=NULL,sync_key_kept=0"} WHERE email=?`).bind(await hashPw(pw,salt,PEPPER), salt, email).run();
+      if (r.meta.changes) await db.prepare("DELETE FROM events WHERE event='reset_request' AND " + RL_EV + " AND detail=?").bind(email).run();   // off the "Password reset requests" list
       return r.meta.changes ? json({ email, password: pw, ...(gating ? { sync_key_kept: "a gate is running; the Sync bookmark keeps working until it stops" } : {}) }) : json({ error:"no such professor" }, 404);
     }
     // Admin only: invite a teacher (one-time code; optional email lock; account active until a date).
@@ -2751,7 +2754,8 @@ export async function onRequest(context) {
     if (p === "/payments") {
       if (!me?.admin) return json({ error:"admin only" }, 403);
       const r = await db.prepare("SELECT p.txn,p.code,p.amount,p.via,p.payer,p.note,p.term,p.received_at,p.matched,COALESCE(s.email,t.email) AS who FROM payments p LEFT JOIN pay_codes_students s ON s.code=p.code LEFT JOIN pay_codes pc ON pc.code=p.code LEFT JOIN teachers t ON t.id=pc.teacher_id ORDER BY p.received_at DESC LIMIT 300").all();
-      return json({ payments: r.results.map(x => ({ ...x, review: x.matched === "review", void: x.matched === "void" })), fee_on: feeOn(), fee: STUDENT_FEE, fee_from: env.STUDENT_FEE_FROM || null, script_key: await paySecret() });
+      // fee_paid: what a student actually pays (Zelle, card); fee is the base the credit factors count against.
+      return json({ payments: r.results.map(x => ({ ...x, review: x.matched === "review", void: x.matched === "void" })), fee_on: feeOn(), fee: STUDENT_FEE, fee_paid: { zelle: totalOf("student", "zelle"), card: totalOf("student", "card") }, fee_from: env.STUDENT_FEE_FROM || null, script_key: await paySecret() });
     }
     // Admin: put any payment on a code (an email = that student's code); also clears void/review.
     // Optional amount for a review row whose amount the script could not read.

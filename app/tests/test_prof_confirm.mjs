@@ -120,6 +120,23 @@ sqlite.prepare("INSERT INTO devices (device_id, device_key, student, student_ver
 await call("/sync", { whoami: { id: "7701" }, courses: [course("880006", "BUAD-215: Foundations", "20263_30006", { id: "7701", name: "Invited, Ivy", email: "ivy@usc.edu" }, "Instructor", stu(2, 7711))] }, { token: IVY });
 check("an invited professor still confirms through his own sync (the invite stands, even with a student install)", acct("ivy@usc.edu")?.verified === 1, JSON.stringify(acct("ivy@usc.edu")));
 
+console.log("A the admin page");
+{ // a password reset request the professor finished himself (emailed code) leaves the admin's list
+  await call("/forgot", { email: "pat@usc.edu" });
+  const reqs = async () => ((await call("/reset-requests", null, { token: ADMIN, get: true })).data?.requests || []).map(x => x.email);
+  const before = await reqs(), code = mail.filter(m => m.to === "pat@usc.edu" && m.code).pop()?.code;
+  r = await call("/forgot/reset", { email: "pat@usc.edu", code, password: "new-pass-4567" });
+  check("a reset request is listed, and gone once he resets with the emailed code", before.includes("pat@usc.edu") && r.status === 200 && !(await reqs()).includes("pat@usc.edu"), JSON.stringify([before, r.status]));
+  await call("/forgot", { email: "ivy@usc.edu" });
+  r = await call("/reset", { email: "ivy@usc.edu" }, { token: ADMIN });
+  check("...or once the admin resets it (Reset pw)", r.status === 200 && !(await reqs()).includes("ivy@usc.edu"));
+  const tl = (await call("/teachers", null, { token: ADMIN, get: true })).data?.teachers || [];
+  check("/teachers says who is the admin (his row is never 'not verified')", tl.find(t => t.email === "admin@usc.edu")?.role === "admin");
+  { const e2 = { ...env, STUDENT_TOTAL: "200", STUDENT_OTHER_TOTAL: "210", STUDENT_FEE: "180" };
+    const res = await onRequest({ request: new Request("https://lockqz.test/api/payments", { headers: { "X-LOCKqz-Teacher": ADMIN, "CF-Connecting-IP": "10.4.0.1" } }), env: e2, waitUntil: () => {} });
+    const d = await res.json();
+    check("admin Payments shows what students actually pay ($200 Zelle, $210 card or Venmo), not only the $180 base", d.fee_paid?.zelle === 200 && d.fee_paid?.card === 210 && d.fee === 180, JSON.stringify(d.fee_paid)); }
+}
 let chromium; try { ({ chromium } = createRequire(import.meta.url)("playwright")); } catch {}
 if (!chromium) try { ({ chromium } = createRequire("/opt/npm-tools/node_modules/")("playwright")); } catch {}
 if (!chromium) console.log("  skip: real-browser checks (no playwright)");
@@ -144,6 +161,15 @@ else {
     check("her students and switches are there, no 'not the instructor' line", /12 students/.test(t) && await pg.locator("#app .sw").count() > 0 && !/does not list you|Only this class's instructor/.test(t), t.slice(0, 400));
     check("header shows her name, not her email", /Ada Lovelace/.test(await pg.innerText("#who").catch(() => "")), await pg.innerText("#who").catch(() => "?"));
     check("plurals: '12 addresses copied', '1 address', '2 students'", await pg.evaluate(() => [pl(12, "address"), pl(1, "address"), pl(2, "student")].join("|")) === "12 addresses|1 address|2 students");
+    await pg.evaluate(() => { location.hash = "#class/880001"; }); await pg.waitForTimeout(700); const cOn = await pg.innerText("#app");
+    await pg.evaluate(() => { location.hash = ""; }); await pg.waitForTimeout(700);
+    const on1 = await pg.innerText("section.band").catch(() => "");
+    await pg.click("section.band button.sw"); await pg.waitForTimeout(1500); const off1 = await pg.innerText("section.band").catch(() => "");
+    check("one exam protected, its password not in Brightspace yet: 'Your upcoming exam is waiting to be set in Brightspace.' (not '0 of your 1 upcoming exam')", /^Your upcoming exam is waiting to be set in Brightspace\./m.test(on1) && !/0 of your/.test(on1), on1);
+    check("all off: 'LOCKqz is off. Students can use AI ...' never next to 'nothing for you to do'", /LOCKqz is off/.test(off1) && !/nothing for you to do/.test(off1), off1);
+    await pg.evaluate(() => { location.hash = "#class/880001"; }); await pg.waitForTimeout(700); const cOff = await pg.innerText("#app");
+    check("class page: 'Nothing to do' only while its exams are protected; off: 'LOCKqz is off for this class'",
+      /Nothing to do\./.test(cOn) && /every exam starts protected/.test(cOn) && !/Nothing to do\./.test(cOff) && /LOCKqz is off for this class/.test(cOff), cOn.slice(0, 300) + " || " + cOff.slice(0, 300));
     check("no page errors", !errs.length, errs.join(" | ")); await ctx.close(); }
   console.log("C4 an account that instructs none of its classes");
   { const { ctx, pg, errs } = await open(NINA, "nina@usc.edu"); const t = await pg.innerText("#app");
@@ -162,6 +188,13 @@ else {
   { const { ctx, pg, errs } = await open(ADMIN, "admin@usc.edu", "#admin"); await pg.waitForTimeout(800);
     const row = await pg.locator("#teachers tr", { hasText: "ada@usc.edu" }).innerText();
     check("Ada's row: her 2 classes, confirmed (no 'not verified'), no Confirm button", /2 classes/.test(row) && !/not verified/.test(row) && await pg.locator("#teachers button", { hasText: "Confirm" }).count() === 0, row);
+    sqlite.prepare("INSERT INTO teacher_courses (teacher_id,ou,name,code,role,synced_at,in_sync) VALUES (?,?,?,?,?,?,1)").run(AID, "880091", "ECON-204", "20263_30091", "Teaching Assistant", new Date().toISOString());
+    sqlite.prepare("INSERT INTO payments (txn,amount,via,payer,note,received_at,matched) VALUES ('t-void',0,'zelle','x','y',?,'void')").run(new Date().toISOString());
+    await pg.evaluate(() => { loadTeachers(); loadPayments(); }); await pg.waitForTimeout(900);
+    const adminRow = await pg.locator("#teachers tr", { hasText: "admin@usc.edu" }).innerText();
+    check("the admin's own row: his classes, never 'not verified'", /class/.test(adminRow) && !/not verified/.test(adminRow), adminRow);
+    const vrow = pg.locator("#payments tr", { hasText: "void" });
+    check("a voided payment shows 'void' and no Void button", await vrow.count() === 1 && await vrow.locator("button", { hasText: "Void" }).count() === 0, await vrow.innerText().catch(() => "?"));
     check("no page errors (admin)", !errs.length, errs.join(" | ")); await ctx.close(); }
   await browser.close();
 }
