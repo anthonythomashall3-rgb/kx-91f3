@@ -151,7 +151,10 @@ const routeSrc = readFileSync(join(DIR, "../cloudflare/functions/api/[[route]].j
 const aiM = routeSrc.match(/const AI_DOMAINS = (\[[\s\S]*?\]);/);
 let served = null; try { served = JSON.parse(aiM[1]); } catch (e) {}
 served ? ok("AI_DOMAINS parses as plain JSON (no comments inside the array)") : bad("AI_DOMAINS is not plain JSON - deploy.sh would fail to build blocklist.json");
-served && JSON.stringify(served) === JSON.stringify(mac) ? ok(`AI_DOMAINS == blocklist.txt (${served.length} entries)`) : bad("AI_DOMAINS and blocklist.txt differ");
+// The served list starts with blocklist.txt exactly, in order. It may run AHEAD of it: entries added on the server
+// between app versions (helpers that refresh from the server add them); they join blocklist.txt at the next version.
+const ahead = served ? served.slice(mac.length) : [];
+served && JSON.stringify(served.slice(0, mac.length)) === JSON.stringify(mac) ? ok(`AI_DOMAINS starts with blocklist.txt (${mac.length} entries${ahead.length ? ", " + ahead.length + " more served ahead of the next app version" : ""})`) : bad("AI_DOMAINS and blocklist.txt differ");
 
 console.log("T15 28 Oct audit 2: LMS quiz-solver back ends, interview copilots, AI browsers, writers/humanizers, coding agents, model gateways, regional Vertex/Bedrock");
 const need5 = ["examclutch.com","getquizsolve.com","getanswerlyai.com","upstudy.ai","finalroundai.com","lockedinai.com","fellou.ai","alexa.com",
@@ -233,8 +236,11 @@ miss20.length === 0 ? ok(`all ${need20.length} in both blocklists + AI_DOMAINS`)
 
 console.log("T20b 11 Nov audit: quiz / homework answer tools, AI search, chat front ends");
 const need22 = ["transcript.study", "answer.ai", "cramly.ai", "studdy.ai", "tutoreva.com", "snapxam.com", "apexvision.ai", "scholarbot.ai", "unriddle.ai", "tutorly.ai", "studentai.app", "inkey.ai", "getconch.ai", "writeless.ai", "kunduz.com", "aimath.com", "scira.ai", "devv.ai", "thinkany.ai", "hika.fyi", "toolbaz.com", "chatboxai.app", "web.chatboxai.app", "lambda.chat", "dify.ai", "cloud.dify.ai", "udify.app", "myninja.ai", "ninjachat.ai", "magai.co", "galaxy.ai", "nat.dev", "typeset.io", "sharly.ai", "docanalyzer.ai", "taskade.com", "crushon.ai", "spicychat.ai", "chub.ai", "heypi.com", "mapify.so", "nami.so", "zhipuai.cn"];
-const miss22 = need22.filter(d => !mac.includes(d) || !win.includes(d) || !(served || []).includes(d));
-miss22.length === 0 ? ok(`all ${need22.length} in both blocklists + AI_DOMAINS`) : bad("missing: " + miss22.join(", "));
+const miss22 = need22.filter(d => !(served || []).includes(d));
+miss22.length === 0 ? ok(`all ${need22.length} served (AI_DOMAINS)`) : bad("missing: " + miss22.join(", "));
+const stray = ahead.filter(d => !need22.includes(d));
+stray.length === 0 ? ok("every entry served ahead of blocklist.txt is one of these") : bad("served but in no blocklist and not listed here: " + stray.join(", "));
+need22.every(d => mac.includes(d) === win.includes(d)) ? ok("both blocklists agree on them") : bad("the two blocklists differ on the 11 Nov entries");
 
 console.log("T21 3 Nov owner decision: no AI in any app left open (Studocu, Knowunity, Instagram, Facebook, Snapchat web, YouTube pages, Colab, Reddit Answers)");
 const need21 = ["studocu.com","knowunity.com","instagram.com","i.instagram.com","facebook.com","web.snapchat.com","snapchat.com/web",
