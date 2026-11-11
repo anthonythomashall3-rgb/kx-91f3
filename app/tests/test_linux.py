@@ -203,5 +203,41 @@ check("download page: Linux gets the one-line command, no installer box; phones/
       all(x in open(os.path.join(APP, "cloudflare/public/index.html")).read() for x in ["install-linux.sh", "for Linux", "Open on your computer for access."]))
 check("release.yml publishes install-linux.sh and runs the real Linux install test", "install-linux.sh" in open(os.path.join(APP, "..", ".github/workflows/release.yml")).read() and "test_linux_install.sh" in open(os.path.join(APP, "..", ".github/workflows/release.yml")).read())
 
+# --- sweep 12: browser names are whole folder / file names; services stopped for a quiz come back; status = whole block ---
+check("a program is a browser only by a whole folder / file name (zenity, operator-sdk, a home folder 'braveheart' or 'zendaya', the Mullvad VPN app are not browsers)",
+      all(A.classify_exe(x)[0] is None for x in ["/usr/bin/zenity", "/usr/bin/zenmap", "/home/zendaya/.local/bin/code", "/usr/local/bin/operator-sdk", "/home/braveheart/bin/tool", "/opt/Mullvad VPN/mullvad-gui", "/home/u/firefox-notes/app"]))
+check("every real browser path still gets its label",
+      [A.classify_exe(x)[0] for x in ["/snap/firefox/123/usr/lib/firefox/firefox", "/usr/lib/firefox-esr/firefox-esr", "/opt/zen/zen", "/app/zen/zen", "/snap/brave/501/opt/brave.com/brave/brave", "/usr/bin/brave-browser",
+        "/usr/lib/x86_64-linux-gnu/opera/opera", "/opt/vivaldi/vivaldi-bin", "/opt/microsoft/msedge/msedge", "/usr/lib/mullvad-browser/mullvadbrowser.real", "/home/s/tor-browser_en-US/Browser/firefox", "/usr/bin/librewolf", "/usr/bin/google-chrome-stable"]]
+      == ["Firefox", "Firefox", "Zen", "Zen", "Brave", "Brave", "Opera", "Vivaldi", "Microsoft Edge", "Mullvad Browser", "Tor Browser", "LibreWolf", "Google Chrome"])
+shown = []; A.dialog = lambda t, title="LOCKqz": shown.append(t)
+_real_run = A.subprocess.run; A.subprocess.run = lambda *a, **k: None
+try:
+    ag = A.Agent.__new__(A.Agent)
+    ag.payment({"pay": {"url": "https://lockqz.com/pay?c=LQ1", "code": "LQ1", "line": "$200 by Zelle, or $210 by card or Venmo", "zelle": True, "amount": 200}})
+finally: A.subprocess.run = _real_run
+check("the unpaid message names every way to pay at its price and the memo (the Mac's text)", len(shown) == 1 and "$200 by Zelle, or $210 by card or Venmo" in shown[0] and "LQ1" in shown[0] and "$5" not in shown[0], str(shown))
+fake = os.path.join(TMP, "fakebin"); os.makedirs(fake, exist_ok=True); st12 = os.path.join(TMP, "st12"); os.makedirs(st12, exist_ok=True)
+with open(os.path.join(fake, "systemctl"), "w") as f:
+    f.write('#!/bin/bash\necho "$*" >> "%s/systemctl.log"\nif [ "$1" = is-active ]; then case "${@: -1}" in tailscaled|docker) exit 0;; *) exit 3;; esac; fi\nexit 0\n' % st12)
+os.chmod(os.path.join(fake, "systemctl"), 0o755)
+eng = open(os.path.join(LINUX, "lockqz.sh")).read()
+fn = eng[eng.index('SYSTEM_SERVICES=('):eng.index('close_apps() {')]
+hosts12 = os.path.join(TMP, "hosts12"); open(hosts12, "w").write("127.0.0.1 localhost\n")
+bl12 = os.path.join(TMP, "bl12"); open(bl12, "w").write("chatgpt.com\nclaude.ai\n")
+sh = 'set -uo pipefail; STATE="%s"; HOSTS="%s"; BLOCKLIST="%s"; source "%s"\n%s\n' % (st12, hosts12, bl12, os.path.join(MAC, "lockqz-core.sh"), fn)
+def run12(body):
+    return subprocess.run(["bash", "-c", sh + body], capture_output=True, text=True, env=dict(os.environ, PATH=fake + ":" + os.environ["PATH"]))
+r = run12('stop_services; stop_services; cat "$STOPPED"')
+check("the services a quiz stops are written down once each", r.stdout.split() == ["tailscaled", "docker"], r.stdout + r.stderr)
+r = run12('echo "evil.service" >> "$STOPPED"; start_services; [ -f "$STOPPED" ] && echo left || echo gone')
+log12 = open(os.path.join(st12, "systemctl.log")).read()
+check("at unlock exactly those services are started again (a name not on LOCKqz's list is never started) and the note is removed",
+      "start --no-block tailscaled" in log12 and "start --no-block docker" in log12 and "evil" not in log12 and log12.count("start --no-block") == 2 and r.stdout.strip() == "gone", log12 + r.stdout)
+check("unlock starts the services only once every layer is off; status says LOCKED only for the whole block (same rule as the Mac)",
+      '[ "$rc" = 0 ] && start_services' in eng and 'if hosts_block_intact "$HOSTS" "$BLOCKLIST"; then say "LOCKED"' in eng)
+r = run12('hosts_add_block "$HOSTS" "$BLOCKLIST"; hosts_block_intact "$HOSTS" "$BLOCKLIST" && echo whole; sed -i "/0.0.0.0 chatgpt.com/d" "$HOSTS"; hosts_is_locked "$HOSTS" && echo marker; hosts_block_intact "$HOSTS" "$BLOCKLIST" || echo edited')
+check("a block with a line removed still has its marker but is not 'locked'", r.stdout.split() == ["whole", "marker", "edited"], r.stdout + r.stderr)
+
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nRESULT: %d passed, %d failed" % (PASS, FAIL)); sys.exit(1 if FAIL else 0)

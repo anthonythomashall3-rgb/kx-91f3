@@ -72,6 +72,8 @@ run "Bug sweep 7: the apps' unpaid message names every way at its own price (nev
 run "Bug sweep 8: card renewals never within 7 days of the card's own payment, partial refunds, held unlocks when D1 is full, account panel retry" node --no-warnings test_sweep8.mjs
 run "Bug sweep 9: 'Access until' is what the student paid, a professor email on the student pay page, Zelle price in the bank email, code boxes, Let in with an apostrophe" node --no-warnings test_sweep9.mjs
 run "Bug sweep 10: the same request several times at the same moment (sign-up double click, memo codes, payments, webhooks)" node --no-warnings test_sweep10.mjs
+run "Bug sweep 12: an exam deleted in Brightspace is let go, schema.sql has every table, account panel and support form" node --no-warnings test_sweep12.mjs
+run "Bug sweep 12 (helper): a list addition during a quiz is applied in the same step, any token text gets a plain 401" python3 test_sweep12.py
 run "Microsoft Store button by itself + automatic Store submissions; Firefox package signed by Mozilla" node --no-warnings test_store_ff.mjs
 run "Apple Developer ID: Mac installer signing + notarization wiring, signed package never replaced" bash test_signing_mac.sh
 run "Download page on a Mac: Apple-signed installer = one download, command one click away (real Chromium)" node --no-warnings test_download_mac.mjs

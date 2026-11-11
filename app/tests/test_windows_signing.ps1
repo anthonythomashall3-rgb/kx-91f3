@@ -159,6 +159,26 @@ if ($ossl -and $py) {
   } finally { Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue; Remove-Item Env:LOCKQZ_UPDATE_DIR -ErrorAction SilentlyContinue; Remove-Item $t -Recurse -Force -ErrorAction SilentlyContinue; $ErrorActionPreference = $savedEAP }
 } else { Write-Host "  (openssl/python not found: cross-check with a CI-style signed release skipped)" }
 
+Write-Host "T5 additions to the AI list from the server (add-only, appended, sanity-checked)"
+$bt = Join-Path ([IO.Path]::GetTempPath()) ("lqz-bl-" + [Guid]::NewGuid().ToString("N") + ".txt")
+try {
+  [IO.File]::WriteAllText($bt, "# shipped list`nchatgpt.com`nclaude.ai`ngemini.google.com`nbing.com/chat")   # no newline at the end, on purpose
+  $before = [IO.File]::ReadAllText($bt)
+  $served = @("chatgpt.com", "claude.ai", "gemini.google.com", "bing.com/chat") + @(1..20 | ForEach-Object { "ai$_.example.com" }) + @("NEWAI.example", "bad host", "http://x.example", 5, "new.example/chat")
+  $n = LQ-MergeBlocklist $served $bt
+  $after = [IO.File]::ReadAllText($bt)
+  $lines = @([IO.File]::ReadAllLines($bt) | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith("#") })
+  Check "new entries are added (22), malformed ones are not" (($n -eq 22) -and ($lines.Count -eq 26) -and ($lines -contains "NEWAI.example") -and ($lines -contains "new.example/chat") -and -not ($lines -contains "bad host") -and -not ($lines -contains "5"))
+  Check "the shipped lines are kept byte for byte, the additions follow on their own lines" ($after.StartsWith($before + [Environment]::NewLine) -and ($lines[3] -eq "bing.com/chat") -and ($lines[4] -eq "ai1.example.com"))
+  Check "the same list again adds nothing" ((LQ-MergeBlocklist $served $bt) -eq 0 -and ([IO.File]::ReadAllText($bt) -eq $after))
+  Check "a short list is refused" ((LQ-MergeBlocklist @("chatgpt.com", "claude.ai", "gemini.google.com", "x1.example") $bt) -eq 0)
+  Check "a list without the anchors is refused" ((LQ-MergeBlocklist @(1..30 | ForEach-Object { "zz$_.example.com" }) $bt) -eq 0 -and ([IO.File]::ReadAllText($bt) -eq $after))
+  Check "no list at all changes nothing" ((LQ-MergeBlocklist $null $bt) -eq 0)
+  Check "an unreachable site changes nothing" ((LQ-RefreshBlocklist "http://127.0.0.1:9/api" $bt "0") -eq 0 -and ([IO.File]::ReadAllText($bt) -eq $after))
+} finally { Remove-Item $bt -Force -ErrorAction SilentlyContinue }
+$wsrc = Get-Content (Join-Path $Win "lockqzd.ps1") -Raw
+Check "the helper asks for additions a minute after start and every 12 h, never during a quiz" ($wsrc -match '\(\$cycles -eq 12\) -or \(\$cycles % 8640 -eq 0\)\) -and \(\$State\.state -eq "unlocked"\)' -and $wsrc -match 'LQ-MergeBlocklist \$served \(Join-Path \$Here "blocklist\.txt"\)')
+
 Write-Host ""
 Write-Host "RESULT: $pass passed, $fail failed"
 if ($fail -gt 0) { exit 1 }

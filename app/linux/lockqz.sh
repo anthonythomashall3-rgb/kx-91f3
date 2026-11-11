@@ -63,10 +63,24 @@ _kill_cmd_res() {
   done
 }
 SYSTEM_SERVICES=(tailscaled zerotier-one warp-svc docker containerd gnome-remote-desktop x11vnc vncserver tor openvpn wg-quick@wg0 nordvpnd expressvpn mullvad-daemon protonvpn-daemon)
+STOPPED="$STATE/services.stopped"   # the services this quiz stopped: started again at unlock, so the computer is as the student left it
 stop_services() {   # once per lock: systemd would restart a killed service every 5 s
   [ "${LOCKQZ_NO_KILL:-0}" = 1 ] && return 0
   local u
-  for u in "${SYSTEM_SERVICES[@]}"; do systemctl is-active --quiet "$u" 2>/dev/null && systemctl stop --no-block "$u" 2>/dev/null; done
+  for u in "${SYSTEM_SERVICES[@]}"; do
+    systemctl is-active --quiet "$u" 2>/dev/null || continue
+    grep -qxF "$u" "$STOPPED" 2>/dev/null || echo "$u" >> "$STOPPED"
+    systemctl stop --no-block "$u" 2>/dev/null
+  done
+  return 0
+}
+start_services() {   # at unlock: only names from the list above, only the ones that were running before the quiz
+  [ -f "$STOPPED" ] || return 0
+  local u
+  while read -r u; do
+    case " ${SYSTEM_SERVICES[*]} " in *" $u "*) systemctl start --no-block "$u" 2>/dev/null || true ;; esac
+  done < "$STOPPED"
+  rm -f "$STOPPED"
   return 0
 }
 close_apps() {
@@ -247,12 +261,14 @@ do_unlock() {
   policy unlock || rc=1
   warm_clear
   flush_dns
+  [ "$rc" = 0 ] && start_services
   write_status unlocked
   [ "$rc" = 0 ] && say "UNLOCKED." || say "UNLOCK INCOMPLETE (a layer is still in place; will retry)."
   return $rc
 }
 do_status() {
-  if is_locked; then say "LOCKED"; else say "unlocked"; fi
+  # LOCKED only while the hosts block is complete (same rule as the Mac): an edited block is put back by the next lock pass.
+  if hosts_block_intact "$HOSTS" "$BLOCKLIST"; then say "LOCKED"; else say "unlocked"; fi
   [ -f "$STATUS" ] && cat "$STATUS"
   return 0
 }

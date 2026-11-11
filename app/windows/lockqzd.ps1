@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.6.15"
+$Version = "0.6.16"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = if ($env:LOCKQZ_CONFIG) { $env:LOCKQZ_CONFIG } else { "$env:ProgramData\LOCKqz\config.json" }
@@ -246,6 +246,40 @@ function LQ-CheckUpdate($state, [string]$here, [string]$updateUrl, [string]$vers
     Write-Host "update: $version -> $($m.version) installed ($($files.PSObject.Properties.Name.Count) files)"
     return $true
   } catch { Write-Host "update check failed: $_"; Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue; return $false }
+}
+# Served additions to the AI list (add-only, as on the Mac): a list that grew on the server reaches this PC without
+# an app update. New entries are appended; the shipped lines are never rewritten. A list that fails the sanity
+# check, or one with nothing new, changes nothing. -> how many entries were added.
+function LQ-MergeBlocklist($domains, [string]$file) {
+  $rx = '^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}(/[A-Za-z0-9._~%/-]*)?$'
+  $clean = @(@($domains) | Where-Object { $_ -is [string] } | ForEach-Object { $_.Trim() } | Where-Object { $_ -cmatch $rx })
+  if ($clean.Count -lt 20) { return 0 }
+  foreach ($anchor in @("chatgpt.com", "claude.ai", "gemini.google.com")) { if ($clean -notcontains $anchor) { return 0 } }
+  $set = New-Object 'System.Collections.Generic.HashSet[string]' -ArgumentList ([StringComparer]::OrdinalIgnoreCase)
+  foreach ($l in [IO.File]::ReadAllLines($file)) { $t = $l.Trim(); if ($t -and -not $t.StartsWith("#")) { [void]$set.Add($t) } }
+  if ($set.Count -eq 0) { return 0 }
+  $add = New-Object 'System.Collections.Generic.List[string]'
+  foreach ($d in $clean) { if ($set.Add($d)) { $add.Add($d) } }
+  if ($add.Count -eq 0) { return 0 }
+  $lines = New-Object 'System.Collections.Generic.List[string]'
+  $lines.Add(""); $lines.Add("# additions from the server " + (Get-Date).ToString("yyyy-MM-dd"))
+  foreach ($d in $add) { $lines.Add($d) }
+  [IO.File]::AppendAllLines($file, [string[]]$lines.ToArray(), (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+  return $add.Count
+}
+function LQ-FetchBlocklist([string]$api, [string]$version) {
+  # -> the served list (array), or $null without an answer
+  if (-not $api) { return $null }
+  try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $r = Invoke-RestMethod -Uri (($api -replace '/api/?$', '') + "/blocklist.json") -TimeoutSec 15 -UserAgent ("LOCKqz/" + $version + " (Windows)")
+    return ,@($r.domains)
+  } catch { return $null }
+}
+function LQ-RefreshBlocklist([string]$api, [string]$file, [string]$version) {
+  $d = LQ-FetchBlocklist $api $version
+  if ($null -eq $d) { return 0 }
+  try { return (LQ-MergeBlocklist $d $file) } catch { return 0 }
 }
 '@
 . ([ScriptBlock]::Create($SignLib))
@@ -514,6 +548,14 @@ $watcher.AddScript({
         $lastSweep = $now
         $got = WLock
         try { if ($State.state -eq "unlocked") { WEngine "unlock" | Out-Null } } finally { WUnlockMx $got }
+      }
+    }
+    # A minute after start and every 12 h, never during a quiz: additions to the AI list from the server.
+    if ((($cycles -eq 12) -or ($cycles % 8640 -eq 0)) -and ($State.state -eq "unlocked")) {
+      $served = LQ-FetchBlocklist $Api $Version   # the download happens outside the engine lock: a quiz starting now never waits for it
+      if ($null -ne $served) {
+        $got = WLock
+        try { if ($State.state -eq "unlocked") { $n = LQ-MergeBlocklist $served (Join-Path $Here "blocklist.txt"); if ($n -gt 0) { Write-Host "blocklist: $n additions from the server" } } } catch { } finally { WUnlockMx $got }
       }
     }
     # ~hourly until the server knows this device's key

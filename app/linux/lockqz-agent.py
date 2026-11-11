@@ -172,22 +172,26 @@ OTHER_BROWSERS = re.compile(r"^(thorium|thorium-browser|ungoogled-chromium|heliu
                             r"torbrowser\.real|tor-browser\.real|microsoft-edge-beta|browser|web)$", re.I)
 
 def classify_exe(path):
-    """(label, flatpak?) for a browser's main executable path, or (None, False). Decided on the PATH: a snap /
-    flatpak / Debian Chromium binary is also called 'chrome', a Tor/Mullvad launcher runs 'firefox.real'."""
+    """(label, flatpak?) for a browser's main executable path, or (None, False). Decided on the PATH's own folder and
+    file names (never a loose piece of a name: /usr/bin/zenity is not Zen, operator-sdk is not Opera, a home folder
+    called braveheart is not Brave): a snap / flatpak / Debian Chromium binary is also called 'chrome', a Tor /
+    Mullvad launcher runs 'firefox.real'."""
     low = path.lower(); base = os.path.basename(low); fp = low.startswith("/app/")
-    if "/snap/chromium/" in low or "/usr/lib/chromium" in low or "/chromium" in low and "google" not in low: return "Chromium", fp
-    if "/opt/google/chrome" in low or "google-chrome" in low or "/com.google.chrome/" in low: return "Google Chrome", fp
-    if "msedge" in low or "microsoft-edge" in low or "/com.microsoft.edge/" in low: return "Microsoft Edge", fp
-    if "brave" in low: return "Brave", fp
-    if "vivaldi" in low: return "Vivaldi", fp
-    if "/opera" in low or base.startswith("opera"): return "Opera", fp
-    if "torbrowser" in low or "tor-browser" in low or "/tor browser/" in low: return "Tor Browser", fp
-    if "mullvad" in low: return "Mullvad Browser", fp
-    if "librewolf" in low: return "LibreWolf", fp
-    if "waterfox" in low: return "Waterfox", fp
-    if "floorp" in low: return "Floorp", fp
-    if "/zen" in low or base in ("zen", "zen-bin"): return "Zen", fp
-    if "firefox" in low or base == "geckomain": return "Firefox", fp
+    parts = [x for x in low.split("/") if x]
+    def has(rx): return any(re.fullmatch(rx, x) for x in parts)
+    if "/snap/chromium/" in low or "/usr/lib/chromium" in low or (has(r"chromium(-browser)?|org\.chromium\.chromium") and "google" not in low): return "Chromium", fp
+    if "/opt/google/chrome" in low or has(r"google-chrome(-[a-z]+)?|com\.google\.chrome"): return "Google Chrome", fp
+    if has(r"msedge|microsoft-edge(-[a-z]+)?|com\.microsoft\.edge"): return "Microsoft Edge", fp
+    if has(r"brave|brave-browser(-[a-z]+)?|brave\.com|bravesoftware|com\.brave\.browser"): return "Brave", fp
+    if has(r"vivaldi(-[a-z]+)?|com\.vivaldi\.vivaldi"): return "Vivaldi", fp
+    if has(r"opera(-(stable|beta|developer))?|com\.opera\.opera"): return "Opera", fp
+    if has(r"torbrowser(-launcher|\.real)?|tor-browser([-_.].*)?|tor browser|start-tor-browser(\.desktop)?"): return "Tor Browser", fp
+    if has(r"mullvad-browser|mullvadbrowser(\.real)?|net\.mullvad\.mullvadbrowser"): return "Mullvad Browser", fp
+    if has(r"librewolf(-bin)?|io\.gitlab\.librewolf-community"): return "LibreWolf", fp
+    if has(r"waterfox(-bin|-[a-z0-9]+)?"): return "Waterfox", fp
+    if has(r"floorp(-bin)?|one\.ablaze\.floorp"): return "Floorp", fp
+    if has(r"zen(-bin|-browser)?|app\.zen_browser\.zen"): return "Zen", fp
+    if has(r"firefox(-(bin|esr|beta|nightly|devedition|developer-edition|trunk))?(\.real)?|org\.mozilla\.firefox") or base == "geckomain": return "Firefox", fp
     for pat, label, _ in CHROMIUM + GECKO:
         if re.match(pat, base): return label, fp
     if OTHER_BROWSERS.match(base): return "other:" + base, fp
@@ -346,8 +350,7 @@ class Agent(M.Agent):
             if u.startswith(("https://lockqz.com/", "https://lockqz.pages.dev/")):
                 try: subprocess.run(["xdg-open", u], timeout=10, capture_output=True)
                 except Exception: pass
-            dialog("Pay $%s for LOCKqz this semester to get the quiz password.\n\nMemo:  %s\n\nThe payment page is open. LOCKqz shows the password here as soon as your payment arrives."
-                   % (pay.get("amount") or 5, pay.get("code") or ""))
+            dialog(M.pay_text(pay))   # the same message as the Mac: every way to pay at its own price, the memo
         return True
 
     def ready_notice(self, urls):

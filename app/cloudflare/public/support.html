@@ -60,7 +60,7 @@
       body: JSON.stringify({ email: email, name: $("nm").value.trim(), message: message, website: $("ws").value }) })
       .then(function (r) { return r.json().catch(function () { return {}; }); })
       .then(function (d) {
-        if (d && d.ok) { out.className = "msg ok"; out.textContent = "Sent. We'll reply to " + email + "."; $("ms").value = ""; }
+        if (d && d.ok) { out.className = "msg ok"; out.textContent = "Sent. We'll reply to " + email + "."; $("ms").value = ""; $("go").disabled = false; }
         else { out.className = "msg bad"; out.textContent = (d && d.error) || "Could not send. Email support@lockqz.com."; $("go").disabled = false; }
       }, function () { out.className = "msg bad"; out.textContent = "Could not send. Email support@lockqz.com."; $("go").disabled = false; });
   });

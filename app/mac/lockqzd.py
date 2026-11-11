@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.6.15"
+VERSION = "0.6.16"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -732,7 +732,11 @@ def refresh_blocklist():
                 with open(tmp, "w") as f:
                     f.write("# LOCKqz AI blocklist - shipped list plus additions from the server %s\n" % time.strftime("%Y-%m-%d"))
                     f.write("\n".join(merged) + "\n")
-                os.replace(tmp, BLOCKLIST)   # atomic: readers see either the old list or the full new one
+                # During a quiz the block is brought up to the new list in the same step (under LOCK), so the
+                # watcher's "is the whole block in place" check never sees a list the block does not match yet.
+                with LOCK:
+                    os.replace(tmp, BLOCKLIST)   # atomic: readers see either the old list or the full new one
+                    if STATE["state"] == "locked": engine("lock")
                 log("blocklist refreshed (%d -> %d domains)" % (len(have), len(merged)))
         else:
             log("blocklist refresh rejected (failed sanity check) — keeping current list")
@@ -954,10 +958,10 @@ class H(BaseHTTPRequestHandler):
     def _who(self):
         """"root" for the master token (root / tests), else the uid whose per-user token this is (only the
         console user's and the lock owner's tokens are checked), else None."""
-        t = str(self.headers.get("X-LOCKqz-Token") or "")
-        if hmac.compare_digest(t, TOKEN): return "root"
+        t = str(self.headers.get("X-LOCKqz-Token") or "").encode("utf-8", "replace")   # bytes: any header text is compared, never an error
+        if hmac.compare_digest(t, TOKEN.encode()): return "root"
         for u in {console_uid(), STATE.get("owner_uid")}:
-            if isinstance(u, int) and u > 0 and hmac.compare_digest(t, uid_token(u)): return u
+            if isinstance(u, int) and u > 0 and hmac.compare_digest(t, uid_token(u).encode()): return u
         return None
     def _other_owner(self, who):
         """The live lock belongs to ANOTHER account that is still logged in (fast user switching)."""

@@ -3285,7 +3285,27 @@ export async function onRequest(context) {
       const autoOus = quizOus.filter(ou => paidSet.has(ou));
       // The answer's protect/clear lists, read once: they also tell auto-protect which quizzes LOCKqz
       // already holds, and are re-read at the end only if this request changed quizzes.
-      const pre = await bsState(mineA);
+      let pre = await bsState(mineA);
+      // An exam the professor deleted in Brightspace (his own Brightspace's full quiz list for the course no longer has
+      // it): LOCKqz lets go of it. There is nothing left to put a password on, so its row is removed and the Sync tab
+      // is not asked to. Only the professor whose Sync protected it decides this (his view of the course); a password
+      // still waiting to be removed is dropped only in a course no other professor syncs.
+      const liveQi = new Map(quizOus.filter(ou => byOu.get(ou).quizzes.length <= 1000).map(ou => [ou, new Set(byOu.get(ou).quizzes.map(q => String(q && q.qi || "")))]));
+      const isGone = r => liveQi.has(String(r.ou)) && !liveQi.get(String(r.ou)).has(String(r.qi));
+      if (pre.protect.some(isGone) || pre.clear.some(isGone)) {
+        const drop = new Set(), key = r => String(r.ou) + "-" + String(r.qi);
+        for (const ou of new Set(pre.protect.filter(isGone).map(r => String(r.ou)))) {
+          const own = new Set((await db.prepare("SELECT qi FROM quizzes WHERE ou=? AND teacher_id=? AND qi IS NOT NULL").bind(ou, me.id).all()).results.map(r => String(r.qi)));
+          for (const r of pre.protect.filter(isGone)) if (String(r.ou) === ou && own.has(String(r.qi))) {
+            drop.add("p" + key(r)); st2.push(db.prepare("DELETE FROM quizzes WHERE ou=? AND qi=? AND teacher_id=?").bind(ou, String(r.qi), me.id)); }
+        }
+        for (const ou of new Set(pre.clear.filter(isGone).map(r => String(r.ou)))) {
+          const others = await db.prepare("SELECT 1 FROM teacher_courses WHERE ou=? AND teacher_id<>? AND teacher_id<>'admin' AND COALESCE(in_sync,1)<>0 AND teacher_id NOT IN (SELECT id FROM teachers WHERE role='admin') LIMIT 1").bind(ou, me.id).first();
+          if (others) continue;
+          for (const r of pre.clear.filter(isGone)) if (String(r.ou) === ou) { drop.add("c" + key(r)); st2.push(db.prepare("DELETE FROM pending_clear WHERE ou=? AND qi=?").bind(ou, String(r.qi))); }
+        }
+        if (drop.size) pre = { protect: pre.protect.filter(r => !drop.has("p" + key(r))), clear: pre.clear.filter(r => !drop.has("c" + key(r))) };
+      }
       // Classes the professor turned LOCKqz off for (Sync panel or dashboard): no auto-protect there.
       const offSet = await classOff(mineA);
       let add = [];

@@ -114,7 +114,7 @@
   function authed(body) { var s = saved(); if (!s) { state.step = "out"; render(); return Promise.resolve({ error: "signed_out" }); } body.token = s.token; return api(body).then(function (d) { if (d._status === 401) { forget(); state = { step: "out", email: "", busy: false, data: null, confirm: null, msg: "Signed out. Sign in again." }; render(); } return d; }); }
   function load() {
     state.busy = true;
-    authed({ op: "status" }).then(function (d) { state.busy = false; if (d.error) { if (d._status !== 401) { state.msg = d.message || "Could not load your account."; render(); } return; } state.data = d; state.msg = ""; render(); });
+    authed({ op: "status" }).then(function (d) { state.busy = false; if (d.error || d._status !== 200) { if (d._status !== 401) { state.msg = d.message || "Could not load your account."; render(); } return; } state.data = d; state.msg = ""; render(); });   // only LOCKqz's own answer (200) is shown as the account
   }
   function row(label, kids) { return el("div", { "class": "lqm-row2" }, [el("span", { "class": "lqm-k", text: label })].concat(kids)); }
   function signedIn(d) {
@@ -153,7 +153,7 @@
   function setRenew(on) {
     state.msg = ""; state.confirm = null;
     authed({ op: "renew", on: on }).then(function (d) {
-      if (d.ok) { state.msg = on ? "Subscription on: your card renews each semester." : "Subscription cancelled. Your card is never charged again; this semester stays active."; return authed({ op: "status" }).then(function (s) { if (!s.error) state.data = s; render(); }); }
+      if (d.ok) { state.msg = on ? "Subscription on: your card renews each semester." : "Subscription cancelled. Your card is never charged again; this semester stays active."; return authed({ op: "status" }).then(function (s) { if (!s.error && s._status === 200) state.data = s; render(); }); }
       if (d._status !== 401) { state.msg = d.message || "Try again."; render(); }
     });
   }

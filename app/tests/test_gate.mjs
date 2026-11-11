@@ -216,13 +216,14 @@ async function suite(label, oldSchema) {
   console.log("T8 protect-by-default: ended quizzes are skipped; a released quiz is not re-protected");
   const yday = new Date(Date.now() - 86400000).toISOString();
   await call(env, "/sync", { courses: [ { ou: OU, name: "ECON 203", role: "Instructor",
-      quizzes: [ { qi: "55501", name: "New active", active: true },
+      quizzes: [ { qi: QI, name: "Quiz 3", active: true },   // Brightspace always sends the course's full quiz list
+                 { qi: "55501", name: "New active", active: true },
                  { qi: "55502", name: "Old ended", active: true, end: yday } ] } ] }, { sync: SYNC });
   check("a new active quiz auto-protects", !!sqlite.prepare("SELECT 1 FROM quizzes WHERE qi=?").get("55501"));
   check("an ended quiz does NOT auto-protect", !sqlite.prepare("SELECT 1 FROM quizzes WHERE qi=?").get("55502"));
   await call(env, "/protect", { ou: OU, qi: "55501", on: false }, { teacher: TOK });   // teacher releases it
   await call(env, "/sync", { courses: [ { ou: OU, name: "ECON 203", role: "Instructor",
-      quizzes: [ { qi: "55501", name: "New active", active: true } ] } ] }, { sync: SYNC });
+      quizzes: [ { qi: QI, name: "Quiz 3", active: true }, { qi: "55501", name: "New active", active: true } ] } ] }, { sync: SYNC });
   check("a released quiz stays released after re-sync", !sqlite.prepare("SELECT 1 FROM quizzes WHERE qi=?").get("55501"));
 
   console.log("T9 rotating password: /password returns a per-minute code, /rotating gives cur+next, /live carries the device IP");
