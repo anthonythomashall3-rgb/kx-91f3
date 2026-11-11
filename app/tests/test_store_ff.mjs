@@ -24,7 +24,7 @@ check("Store version unknown -> no id", (await store("1", null, "0.6.11")).id ==
 check("answer says both versions", (await store("1", "0.6.6", "0.6.11")).store_version === "0.6.6");
 const idx = readFileSync(join(CF, "public", "index.html"), "utf8");
 check("download page (Windows) asks /api/store and shows the Store button first", idx.includes('fetch("/api/store")') && idx.includes("showStore(d && d.id)") && idx.includes('"https://apps.microsoft.com/detail/" + id'));
-check("Store current -> Store is the one way shown; command + installer one click away", idx.includes('$("alt").hidden = true') && idx.includes('id="altlink"') && /<div id="alt">[\s\S]*id="lead"[\s\S]*id="dlbox"[\s\S]*<\/div>\s*<\/div>/.test(idx));
+check("Store current -> Store is the one way shown, no other-ways link", idx.includes('$("alt").hidden = true') && !idx.includes('altlink') && !idx.includes('Other ways') && /<div id="alt">[\s\S]*id="lead"[\s\S]*id="dlbox"[\s\S]*<\/div>\s*<\/div>/.test(idx));
 check("Android still hides the command box (not the Store box)", idx.includes('$("lead").parentNode.hidden = true'));
 
 console.log("S2 automatic Store submissions (CI)");

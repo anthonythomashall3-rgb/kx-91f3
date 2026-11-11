@@ -79,7 +79,6 @@
           <li>Open LOCKqz and click <b>Yes</b> on the Windows prompt.</li>
           <li>Follow LOCKqz&rsquo;s steps. Done.</li>
         </ol>
-        <p style="margin:14px 0 0;font-size:13.5px"><a href="#" id="altlink" style="color:var(--usc)">Can&rsquo;t use Microsoft Store? Other ways to install</a></p>
       </div>
 
       <div id="alt">
@@ -168,11 +167,10 @@
       $("dl").textContent = "Download for Windows";
       $("dlol").innerHTML = ["Open <b>lockqz-win.exe</b> from Downloads.", "If SmartScreen appears: <b>More info \u2192 Run anyway</b>.", "Click <b>Yes</b>, then follow the installer."].map(function (x) { return "<li>" + x + "</li>"; }).join("");
       // Microsoft Store is the one way on Windows once its copy is the current release (/api/store says so):
-      // no SmartScreen warning, no PowerShell. The command + installer stay one click away for PCs without the Store.
+      // no SmartScreen warning, no PowerShell. The command + installer show only while the Store copy is behind.
       var showStore = function (id) { if (!id) return;
         $("store").hidden = false; $("storebtn").href = "https://apps.microsoft.com/detail/" + id;
-        $("alt").hidden = true;
-        $("altlink").onclick = function (e) { e.preventDefault(); $("alt").hidden = false; this.parentNode.hidden = true; }; };
+        $("alt").hidden = true; };
       if (STORE_ID) { showStore(STORE_ID); show(); }
       else fetch("/api/store").then(function (r) { return r.json(); }).then(function (d) { showStore(d && d.id); }, function () {}).then(show, show);
     }
