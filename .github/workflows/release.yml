@@ -130,7 +130,14 @@ jobs:
         with: { node-version: 22 }
       - name: Chromium for the agent's tab-reading check
         run: |
-          (npm i --no-save playwright@1.49.1 && timeout 240 npx playwright install --with-deps chromium) >/dev/null 2>&1 || echo "no Chromium - tab-reading check will be skipped"
+          # the runner image already has a browser's system libraries: fetch only Chromium, then prove it starts
+          (npm i --no-save playwright@1.49.1 && timeout 240 npx playwright install chromium) >/dev/null 2>&1 || true
+          if ! timeout 60 node -e "require('playwright').chromium.launch({args:['--no-sandbox']}).then(b=>b.close())" 2>/dev/null; then
+            (timeout 300 npx playwright install-deps chromium) >/dev/null 2>&1 || true
+            if ! timeout 60 node -e "require('playwright').chromium.launch({args:['--no-sandbox']}).then(b=>b.close())" 2>/dev/null; then
+              rm -rf node_modules; echo "no Chromium - tab-reading check will be skipped"
+            fi
+          fi
           # a package install left running would hold the lock the installer needs
           sudo pkill -x apt-get 2>/dev/null || true
       - name: Install, lock/unlock, uninstall
