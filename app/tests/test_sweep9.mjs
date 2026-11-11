@@ -8,6 +8,7 @@ import { payT } from "./pay_t.mjs";
 //   S3 the bank-transfer email names Zelle at Zelle's own price (professors: $6,300, not the $6,500 transfer price).
 //   S4 sign-up and password-reset codes get the big code box in the email, like the students' codes.
 //   S5 "Let in" / "Undo" on the live page works for an email with an apostrophe (o'brien@...) (real Chromium).
+//   S7 Admin > Payments: a payment moved from one professor to another takes its activation with it.
 //   S6 exams of one class that start together (versions A / B, an extended-time copy) send ONE reminder to students
 //      who are not ready, 2 days and 3 hours before -- not one per exam.
 import { DatabaseSync } from "node:sqlite";
@@ -132,6 +133,26 @@ try {
     check("the three exams that start together: 2 reminders in all (2 days + 3 hours before), was 6", subj.filter(x => /^Exam 3/.test(x)).length === 2, subj.join(" | "));
     check("the exam a day later still gets its own two reminders", subj.filter(x => x === "Quiz 9").length === 2, subj.join(" | "));
     check("every exam is marked done (no reminder left to send later)", Number(sqlite.prepare("SELECT COUNT(*) AS c FROM mail_sent WHERE ou='600' AND (kind LIKE 'r48:%' OR kind LIKE 'r3:%')").get().c) === 8, JSON.stringify(sqlite.prepare("SELECT kind,n FROM mail_sent WHERE ou='600'").all()));
+    at(null);
+  }
+
+  console.log("S7 a payment moved from one professor to another takes its activation with it");
+  {
+    at("2026-11-12T20:00:00Z");
+    const mk = async em => { const c = (await call("/invite", { email: em }, { teacher: ADMIN })).data?.code; const t = (await call("/signup", { email: em, password: "profpass12", name: "Prof " + em[0].toUpperCase(), invite: c })).data?.token;
+      return { t, memo: (await call("/my-sections", null, { teacher: t, get: true })).data?.memo }; };
+    const a = await mk("wrong9@usc.edu"), b = await mk("right9@usc.edu");
+    const r = (await call("/pay/notify", { payments: [{ txn: "s9-move", amount: 6300, payer: "Right", note: a.memo, via: "zelle" }] }, { pay: true })).data?.results?.[0];
+    const act = async t => (await call("/me", null, { teacher: t, get: true })).data;
+    check("set-up: a $6,300 Zelle with the wrong professor's memo activated him", r?.paid === true && (await act(a.t)).active === true, JSON.stringify(r));
+    const mv = await call("/pay-assign", { txn: "s9-move", code: b.memo }, { teacher: ADMIN });
+    const A = await act(a.t), B = await act(b.t);
+    check("admin assigns it to the right professor: he is active until the term's last day", mv.status === 200 && mv.data?.paid === true && B.active === true && B.active_until === "2026-12-16", JSON.stringify(mv.data));
+    check("... and the first professor is no longer active (was: stayed active without a payment)", A.active === false && !A.active_until, JSON.stringify(A));
+    sqlite.prepare("UPDATE teachers SET active_until='2027-06-30' WHERE email='wrong9@usc.edu'").run();
+    await call("/pay/notify", { payments: [{ txn: "s9-move2", amount: 6300, payer: "X", note: a.memo, via: "zelle" }] }, { pay: true });
+    await call("/pay-assign", { txn: "s9-move2", code: b.memo }, { teacher: ADMIN });
+    check("a date the admin set by hand (Activate) is never taken away by a move", (await act(a.t)).active_until === "2027-06-30");
     at(null);
   }
 

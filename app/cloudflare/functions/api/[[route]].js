@@ -2890,6 +2890,7 @@ export async function onRequest(context) {
       const amt = body.amount != null && body.amount !== "" ? Number(body.amount) : null;
       if (amt !== null && !(amt > 0 && amt <= 100000)) return json({ error:"bad amount" }, 400);
       await db.prepare(`UPDATE payments SET code=?, term=?, matched=NULL${amt !== null ? ", amount=?" : ""} WHERE txn=?`).bind(...(amt !== null ? [code, pr.term, amt, txn] : [code, pr.term, txn])).run();
+      if (pr.code && pr.code !== code) await unsettle(pr.code);   // moved off another professor: the activation that payment gave him goes with it
       return json({ ok:true, was: pr.code || null, ...(await settle(code, pr.term)) });
     }
     // Admin: void a payment (refunded, duplicate, wrong alert). It stops counting at once for students;
