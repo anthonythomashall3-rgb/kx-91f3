@@ -101,6 +101,13 @@ check("W1 the account panel shows an account only from LOCKqz's own answer (HTTP
   acct.includes('if (d.error || d._status !== 200)') && acct.includes('if (!s.error && s._status === 200) state.data = s'));
 check("W1 the support form can send another message after one was sent", /Sent\. We'll reply to[^}]*\$\("go"\)\.disabled = false/.test(sup));
 
+const pop = readFileSync(join(CF, "..", "extension-prof", "popup.js"), "utf8");
+check("W2 extension popup: Sync now pressed while 'Sign in to Brightspace' already shows waits for that sync's own answer",
+  pop.includes("was = !!st.signin") && pop.includes("(n.signin && (!was || Date.now() - t0 > 45000))"));
+const wf = readFileSync(join(CF, "..", "..", ".github", "workflows", "release.yml"), "utf8");
+check("W3 one Microsoft Store submission per version (a marker per app/VERSION; a later run for the same version does not submit again)",
+  wf.includes("key: store-sent-${{ hashFiles('app/VERSION') }}") && wf.includes('steps.sent.outputs.cache-hit }}" -eq "true"') && wf.includes("Set-Content store-sent/version $v"));
+
 globalThis.Date = RealDate;
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

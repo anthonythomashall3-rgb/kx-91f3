@@ -1562,9 +1562,10 @@ export async function onRequest(context) {
       const d = res.d || {}, err = d.error || null, pi = String(d.id || err?.payment_intent?.id || "").slice(0, 80) || null;
       if (res.ok && d.status === "succeeded") {
         credits.push({ txn: "stripe:" + d.id, amount: Number(d.amount_received || d.amount) / 100, note: r.code, via: "stripe-card", payer: r.email, want_term: R });
-        acts.push(db.prepare("UPDATE card_renew SET state='paid', pi=?, updated_at=? WHERE email=?").bind(pi, t, r.email)); out.charged++;
+        // The row is marked paid at once; of several ticks at the same moment only the one that marks it sends the email.
+        const first = Number((await db.prepare("UPDATE card_renew SET state='paid', pi=?, updated_at=? WHERE email=? AND state IN ('reminded','failed')").bind(pi, t, r.email).run())?.meta?.changes) === 1; out.charged++;
         // After the card is billed for the new semester: one "you're resubscribed" email (29 Oct 2026, owner).
-        try { await mailOut(r.email, `LOCKqz renewed for ${termName(R)}`, `You're resubscribed to LOCKqz for ${termName(R)}.\n\nYour card (${cardName(r)}) was charged ${usd(Number(d.amount_received || d.amount))}. Access until ${fmtDay(termEndOf(R))}.\n\nCancel anytime: ${CANCEL_HOW}.`, {}, "essential"); out.sub++; } catch {}
+        if (first) try { await mailOut(r.email, `LOCKqz renewed for ${termName(R)}`, `You're resubscribed to LOCKqz for ${termName(R)}.\n\nYour card (${cardName(r)}) was charged ${usd(Number(d.amount_received || d.amount))}. Access until ${fmtDay(termEndOf(R))}.\n\nCancel anytime: ${CANCEL_HOW}.`, {}, "essential"); out.sub++; } catch {}
         continue;
       }
       if (res.ok && d.status === "processing") { acts.push(db.prepare("UPDATE card_renew SET state='pending', pi=?, updated_at=? WHERE email=?").bind(pi, t, r.email)); continue; }

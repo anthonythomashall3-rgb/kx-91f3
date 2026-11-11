@@ -265,6 +265,15 @@ jobs:
       - name: Microsoft Store Developer CLI
         if: vars.MSIX_NAME != '' && env.HAS_STORE == 'true' && github.event_name != 'pull_request'
         uses: microsoft/microsoft-store-apppublisher@v1.1
+      # One submission per version: a later run for the same version (a workflow or server-only push while Microsoft
+      # is still certifying) finds this marker and does not submit again, which would restart the certification.
+      - name: Was this version already sent to the Store?
+        id: sent
+        if: vars.MSIX_NAME != '' && env.HAS_STORE == 'true' && github.event_name != 'pull_request'
+        uses: actions/cache@v4
+        with:
+          path: store-sent
+          key: store-sent-${{ hashFiles('app/VERSION') }}
       - name: Submit to the Microsoft Store
         if: vars.MSIX_NAME != '' && env.HAS_STORE == 'true' && github.event_name != 'pull_request'
         shell: pwsh
@@ -278,9 +287,11 @@ jobs:
           $v = (Get-Content app/VERSION -Raw).Trim(); $s = $null
           try { $s = Invoke-RestMethod -Uri https://lockqz.pages.dev/api/store -TimeoutSec 20 } catch {}
           if ($s -and "$($s.store_version)" -eq $v) { Write-Host "Microsoft Store already has $v - nothing to submit"; exit 0 }
+          if ("${{ steps.sent.outputs.cache-hit }}" -eq "true") { Write-Host "$v was already submitted by an earlier run - not submitting again"; exit 0 }
           msstore reconfigure --tenantId $env:STORE_TENANT_ID --sellerId $env:STORE_SELLER_ID --clientId $env:STORE_CLIENT_ID --clientSecret $env:STORE_CLIENT_SECRET
           msstore publish "$env:RUNNER_TEMP\store\lockqz-store.msix" -id 9P7D1114N2LJ -v
-          if ($LASTEXITCODE -ne 0) { Write-Host "::warning::Microsoft Store submission failed - the site still deploys; see the log" }
+          if ($LASTEXITCODE -eq 0) { New-Item -ItemType Directory -Force store-sent | Out-Null; Set-Content store-sent/version $v }   # saved as the marker when the job ends
+          else { Write-Host "::warning::Microsoft Store submission failed - the site still deploys; see the log" }
           exit 0
 
   deploy:

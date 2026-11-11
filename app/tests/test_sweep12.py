@@ -63,4 +63,26 @@ st, body = req(D.TOKEN)
 check("H3 the real token still works", st == 200 and json.loads(body).get("state") == "unlocked", str(st))
 srv.shutdown()
 
+# --- follow-up: the cap's clock, the hosts block's END line, the installer's config read ---
+import subprocess, time
+t1 = D.steady(); time.sleep(0.05); t2 = D.steady()
+src = open(os.path.join(MAC, "lockqzd.py")).read()
+check("H4 the quiz cap is measured on a clock that keeps counting during sleep (boot time on Linux, the continuous clock on a Mac)",
+      0.03 < t2 - t1 < 5 and "time.monotonic() - STATE" not in src and src.count("steady()") >= 4 and
+      (not hasattr(time, "CLOCK_BOOTTIME") or abs(D.steady() - time.clock_gettime(time.CLOCK_BOOTTIME)) < 5))
+core = os.path.join(MAC, "lockqz-core.sh")
+h = os.path.join(TMP, "hosts"); b2 = os.path.join(TMP, "bl2"); open(b2, "w").write("chatgpt.com\nclaude.ai\n")
+open(h, "w").write("127.0.0.1 localhost\n")
+r = subprocess.run(["bash", "-c", 'set -euo pipefail; source "%s"; hosts_add_block "%s" "%s"; grep -vF "$MARK_END" "%s" > "%s.x"; cat "%s.x" > "%s"; '
+                    'printf "10.0.0.5 myprinter\\n0.0.0.0 ads.example\\n" >> "%s"; hosts_remove_block "%s"; cat "%s"' % (core, h, b2, h, h, h, h, h, h, h)], capture_output=True, text=True)
+out = r.stdout
+check("H5 a block whose END line was edited away: only LOCKqz's lines are removed, the student's later lines stay",
+      r.returncode == 0 and "myprinter" in out and "0.0.0.0 ads.example" in out and "chatgpt" not in out and "LOCKqz" not in out and "localhost" in out, out + r.stderr)
+cfgf = os.path.join(TMP, "c.json"); open(cfgf, "w").write('{\n  "port": 8787,\n  "api_base": "https://lockqz.pages.dev/api",\n  "device_id": "mac-12ab",\n  "student": null\n}\n')
+inst = open(os.path.join(MAC, "install.sh")).read()
+fn = [l for l in inst.split("\n") if l.startswith("cfg_get()")][0]
+r = subprocess.run(["bash", "-c", fn + '\ncfg_get api_base "%s"; cfg_get device_id "%s"; cfg_get device_id /nonexistent; echo end' % (cfgf, cfgf)], capture_output=True, text=True)
+check("H6 the Mac installer reads the old config without python3 (python3 is first used after ensure-python)",
+      r.stdout.split() == ["https://lockqz.pages.dev/api", "mac-12ab", "end"] and inst.index("/usr/bin/python3 -") > inst.index('bash "$DEST/ensure-python.sh"'), r.stdout + r.stderr)
+
 print("\nRESULT: %d passed, %d failed" % (PASS, FAIL)); sys.exit(1 if FAIL else 0)

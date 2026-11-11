@@ -60,7 +60,7 @@ await api("/signup", { email: "nobody@usc.edu", password: "nobody-pass1", invite
 check("no name anywhere -> welcome says 'Hi,' (never the address)", /^Hi,\n/.test(mail.filter(m => m.to === "nobody@usc.edu").pop()?.text || ""));
 // His own first sync: Brightspace confirms him (verified) and the dashboard lists his class.
 r = await api("/sync", { whoami: { id: "4000", name: "Duke Bristow" }, courses: [{ ou: OU, name: "20263_14792 BUAD-306: Business Finance", code: "20263_14792", role: "Instructor", classlist: cl,
-  quizzes: [{ qi: "201", name: "Exam 3", start_date: new Date(Date.now() + 2 * day).toISOString(), end_date: new Date(Date.now() + 2.1 * day).toISOString(), active: true }] }] }, { "X-LOCKqz-Teacher": BT });
+  quizzes: [{ qi: "201", name: "Exam 3", start: new Date(Date.now() + 2 * day).toISOString(), end: new Date(Date.now() + 2.1 * day).toISOString(), active: true }] }] }, { "X-LOCKqz-Teacher": BT });
 check("his own sync verifies him", r.status === 200 && row("dbristow@usc.edu")?.verified === 1, JSON.stringify(r.data).slice(0, 200));
 // A professor no class list names: Brightspace's own name at his first sync.
 sqlite.prepare("INSERT INTO teacher_courses (teacher_id,ou,name,code,role,synced_at,in_sync) VALUES ('admin','900','X','X','Teaching Assistant',?,1)").run(new Date().toISOString());

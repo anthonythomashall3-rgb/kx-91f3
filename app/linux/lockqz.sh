@@ -169,6 +169,8 @@ fw_on() {
       ip6tables -A LOCKQZ -p tcp --dport 853 -j DROP; ip6tables -A LOCKQZ -p udp --dport 853 -j DROP
       for a in "${DOH_V6[@]}"; do ip6tables -A LOCKQZ -d "$a" -p tcp --dport 443 -j DROP; ip6tables -A LOCKQZ -d "$a" -p udp --dport 443 -j DROP; done
       ip6tables -A LOCKQZ -p tcp -m multiport --dports "${MODEL_PORTS// /}" -j DROP
+      for a in ::1/128 fc00::/7 fe80::/10; do ip6tables -A LOCKQZ -d "$a" -p tcp -m multiport --dports "${LOCAL_MODEL_PORTS// /}" -j DROP; done
+      ip6tables -A LOCKQZ -p udp -m multiport --dports "${VPN_UDP// /}" -j DROP; ip6tables -A LOCKQZ -p tcp --dport 1194 -j DROP
     fi
     return 0
   fi
@@ -230,6 +232,38 @@ flush_dns() {
 }
 write_status() { mkdir -p "$STATE"; printf '{"state":"%s","at":"%s","host":"%s"}\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(hostname)" > "$STATUS"; }
 
+# --- whole AI / tunnel domains (every name under them), for every program - the Mac's /etc/resolver layer ---
+# /etc/hosts cannot name "anything.workers.dev". With systemd-resolved (Ubuntu, Fedora, Debian desktop, Arch
+# with resolved) these domains are routed to a link of LOCKqz's own whose DNS server answers nothing, so no name
+# under them resolves during a quiz, in any program. The link is removed at unlock. Same list as the Mac.
+WILD_DOMAINS=(openai.azure.com cognitiveservices.azure.com services.ai.azure.com inference.ai.azure.com ai.azure.com \
+              workers.dev hf.space modal.run vercel.app fly.dev replit.dev replit.app repl.co \
+              ngrok.io ngrok-free.app ngrok.app ngrok.dev ngrok-free.dev trycloudflare.com loca.lt serveo.net \
+              localhost.run pinggy.link pinggy.io zrok.io learnwise.ai forethought.ai)
+WILD_IF="${LOCKQZ_WILD_IF:-lockqz0}"
+wild_on() {
+  command -v resolvectl >/dev/null 2>&1 && command -v ip >/dev/null 2>&1 || return 0
+  systemctl is-active --quiet systemd-resolved 2>/dev/null || return 0
+  if ip link show "$WILD_IF" >/dev/null 2>&1 && resolvectl domain "$WILD_IF" 2>/dev/null | grep -q '~workers\.dev'; then return 0; fi
+  ip link show "$WILD_IF" >/dev/null 2>&1 || ip link add "$WILD_IF" type dummy 2>/dev/null || return 1
+  ip addr replace 192.0.2.254/32 dev "$WILD_IF" 2>/dev/null   # an address of the documentation range: resolved only uses a link that has one
+  ip link set "$WILD_IF" up 2>/dev/null
+  resolvectl dns "$WILD_IF" 192.0.2.254 2>/dev/null || return 1   # nothing listens there: every query for these domains fails
+  resolvectl domain "$WILD_IF" "${WILD_DOMAINS[@]/#/\~}" 2>/dev/null || return 1
+  resolvectl default-route "$WILD_IF" false 2>/dev/null
+  resolvectl llmnr "$WILD_IF" false 2>/dev/null; resolvectl mdns "$WILD_IF" false 2>/dev/null
+  resolvectl flush-caches 2>/dev/null
+  return 0
+}
+wild_off() {
+  command -v ip >/dev/null 2>&1 || return 0
+  ip link show "$WILD_IF" >/dev/null 2>&1 || return 0
+  ip link del "$WILD_IF" 2>/dev/null
+  command -v resolvectl >/dev/null 2>&1 && resolvectl flush-caches 2>/dev/null
+  ip link show "$WILD_IF" >/dev/null 2>&1 && return 1
+  return 0
+}
+
 do_lock() {
   need_root
   if [ "$DRYRUN" = "1" ]; then
@@ -243,6 +277,7 @@ do_lock() {
   is_locked || rc=1
   fw_on || rc=1
   policy lock || rc=1
+  wild_on || true
   [ "$already" = 0 ] && { flush_dns; stop_services; }
   close_apps
   warm_apply
@@ -259,6 +294,7 @@ do_unlock() {
   is_locked && rc=1
   fw_off || rc=1
   policy unlock || rc=1
+  wild_off || rc=1
   warm_clear
   flush_dns
   [ "$rc" = 0 ] && start_services

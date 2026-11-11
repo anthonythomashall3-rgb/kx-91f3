@@ -239,5 +239,28 @@ check("unlock starts the services only once every layer is off; status says LOCK
 r = run12('hosts_add_block "$HOSTS" "$BLOCKLIST"; hosts_block_intact "$HOSTS" "$BLOCKLIST" && echo whole; sed -i "/0.0.0.0 chatgpt.com/d" "$HOSTS"; hosts_is_locked "$HOSTS" && echo marker; hosts_block_intact "$HOSTS" "$BLOCKLIST" || echo edited')
 check("a block with a line removed still has its marker but is not 'locked'", r.stdout.split() == ["whole", "marker", "edited"], r.stdout + r.stderr)
 
+# --- whole AI / tunnel domains through systemd-resolved (the Mac's /etc/resolver layer) ---
+import re as _re
+def _wild(text): return _re.search(r"WILD_DOMAINS=\(([^)]*)\)", text).group(1).replace("\\", " ").split()
+mac_extra = open(os.path.join(MAC, "extra-block.sh")).read()
+check("Linux blocks the same whole domains as the Mac", _wild(eng) == _wild(mac_extra) and "workers.dev" in _wild(eng), str(set(_wild(eng)) ^ set(_wild(mac_extra))))
+wst = os.path.join(TMP, "wild"); os.makedirs(wst, exist_ok=True)
+for name, body in (("ip", 'echo "ip $*" >> "%s/log"\ncase "$1 $2" in "link show") [ -f "%s/link" ];; "link add") touch "%s/link";; "link del") rm -f "%s/link";; esac\n' % (wst, wst, wst, wst)),
+                   ("resolvectl", 'echo "resolvectl $*" >> "%s/log"\nif [ "$1" = domain ] && [ $# = 2 ]; then cat "%s/domains" 2>/dev/null; exit 0; fi\nif [ "$1" = domain ]; then shift 2; echo "$*" > "%s/domains"; fi\nexit 0\n' % (wst, wst, wst))):
+    with open(os.path.join(fake, name), "w") as f: f.write("#!/bin/bash\n" + body)
+    os.chmod(os.path.join(fake, name), 0o755)
+with open(os.path.join(fake, "systemctl"), "w") as f: f.write("#!/bin/bash\nexit 0\n")
+wfn = eng[eng.index("WILD_DOMAINS=("):eng.index("do_lock() {")]
+def runw(body): return subprocess.run(["bash", "-c", "set -uo pipefail\n" + wfn + "\n" + body], capture_output=True, text=True, env=dict(os.environ, PATH=fake + ":" + os.environ["PATH"]))
+r = runw("wild_on; echo rc=$?; wild_on; echo rc=$?")
+wlog = open(os.path.join(wst, "log")).read(); doms = open(os.path.join(wst, "domains")).read().split()
+check("lock: LOCKqz's own link is made once, given a dead DNS server and every whole domain as a routing domain",
+      r.stdout.split() == ["rc=0", "rc=0"] and wlog.count("ip link add lockqz0 type dummy") == 1 and "resolvectl dns lockqz0 192.0.2.254" in wlog
+      and doms == ["~" + d for d in _wild(eng)] and "resolvectl default-route lockqz0 false" in wlog and wlog.count("resolvectl domain lockqz0 ~") == 1, wlog[-600:] + r.stderr)
+r = runw("wild_off; echo rc=$?; wild_off; echo rc=$?")
+check("unlock: the link is removed (and a second unlock has nothing to do)", r.stdout.split() == ["rc=0", "rc=0"] and not os.path.exists(os.path.join(wst, "link")) and open(os.path.join(wst, "log")).read().count("ip link del lockqz0") == 1, r.stdout + r.stderr)
+check("the whole-domain layer is part of lock and unlock; unlock is incomplete while the link is left", "wild_on || true" in eng and "wild_off || rc=1" in eng)
+check("the iptables fallback covers IPv6 too (local model ports, VPN ports)", 'for a in ::1/128 fc00::/7 fe80::/10; do ip6tables -A LOCKQZ' in eng and 'ip6tables -A LOCKQZ -p udp -m multiport --dports "${VPN_UDP// /}" -j DROP' in eng)
+
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nRESULT: %d passed, %d failed" % (PASS, FAIL)); sys.exit(1 if FAIL else 0)

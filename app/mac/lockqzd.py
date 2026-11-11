@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.6.16"
+VERSION = "0.6.17"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -325,6 +325,16 @@ def parse_iso(s):
         sign = -1 if z[0] == "-" else 1; z = z[1:].replace(":", "")
         t -= sign * (int(z[:2]) * 3600 + int(z[2:]) * 60)
     return float(t)
+
+def steady():
+    """Seconds that keep counting while the computer sleeps and that changing the computer's clock cannot move
+    (Linux: time since boot; Mac: the continuous clock). time.monotonic() stands still during sleep on both."""
+    try:
+        cid = getattr(time, "CLOCK_BOOTTIME", None)   # Linux only; the Mac's CLOCK_MONOTONIC already counts sleep
+        if cid is None: cid = getattr(time, "CLOCK_MONOTONIC", None)
+        if cid is not None: return time.clock_gettime(cid)
+    except Exception: pass
+    return time.monotonic()
 
 def cap_for_end(locked_since, end_epoch, now, skew=0.0):
     """New cap time for a lock once the server told us the quiz end (server clock), or None to keep
@@ -907,7 +917,7 @@ def watcher():
                 cap_at = STATE["cap_at"] or (STATE["locked_since"] + STATE["max_minutes"] * 60)
                 # Wall clock AND monotonic clock must both say the cap is reached: an admin who moves the
                 # Mac's date forward 24 h must not end the lock (time.monotonic() ignores date changes).
-                mono_ok = STATE.get("mono_since") is None or time.monotonic() - STATE["mono_since"] >= cap_at - STATE["locked_since"]
+                mono_ok = STATE.get("mono_since") is None or steady() - STATE["mono_since"] >= cap_at - STATE["locked_since"]
                 if STATE["locked_since"] and time.time() >= cap_at and mono_ok:
                     log("safety cap reached — auto-unlocking")
                     cap_end_known = STATE["end_known"]
@@ -1040,7 +1050,7 @@ class H(BaseHTTPRequestHandler):
                 if not same:   # a repeat /lock for the running quiz never extends the cap
                     now = time.time()
                     STATE.update(max_minutes=mx, locked_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                                 locked_since=now, cap_at=now + mx * 60, end_known=False, mono_since=time.monotonic(),
+                                 locked_since=now, cap_at=now + mx * 60, end_known=False, mono_since=steady(),
                                  release_pending=False)
                     for k in ("hold_until", "ask_fail_since"): STATE.pop(k, None)   # another quiz's hold never carries over
                     set_assist(None, [])   # another quiz's allowance never carries over
@@ -1231,7 +1241,7 @@ def main():
         STATE.update(state="locked", quiz_id=rec["quiz_id"], student=rec.get("student") or STATE["student"],
                       locked_at=rec.get("locked_at"), locked_since=float(rec["locked_since"]),
                       max_minutes=rec["max_minutes"], cap_at=rec["cap_at"], end_known=rec["end_known"],
-                      mono_since=time.monotonic() - max(0.0, time.time() - float(rec["locked_since"])),
+                      mono_since=steady() - max(0.0, time.time() - float(rec["locked_since"])),
                       owner_uid=rec.get("owner_uid") if isinstance(rec.get("owner_uid"), int) else None)
         engine("lock")
         # A restart from our own signed self-update is expected, not tampering. The updater drops a

@@ -40,11 +40,11 @@
   $("sync").onclick = async () => {
     $("sync").disabled = true; $("sync").textContent = "Syncing\u2026";
     try { await api.runtime.sendMessage({ t: "sync" }); } catch {}
-    const t0 = Date.now();
+    const t0 = Date.now(), was = !!st.signin;   // "sign in" already showing: this click is the retry, so wait for its own answer
     const wait = setInterval(async () => {
       const n = await api.storage.local.get(["lastSync", "lastCheck", "signin"]);
       if (Number(n.lastSync) > t0 || Number(n.lastCheck) > t0) { clearInterval(wait); await api.storage.local.set({ statusAt: 0 }); $("sync").textContent = "Synced"; await draw(); await fetchStatus(); setTimeout(() => { $("sync").textContent = "Sync now"; }, 2500); }
-      else if (n.signin || Date.now() - t0 > 180000) { clearInterval(wait); $("sync").textContent = "Sync now"; await draw(); }
+      else if ((n.signin && (!was || Date.now() - t0 > 45000)) || Date.now() - t0 > 180000) { clearInterval(wait); $("sync").textContent = "Sync now"; await draw(); }
     }, 1000);
   };
   api.storage.onChanged.addListener(ch => { if (ch.lastSync || ch.signin || ch.key) draw(); });

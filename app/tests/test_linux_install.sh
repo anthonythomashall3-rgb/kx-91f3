@@ -27,6 +27,8 @@ check "rejects wrong token" "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -H 'X
 check "browser-origin request refused (no CORS)" "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -H '$H' -H 'Origin: https://evil.example' $B/status)\" = 401 ]"
 check "no developer mode on a student machine" "curl -s -H '$H' $B/status | grep -q '\"developer\": false'"
 
+# Whole-domain layer (systemd-resolved): only judged where resolved runs and the name resolves before the lock.
+WILD=0; if systemctl is-active --quiet systemd-resolved && resolvectl query -4 workers.dev >/dev/null 2>&1; then WILD=1; fi
 curl -s -m 90 -X POST -H "$H" -H 'Content-Type: application/json' -d '{"quiz_id":"ci-test","student":"CI"}' $B/lock > /tmp/lock.json
 check "lock accepted" "grep -q '\"locked\"' /tmp/lock.json"
 check "hosts has block" "grep -q 'LOCKqz START' /etc/hosts"
@@ -37,6 +39,12 @@ check "nftables table loaded (DoT, DoH, model ports, VPN, QUIC-to-AI sets)" "sud
 check "Chrome AI policy on" "python3 -c \"import json;d=json.load(open('/etc/opt/chrome/policies/managed/zz-lockqz.json'));assert d['GenAiDefaultSettings']==2 and d['GeminiSettings']==1 and 'chatgpt.com' in d['URLBlocklist']\""
 check "Firefox AI policy on" "python3 -c \"import json;d=json.load(open('/etc/firefox/policies/policies.json'))['policies'];assert d['LOCKqzManaged'] and d['DNSOverHTTPS']['Enabled'] is False\""
 check "status locked" "curl -s -H '$H' $B/status | grep -q '\"engine_locked\": true'"
+if [ "$WILD" = 1 ]; then
+  check "whole AI / tunnel domains are routed to LOCKqz's own link (systemd-resolved)" "resolvectl domain lockqz0 | grep -q '~workers.dev' && resolvectl domain lockqz0 | grep -q '~openai.azure.com'"
+  check "a name under such a domain does not resolve during the quiz (workers.dev)" "! timeout 30 resolvectl query -4 workers.dev"
+  check "any name under it either (x.trycloudflare.com)" "! timeout 30 resolvectl query -4 lockqz-probe.trycloudflare.com"
+  check "other names still resolve (example.com)" "timeout 30 resolvectl query -4 example.com"
+else echo "SKIP  whole-domain layer (no systemd-resolved answer on this machine)"; fi
 for i in $(seq 1 20); do [ -s $STATE/warm_ips ] && break; sleep 3; done
 check "warm-connection list resolved past the hosts block (AI addresses, not 0.0.0.0)" "[ -s $STATE/warm_ips ] && ! grep -q '^0.0.0.0' $STATE/warm_ips && [ \"\$(wc -l < $STATE/warm_ips)\" -ge 50 ]"
 curl -s -m 30 -X POST -H "$H" -H 'Content-Type: application/json' -d '{"quiz_id":"ci-test"}' $B/lock > /tmp/relock.json   # the 5-second re-lock pass
@@ -47,6 +55,8 @@ check "unlock accepted" "grep -q '\"unlocked\"' /tmp/unlock.json"
 check "hosts clean" "! grep -q 'LOCKqz START' /etc/hosts"
 check "chatgpt.com resolvable again" "! getent ahosts chatgpt.com | grep -q '^0.0.0.0'"
 check "nftables table gone" "! sudo nft list table inet lockqz"
+check "LOCKqz's DNS link is gone after unlock" "! ip link show lockqz0"
+if [ "$WILD" = 1 ]; then check "workers.dev resolves again" "timeout 30 resolvectl query -4 workers.dev"; fi
 check "Chrome policy removed" "[ ! -f /etc/opt/chrome/policies/managed/zz-lockqz.json ]"
 check "Firefox policy removed" "[ ! -f /etc/firefox/policies/policies.json ] || ! grep -q LOCKqzManaged /etc/firefox/policies/policies.json"
 

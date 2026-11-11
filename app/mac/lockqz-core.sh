@@ -44,6 +44,18 @@ hosts_add_block() {
 hosts_remove_block() {
   local hosts="$1"
   hosts_is_locked "$hosts" || return 0
+  # A block whose END line was edited away is closed again first, right after its last LOCKqz line, so only
+  # LOCKqz's own lines are ever removed (never the rest of the file).
+  if ! grep -qF "$MARK_END" "$hosts"; then
+    awk -v s="$MARK_START" -v e="$MARK_END" '
+      { line[NR] = $0 }
+      index($0, s) { st = NR; last = NR; inb = 1; next }
+      inb && ($0 ~ /^(0\.0\.0\.0|::) [^ ]+$/) { last = NR; next }
+      { inb = 0 }
+      END { for (i = 1; i <= NR; i++) { print line[i]; if (i == last) print e } }' "$hosts" > "$hosts.lqz.$$" \
+      && cat "$hosts.lqz.$$" > "$hosts"
+    rm -f "$hosts.lqz.$$"
+  fi
   # portable sed in-place (works on BSD/macOS and GNU)
   if sed --version >/dev/null 2>&1; then
     sed -i "/$MARK_START/,/$MARK_END/d" "$hosts"

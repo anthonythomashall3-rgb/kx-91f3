@@ -68,14 +68,17 @@ if [ ! -f "$APP/lockqzd.py" ] || [ -n "${FETCH_ONLY:-}" ]; then
   [ -n "$API" ] || API="$SITE/api"
 fi
 
+# One text value of a config.json, read without python3 (on a Mac without Apple's tools /usr/bin/python3 is a
+# stub that opens an "install the developer tools?" dialog; ensure-python.sh installs them further down).
+cfg_get() { [ -f "$2" ] && sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$2" 2>/dev/null | head -1 || true; }
 # Pull defaults from an existing config.json next to this script.
 CFG="$APP/config.json"
-if [ -z "$API" ]   && [ -f "$CFG" ]; then API="$(/usr/bin/python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("api_base",""))' "$CFG" 2>/dev/null || true)"; fi
+if [ -z "$API" ]   && [ -f "$CFG" ]; then API="$(cfg_get api_base "$CFG")"; fi
 [ -n "$API" ]   || { read -r -p "API base (e.g. https://<project>.pages.dev/api): " API; }
 
 DEVICE="mac-$(/usr/bin/uuidgen | tr 'A-Z' 'a-z')"
 # A reinstall keeps this Mac's device id (its signing key is already registered with the server).
-OLD_DEV="$(/usr/bin/python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("device_id",""))' "$DEST/config.json" 2>/dev/null || true)"
+OLD_DEV="$(cfg_get device_id "$DEST/config.json")"
 case "$OLD_DEV" in mac-*) DEVICE="$OLD_DEV";; esac
 echo "== installing LOCKqz helper =="
 

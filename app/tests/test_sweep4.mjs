@@ -152,14 +152,14 @@ console.log("C LOCKqz's clock (the Gmail script) is watched");
 console.log("P the student download page on a Chromebook");
 { const idx = readFileSync(join(CF, "public", "index.html"), "utf8");
   check("a Chromebook is told LOCKqz needs a Mac, Windows or Linux computer (not 'Open on your computer')", /\/CrOS\/\.test\(ua\)\) \$\("nope"\)\.textContent = "LOCKqz needs a Mac, Windows or Linux computer\. It does not run on Chromebooks\.";/.test(idx)); }
-console.log("X the Brightspace Sync panel (sync.js, extension 1.0.6)");
+console.log("X the Brightspace Sync panel (sync.js, extension)");
 { const sj = readFileSync(join(CF, "public", "sync.js"), "utf8");
   check("panel counts: '1 student', '1 quiz' (no '1 students', '1 quizzes')", sj.includes('" student" + (students === 1 ? "" : "s")') && sj.includes('" quiz" + (nq === 1 ? "" : "zes")') && !sj.includes('" students, " + nq + " quizzes'));
   check("panel Send email: one install step for any computer, the fee from LOCKqz while it is on (no 'Click Download and run the installer')",
     sj.includes('Install LOCKqz on your computer: " + INSTALL') && sj.includes('Pay for this semester when LOCKqz asks: " + fee') && !sj.includes("Click Download and run the installer"));
   check("sync.js stays pure ASCII (it runs inside Brightspace)", !/[^\x00-\x7f]/.test(sj));
   const man = JSON.parse(readFileSync(join(CF, "..", "extension-prof", "manifest.json"), "utf8"));
-  check("extension version 1.0.6", man.version === "1.0.6", man.version);
+  check("extension version is 1.0.6 or newer", /^1\.0\.([6-9]|\d\d+)$|^1\.[1-9]|^[2-9]/.test(man.version), man.version);
   const SYNC = { courses: [{ ou: "98010", name: "X", code: "X", role: "Instructor", classlist: [], quizzes: [] }] };
   const on = await call("/sync", SYNC, { token: PROF, envx: feeOn }), off = await call("/sync", SYNC, { token: PROF, envx: feeOff });
   check("/sync tells the panel the fee while it is on ('$200 by Zelle, or $210 by card or Venmo'), null when off", on.data?.fee === "$200 by Zelle, or $210 by card or Venmo" && off.data?.fee === null, JSON.stringify([on.data?.fee, off.data?.fee])); }
