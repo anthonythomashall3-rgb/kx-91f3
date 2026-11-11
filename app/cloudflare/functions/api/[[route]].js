@@ -100,7 +100,12 @@ const AI_DOMAINS = [
   "www.instagram.com","i.instagram.com","web.snapchat.com","snapchat.com/web","facebook.com","www.facebook.com","m.facebook.com",
   "youtube.com/watch","youtube.com/results","youtube.com/shorts","youtube.com/feed","youtube.com/channel",
   "youtube.com/playlist","youtube.com/live","youtube.com/c/","youtube.com/user","m.youtube.com","music.youtube.com",
-  "colab.research.google.com","colab.google","reddit.com/answers"
+  "colab.research.google.com","colab.google","reddit.com/answers",
+  "transcript.study","answer.ai","cramly.ai","studdy.ai","tutoreva.com","snapxam.com","apexvision.ai","scholarbot.ai","unriddle.ai",
+  "tutorly.ai","studentai.app","inkey.ai","getconch.ai","writeless.ai","kunduz.com","aimath.com","scira.ai","devv.ai","thinkany.ai",
+  "hika.fyi","toolbaz.com","chatboxai.app","web.chatboxai.app","lambda.chat","dify.ai","cloud.dify.ai","udify.app",
+  "myninja.ai","ninjachat.ai","magai.co","galaxy.ai","nat.dev","typeset.io","sharly.ai","docanalyzer.ai","taskade.com","crushon.ai",
+  "spicychat.ai","chub.ai","heypi.com","mapify.so","nami.so","zhipuai.cn"
 ];
 const now = () => new Date().toISOString();
 // "Today" in America/Los_Angeles as YYYY-MM-DD, so a professor stays active through the end of their

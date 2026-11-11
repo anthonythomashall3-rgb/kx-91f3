@@ -231,6 +231,11 @@ const miss20 = need20.filter(d => !mac.includes(d) || !win.includes(d) || !(serv
 miss20.length === 0 ? ok(`all ${need20.length} in both blocklists + AI_DOMAINS`) : bad("missing: " + miss20.join(", "));
 !["knowt.com","scribbr.com","khanacademy.org","github.com","amazon.com","qq.com"].some(d => mac.includes(d)) ? ok("Knowt, Scribbr, Khan Academy, GitHub, Amazon, QQ themselves stay open (AI paths/hosts only)") : bad("a whole site is over-blocked");
 
+console.log("T20b 11 Nov audit: quiz / homework answer tools, AI search, chat front ends");
+const need22 = ["transcript.study", "answer.ai", "cramly.ai", "studdy.ai", "tutoreva.com", "snapxam.com", "apexvision.ai", "scholarbot.ai", "unriddle.ai", "tutorly.ai", "studentai.app", "inkey.ai", "getconch.ai", "writeless.ai", "kunduz.com", "aimath.com", "scira.ai", "devv.ai", "thinkany.ai", "hika.fyi", "toolbaz.com", "chatboxai.app", "web.chatboxai.app", "lambda.chat", "dify.ai", "cloud.dify.ai", "udify.app", "myninja.ai", "ninjachat.ai", "magai.co", "galaxy.ai", "nat.dev", "typeset.io", "sharly.ai", "docanalyzer.ai", "taskade.com", "crushon.ai", "spicychat.ai", "chub.ai", "heypi.com", "mapify.so", "nami.so", "zhipuai.cn"];
+const miss22 = need22.filter(d => !mac.includes(d) || !win.includes(d) || !(served || []).includes(d));
+miss22.length === 0 ? ok(`all ${need22.length} in both blocklists + AI_DOMAINS`) : bad("missing: " + miss22.join(", "));
+
 console.log("T21 3 Nov owner decision: no AI in any app left open (Studocu, Knowunity, Instagram, Facebook, Snapchat web, YouTube pages, Colab, Reddit Answers)");
 const need21 = ["studocu.com","knowunity.com","instagram.com","i.instagram.com","facebook.com","web.snapchat.com","snapchat.com/web",
   "youtube.com/watch","youtube.com/results","youtube.com/shorts","m.youtube.com","colab.research.google.com","reddit.com/answers"];
