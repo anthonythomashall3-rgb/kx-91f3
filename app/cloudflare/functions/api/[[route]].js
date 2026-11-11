@@ -2240,9 +2240,12 @@ export async function onRequest(context) {
         await db.prepare("DELETE FROM teacher_courses WHERE teacher_id=?").bind(id).run();
         await db.prepare("UPDATE teachers SET name=?, pw_hash=?, salt=?, token=?, sync_key=NULL, bs_user_id=NULL, verified=0, vouched=1, active_until=?, created_at=? WHERE id=?")
           .bind(nm, await hashPw(pw,salt,PEPPER), salt, token, inv ? inv.active_until : null, now(), id).run();
-      } else
-        await db.prepare("INSERT INTO teachers (id,email,name,pw_hash,salt,token,created_at,role,active_until,vouched) VALUES (?,?,?,?,?,?,?,?,?,?)")
-          .bind(id, email, nm, await hashPw(pw,salt,PEPPER), salt, token, now(), n===0?"admin":"teacher", inv ? inv.active_until : null, vouched).run();
+      } else {
+        // Two sign-ups for one email at the same moment (a double click): the second is told the account exists.
+        try { await db.prepare("INSERT INTO teachers (id,email,name,pw_hash,salt,token,created_at,role,active_until,vouched) VALUES (?,?,?,?,?,?,?,?,?,?)")
+          .bind(id, email, nm, await hashPw(pw,salt,PEPPER), salt, token, now(), n===0?"admin":"teacher", inv ? inv.active_until : null, vouched).run(); }
+        catch (e) { if (!/UNIQUE/i.test(String(e && e.message || e))) throw e; return json({ error:"that email already has an account — log in instead" }, 409); }
+      }
       if (proved) await db.batch([db.prepare("DELETE FROM email_codes WHERE device_id=?").bind("prof:" + email),   // one code, one account
         db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE email=? AND used_at IS NULL").bind(now(), email, email),   // a waiting invite is moot
         db.prepare("INSERT INTO invites (code,email,active_until,created_at,used_at,used_by) VALUES (?,?,?,?,?,?)").bind("self-" + rid(10), email, null, now(), now(), email)]);   // the email is confirmed
@@ -2299,8 +2302,9 @@ export async function onRequest(context) {
         if (t) await db.batch([
             db.prepare("DELETE FROM teacher_courses WHERE teacher_id=?").bind(t.id),
             db.prepare("UPDATE teachers SET name=?, pw_hash=?, salt=?, token=?, sync_key=NULL, bs_user_id=NULL, verified=0, vouched=1, created_at=? WHERE id=?").bind(name, pwh, salt, token, now(), t.id)]);
-        else await db.prepare("INSERT INTO teachers (id,email,name,pw_hash,salt,token,created_at,role,active_until,vouched) VALUES (?,?,?,?,?,?,?,?,?,?)")
-            .bind(rid(10), g.email, name, pwh, salt, token, now(), "teacher", null, 1).run();
+        else try { await db.prepare("INSERT INTO teachers (id,email,name,pw_hash,salt,token,created_at,role,active_until,vouched) VALUES (?,?,?,?,?,?,?,?,?,?)")
+            .bind(rid(10), g.email, name, pwh, salt, token, now(), "teacher", null, 1).run(); }
+          catch (e) { if (!/UNIQUE/i.test(String(e && e.message || e))) throw e; return json({ error:"Please try again." }, 409); }   // the same sign-in twice at the same moment
         await db.batch([db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + ip, null, null, "signup", "google", now()),
           db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE email=? AND used_at IS NULL").bind(now(), g.email, g.email),
           db.prepare("INSERT INTO invites (code,email,active_until,created_at,used_at,used_by) VALUES (?,?,?,?,?,?)").bind("self-" + rid(10), g.email, null, now(), now(), g.email)]);   // Google confirmed the email
