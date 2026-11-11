@@ -89,9 +89,10 @@ chown root:root "$STATE/helper.token"; chmod 600 "$STATE/helper.token"
 TOKEN="$(cat "$STATE/helper.token")"
 
 # Desktop helpers for the agent's dialogs (best effort, never fatal).
-if command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get install -y -qq zenity libnotify-bin wl-clipboard xclip >/dev/null 2>&1 || true
-elif command -v dnf >/dev/null 2>&1; then dnf install -y -q zenity libnotify wl-clipboard xclip >/dev/null 2>&1 || true
-elif command -v pacman >/dev/null 2>&1; then pacman -S --noconfirm --needed zenity libnotify wl-clipboard xclip >/dev/null 2>&1 || true; fi
+# At most 2 minutes: a busy or unreachable package manager (another install running, a slow mirror) never holds the install up.
+if command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive timeout 120 apt-get -o DPkg::Lock::Timeout=30 install -y -qq zenity libnotify-bin wl-clipboard xclip >/dev/null 2>&1 || true
+elif command -v dnf >/dev/null 2>&1; then timeout 120 dnf install -y -q zenity libnotify wl-clipboard xclip >/dev/null 2>&1 || true
+elif command -v pacman >/dev/null 2>&1; then timeout 120 pacman -S --noconfirm --needed zenity libnotify wl-clipboard xclip >/dev/null 2>&1 || true; fi
 
 cat > /etc/systemd/system/lockqzd.service <<EOF
 [Unit]

@@ -129,7 +129,10 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - name: Chromium for the agent's tab-reading check
-        run: (npm i --no-save playwright@1.49.1 && npx playwright install --with-deps chromium) >/dev/null 2>&1 || echo "no Chromium - tab-reading check will be skipped"
+        run: |
+          (npm i --no-save playwright@1.49.1 && timeout 240 npx playwright install --with-deps chromium) >/dev/null 2>&1 || echo "no Chromium - tab-reading check will be skipped"
+          # a package install left running would hold the lock the installer needs
+          sudo pkill -x apt-get 2>/dev/null || true
       - name: Install, lock/unlock, uninstall
         run: |
           rc=0; timeout 600 bash app/tests/test_linux_install.sh > "$RUNNER_TEMP/linux.log" 2>&1 || rc=$?   # 10 min at most (it takes ~1.5): a stuck step shows its log instead of running for hours
