@@ -62,6 +62,8 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 - 2026-10-29 13:40 PT — 01UUDg7b: dashboard Set up redesigned: 3 cards always shown (number top-left, centred title/one line/button, done = green check), step 3 = ONE Email students button for every class (/email/students ous[] -> one draft, deduped Bcc, mail_sent per class). lq.js: LOCKqz on red/dark backgrounds turns white (was red qz on red buttons); extension dist rebuilt (store package not re-uploaded).
 - Older history: claude.ai Project LOCKqz, doc claude/LOCKqz-HANDOFF.md (private).
 
+- ACTIVE 01UUDg7bsaVV (11 Nov, sweep 12 follow-up): app/extension-prof/{popup.js,manifest.json,dist}, app/linux/lockqz.sh, app/mac/{lockqz-core.sh,install.sh,lockqzd.py}, app/cloudflare/functions/api/[[route]].js (card renewal email), .github/workflows/release.yml (Store step), app/tests/{test_prof_polish.mjs,test_sweep12*,test_linux*,test_sweep4.mjs}, app/VERSION + version lines
+
 ## Requests
 - Owner OK'd (3 Nov) deleting merged branches cws-live, wip/prof-email-budget, wip/prof-zero-effort-orphan (all in master); delete from github.com/anthonythomashall3-rgb/kx-91f3/branches.
 - When the Google OAuth client exists (project lockqz-513313, Web, origins https://lockqz.pages.dev + https://prof.lockqz.pages.dev): put its client ID in app/cloudflare/wrangler.toml GOOGLE_CLIENT_ID and publish the consent screen (In production).
