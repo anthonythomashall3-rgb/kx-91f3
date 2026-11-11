@@ -132,7 +132,7 @@ jobs:
         run: (npm i --no-save playwright@1.49.1 && npx playwright install --with-deps chromium) >/dev/null 2>&1 || echo "no Chromium - tab-reading check will be skipped"
       - name: Install, lock/unlock, uninstall
         run: |
-          rc=0; bash app/tests/test_linux_install.sh > "$RUNNER_TEMP/linux.log" 2>&1 || rc=$?
+          rc=0; timeout 600 bash app/tests/test_linux_install.sh > "$RUNNER_TEMP/linux.log" 2>&1 || rc=$?   # 10 min at most (it takes ~1.5): a stuck step shows its log instead of running for hours
           cat "$RUNNER_TEMP/linux.log"
           if [ "$rc" -ne 0 ]; then grep -E '^FAIL|^INSTALL-LOG|^JOURNAL|Error|error:|Traceback' "$RUNNER_TEMP/linux.log" | head -60 | sed 's/^/::error title=Linux install test::/'; fi
           exit $rc
