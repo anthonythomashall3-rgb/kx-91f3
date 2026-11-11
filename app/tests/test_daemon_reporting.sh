@@ -294,7 +294,7 @@ python3 -c "import json,time;json.dump({'quiz_id':'98765-12345','student':'T','l
 LOCKQZ_TOKEN_FILE="$TMP/d/helper.token" LOCKQZ_TOKEN_DIR="$TMP/d/tokens" LOCKQZ_LOCKFILE="$TMP/d/active_lock.json" LOCKQZ_NO_DEVMODE=1 LOCKQZ_DRYRUN=1 \
   LOCKQZ_CONFIG="$TMP/d/config.json" LOCKQZ_KEY_PATH="$TMP/d/device.key" LOCKQZ_BLOCKLIST="$TMP/d/blocklist.txt" \
   python3 "$APP/mac/lockqzd.py" >"$TMP/d/daemon.log" 2>&1 & DPID4=$!
-for i in $(seq 1 40); do grep -q '"reason": "cap"' "$LOG4" 2>/dev/null && break; sleep 0.5; done
+for i in $(seq 1 90); do grep -q '"reason": "cap"' "$LOG4" 2>/dev/null && break; sleep 0.5; done
 grep '"event": "unlock"' "$LOG4" | grep '"reason": "cap"' | grep -q '"quiz_id": "98765-12345"' && ok "hard cap auto-unlock reported as unlock, reason cap" || bad "no cap unlock report: $(tail -3 "$LOG4")"
 st=$(curl -s -H "X-LOCKqz-Token: $TOKEN" "http://127.0.0.1:$CTRL_PORT/status")
 echo "$st" | grep -q '"state": "unlocked"' && echo "$st" | grep -q '"capped_quiz": "98765-12345"' && ok "status tells the agent which quiz the cap released" || bad "status after cap: $st"

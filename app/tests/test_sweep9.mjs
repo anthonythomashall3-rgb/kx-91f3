@@ -8,6 +8,8 @@ import { payT } from "./pay_t.mjs";
 //   S3 the bank-transfer email names Zelle at Zelle's own price (professors: $6,300, not the $6,500 transfer price).
 //   S4 sign-up and password-reset codes get the big code box in the email, like the students' codes.
 //   S5 "Let in" / "Undo" on the live page works for an email with an apostrophe (o'brien@...) (real Chromium).
+//   S8 an exam moved later after its reminder went out gets a reminder for the new date (2-day: moved 6 h or more).
+//   S9 a school email with an apostrophe can be confirmed.
 //   S7 Admin > Payments: a payment moved from one professor to another takes its activation with it.
 //   S6 exams of one class that start together (versions A / B, an extended-time copy) send ONE reminder to students
 //      who are not ready, 2 days and 3 hours before -- not one per exam.
@@ -154,6 +156,50 @@ try {
     await call("/pay-assign", { txn: "s9-move2", code: b.memo }, { teacher: ADMIN });
     check("a date the admin set by hand (Activate) is never taken away by a move", (await act(a.t)).active_until === "2027-06-30");
     at(null);
+  }
+
+  console.log("S8 an exam moved later after its reminder went out is reminded again for the new date");
+  {
+    sqlite.prepare("DELETE FROM mail_sent").run();
+    const iso = t => new RealDate(t).toISOString(), T0 = RealDate.parse("2026-12-03T20:00:00Z"), T1 = T0 + 5 * 86400e3;
+    const roster = [{ id: "8001", name: "Pat Prof", email: "prof9@usc.edu", role: "Instructor" }, { id: "9301", name: "Stu M", email: "rm@usc.edu", role: "Student" }];
+    const sync = (start, extra = []) => call("/sync", { whoami: { id: "8001" }, courses: [{ ou: "700", name: "BUAD 306", classlist: roster, quizzes: [{ qi: "1", name: "Final", active: true, start: iso(start), end: iso(start + 3600e3) }, ...extra] }] }, { teacher: P });
+    at(iso(T0 - 60 * 3600e3));
+    await call("/sync", { courses: [{ ou: "700", name: "BUAD 306", classlist: roster, quizzes: [] }] }, { teacher: ADMIN }); await sync(T0);
+    const k = MAILS.length, run = async (a, b) => { for (let t = a; t <= b; t += 10 * 60e3) { fakeNow = t; await call("/cron", {}, { pay: true }); } };
+    const got = () => MAILS.slice(k).filter(m => /^Reminder: install LOCKqz before Final/.test(m.subject) && [].concat(m.to).includes("rm@usc.edu"));
+    await run(T0 - 50 * 3600e3, T0 - 40 * 3600e3);
+    check("set-up: the 2-day reminder went out once", got().length === 1, String(got().length));
+    await sync(T0 + 20 * 60e3); await run(T0 - 40 * 3600e3, T0 - 30 * 3600e3);
+    check("moved 20 minutes later: no second reminder", got().length === 1, String(got().length));
+    await sync(T1); await run(T0 - 30 * 3600e3, T1 - 49 * 3600e3);
+    check("moved 5 days later: nothing more until 2 days before the new date", got().length === 1, String(got().length));
+    await run(T1 - 49 * 3600e3, T1 - 4 * 3600e3);
+    check("... then the 2-day reminder goes out again, once (was: never)", got().length === 2, String(got().length));
+    await run(T1 - 4 * 3600e3, T1 - 2 * 3600e3);
+    check("the 3-hour reminder goes out once", got().length === 3, String(got().length));
+    await sync(T1 + 6 * 3600e3); await run(T1 - 2 * 3600e3, T1 + 5.5 * 3600e3);
+    check("moved 6 hours later after the 3-hour reminder: one more 3-hour reminder, once", got().length === 4, String(got().length));
+    at(null);
+  }
+
+  console.log("S9 a school email with an apostrophe (o'brien@...) can be confirmed");
+  {
+    const em = "o'brien@usc.edu", dv = "dev-s9-ob", key = "ab".repeat(32);
+    const { createHmac, createHash } = await import("node:crypto");
+    const dcall = async (path, body) => { const raw = JSON.stringify(body), ts = String(Math.floor(Date.now() / 1000));
+      const sig = createHmac("sha256", key).update(`POST\n/api${path}\n${ts}\n${createHash("sha256").update(raw).digest("hex")}`).digest("hex");
+      const res = await onRequest({ request: new Request("https://lockqz.test/api" + path, { method: "POST", headers: { "Content-Type": "application/json", "CF-Connecting-IP": "10.9.7." + (++ipN & 255), "X-LOCKqz-Device": dv, "X-LOCKqz-Time": ts, "X-LOCKqz-Sig": sig }, body: raw }), env, waitUntil: () => {} });
+      return { status: res.status, data: await res.json().catch(() => null) }; };
+    await call("/register", { device_id: dv, key, platform: "mac", version: "0.6.14" }); await dcall("/report", { event: "install", platform: "mac", version: "0.6.14" });
+    const k = MAILS.length, s1 = await dcall("/verify", { op: "send", email: em }), m = MAILS.slice(k).find(x => x.to === em);
+    check("the code is emailed (was: bad_email)", s1.status === 200 && s1.data?.sent === true && !!m?.code, JSON.stringify(s1.data));
+    const c = await dcall("/verify", { op: "code", email: em, code: m?.code });
+    check("the code confirms the email on the computer", c.data?.verified === true && sqlite.prepare("SELECT student FROM devices WHERE device_id=?").get(dv)?.student === em, JSON.stringify(c.data));
+    const st = (await payStart(em)).data;
+    check("the pay page works for it (memo code, prices)", !!st?.code && st.ways?.zelle?.total === 200, JSON.stringify(st).slice(0, 120));
+    const bad = await dcall("/verify", { op: "send", email: "a b'@usc.edu" }), bad2 = await dcall("/verify", { op: "send", email: "x\"y@usc.edu" });
+    check("spaces and double quotes are still refused", bad.data?.error === "bad_email" && bad2.data?.error === "bad_email", JSON.stringify([bad.data, bad2.data]));
   }
 
   console.log("S5 Let in / Undo for an email with an apostrophe (real Chromium)");

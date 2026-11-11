@@ -330,7 +330,7 @@ const isRegistered = async (db, id) => !!(id && await db.prepare("SELECT 1 AS r 
 // Gmail SMTP (free, 500/day) using Pages secrets MAIL_USER + MAIL_APP_PASSWORD.
 // Without those secrets codes are off and an email is accepted after the roster check (old behaviour).
 const CODE_MS = 15 * 60000, CODE_TRIES = 5;
-const EMAIL_OK = e => /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(e);
+const EMAIL_OK = e => /^[a-z0-9._%+'-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(e);   // ' is a real email character (o'brien@...)
 // Trial testers (FEE_EXEMPT in wrangler.toml, comma-separated): never pay (student fee or professor fee)
 // and get the test-run welcome. Everyone else pays.
 const exemptSet = env => new Set(String(env.FEE_EXEMPT || "").split(",").map(x => x.trim().toLowerCase()).filter(Boolean));
@@ -2795,7 +2795,8 @@ export async function onRequest(context) {
       const sent = new Set(sentRows.map(r => r.k));
       // Two exams of one class that start together (versions A / B, an extended-time copy): ONE reminder, not one
       // per exam. A class reminded (same kind: 2 days / 3 hours) in the last 3 hours is not reminded again.
-      const classAt = new Map();
+      const classAt = new Map(), sentAt = new Map();   // sentAt: the LATEST time each reminder went out
+      for (const r of sentRows) { const t = r.at ? Date.parse(r.at) : NaN; if (!isNaN(t)) sentAt.set(r.k, Math.max(sentAt.get(r.k) || 0, t)); }
       for (const r of sentRows) { const m = /^(.*)\|(r48|r3):/.exec(r.k), t = m && r.at ? Date.parse(r.at) : NaN; if (m && !isNaN(t)) classAt.set(m[1] + "|" + m[2], Math.max(classAt.get(m[1] + "|" + m[2]) || 0, t)); }
       const record = (ou, kind, n) => db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, kind, day, n, now()).run();
       let sends = 0;
@@ -2824,6 +2825,9 @@ export async function onRequest(context) {
         // not installed -> the install reminder; installed on a confirmed computer but fee unpaid -> the pay line.
         const kind = lead <= 3 * 3600000 ? "r3:" + r.qi : lead <= 48 * 3600000 ? "r48:" + r.qi : null;
         const ckey = kind ? r.ou + "|" + kind.split(":")[0] : "";
+        // The exam was moved later after its reminder went out (2-day one: by 6 h or more; 3-hour one: by 1 h or
+        // more): that reminder was for the old date, so the new date gets its own.
+        if (kind && sentAt.get(r.ou + "|" + kind) < Date.parse(r.start_date) - (kind.startsWith("r3:") ? 4 : 54) * 3600000) { sent.delete(r.ou + "|" + kind); sentAt.delete(r.ou + "|" + kind); }
         if (kind && Number(r.reminders ?? 1) !== 0 && !sent.has(r.ou + "|" + kind) && nowMs - (classAt.get(ckey) || 0) < 3 * 3600000) {
           sent.add(r.ou + "|" + kind); await record(String(r.ou), kind, 0);   // this class was just reminded for another exam
         } else if (kind && Number(r.reminders ?? 1) !== 0 && !sent.has(r.ou + "|" + kind)) {
