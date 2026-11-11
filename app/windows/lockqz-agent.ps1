@@ -256,7 +256,7 @@ function Close-Browsers($names, [string]$keep) {
 # The quiz gate admits a student by their Brightspace email, so it must be theirs: LOCKqz shows the
 # roster name ("Is this you?") and binds the email only after the 6-digit code sent to it is typed.
 # A typo or a classmate's email can never stick. An expired code is resent automatically.
-$EmailRe = '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+$EmailRe = '^[A-Za-z0-9._%+''-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'   # ' is a real email character (o'brien@...)
 $Ask = "Enter your school email (the one Brightspace uses, e.g. you@usc.edu):"
 function Ask-Box($msg, $buttons, $default, [bool]$answer) {
   # Modal dialog that waits for the student (closes itself after 30 min). -> @{ b; t } or $null

@@ -40,6 +40,8 @@ ok("TA/staff Preview of a quiz locks too") if all(A.is_quiz(u) for u in prv) els
 ok("quiz edit page (no preview) never locks") if not any(A.is_quiz(u) for u in edit) else bad("an edit page locked")
 ok("real email accepted") if A.EMAIL_RE.match("you@usc.edu") else bad("email rejected")
 ok("a name is not an email") if not A.EMAIL_RE.match("anthony") else bad("name accepted as email")
+ok("an email with an apostrophe is accepted (o'brien@...)") if A.EMAIL_RE.match("o'brien@usc.edu") else bad("apostrophe email rejected")
+ok("spaces and quotes are still refused") if not A.EMAIL_RE.match("a b@usc.edu") and not A.EMAIL_RE.match('a"b@usc.edu') else bad("bad email accepted")
 
 print("T2 search backstop: AI-answer searches are sent to Google Web; clean ones are left alone")
 r = A.rewrite_search

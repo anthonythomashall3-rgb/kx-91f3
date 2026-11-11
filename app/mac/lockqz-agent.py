@@ -531,7 +531,7 @@ def dialog(text, title="LOCKqz"):
         except Exception: pass
     threading.Thread(target=run, daemon=True).start()
 
-EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")   # ' is a real email character (o'brien@...)
 
 # ---------- student email: asked ONCE per computer, confirmed by an emailed code ----------
 # The quiz gate admits a student by their Brightspace email, so it must be theirs: LOCKqz shows the
