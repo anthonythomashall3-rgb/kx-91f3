@@ -126,7 +126,9 @@
   var $ = function (id) { return document.getElementById(id); };
 
   if (mac || win || linux || android) {
-    $("install").hidden = false;
+    // Mac + Windows: shown once the page knows which install way is live (never one way, then another); 2.5 s at most.
+    var show = function () { $("install").hidden = false; };
+    if (mac || win) setTimeout(show, 2500); else show();
     if (android) {
       $("os").textContent = "for Android";
       $("lead").parentNode.hidden = true; $("orline").hidden = true;   // one way on a phone: the app
@@ -150,14 +152,12 @@
       $("dl").textContent = "Download for Mac";
       $("dlol").innerHTML = ["Open <b>lockqz-mac.pkg</b> from Downloads.", "If it won\u2019t open: <b>System Settings \u2192 Privacy &amp; Security \u2192 Open Anyway</b>.", "Follow the installer. Enter your Mac password when asked."].map(function (x) { return "<li>" + x + "</li>"; }).join("");
       // Apple-signed installer (download/mac.json, written by the release): the download is the one way shown:
-      // no Terminal, no "Open Anyway". The command stays one click away.
+      // no Terminal, no "Open Anyway".
       fetch("/download/mac.json", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (d) {
         if (!d || d.signed !== true || $("dlbox").hidden) return;
         $("dlol").innerHTML = ["Open <b>lockqz-mac.pkg</b> from Downloads.", "Click <b>Continue</b>, then <b>Install</b>. Enter your Mac password.", "Click <b>OK or Allow</b> on every prompt. Done."].map(function (x) { return "<li>" + x + "</li>"; }).join("");
         $("lead").parentNode.hidden = true; $("orline").hidden = true;
-        $("dlbox").insertAdjacentHTML("beforeend", '<p style="margin:14px 0 0;font-size:13.5px"><a href="#" id="macalt" style="color:var(--usc)">Other ways to install</a></p>');
-        $("macalt").onclick = function (e) { e.preventDefault(); $("lead").parentNode.hidden = false; $("orline").hidden = false; this.parentNode.hidden = true; };
-      }, function () {});
+      }, function () {}).then(show, show);
     } else {
       $("os").textContent = "for Windows";
       $("how").innerHTML = "Press <b>Start</b>, type PowerShell, right-click it \u2192 <b>Run as administrator</b>.";
@@ -173,8 +173,8 @@
         $("store").hidden = false; $("storebtn").href = "https://apps.microsoft.com/detail/" + id;
         $("alt").hidden = true;
         $("altlink").onclick = function (e) { e.preventDefault(); $("alt").hidden = false; this.parentNode.hidden = true; }; };
-      if (STORE_ID) showStore(STORE_ID);
-      else fetch("/api/store").then(function (r) { return r.json(); }).then(function (d) { showStore(d && d.id); }, function () {});
+      if (STORE_ID) { showStore(STORE_ID); show(); }
+      else fetch("/api/store").then(function (r) { return r.json(); }).then(function (d) { showStore(d && d.id); }, function () {}).then(show, show);
     }
     // Pages answers a missing file with this page (HTML, status 200). Only offer what is really published.
     var served = function (path, cb) {

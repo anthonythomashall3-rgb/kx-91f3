@@ -73,7 +73,7 @@ c(){ has 'MAC_SIGN: "${{ secrets.MAC_SIGNING != '"''"' || secrets.MAC_INSTALLER_
 check "secrets set + live installer not signed -> the Mac build runs by itself" c
 check "live check reads mac.json" has 'download/mac.json | python3 -c' "$R"
 check "Microsoft Store: a version it already has is not submitted again" has 'Microsoft Store already has $v - nothing to submit' "$R"
-c(){ has 'fetch("/download/mac.json", { cache: "no-store" })' "$I" && has 'd.signed !== true' "$I" && has 'Click <b>Continue</b>, then <b>Install</b>. Enter your Mac password.' "$I" && has 'id="macalt"' "$I" && has '$("lead").parentNode.hidden = true; $("orline").hidden = true;' "$I"; }
+c(){ has 'fetch("/download/mac.json", { cache: "no-store" })' "$I" && has 'd.signed !== true' "$I" && has 'Click <b>Continue</b>, then <b>Install</b>. Enter your Mac password.' "$I" && ! has 'macalt' "$I" && has '.then(show, show)' "$I" && has '$("lead").parentNode.hidden = true; $("orline").hidden = true;' "$I"; }
 check "page: signed Mac -> the download is the one way shown, command one click away" c
 c(){ has 'Open Anyway' "$I" && has '/install.sh | sudo bash' "$I"; }
 check "page: unsigned Mac keeps the command + installer as before" c
