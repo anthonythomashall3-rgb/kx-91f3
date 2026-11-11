@@ -150,7 +150,8 @@ def upstream_servers():
                 if l.startswith(("DNS Servers:", "Current DNS Server:")):
                     srv = [x.split("#")[0].split("%")[0] for x in l.split(":", 1)[1].split()] + srv
         except Exception: pass
-    srv = [s for s in srv if s and not s.startswith("127.0.0.5") and not s.startswith("::1")]
+    # never the stub itself, and never the answer-nothing server of LOCKqz's own link (lockqz.sh wild_on)
+    srv = [s for s in srv if s and not s.startswith("127.0.0.5") and not s.startswith("::1") and s != "192.0.2.254"]
     return srv or ["1.1.1.1", "8.8.8.8"]
 
 def _query(name, qtype, server, timeout=2.0):

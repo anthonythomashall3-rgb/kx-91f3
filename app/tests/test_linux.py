@@ -261,6 +261,7 @@ r = runw("wild_off; echo rc=$?; wild_off; echo rc=$?")
 check("unlock: the link is removed (and a second unlock has nothing to do)", r.stdout.split() == ["rc=0", "rc=0"] and not os.path.exists(os.path.join(wst, "link")) and open(os.path.join(wst, "log")).read().count("ip link del lockqz0") == 1, r.stdout + r.stderr)
 check("the whole-domain layer is part of lock and unlock; unlock is incomplete while the link is left", "wild_on || true" in eng and "wild_off || rc=1" in eng)
 check("the iptables fallback covers IPv6 too (local model ports, VPN ports)", 'for a in ::1/128 fc00::/7 fe80::/10; do ip6tables -A LOCKQZ' in eng and 'ip6tables -A LOCKQZ -p udp -m multiport --dports "${VPN_UDP// /}" -j DROP' in eng)
+check("the address resolver never asks the answer-nothing server of LOCKqz's own link", 's != "192.0.2.254"' in open(os.path.join(LINUX, "browser-policy.py")).read() and "resolvectl dns \"$WILD_IF\" 192.0.2.254" in eng)
 
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nRESULT: %d passed, %d failed" % (PASS, FAIL)); sys.exit(1 if FAIL else 0)
