@@ -290,7 +290,7 @@ cat > "$TMP/d/config.json" <<CFG
 { "port": $CTRL_PORT, "api_base": "http://127.0.0.1:$M4", "device_id": "itest-cap", "student": "T", "max_minutes": 1, "beat_cycles": 1 }
 CFG
 cp "$APP/mac/blocklist.txt" "$TMP/d/blocklist.txt"; printf %s "$TOKEN" > "$TMP/d/helper.token"
-python3 -c "import json,time;json.dump({'quiz_id':'98765-12345','student':'T','locked_at':'x','locked_since':time.time()-55,'max_minutes':1},open('$TMP/d/active_lock.json','w'))"
+python3 -c "import json,time;json.dump({'quiz_id':'98765-12345','student':'T','locked_at':'x','locked_since':time.time()-45,'max_minutes':1},open('$TMP/d/active_lock.json','w'))"
 LOCKQZ_TOKEN_FILE="$TMP/d/helper.token" LOCKQZ_TOKEN_DIR="$TMP/d/tokens" LOCKQZ_LOCKFILE="$TMP/d/active_lock.json" LOCKQZ_NO_DEVMODE=1 LOCKQZ_DRYRUN=1 \
   LOCKQZ_CONFIG="$TMP/d/config.json" LOCKQZ_KEY_PATH="$TMP/d/device.key" LOCKQZ_BLOCKLIST="$TMP/d/blocklist.txt" \
   python3 "$APP/mac/lockqzd.py" >"$TMP/d/daemon.log" 2>&1 & DPID4=$!

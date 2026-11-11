@@ -123,7 +123,7 @@ const server = createServer({ key: readFileSync(join(tmp, "k.pem")), cert: readF
   const send = (status, type, b, headers = {}) => { res.writeHead(status, { "Content-Type": type, ...headers }); res.end(b); };
   try {
     if ((host === "lockqz.pages.dev" || host === "lockqz.com") && u.pathname.startsWith("/api/")) {
-      lqCalls.push(u.pathname.slice(4));
+      if (req.method !== "OPTIONS") lqCalls.push(u.pathname.slice(4));   // a CORS preflight is not a call (newer Chromium repeats it)
       const h = { ...req.headers }; delete h["content-length"]; delete h.host;
       const r = await onRequest({ request: new Request(u.href.replace("://lockqz.com/", "://lockqz.pages.dev/"), { method: req.method, headers: h, body: ["GET", "HEAD", "OPTIONS"].includes(req.method) ? undefined : body }), env });
       const hs = Object.fromEntries(r.headers); return send(r.status, hs["content-type"] || "application/json", Buffer.from(await r.arrayBuffer()), hs);

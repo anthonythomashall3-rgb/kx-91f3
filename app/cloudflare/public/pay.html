@@ -177,6 +177,9 @@ async function start(email){
   // Typed an email (no link token): LOCKqz emails that address its own pay link; nothing else is shown.
   if (d.link_sent) { $("err").textContent = "We emailed your pay link to " + email + ". Open it from that inbox to pay."; $("err").hidden = false; return; }
   history.replaceState(null, "", "?email=" + encodeURIComponent(email) + (TOK && email === TOK_EMAIL ? "&t=" + encodeURIComponent(TOK) : ""));
+  // A professor's email (the "Stop these emails" link in a renewal email): professors pay on their dashboard.
+  if (d.professor) { stopPoll(); $("f").hidden = true; $("pay").hidden = true; renewUi(email, d.renew);
+    $("err").innerHTML = 'This is a LOCKqz professor account. Professors pay on the dashboard: <a href="https://professor.lockqz.com/">professor.lockqz.com</a>'; $("err").hidden = false; return; }
   if (!d.required) { stopPoll(); $("f").hidden = true; $("pay").hidden = true; $("free").hidden = false; return; }   // fee not on yet
   const amt = money(d.amount);
   $("amt").textContent = amt; $("price").hidden = false;

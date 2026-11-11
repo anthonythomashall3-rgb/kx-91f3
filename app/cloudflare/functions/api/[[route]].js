@@ -500,7 +500,7 @@ function autoHtml(text, { sign = true } = {}) {
   const paras = String(text == null ? "" : text).replace(/\r/g, "").split(/\n{2,}/).map(x => x.trim()).filter(Boolean);
   if (paras.length && /^(?:—\s*)?LOCKqz$|^Respectfully,\nThe LOCKqz Team$/.test(paras[paras.length - 1])) paras.pop();
   const body = paras.map(p => {
-    const code = p.match(/^Your LOCKqz (?:sign-in )?code is (\d{6})$/);
+    const code = p.match(/^Your LOCKqz (?:sign-in |sign-up |password reset )?code is (\d{6})$/);
     if (code) return `<p style="margin:0 0 6px">Your LOCKqz code:</p><p style="margin:0 0 16px"><span style="display:inline-block;font-size:30px;font-weight:700;letter-spacing:6px;background:#f6f5f2;border:1px solid #e6e3dc;border-radius:10px;padding:10px 18px;color:#111">${code[1]}</span></p>`;
     return P(p.split("\n").map(l => { const m = l.match(/^(.*?)(https?:\/\/\S+?)[.,]?\s*$/), lab = m && autoBtn(m[2]);
       if (!lab) return linkify(l);
@@ -2587,11 +2587,19 @@ export async function onRequest(context) {
         }
         return json({ link_sent: true, to: email, required: true });
       }
+      const ro = await db.prepare("SELECT 1 FROM renew_optout WHERE email=?").bind(email).first().catch(() => null);
+      // A professor's account (e.g. "Stop these emails" in his renewal email opens this page): professors pay on
+      // their dashboard, never the student fee, so the student pay page is not shown for that email.
+      if (await db.prepare("SELECT 1 FROM teachers WHERE email=? AND role<>'admin' AND (vouched=1 OR verified=1)").bind(email).first())
+        return json({ professor: true, dashboard: DASH_URL, required: feeOn(), renew: !ro });
       const info = await payInfo(email, clientIp, !(await studentPaid(email)));
       if (info.limited) return json({ error:"too many requests — try again in an hour" }, 429);
       const stt = await studentStatus(email);
-      const ro = await db.prepare("SELECT 1 FROM renew_optout WHERE email=?").bind(email).first().catch(() => null);
-      return json({ ...info, paid: await studentPaid(email), required: feeOn(), term: stt.term, until: termEndOf(stt.term), received: stt.received, money: stt.money, token: await statusToken(email), renew: !ro,
+      // "Access until": for someone already paid, the last day of what they PAID (next term only when that one
+      // is paid too); for someone about to pay, the last day of the term their payment will count for.
+      const paidNow = await studentPaid(email), [curT, nxtT] = curTerms();
+      const upTerm = stt.code && (ahead() || inGap()) && FULL(await paidSum(stt.code, nxtT), STUDENT_FEE) ? nxtT : curT;
+      return json({ ...info, paid: paidNow, required: feeOn(), term: stt.term, until: termEndOf(paidNow ? upTerm : stt.term), received: stt.received, money: stt.money, token: await statusToken(email), renew: !ro,
         card_auto: !!(await db.prepare("SELECT 1 AS x FROM card_renew WHERE email=? AND autorenew=1 AND pm IS NOT NULL").bind(email).first()) });
     }
     if (p === "/pay/status") {
@@ -2748,7 +2756,7 @@ export async function onRequest(context) {
         + `Memo / reference: ${code}\nPut ${code} in the memo, or LOCKqz can't tell the payment is yours.\n\n`
         + (details ? details + "\n\n" : "LOCKqz's bank account details follow in a separate email.\n\n")
         + `Access turns on by itself within a minute of the money arriving (ACH usually 1–3 business days, wire same day).\n`
-        + (stuZelle() ? `Faster: Zelle ${m(w.total)} to ${stuZelle()} with memo ${code}. It arrives in minutes.\n` : "")
+        + (env.ZELLE_TO ? `Faster: Zelle ${m(taxOn() ? waysFor(kind, left).zelle.total : w.total)} to ${env.ZELLE_TO} with memo ${code}. It arrives in minutes.\n` : "")   // Zelle's own price (professors: lower than a bank transfer)
         + `\nQuestions: reply to this email.`;
       try { await mailOut(email, `LOCKqz bank transfer details · ${code}`, text, {}, "essential"); }
       catch (e) { return json({ error: "Could not send the email. Try again in a minute." }, 502); }
@@ -2783,7 +2791,12 @@ export async function onRequest(context) {
         ORDER BY b.start_date, t.role='admin' LIMIT 120`).bind(from, to).all()).results;
       const seenQ = new Set(), day = laToday();
       // ix:<teacher> rows: the "add LOCKqz to Chrome" email goes to a professor at most once a day (any exam).
-      const sent = new Set((await db.prepare("SELECT ou||'|'||kind AS k FROM mail_sent WHERE (kind LIKE 'r48:%' OR kind LIKE 'r3:%' OR kind LIKE 'ck:%') OR (kind LIKE 'ix:%' AND day=?)").bind(day).all()).results.map(r => r.k));
+      const sentRows = (await db.prepare("SELECT ou||'|'||kind AS k, at FROM mail_sent WHERE (kind LIKE 'r48:%' OR kind LIKE 'r3:%' OR kind LIKE 'ck:%') OR (kind LIKE 'ix:%' AND day=?)").bind(day).all()).results;
+      const sent = new Set(sentRows.map(r => r.k));
+      // Two exams of one class that start together (versions A / B, an extended-time copy): ONE reminder, not one
+      // per exam. A class reminded (same kind: 2 days / 3 hours) in the last 3 hours is not reminded again.
+      const classAt = new Map();
+      for (const r of sentRows) { const m = /^(.*)\|(r48|r3):/.exec(r.k), t = m && r.at ? Date.parse(r.at) : NaN; if (m && !isNaN(t)) classAt.set(m[1] + "|" + m[2], Math.max(classAt.get(m[1] + "|" + m[2]) || 0, t)); }
       const record = (ou, kind, n) => db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, kind, day, n, now()).run();
       let sends = 0;
       // Soonest exam first (ORDER BY start_date): when the automatic budget runs low, the most urgent mail goes.
@@ -2810,7 +2823,10 @@ export async function onRequest(context) {
         // Reminders to students who are not ready (2 days and 3 hours before), from the automatic budget:
         // not installed -> the install reminder; installed on a confirmed computer but fee unpaid -> the pay line.
         const kind = lead <= 3 * 3600000 ? "r3:" + r.qi : lead <= 48 * 3600000 ? "r48:" + r.qi : null;
-        if (kind && Number(r.reminders ?? 1) !== 0 && !sent.has(r.ou + "|" + kind)) {
+        const ckey = kind ? r.ou + "|" + kind.split(":")[0] : "";
+        if (kind && Number(r.reminders ?? 1) !== 0 && !sent.has(r.ou + "|" + kind) && nowMs - (classAt.get(ckey) || 0) < 3 * 3600000) {
+          sent.add(r.ou + "|" + kind); await record(String(r.ou), kind, 0);   // this class was just reminded for another exam
+        } else if (kind && Number(r.reminders ?? 1) !== 0 && !sent.has(r.ou + "|" + kind)) {
           const sp = await classRecipients(String(r.ou), "split"), list = sp.missing, unp = new Set(sp.unpaid);
           if (!list.length) { sent.add(r.ou + "|" + kind); await record(String(r.ou), kind, 0); }
           else if (!(await mailRoom(list.length, "auto"))) out.skipped++;   // not marked sent: a later tick retries if room frees up
@@ -2820,7 +2836,7 @@ export async function onRequest(context) {
             let done = 0;
             try { for (const [grp, m] of [[list.filter(e => !unp.has(e)), MAIL.reminder(base)], [sp.unpaid, MAIL.reminder({ ...base, unpaid: true })]])
                 for (const part of chunk(grp, MAIL_BATCH)) { await mailOut(part, m.subject, m.text, { html: m.html, replyTo: r.email }, "auto"); sends++; done += part.length; } } catch { out.skipped++; }
-            out.reminders += done; if (done) await record(String(r.ou), kind, done);
+            out.reminders += done; if (done) { await record(String(r.ou), kind, done); classAt.set(ckey, nowMs); }
           }
         }
       }

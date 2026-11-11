@@ -674,7 +674,7 @@ async function loadLive(id){
   const nameOf = r => { const k=(r.email||r.student||"").toLowerCase(); const s=c&&c.students.find(x=>(x.email||"").toLowerCase()===k||(x.name||"").toLowerCase()===k); return s?s.name:(r.student||r.device_id); };
   const notStarted = c ? c.students.filter(s=>!seen.has((s.email||"").toLowerCase()) && !seen.has((s.name||"").toLowerCase())) : [];
   const letin = new Set((d.letin_emails||[]).map(e=>String(e).toLowerCase()));
-  const letBtn = (s, on) => s && s.email ? `<button class="btn${on?'':' ok'}" style="padding:4px 12px;font-size:13px;min-height:32px" onclick="letIn('${esc(id)}','${esc(s.email)}',${on})">${on?"Let in":"Undo"}</button>` : "";
+  const letBtn = (s, on) => s && s.email ? `<button class="btn${on?'':' ok'}" style="padding:4px 12px;font-size:13px;min-height:32px" data-q="${esc(id)}" data-e="${esc(s.email)}" onclick="letIn(this.dataset.q,this.dataset.e,${on})">${on?"Let in":"Undo"}</button>` : "";
   showCode(id, letin.size);
   // Labels only on evidence: "Submitted" needs a Brightspace submission (r.submitted); "working" needs the
   // student admitted (not unpaid, confirmed email + signed lock).
