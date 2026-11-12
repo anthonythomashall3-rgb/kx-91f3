@@ -9,6 +9,10 @@ traffic (locks, passwords, heartbeats, unlocks) is limited only by the machine.
   database up from `schema.sql` + every `migrate_*.sql` (each once, recorded in `_migrations`).
 - `import.mjs` - turns a SQL export of the Cloudflare database into the server's file.
 - `loadtest.mjs` - an exam day against a real listening server: `node loadtest.mjs 50000 300`.
+- `loadtest-full.mjs` - the same with a full-size database (fee on, class lists, payments, a term of
+  earlier events), professors watching live and the admin on the admin pages; lists the database
+  statements that cost most and any that read a whole big table:
+  `node loadtest-full.mjs 100000 20000 200 1000 600000 100`.
 - `lockqz.env.example` - the settings file. `lockqz-api.service` - the systemd unit.
 
 Needs Node 22.5 or newer. No packages to install.

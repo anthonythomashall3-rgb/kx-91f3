@@ -3754,7 +3754,11 @@ export async function onRequest(context) {
       else {
         rows = [];
         const exact = quiz && /^\d+-\d+$/.test(quiz);
-        for (const part of chunk(ous, 45)) rows.push(...(await db.prepare(`SELECT ${COLS} FROM events WHERE ${exact ? "quiz_id=?" : rangeSql(part.length)} AND ts>? ORDER BY id DESC LIMIT 500`).bind(...(exact ? [quiz] : rangeArgs(part)), since).all()).results);
+        // One bounded read per class (its own events through the quiz index, newest 500), never a walk over
+        // every school-wide event: the cost depends on the class, not on how many events LOCKqz holds.
+        const one = `SELECT * FROM (SELECT ${COLS} FROM events WHERE quiz_id>=? AND quiz_id<? AND ts>? ORDER BY +id DESC LIMIT 500)`;
+        if (exact) rows.push(...(await db.prepare(`SELECT ${COLS} FROM events WHERE quiz_id=? AND ts>? ORDER BY id DESC LIMIT 500`).bind(quiz, since).all()).results);
+        else for (const part of chunk(ous, 20)) rows.push(...(await db.prepare(part.map(() => one).join(" UNION ALL ")).bind(...part.flatMap(o => [o + "-", o + ".", since])).all()).results);
         rows.sort((a, b) => b.id - a.id); rows = rows.slice(0, 500);
       }
       return json({ events: rows.map(({ id, ...r }) => r) });

@@ -7,7 +7,7 @@ import { join } from "node:path";
 const val = x => x === undefined ? null : typeof x === "boolean" ? Number(x) : x;
 const num = x => typeof x === "bigint" ? Number(x) : x;
 
-export function openDb(file, { cache = 400 } = {}) {
+export function openDb(file, { cache = 400, profile = false } = {}) {
   const sqlite = new DatabaseSync(file);
   if (file !== ":memory:") sqlite.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
   sqlite.exec("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=OFF;");
@@ -21,9 +21,12 @@ export function openDb(file, { cache = 400 } = {}) {
     return s;
   };
   const stats = { read: 0, written: 0, queries: 0 };
+  // profile: time spent per SQL text (count, total ms, slowest), for finding the statements that cost most.
+  const prof = profile ? new Map() : null;
+  const timed = (sql, fn) => { if (!prof) return fn(); const t = process.hrtime.bigint(); try { return fn(); } finally { const ms = Number(process.hrtime.bigint() - t) / 1e6; const e = prof.get(sql) || { n: 0, ms: 0, max: 0 }; e.n++; e.ms += ms; if (ms > e.max) e.max = ms; prof.set(sql, e); } };
   const meta = r => ({ changes: num(r.changes), last_row_id: num(r.lastInsertRowid), duration: 0 });
-  const runNow = (sql, args) => { stats.queries++; const r = stmt(sql).run(...args); stats.written += num(r.changes); return { success: true, results: [], meta: meta(r) }; };
-  const allNow = (sql, args) => { stats.queries++; const rows = stmt(sql).all(...args); stats.read += rows.length; return { success: true, results: rows, meta: { changes: 0 } }; };
+  const runNow = (sql, args) => { stats.queries++; const r = timed(sql, () => stmt(sql).run(...args)); stats.written += num(r.changes); return { success: true, results: [], meta: meta(r) }; };
+  const allNow = (sql, args) => { stats.queries++; const rows = timed(sql, () => stmt(sql).all(...args)); stats.read += rows.length; return { success: true, results: rows, meta: { changes: 0 } }; };
   // A statement that returns rows (SELECT, or ... RETURNING) is read; anything else is run.
   const reads = sql => /^\s*(select|with|pragma|explain)\b/i.test(sql) || /\breturning\b/i.test(sql);
   const db = {
@@ -31,7 +34,7 @@ export function openDb(file, { cache = 400 } = {}) {
       let args = [];
       const o = {
         bind(...a) { args = a.map(val); return o; },
-        async first(col) { stats.queries++; const row = stmt(sql).get(...args); if (row === undefined) return null; stats.read++; return col === undefined ? row : row[col] ?? null; },
+        async first(col) { stats.queries++; const row = timed(sql, () => stmt(sql).get(...args)); if (row === undefined) return null; stats.read++; return col === undefined ? row : row[col] ?? null; },
         async all() { return reads(sql) ? allNow(sql, args) : runNow(sql, args); },
         async run() { return reads(sql) ? allNow(sql, args) : runNow(sql, args); },
         async raw() { return allNow(sql, args).results.map(r => Object.values(r)); },
@@ -47,7 +50,7 @@ export function openDb(file, { cache = 400 } = {}) {
       catch (e) { try { sqlite.exec("ROLLBACK"); } catch {} throw e; }
     },
     async exec(sql) { sqlite.exec(sql); return { count: 1, duration: 0 }; },
-    stats, sqlite,
+    stats, sqlite, profile: prof,
     close() { stmts.clear(); sqlite.close(); },
   };
   return db;

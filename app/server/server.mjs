@@ -104,7 +104,7 @@ export async function start(opts = {}) {
     for (const s of multi.schools.values()) { const cache = memoryCache(), inner = s.onRequest; s.onRequest = c => scope.run({ cache }, () => inner(c)); }
     db = multi.schools.get(multiCfg.default).db; applied = multi.applied[multiCfg.default];
   } else {
-    db = opts.db || openDb(opts.dbFile || join(data, "lockqz.db"));
+    db = opts.db || openDb(opts.dbFile || join(data, "lockqz.db"), { profile: !!opts.profile });
     applied = migrate(db, cf);
     env.DB = db;
     onRequest = opts.onRequest || await loadApi(cf, join(data, "run"), { version, id: env.LOCKQZ_BUILD || "server" });
