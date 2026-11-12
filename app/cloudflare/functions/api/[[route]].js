@@ -152,7 +152,8 @@ const staleMsFor = env => (2 * beatSecs(env) + 60) * 1000;
 const EVENT_DAYS = 120;    // retention: activity events are deleted after 120 days (privacy.html)
 const rid = (n=6) => Array.from(crypto.getRandomValues(new Uint8Array(n))).map(b=>"ABCDEFGHJKMNPQRSTUVWXYZ23456789"[b%30]).join("");
 const hex = a => Array.from(new Uint8Array(a)).map(b=>b.toString(16).padStart(2,"0")).join("");
-const CORS = { "Access-Control-Allow-Origin":"*", "Access-Control-Allow-Headers":"Content-Type, X-LOCKqz-Teacher, X-LOCKqz-Sync", "Access-Control-Allow-Methods":"GET, POST, OPTIONS", "Access-Control-Max-Age":"86400" };
+const CORS = { "Access-Control-Allow-Origin":"*", "Access-Control-Allow-Headers":"Content-Type, X-LOCKqz-Teacher, X-LOCKqz-Sync", "Access-Control-Allow-Methods":"GET, POST, OPTIONS", "Access-Control-Max-Age":"86400",
+  "Strict-Transport-Security":"max-age=31536000", "X-Content-Type-Options":"nosniff" };   // https only; an answer is only ever what its type says
 const json = (o, s=200) => new Response(JSON.stringify(o), { status: s, headers: { "Content-Type":"application/json", ...CORS } });
 
 // Build stamp: deploy.sh replaces the two placeholders in its staging copy (same build -> both hosts).

@@ -1,7 +1,9 @@
-# No LOCKqz page is ever shown inside another site's frame.
+# No LOCKqz page is ever shown inside another site's frame, and a browser that has seen LOCKqz once only ever
+# opens it over https.
 /*
   X-Frame-Options: DENY
   Content-Security-Policy: frame-ancestors 'none'
+  Strict-Transport-Security: max-age=31536000
 
 /download/lockqz-prof-firefox.xpi
   Content-Type: application/x-xpinstall

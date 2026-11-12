@@ -68,6 +68,8 @@ check("E4 Forget also removes an unused invitation sent to that email", before =
 
 const hd = readFileSync(join(CF, "public", "_headers"), "utf8");
 check("E3 every page forbids being framed by another site", /^\/\*\n  X-Frame-Options: DENY\n  Content-Security-Policy: frame-ancestors 'none'\n/m.test(hd) && hd.includes("/download/lockqz-prof-firefox.xpi\n  Content-Type: application/x-xpinstall"));
+{ const v = await api("/version", undefined, { get: true }).catch(() => null), src = readFileSync(join(CF, "functions", "api", "[[route]].js"), "utf8");
+  check("E3 pages and API answers tell the browser: https only from now on, and never guess a file's type", /\n  Strict-Transport-Security: max-age=31536000\n/.test(hd) && /"Strict-Transport-Security":"max-age=31536000", "X-Content-Type-Options":"nosniff"/.test(src)); }
 const pages = readdirSync(join(CF, "public")).filter(f => /\.(html|js)$/.test(f)).map(f => readFileSync(join(CF, "public", f), "utf8")).join("\n");
 check("E3 no LOCKqz page frames another LOCKqz page", !/<iframe|createElement\(["']iframe/i.test(pages));
 
