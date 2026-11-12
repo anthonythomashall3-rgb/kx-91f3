@@ -17,6 +17,13 @@ traffic (locks, passwords, heartbeats, unlocks) is limited only by the machine.
 
 Needs Node 22.5 or newer. No packages to install.
 
+## A fresh machine
+
+    curl -fsSL https://raw.githubusercontent.com/anthonythomashall3-rgb/kx-91f3/master/app/server/setup.sh | sudo bash
+
+Installs Node, the code in `/opt/lockqz` and the `lockqz-api` service (127.0.0.1:8787, no open port).
+Running it again brings the machine to the newest code and restarts the service.
+
 ## Run
 
     cp lockqz.env.example lockqz.env && chmod 600 lockqz.env    # fill in the secrets
