@@ -78,6 +78,7 @@ run "Bug sweep 12 (same moment): three payment ticks at once send one renewed em
 run "Bug sweep 13: one-line email subjects, no raw HTML in emails, trimmed class-list emails, pages never framed" node --no-warnings test_sweep13.mjs
 run "Bug sweep 15: every request fits the free plan per call at scale - exam emails, renewals, card renewals, email every class" node --no-warnings test_sweep15.mjs
 run "Bug sweep 18: a big Sync goes out in parts (class lists first) and leaves LOCKqz exactly as one request does" node --no-warnings test_sweep18.mjs
+run "Plain server (app/server): the same API over real HTTP on a SQLite file, database set-up, data import, exam-day run" node --no-warnings test_server.mjs
 run "Microsoft Store button by itself + automatic Store submissions; Firefox package signed by Mozilla" node --no-warnings test_store_ff.mjs
 run "Apple Developer ID: Mac installer signing + notarization wiring, signed package never replaced" bash test_signing_mac.sh
 run "Download page on a Mac: Apple-signed installer = one download, command one click away (real Chromium)" node --no-warnings test_download_mac.mjs

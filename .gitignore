@@ -33,3 +33,7 @@ app/.src2.tgz
 .round2.patch
 app/cloudflare/.deploy/
 .private/
+
+# Plain server: secrets and data never go in the repo
+app/server/lockqz.env
+app/server/data/

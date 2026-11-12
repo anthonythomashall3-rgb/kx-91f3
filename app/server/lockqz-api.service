@@ -1,0 +1,22 @@
+# systemd unit: LOCKqz API on a plain server.   sudo cp lockqz-api.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now lockqz-api
+[Unit]
+Description=LOCKqz API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=lockqz
+WorkingDirectory=/opt/lockqz/app/server
+ExecStart=/usr/bin/node --no-warnings server.mjs
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/lockqz/app/server/data
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

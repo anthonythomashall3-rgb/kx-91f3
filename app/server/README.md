@@ -1,0 +1,36 @@
+# LOCKqz API on a plain server
+
+The same API file Cloudflare runs (`../cloudflare/functions/api/[[route]].js`), served by Node on one
+machine with one SQLite file as the database. A machine has no per-day request allowance, so exam-day
+traffic (locks, passwords, heartbeats, unlocks) is limited only by the machine.
+
+- `server.mjs` - the HTTP server. `GET /healthz` reports health; everything under `/api/` is the API.
+- `d1.mjs` - the database layer: the calls the API makes on Cloudflare D1, answered from SQLite; sets the
+  database up from `schema.sql` + every `migrate_*.sql` (each once, recorded in `_migrations`).
+- `import.mjs` - turns a SQL export of the Cloudflare database into the server's file.
+- `loadtest.mjs` - an exam day against a real listening server: `node loadtest.mjs 50000 300`.
+- `lockqz.env.example` - the settings file. `lockqz-api.service` - the systemd unit.
+
+Needs Node 22.5 or newer. No packages to install.
+
+## Run
+
+    cp lockqz.env.example lockqz.env && chmod 600 lockqz.env    # fill in the secrets
+    node --no-warnings server.mjs
+
+The server listens on 127.0.0.1 only. Put Cloudflare in front of it with a Tunnel (`cloudflared`), so the
+machine has no open port and students' addresses arrive in `CF-Connecting-IP`.
+
+## Moving the data
+
+    npx wrangler d1 export lockqz --remote --output lockqz-export.sql
+    node import.mjs lockqz-export.sql data/lockqz.db
+
+## Copies of the database
+
+`SNAPSHOT_MIN=15` writes a whole copy to `data/snapshots/` every 15 minutes (the newest
+`SNAPSHOT_KEEP` are kept). Copy that folder off the machine.
+
+## Tests
+
+`node --no-warnings ../tests/test_server.mjs` (part of `run_all.sh`).
