@@ -8,6 +8,7 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 
 ## Working now
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
+- 2026-11-12 15:05 PT — ACTIVE 01UUDg7bsaVV (12 Nov, sweep 20, plain server): app/server/server.mjs, app/server/setup.sh, app/server/README.md, app/tests/test_server.mjs.
 
 ## Recently finished
 - 2026-11-12 14:35 PT — 01UUDg7a: app/server/setup.sh - one command sets a fresh Ubuntu machine (Arm or x86) up as the plain server, or brings it to the newest code: Node 22 from nodejs.org (checksum verified), a lockqz system user, the code in /opt/lockqz, a 2 GB swap file on 1 GB machines, the lockqz-api service on 127.0.0.1:8787 (no open port), then waits for /healthz. Run for real here as root with systemctl stubbed: the server came up as the lockqz user and answered healthy. Nothing live changed. run_all green.
