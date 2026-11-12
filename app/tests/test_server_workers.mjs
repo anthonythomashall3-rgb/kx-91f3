@@ -25,6 +25,7 @@ try {
     const raw = body === undefined ? null : JSON.stringify(body);
     const r = http.request({ host: "127.0.0.1", port, path, method, agent: false, headers: { ...(raw ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(raw) } : {}), ...headers } }, rs => {
       const ch = []; rs.on("data", c => ch.push(c)); rs.on("end", () => { let j = null; try { j = JSON.parse(Buffer.concat(ch)); } catch {} done({ status: rs.statusCode, data: j }); }); });
+    r.setTimeout(4000, () => r.destroy(new Error("no answer")));   // a request caught in a process as it dies is not waited for
     r.on("error", () => done({ status: 0, data: null })); r.end(raw || undefined);
   });
   const signed = (path, body, dev, key, ip) => { const raw = JSON.stringify(body), ts = String(Math.floor(Date.now() / 1000));
