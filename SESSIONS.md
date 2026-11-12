@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-11-12 10:10 PT — 01UUDg7a: exam-day load test with a full-size database (app/server/loadtest.mjs, d1.mjs, server.mjs, README; app/tests/test_server*.mjs). May add a migrate_041 index file and touch single queries in app/cloudflare/functions/api/[[route]].js if the test finds a slow one (will name the lines here first).
+- 2026-11-12 10:10 PT — 01UUDg7a: exam-day load test with a full-size database (app/server/loadtest.mjs, d1.mjs, server.mjs, README; app/tests/test_server*.mjs). Editing in app/cloudflare/functions/api/[[route]].js ONLY the /sessions block (the events query, about 6 lines); new app/cloudflare/migrate_041_payments_received.sql (one index); new app/tests/test_scale_full.mjs.
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
 
 ## Recently finished
