@@ -8,6 +8,7 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 
 ## Working now
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
+- 2026-11-12 07:30 PT — ACTIVE 01UUDg7bsaVV (12 Nov, sweep 17): app/cloudflare/functions/api/[[route]].js (exam emails), app/tests/test_sweep15.mjs.
 
 ## Recently finished
 - 2026-11-12 07:05 PT — 01UUDg7bsaVV: sweep 16 server part. Card renewals: a card marked 'charged' is finished by reading its payment back from Stripe by id (no second charge request). Tests: test_sweep15.mjs (12). Files: app/cloudflare/functions/api/[[route]].js, app/tests/test_sweep15.mjs.
