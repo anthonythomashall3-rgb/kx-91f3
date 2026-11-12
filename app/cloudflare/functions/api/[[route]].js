@@ -2816,7 +2816,11 @@ export async function onRequest(context) {
         ORDER BY b.start_date, t.role='admin' LIMIT 120`).bind(from, to).all()).results;
       const seenQ = new Set(), day = laToday();
       // ix:<teacher> rows: the "add LOCKqz to Chrome" email goes to a professor at most once a day (any exam).
-      const sentRows = (await db.prepare("SELECT ou||'|'||kind AS k, at FROM mail_sent WHERE (kind LIKE 'r48:%' OR kind LIKE 'r3:%' OR kind LIKE 'ck:%') OR (kind LIKE 'ix:%' AND day=?)").bind(day).all()).results;
+      // Only the rows of the classes with an exam in the window (and the professors' once-a-day rows) are read,
+      // through the table's key: the cost of a tick does not grow with the emails of past exams.
+      const sentRows = [];
+      if (rows.length) for (const part of chunk(["_prof", ...new Set(rows.map(r => String(r.ou)))], 90))
+        sentRows.push(...(await db.prepare(`SELECT ou||'|'||kind AS k, at FROM mail_sent WHERE ou IN (${placeholders(part.length)}) AND ((kind LIKE 'r48:%' OR kind LIKE 'r3:%' OR kind LIKE 'ck:%') OR (kind LIKE 'ix:%' AND day=?))`).bind(...part, day).all()).results);
       const sent = new Set(sentRows.map(r => r.k));
       // Two exams of one class that start together (versions A / B, an extended-time copy): ONE reminder, not one
       // per exam. A class reminded (same kind: 2 days / 3 hours) in the last 3 hours is not reminded again.

@@ -76,6 +76,9 @@ const soon = h => new RealDate(fakeNow + h * 3600000).toISOString();
   const rem = W.MAILS.slice(m0).filter(m => /Reminder/.test(m.subject));
   check("S1 60 hours of /cron and /pay/tick: never more than 50 calls in one request, no job stopped by the limit", W.C.over === 0 && bad === 0 && W.C.worst["/cron"] <= 45 && W.C.worst["/pay/tick"] <= 45, `limit hits ${W.C.over}, errors ${bad}, worst cron ${W.C.worst["/cron"]} tick ${W.C.worst["/pay/tick"]}`);
   check("S1 the reminders still go out (up to the day's automatic email budget) and each class is reminded at most once per kind", rem.length >= 4 && W.sqlite.prepare("SELECT COUNT(*) n FROM mail_sent WHERE kind LIKE 'r48:%' AND n>0").get().n >= 4, rem.length + " reminder emails");
+  { const src = readFileSync(join(CF, "functions", "api", "[[route]].js"), "utf8"), m = /SELECT ou\|\|'\|'\|\|kind AS k, at FROM mail_sent WHERE ou IN \(\$\{placeholders\(part\.length\)\}\) AND ([^`]+)`/.exec(src);
+    const plan = m ? W.sqlite.prepare("EXPLAIN QUERY PLAN SELECT ou||'|'||kind AS k, at FROM mail_sent WHERE ou IN (?,?) AND " + m[1]).all().map(r => r.detail).join(" ; ") : "query not found";
+    check("S1 a tick reads only the email records of the classes with an exam coming (by the table's key), never the whole table", /SEARCH mail_sent USING/.test(plan) && !/SCAN mail_sent/.test(plan) && !/FROM mail_sent WHERE \(kind LIKE/.test(src), plan); }
   // S4: 40 classes in one "email every class"
   await W.api("/sync", { whoami: { id: "8001" }, courses: courses(40) }, H);
   const ous = Array.from({ length: 40 }, (_, c) => String(500 + c));
