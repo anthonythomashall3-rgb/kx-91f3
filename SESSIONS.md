@@ -8,6 +8,7 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 
 ## Working now
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
+- 2026-11-12 06:45 PT — ACTIVE 01UUDg7bsaVV (12 Nov, sweep 16 server part): app/cloudflare/functions/api/[[route]].js (card renewals), app/tests/test_sweep15.mjs.
 
 ## Recently finished
 - 2026-11-12 06:30 PT — 01UUDg7bsaVV: sweep 16, apps 0.6.18. Linux: the whole AI / tunnel domains are also refused on port 53 by the firewall during a quiz (chain LOCKQZW, IPv4 + IPv6, UDP + TCP, any resolver, removed at unlock), next to the systemd-resolved link. Mac / Linux helper: a control connection that says nothing is closed after 30 seconds. Tests: test_linux.py (77), test_sweep12.py H7 (9), test_linux_install.sh. Files: app/linux/lockqz.sh, app/mac/lockqzd.py, app/windows/lockqzd.ps1 (version), app/VERSION.
