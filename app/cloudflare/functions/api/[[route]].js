@@ -828,6 +828,7 @@ export async function onRequest(context) {
   const sesCount = n => db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('_all','ses',?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(hourKey(), n, now()).run();
   const sesFail = e => db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("mail", null, null, "ses_failed", String(e && e.message || e).slice(0, 200), now()).run().catch(() => {});
   // -> "ses" | "gmail"; throws { budget: true } when neither channel has room, or the Gmail error.
+  let mailOkMarked = false;
   async function sendVia(to, subject, text, opts, cls) {
     subject = String(subject == null ? "" : subject).replace(/\s+/g, " ").trim().slice(0, 250);   // a subject is one line, whatever an exam or class is called
     if (!opts || !opts.html) opts = { ...(opts || {}), html: autoHtml(text, { sign: !(opts && opts.inbox) }) };   // every email branded
@@ -844,7 +845,7 @@ export async function onRequest(context) {
     catch (e) { await clockMark("mail_fail");
       try { await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("mail", null, null, "mail_fail", String(e && e.message || e).slice(0, 300), now()).run(); } catch {}
       throw e; }
-    await clockMark("mail_ok");
+    if (!mailOkMarked) { mailOkMarked = true; await clockMark("mail_ok"); }   // once per request: every send after the first costs one database call less
     try { await mailCount(k); } catch {}
     return "gmail";
   }
@@ -1417,7 +1418,7 @@ export async function onRequest(context) {
         AND s.code NOT IN (SELECT code FROM payments WHERE term=? AND code IS NOT NULL)
       UNION SELECT DISTINCT t.email, 'professor', c.code FROM payments p JOIN pay_codes c ON c.code=p.code JOIN teachers t ON t.id=c.teacher_id
         WHERE p.term=? AND lower(t.email) NOT IN (SELECT email FROM renew_optout) AND lower(t.email) NOT IN (SELECT email FROM renew_sent WHERE term=?)
-        AND (t.active_until IS NULL OR t.active_until < ?) LIMIT 20`).bind(prev, cur, cur, prev, cur, termEndOf(cur)).all()).results;
+        AND (t.active_until IS NULL OR t.active_until < ?) LIMIT 8`).bind(prev, cur, cur, prev, cur, termEndOf(cur)).all()).results;   // 8 an hour: one call stays inside Workers Free's 50 database calls
     let sent = 0;
     for (const r of due) {
       const email = String(r.email).toLowerCase(), kind = r.kind === "student" ? "student" : "professor";
@@ -1427,11 +1428,10 @@ export async function onRequest(context) {
       const text = `LOCKqz renews for ${termName(cur)}.\n\n${kind === "student" ? "Pay here" : "Pay on your LOCKqz dashboard"}: ${link}\n\n`
         + `${prices ? prices + "." : ""}${zel || venmo ? ` Memo for Zelle${venmo ? " or Venmo" : ""}: ${r.code}.` : ""}\n\n`
         + `Access turns on as soon as the payment arrives and lasts until ${fmtDay(termEndOf(cur))}.\n\nStop these emails: ${await payLink(email, "&renew=off")}`;
-      try {
-        await mailOut(email, "Renew LOCKqz", text, {}, "auto");
-        await db.prepare("INSERT OR IGNORE INTO renew_sent (email,term,at) VALUES (?,?,?)").bind(email, cur, now()).run();
-        sent++;
-      } catch (e) { break; }
+      // Written down first, sent second: one renewal email per person per term, whatever fails afterwards.
+      if (Number((await db.prepare("INSERT OR IGNORE INTO renew_sent (email,term,at) VALUES (?,?,?)").bind(email, cur, now()).run())?.meta?.changes) !== 1) continue;
+      try { await mailOut(email, "Renew LOCKqz", text, {}, "auto"); sent++; }
+      catch (e) { await db.prepare("DELETE FROM renew_sent WHERE email=? AND term=?").bind(email, cur).run().catch(() => {}); break; }   // not sent (mail budget): next hour
     }
     return { sent, term: cur };
   }
@@ -1495,7 +1495,7 @@ export async function onRequest(context) {
     const hrs = Number(env.PAY_NUDGE_HOURS ?? 2); if (!(hrs > 0)) return { sent: 0, why: "off" };
     const t = Date.now(), upto = new Date(t - hrs * 3600000).toISOString(), from = new Date(t - 7 * 86400000).toISOString();
     const rows = (await db.prepare(`SELECT DISTINCT lower(d.student) AS email FROM devices d WHERE d.student_verified=1 AND d.student IS NOT NULL
-        AND COALESCE(d.revoked,0)=0 AND d.installed_at>=? AND d.installed_at<=? AND lower(d.student) NOT IN (SELECT email FROM pay_nudge) LIMIT 10`).bind(from, upto).all()).results
+        AND COALESCE(d.revoked,0)=0 AND d.installed_at>=? AND d.installed_at<=? AND lower(d.student) NOT IN (SELECT email FROM pay_nudge) LIMIT 8`).bind(from, upto).all()).results
       .map(r => r.email).filter(e => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e || ""));
     if (!rows.length) return { sent: 0 };
     const paid = await paidEmails(rows);
@@ -1506,9 +1506,10 @@ export async function onRequest(context) {
       const text = `LOCKqz is installed on your computer. One step left: pay for this semester, or your Brightspace exams that use LOCKqz will not open.\n\n`
         + `Pay now: ${await payLink(email)}\n\n`
         + `${waysLine("student") ? waysLine("student") + ". " : ""}One payment covers all your LOCKqz classes until ${end}.`;
+      // Written down first, sent second: one reminder per student, whatever fails afterwards.
+      if (Number((await db.prepare("INSERT OR IGNORE INTO pay_nudge (email,at,sent) VALUES (?,?,1)").bind(email, now()).run())?.meta?.changes) !== 1) continue;
       try { await mailOut(email, "One step left: pay for LOCKqz", text, {}, "auto"); }
-      catch (e) { break; }   // mail budget reached: the rest wait for the next hour
-      await db.prepare("INSERT OR IGNORE INTO pay_nudge (email,at,sent) VALUES (?,?,1)").bind(email, now()).run();
+      catch (e) { await db.prepare("DELETE FROM pay_nudge WHERE email=? AND sent=1").bind(email).run().catch(() => {}); break; }   // mail budget reached: the rest wait for the next hour
       sent++;
     }
     return { sent, skipped };
@@ -1546,10 +1547,14 @@ export async function onRequest(context) {
       await runBatches(db, acts.splice(0));
     }
     // 2) Charges that are due (at most once a day after a failure).
-    const due = (await db.prepare("SELECT c.email AS email, c.customer AS customer, c.pm AS pm, c.brand AS brand, c.last4 AS last4, c.tries AS tries, s.code AS code FROM card_renew c JOIN pay_codes_students s ON s.email=c.email WHERE c.autorenew=1 AND c.rterm=? AND c.state IN ('reminded','failed') AND c.charge_on<=? AND (c.fail_day IS NULL OR c.fail_day<?) AND COALESCE(c.tries,0)<? AND c.pm IS NOT NULL AND c.customer IS NOT NULL LIMIT 10")
+    const due = (await db.prepare("SELECT c.email AS email, c.customer AS customer, c.pm AS pm, c.brand AS brand, c.last4 AS last4, c.tries AS tries, s.code AS code FROM card_renew c JOIN pay_codes_students s ON s.email=c.email WHERE c.autorenew=1 AND c.rterm=? AND c.state IN ('reminded','failed','charged') AND c.charge_on<=? AND (c.fail_day IS NULL OR c.fail_day<?) AND COALESCE(c.tries,0)<? AND c.pm IS NOT NULL AND c.customer IS NOT NULL LIMIT 5")
       .bind(R, day, day, RENEW_TRIES).all()).results;
+    // 5 cards an hour: one call stays inside Workers Free's 50 subrequests / database calls. Each card goes
+    // 'reminded' -> 'charged' (Stripe took the money; the one "renewed" email) -> 'paid' (the payment is written,
+    // at the end of the call). A call that stops in between leaves 'charged': the next hour asks Stripe again with
+    // the same idempotency key (no second charge, no second email) and writes the payment.
     const paid2 = await paidFor(due), last2 = await lastCard(due);
-    for (const r of due) {
+    try { for (const r of due) {
       const got = paid2.get(r.code) || 0;
       if (FULL(got, STUDENT_FEE)) { acts.push(db.prepare("UPDATE card_renew SET state='paid', updated_at=? WHERE email=?").bind(t, r.email)); out.paid++; continue; }
       // Paid by card in the last RENEW_LEAD days (a card armed before that payment): the charge moves to that day.
@@ -1563,8 +1568,9 @@ export async function onRequest(context) {
       const d = res.d || {}, err = d.error || null, pi = String(d.id || err?.payment_intent?.id || "").slice(0, 80) || null;
       if (res.ok && d.status === "succeeded") {
         credits.push({ txn: "stripe:" + d.id, amount: Number(d.amount_received || d.amount) / 100, note: r.code, via: "stripe-card", payer: r.email, want_term: R });
-        // The row is marked paid at once; of several ticks at the same moment only the one that marks it sends the email.
-        const first = Number((await db.prepare("UPDATE card_renew SET state='paid', pi=?, updated_at=? WHERE email=? AND state IN ('reminded','failed')").bind(pi, t, r.email).run())?.meta?.changes) === 1; out.charged++;
+        // Of several ticks at the same moment only the one that marks the row 'charged' sends the email.
+        const first = Number((await db.prepare("UPDATE card_renew SET state='charged', pi=?, updated_at=? WHERE email=? AND state IN ('reminded','failed')").bind(pi, t, r.email).run())?.meta?.changes) === 1; out.charged++;
+        acts.push(db.prepare("UPDATE card_renew SET state='paid', updated_at=? WHERE email=? AND state='charged'").bind(t, r.email));
         // After the card is billed for the new semester: one "you're resubscribed" email (29 Oct 2026, owner).
         if (first) try { await mailOut(r.email, `LOCKqz renewed for ${termName(R)}`, `You're resubscribed to LOCKqz for ${termName(R)}.\n\nYour card (${cardName(r)}) was charged ${usd(Number(d.amount_received || d.amount))}. Access until ${fmtDay(termEndOf(R))}.\n\nCancel anytime: ${CANCEL_HOW}.`, {}, "essential"); out.sub++; } catch {}
         continue;
@@ -1583,9 +1589,11 @@ export async function onRequest(context) {
           + `Cancel auto-renew: ${CANCEL_HOW}.`;
         try { out.sub++; await mailOut(r.email, "LOCKqz renewal did not go through", text, {}, "essential"); } catch {}
       }
+    } } finally {
+      // Always: the payments first, then the rows' new states (a card is 'paid' only once its payment is written).
+      if (credits.length) await applyPayments(credits);
+      await runBatches(db, acts);
     }
-    if (credits.length) await applyPayments(credits);
-    await runBatches(db, acts);
     return out;
   }
   async function settle(code, term) {
@@ -1662,10 +1670,11 @@ export async function onRequest(context) {
   // A class's students' emails (Learners and TAs, never instructors, never the admin). kind "missing": only
   // those NOT ready (see liveDevices). Same rule as /bs's ready flag. kind "split" -> { all, missing, unpaid }
   // (unpaid: installed and confirmed, fee not paid -- a subset of missing).
+  let adminEmails = null;
   async function classRecipients(ou, kind) {
     const snaps = await rosterSnaps([ou]);
     const rows = snaps.get(String(ou)) || (await db.prepare("SELECT ou,user_id,name,email,username,role FROM roster WHERE ou=?").bind(String(ou)).all()).results;
-    const admins = new Set(((await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin'").all()).results).map(x => x.e));
+    const admins = adminEmails || (adminEmails = new Set(((await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin'").all()).results).map(x => x.e)));   // read once per request
     let ems = [...new Set(rows.filter(r => takesQuizzes(r.role) && r.email && EMAIL_OK(String(r.email).toLowerCase())).map(r => String(r.email).toLowerCase()))].filter(e => !admins.has(e));
     if ((kind === "missing" || kind === "split") && ems.length) {
       const have = new Set((await liveDevices(ems)).map(x => String(x.who).toLowerCase()));
@@ -2809,28 +2818,37 @@ export async function onRequest(context) {
       const classAt = new Map(), sentAt = new Map();   // sentAt: the LATEST time each reminder went out
       for (const r of sentRows) { const t = r.at ? Date.parse(r.at) : NaN; if (!isNaN(t)) sentAt.set(r.k, Math.max(sentAt.get(r.k) || 0, t)); }
       for (const r of sentRows) { const m = /^(.*)\|(r48|r3):/.exec(r.k), t = m && r.at ? Date.parse(r.at) : NaN; if (m && !isNaN(t)) classAt.set(m[1] + "|" + m[2], Math.max(classAt.get(m[1] + "|" + m[2]) || 0, t)); }
-      const record = (ou, kind, n) => db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, kind, day, n, now()).run();
-      let sends = 0;
+      // Workers Free allows 50 database calls per request. `work` counts the calls this loop has made (an estimate
+      // for the helpers); past WORK_MAX the loop stops and the next tick (10 minutes later) carries on, soonest
+      // exam first. Exams with nothing due cost no call: a professor's name and a class's recipients are read once
+      // per tick and only when an email is really going out.
+      let work = 0; const WORK_MAX = 16;
+      const record = (ou, kind, n) => { work++; return db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, kind, day, n, now()).run(); };
+      const names = new Map(), recips = new Map();
+      const nameOf = async r => { if (!names.has(r.tid)) { work += String(r.tname || "").trim() ? 0 : 1; names.set(r.tid, await profName(r.tname, r.email)); } return names.get(r.tid); };
+      const recipientsOf = async ou => { if (!recips.has(ou)) { const sp = await classRecipients(ou, "split"); work += 4 + 2 * Math.ceil(sp.all.length / 90); recips.set(ou, sp); } return recips.get(ou); };
+      const send = async (...a) => { work += 3; return mailOut(...a); };
+      let sends = 0, noRoom = false;   // noRoom: today's automatic email budget is used up - no class list is read for nothing
       // Soonest exam first (ORDER BY start_date): when the automatic budget runs low, the most urgent mail goes.
       for (const r of rows) {
         const key = String(r.ou) + "-" + String(r.qi); if (seenQ.has(key)) continue; seenQ.add(key);   // one professor per exam (the first non-admin)
-        if (sends >= 12) break;   // Workers subrequest budget per call; the next tick continues
+        if (sends >= 12 || work >= WORK_MAX) break;   // Workers subrequest / database budget per call; the next tick continues
         const lead = Date.parse(r.start_date) - nowMs; if (isNaN(lead) || lead <= 0) continue;
-        const exam = String(r.name || "your exam").slice(0, 120), prof = (await profName(r.tname, r.email)), last = lastName(prof) || prof;
+        const exam = String(r.name || "your exam").slice(0, 120);
         // To the professor first (one email; their whole class depends on it).
         // A professor who never added the extension: once a day while a protected exam is within 24 h.
         const ix = "ix:" + r.tid;
         if (!r.ext_seen && r.email && lead <= 24 * 3600000 && !sent.has("_prof|" + ix)) {
           sent.add("_prof|" + ix);
           const m = MAIL.install({ exam, when: inWords(lead) });
-          try { await mailOut(r.email, m.subject, m.text, { html: m.html }, "auto"); sends++; out.installs++; await record("_prof", ix, 1); } catch { out.skipped++; }
+          try { await send(r.email, m.subject, m.text, { html: m.html }, "auto"); sends++; out.installs++; await record("_prof", ix, 1); } catch { out.skipped++; }
         }
         // T-70: the extension has checked in before but not for 6 h (Chrome closed / computer asleep).
         const ck = "ck:" + r.qi;
         if (lead <= 70 * 60000 && !sent.has(r.ou + "|" + ck) && r.email && r.ext_seen && nowMs - Date.parse(r.ext_seen) > 6 * 3600000) {
           sent.add(r.ou + "|" + ck);
           const m = MAIL.checkin({ exam });
-          try { await mailOut(r.email, m.subject, m.text, { html: m.html }, "auto"); sends++; out.checkins++; await record(String(r.ou), ck, 1); } catch { out.skipped++; }
+          try { await send(r.email, m.subject, m.text, { html: m.html }, "auto"); sends++; out.checkins++; await record(String(r.ou), ck, 1); } catch { out.skipped++; }
         }
         // Reminders to students who are not ready (2 days and 3 hours before), from the automatic budget:
         // not installed -> the install reminder; installed on a confirmed computer but fee unpaid -> the pay line.
@@ -2842,15 +2860,16 @@ export async function onRequest(context) {
         if (kind && Number(r.reminders ?? 1) !== 0 && !sent.has(r.ou + "|" + kind) && nowMs - (classAt.get(ckey) || 0) < 3 * 3600000) {
           sent.add(r.ou + "|" + kind); await record(String(r.ou), kind, 0);   // this class was just reminded for another exam
         } else if (kind && Number(r.reminders ?? 1) !== 0 && !sent.has(r.ou + "|" + kind)) {
-          const sp = await classRecipients(String(r.ou), "split"), list = sp.missing, unp = new Set(sp.unpaid);
+          const sp = await recipientsOf(String(r.ou)), list = sp.missing, unp = new Set(sp.unpaid);
           if (!list.length) { sent.add(r.ou + "|" + kind); await record(String(r.ou), kind, 0); }
-          else if (!(await mailRoom(list.length, "auto"))) out.skipped++;   // not marked sent: a later tick retries if room frees up
+          else if (noRoom || !(work++, await mailRoom(list.length, "auto"))) { out.skipped++; noRoom = true; }   // not marked sent: a later tick retries if room frees up
           else {
             sent.add(r.ou + "|" + kind);
+            const prof = await nameOf(r), last = lastName(prof) || prof;
             const base = { course: r.course, code: r.code, prof, last, exam, when: inWords(lead), start_date: r.start_date, fee: stuFee() };
             let done = 0;
             try { for (const [grp, m] of [[list.filter(e => !unp.has(e)), MAIL.reminder(base)], [sp.unpaid, MAIL.reminder({ ...base, unpaid: true })]])
-                for (const part of chunk(grp, MAIL_BATCH)) { await mailOut(part, m.subject, m.text, { html: m.html, replyTo: r.email }, "auto"); sends++; done += part.length; } } catch { out.skipped++; }
+                for (const part of chunk(grp, MAIL_BATCH)) { await send(part, m.subject, m.text, { html: m.html, replyTo: r.email }, "auto"); sends++; done += part.length; } } catch { out.skipped++; }
             out.reminders += done; if (done) { await record(String(r.ou), kind, done); classAt.set(ckey, nowMs); }
           }
         }
@@ -2869,12 +2888,16 @@ export async function onRequest(context) {
       const secret = await paySecret();
       if (secret.length < 16 || !sameHex(String(request.headers.get("X-LOCKqz-Pay") || ""), secret)) return json({ error:"unauthorized" }, 401);   // constant-time
       await clockMark("tick");
-      let exams; try { exams = await examMailTick(); } catch (e) { exams = { error: String(e && e.message || e).slice(0, 120) }; }
+      // Money first: card renewals, then renewal emails, then pay reminders. The exam emails also run every 10
+      // minutes from /cron, so here they only use what is left of this call's budget (Workers Free: 50 subrequests
+      // and 50 database calls per call).
       let card; try { card = await cardRenewTick(); } catch (e) { card = { error: String(e && e.message || e).slice(0, 120) }; }
-      // Workers Free: 50 subrequests per call; a busy card round leaves the renewal emails for the next hour.
-      if (Number(card && card.sub) > 20) return json({ sent: 0, why: "card renewals busy", card, exams });
+      // One kind of work per call (each fits the budget by itself): cards, else renewal emails, else pay reminders.
+      if (Number(card && card.sub) > 0) return json({ sent: 0, why: "card renewals busy", card });
       const renew = await renewalTick();
-      let nudge; try { nudge = Number(renew.sent) > 10 ? { sent: 0, why: "renewals busy" } : await payNudgeTick(); } catch (e) { nudge = { error: String(e && e.message || e).slice(0, 120) }; }
+      let nudge; try { nudge = Number(renew.sent) > 0 ? { sent: 0, why: "renewals busy" } : await payNudgeTick(); } catch (e) { nudge = { error: String(e && e.message || e).slice(0, 120) }; }
+      let exams; if (Number(renew.sent) > 0 || Number(nudge && nudge.sent) > 0 || Number(card && card.sub) > 0) exams = { why: "left to /cron" };
+      else try { exams = await examMailTick(); } catch (e) { exams = { error: String(e && e.message || e).slice(0, 120) }; }
       return json({ ...renew, card, exams, nudge });
     }
     if (p === "/pay/notify" && request.method === "POST") {
@@ -3423,13 +3446,20 @@ export async function onRequest(context) {
         const ous = [...new Set(body.ous.map(String))].filter(o => /^\d+$/.test(o)).slice(0, 40);
         if (!ous.length) return json({ error:"bad class" }, 400);
         const to = new Set(), names = [];
+        // Every class in a handful of database calls, however many classes there are (Workers Free: 50 per request).
+        if (!me.admin) { const mine = await trustedOus(ous); if (ous.some(o => !mine.has(o))) return json({ error:"Only the professor of this class can email it." }, 403); }
+        const cs = new Map();   // each class's name: the caller's own row first
+        for (const r of (await db.prepare(`SELECT ou, name, code, teacher_id FROM teacher_courses WHERE ou IN (${placeholders(ous.length)})`).bind(...ous).all()).results)
+          if (!cs.has(String(r.ou)) || r.teacher_id === me.id) cs.set(String(r.ou), r);
+        await rosterSnaps(ous);
+        const marks = [];
         for (const ou of ous) {
-          if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this class can email it." }, 403);
-          const c = await db.prepare("SELECT name, code FROM teacher_courses WHERE ou=? ORDER BY teacher_id=? DESC LIMIT 1").bind(ou, me.id).first() || {};
+          const c = cs.get(ou) || {};
           const list = await classRecipients(ou, "all"); if (!list.length) continue;
           list.forEach(e => to.add(e)); const nm = courseCode(c) || courseLabel(c); if (!names.includes(nm)) names.push(nm);   // two sections of one course: named once
-          await db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, "all", laToday(), list.length, now()).run();
+          marks.push(db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, "all", laToday(), list.length, now()));
         }
+        await runBatches(db, marks);
         if (!to.size) return json({ to: [], kind: "all", none: true });
         const prof = (await profName(me.name, me.email)), last = lastName(prof) || prof;
         const label = names.length > 1 ? names.slice(0, -1).join(", ") + " and " + names[names.length - 1] : names[0];
