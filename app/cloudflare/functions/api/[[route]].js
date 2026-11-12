@@ -3208,9 +3208,11 @@ export async function onRequest(context) {
       }
       st.push(...multiInsert(db, "INSERT INTO teacher_courses (teacher_id,ou,name,code,role,synced_at,in_sync)", 7, tcRows,
         "ON CONFLICT(teacher_id,ou) DO UPDATE SET name=excluded.name,code=excluded.code,role=excluded.role,synced_at=excluded.synced_at,in_sync=1"));
+      // A big Sync arrives in parts (roster_part: some classes' lists, no exams), then one request with every
+      // class and its exams: a part never says which classes the professor no longer has.
       // Parity with the Sync panel: a class this Sync no longer lists (ended, hidden, dropped) leaves the
       // dashboard too. One statement; writes only the rows that change (0 on a repeat sync).
-      if (Array.isArray(body.courses)) st.push(db.prepare("UPDATE teacher_courses SET in_sync=0 WHERE teacher_id=? AND COALESCE(in_sync,1)<>0 AND ou NOT IN (SELECT value FROM json_each(?))").bind(me.id, JSON.stringify(A)));
+      if (Array.isArray(body.courses) && body.roster_part !== true) st.push(db.prepare("UPDATE teacher_courses SET in_sync=0 WHERE teacher_id=? AND COALESCE(in_sync,1)<>0 AND ou NOT IN (SELECT value FROM json_each(?))").bind(me.id, JSON.stringify(A)));
       for (const part of chunk(touch, 98)) st.push(db.prepare(`UPDATE teacher_courses SET synced_at=? WHERE teacher_id=? AND ou IN (${placeholders(part.length)})`).bind(t, me.id, ...part));
       // Class lists: upsert changed/new students, delete the ones Brightspace no longer lists.
       // Each course's writes and its new roster_snap row go out as ONE group (one db.batch = one

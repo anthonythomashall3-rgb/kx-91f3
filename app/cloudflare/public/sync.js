@@ -260,7 +260,25 @@
 
     // ---- 2. save to LOCKqz ----
     wait("Saving to LOCKqz", "This takes a few seconds");
-    var state = await lq("/sync", { host: location.host, whoami: { id: me.Identifier, name: ((me.FirstName || "") + " " + (me.LastName || "")).trim() }, courses: courses });
+    // Many students (over 400 in all): the class lists go first, a few classes per request (about 400 students
+    // each), then one request with every class and its exams. Each request stays small for LOCKqz's server.
+    var who = { id: me.Identifier, name: ((me.FirstName || "") + " " + (me.LastName || "")).trim() }, sendCourses = courses;
+    var nStu = courses.reduce(function (a, c) { return a + (c.classlist ? c.classlist.length : 0); }, 0);
+    if (nStu > 400) {
+      var part = [], inPart = 0, flush = async function () {
+        if (!part.length) return;
+        await lq("/sync", { host: location.host, whoami: who, roster_part: true, courses: part });
+        part = []; inPart = 0;
+      };
+      for (var pi = 0; pi < courses.length; pi++) {
+        var pc = courses[pi]; if (!pc.classlist) continue;
+        if (part.length && inPart + pc.classlist.length > 400) await flush();
+        part.push(Object.assign({}, pc, { quizzes: null })); inPart += pc.classlist.length;
+      }
+      await flush();
+      sendCourses = courses.map(function (c) { return c.classlist ? Object.assign({}, c, { classlist: null }) : c; });
+    }
+    var state = await lq("/sync", { host: location.host, whoami: who, courses: sendCourses });
     AUTOGATE = !!(state && state.auto_gate);
     // What the SERVER confirms it saved (C3): orig_password_saved / orig_hidden_saved. A row with neither
     // saved -> null (nothing known yet), so saveOrig still saves the professor's settings first.
