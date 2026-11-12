@@ -64,6 +64,8 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 - 2026-10-29 13:40 PT — 01UUDg7b: dashboard Set up redesigned: 3 cards always shown (number top-left, centred title/one line/button, done = green check), step 3 = ONE Email students button for every class (/email/students ous[] -> one draft, deduped Bcc, mail_sent per class). lq.js: LOCKqz on red/dark backgrounds turns white (was red qz on red buttons); extension dist rebuilt (store package not re-uploaded).
 - Older history: claude.ai Project LOCKqz, doc claude/LOCKqz-HANDOFF.md (private).
 
+- ACTIVE 01UUDg7bsaVV (12 Nov, sweep 14): app/cloudflare/functions/api/[[route]].js (/forget), app/tests/test_sweep13.mjs
+
 ## Requests
 - Owner OK'd (3 Nov) deleting merged branches cws-live, wip/prof-email-budget, wip/prof-zero-effort-orphan (all in master); delete from github.com/anthonythomashall3-rgb/kx-91f3/branches.
 - When the Google OAuth client exists (project lockqz-513313, Web, origins https://lockqz.pages.dev + https://prof.lockqz.pages.dev): put its client ID in app/cloudflare/wrangler.toml GOOGLE_CLIENT_ID and publish the consent screen (In production).
