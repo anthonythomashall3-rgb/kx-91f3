@@ -34,3 +34,21 @@ machine has no open port and students' addresses arrive in `CF-Connecting-IP`.
 ## Tests
 
 `node --no-warnings ../tests/test_server.mjs` (part of `run_all.sh`).
+
+## Several schools
+
+Put a `schools.json` in the data folder and each school gets its own database file
+(`data/schools/<id>.db`) and its own settings. Brightspace numbers courses and quizzes per school, so
+schools are never kept in the same tables.
+
+    { "default": "usc",
+      "schools": [
+        { "id": "usc",   "name": "USC",   "brightspace": ["brightspace.usc.edu", "usc.brightspace.com"], "domains": ["usc.edu"] },
+        { "id": "state", "name": "State", "brightspace": ["learn.state.edu"], "domains": ["state.edu"],
+          "env": { "ADMIN_EMAIL": "admin@state.edu" } } ] }
+
+A request is handed to its school by, in this order: the `X-LOCKqz-School` header; the Brightspace
+address in it (a quiz's address, or the Sync's); the professor sign-in or Sync key that made it; the
+computer that signed it; the email domain in it; otherwise the default school. The clock calls (`/cron`,
+`/pay/tick`) run for every school. `schools.mjs` holds the rules; `test_server_schools.mjs` checks them.
+Without a `schools.json` the server is one school with one database (`data/lockqz.db`).

@@ -8,7 +8,9 @@ import { Duplex } from "node:stream";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { openDb, migrate, snapshot } from "./d1.mjs";
+import { readSchools, openSchools } from "./schools.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -60,13 +62,19 @@ const mailOpen = env => () => new Promise((ok, bad) => {
   s.once("error", bad);
 });
 
+let LOADS = 0;
 export async function loadApi(cloudflareDir, workDir, build = {}) {
   // The API file is an ES module inside a CommonJS package: run a copy named .mjs.
   let src = readFileSync(join(cloudflareDir, "functions", "api", "[[route]].js"), "utf8");
   if (build.version) src = src.replace('"__LQZ_VERSION__"', JSON.stringify(build.version));
   if (build.id) src = src.replace('"__LQZ_BUILD__"', JSON.stringify(build.id));
+  if (build.brightspace) {   // the address "Open Brightspace" links to in this school's emails
+    const was = 'BS_URL = "https://brightspace.usc.edu"';
+    if (!src.includes(was)) throw new Error("the API file no longer names its Brightspace address the way this server expects");
+    src = src.replace(was, "BS_URL = " + JSON.stringify(build.brightspace));
+  }
   mkdirSync(workDir, { recursive: true });
-  const f = join(workDir, "route-" + process.pid + "-" + Date.now() + ".mjs");
+  const f = join(workDir, "route-" + process.pid + "-" + Date.now() + "-" + (LOADS++) + ".mjs");
   writeFileSync(f, src);
   try { return (await import(pathToFileURL(f).href)).onRequest; } finally { try { unlinkSync(f); } catch {} }
 }
@@ -77,28 +85,44 @@ export async function start(opts = {}) {
   const env = { ...readWranglerVars(join(cf, "wrangler.toml")), ...pick(fileEnv), ...(opts.inheritEnv === false ? {} : pick(process.env)), ...(opts.env || {}) };
   const data = resolve(opts.dataDir || env.LOCKQZ_DATA || join(HERE, "data"));
   mkdirSync(data, { recursive: true });
-  const db = opts.db || openDb(opts.dbFile || join(data, "lockqz.db"));
-  const applied = migrate(db, cf);
-  env.DB = db;
   if (typeof env.MAIL_OPEN !== "function" && typeof env.MAIL_SINK !== "function") env.MAIL_OPEN = mailOpen(env);
   // This server answers for its own address: it never forwards the API to another LOCKqz host.
   if (env.NO_API_PROXY === undefined) env.NO_API_PROXY = "1";
-  if (!globalThis.caches) globalThis.caches = { default: memoryCache() };
+  // Each school (and the one-school server) has its own cache; the API reaches it as caches.default.
+  const scope = new AsyncLocalStorage(), ownCache = memoryCache();
+  globalThis.caches = { get default() { return scope.getStore()?.cache || ownCache; } };
   let version = ""; try { version = readFileSync(join(cf, "..", "VERSION"), "utf8").trim(); } catch {}
-  const onRequest = opts.onRequest || await loadApi(cf, join(data, "run"), { version, id: env.LOCKQZ_BUILD || "server" });
+  // Several schools: opts.schools, or a schools.json next to the data. Otherwise one school, one database.
+  const schoolsFile = join(data, "schools.json");
+  const multiCfg = opts.schools ? readSchools(opts.schools) : existsSync(schoolsFile) ? readSchools(schoolsFile) : null;
+  let db = null, applied = [], onRequest = null, multi = null;
+  if (multiCfg) {
+    multi = openSchools(multiCfg, { dataDir: data, cloudflareDir: cf, baseEnv: env, version,
+      loadApi: s => loadApi(cf, join(data, "run"), { version, id: env.LOCKQZ_BUILD || "server", brightspace: String(s.env.BS_URL || "https://" + s.brightspace[0]) }) });
+    await multi.ready;
+    // every school's work runs with that school's own cache
+    for (const s of multi.schools.values()) { const cache = memoryCache(), inner = s.onRequest; s.onRequest = c => scope.run({ cache }, () => inner(c)); }
+    db = multi.schools.get(multiCfg.default).db; applied = multi.applied[multiCfg.default];
+  } else {
+    db = opts.db || openDb(opts.dbFile || join(data, "lockqz.db"));
+    applied = migrate(db, cf);
+    env.DB = db;
+    onRequest = opts.onRequest || await loadApi(cf, join(data, "run"), { version, id: env.LOCKQZ_BUILD || "server" });
+  }
   const trustProxy = String(env.TRUST_PROXY ?? "1") === "1";   // behind Cloudflare (Tunnel): its CF-Connecting-IP is the student's address
   const maxBody = Number(env.MAX_BODY || 6 * 1024 * 1024);
-  const counters = { started: Date.now(), requests: 0, errors: 0, busy: 0 };
+  const counters = { started: Date.now(), requests: 0, errors: 0, busy: 0, bySchool: {} };
   const pending = new Set();
 
+  const allDbs = () => multi ? [...multi.schools.values()].map(x => x.db) : [db];
   const server = http.createServer(async (req, res) => {
     counters.requests++;
     try {
       const path = (req.url || "/").split("?")[0];
       if (path === "/healthz") {
-        let ok = true; try { db.sqlite.prepare("SELECT 1").get(); } catch { ok = false; }
+        let ok = true; try { for (const d of allDbs()) d.sqlite.prepare("SELECT 1").get(); } catch { ok = false; }
         res.writeHead(ok ? 200 : 500, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-        return res.end(JSON.stringify({ ok, version, up_s: Math.round((Date.now() - counters.started) / 1000), requests: counters.requests, errors: counters.errors, db: db.stats }));
+        return res.end(JSON.stringify({ ok, version, up_s: Math.round((Date.now() - counters.started) / 1000), requests: counters.requests, errors: counters.errors, db: db.stats, ...(multi ? { schools: Object.fromEntries([...multi.schools.values()].map(x => [x.id, { requests: counters.bySchool[x.id] || 0, written: x.db.stats.written }])) } : {}) }));
       }
       if (!path.startsWith("/api/") && path !== "/api") { res.writeHead(404, { "Content-Type": "application/json" }); return res.end('{"error":"not found"}'); }
       const chunks = []; let size = 0;
@@ -110,8 +134,18 @@ export async function start(opts = {}) {
       const hasBody = req.method !== "GET" && req.method !== "HEAD";
       const request = new Request("https://" + host + req.url, { method: req.method, headers, body: hasBody ? Buffer.concat(chunks) : undefined });
       const context = { request, env, waitUntil(p) { const q = Promise.resolve(p).catch(e => { counters.errors++; console.error("background:", e && e.message); }).finally(() => pending.delete(q)); pending.add(q); } };
-      const out = await onRequest(context);
+      let out;
+      if (multi) {
+        const raw = hasBody ? Buffer.concat(chunks) : Buffer.alloc(0);
+        let body = {}; if (raw.length) { try { body = JSON.parse(raw.toString("utf8")); } catch {} } if (!body || typeof body !== "object" || Array.isArray(body)) body = {};
+        const apiPath = path.replace(/^\/api/, "") || "/";
+        const mk = () => new Request("https://" + host + req.url, { method: req.method, headers, body: hasBody ? raw : undefined });
+        const r = await multi.handle(mk, apiPath, body, headers, req.method, { waitUntil: context.waitUntil }, raw);
+        out = r.response;
+        if (r.school && r.school !== "*") counters.bySchool[r.school] = (counters.bySchool[r.school] || 0) + 1;
+      } else out = await onRequest(context);
       const h = {}; out.headers.forEach((v, k) => { h[k] = v; });
+      if (multi && req.method === "OPTIONS" && h["access-control-allow-headers"]) h["access-control-allow-headers"] += ", X-LOCKqz-School";
       res.writeHead(out.status, h);
       res.end(Buffer.from(await out.arrayBuffer()));
     } catch (e) {
@@ -127,19 +161,22 @@ export async function start(opts = {}) {
   const snapDir = join(data, "snapshots"), every = Number(env.SNAPSHOT_MIN ?? 0), keep = Math.max(1, Number(env.SNAPSHOT_KEEP || 6));
   const takeSnapshot = () => {
     mkdirSync(snapDir, { recursive: true });
-    const f = join(snapDir, "lockqz-" + new Date().toISOString().replace(/[:.]/g, "-") + ".db");
-    snapshot(db, f);
-    const all = readdirSync(snapDir).filter(n => /^lockqz-.*\.db$/.test(n)).sort();
-    for (const old of all.slice(0, Math.max(0, all.length - keep))) { try { unlinkSync(join(snapDir, old)); } catch {} }
-    return f;
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-"), made = [];
+    for (const [name, d] of multi ? [...multi.schools.values()].map(x => [x.id, x.db]) : [["lockqz", db]]) {
+      const f = join(snapDir, name + "-" + stamp + ".db");
+      snapshot(d, f); made.push(f);
+      const all = readdirSync(snapDir).filter(n => n.startsWith(name + "-") && /-\d{4}-\d{2}-\d{2}T[\d-]+Z\.db$/.test(n) && n.slice(0, -(stamp.length + 4)) === name).sort();
+      for (const old of all.slice(0, Math.max(0, all.length - keep))) { try { unlinkSync(join(snapDir, old)); } catch {} }
+    }
+    return multi ? made : made[0];
   };
   const timer = every > 0 ? setInterval(() => { try { takeSnapshot(); } catch (e) { console.error("snapshot:", e.message); } }, every * 60000) : null;
   if (timer) timer.unref();
 
   const port = Number(opts.port ?? env.PORT ?? 8787), bind = opts.host || env.BIND || "127.0.0.1";
   await new Promise((ok, bad) => { server.once("error", bad); server.listen(port, bind, ok); });
-  const close = async () => { if (timer) clearInterval(timer); const shut = new Promise(r => server.close(r)); server.closeIdleConnections?.(); const hard = setTimeout(() => server.closeAllConnections?.(), 3000); await shut; clearTimeout(hard); await Promise.allSettled([...pending]); if (!opts.db) db.close(); };
-  return { server, db, env, port: server.address().port, applied, takeSnapshot, counters, close };
+  const close = async () => { if (timer) clearInterval(timer); const shut = new Promise(r => server.close(r)); server.closeIdleConnections?.(); const hard = setTimeout(() => server.closeAllConnections?.(), 3000); await shut; clearTimeout(hard); await Promise.allSettled([...pending]); if (multi) multi.close(); else if (!opts.db) db.close(); };
+  return { server, db, env, port: server.address().port, applied, takeSnapshot, counters, close, multi };
 }
 
 // Only the settings the API itself reads are taken from the process environment (never PATH, HOME, ...),
