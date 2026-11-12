@@ -4,7 +4,8 @@
 //   S1 exam emails (/cron, /pay/tick) with 12 classes x 100 students x 10 exams inside 48 hours;
 //   S2 renewal emails to 60 past payers: one each, none twice;
 //   S3 card renewals for 30 saved cards: each charged once, one payment row, one "renewed" email - also when a
-//      call stops after Stripe took the money (the card stays 'charged' and the next hour finishes it);
+//      call stops after Stripe took the money (the card stays 'charged' and the next hour reads that payment back from Stripe
+//      and finishes it, without a second charge request);
 //   S4 "email every class" for a professor with 40 classes.
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync, writeFileSync, mkdtempSync, readdirSync } from "node:fs";
@@ -25,6 +26,8 @@ let worldN = 0, CUR = null;   // CUR: the world whose request is running (for th
 globalThis.fetch = async (u, init = {}) => { u = String(u); const W = CUR; W.C.n++; if (W.C.n > LIMIT) { W.C.over++; throw new Error("Too many subrequests."); }
   if (u === "https://api.stripe.com/v1/payment_intents") { const f = new URLSearchParams(String(init.body)), key = (init.headers && (init.headers["Idempotency-Key"] || init.headers["idempotency-key"])) || null; W.intents.push({ f, key });
     return new Response(JSON.stringify({ id: "pi_renew_" + key, status: "succeeded", amount: Number(f.get("amount")), amount_received: Number(f.get("amount")), metadata: {} }), { status: 200 }); }
+  if (u.startsWith("https://api.stripe.com/v1/payment_intents/pi_renew_")) { const id = decodeURIComponent(u.split("/").pop().split("?")[0]); W.reads.push(id); const was = W.intents.find(i => "pi_renew_" + i.key === id);
+    return new Response(JSON.stringify(was ? { id, status: "succeeded", amount: Number(was.f.get("amount")), amount_received: Number(was.f.get("amount")), metadata: {} } : { error: { message: "No such payment_intent" } }), { status: was ? 200 : 404 }); }
   if (u.startsWith("https://api.stripe.com/v1/payment_intents/pi_")) return new Response(JSON.stringify({ id: u.split("/").pop().split("?")[0], payment_method: { id: "pm_card1", type: "card", card: { brand: "visa", last4: "4242" } } }), { status: 200 });
   return new Response("{}", { status: 200 }); };
 async function world(extra = {}) {
@@ -32,7 +35,7 @@ async function world(extra = {}) {
   const sqlite = new DatabaseSync(":memory:"); sqlite.exec(readFileSync(join(CF, "schema.sql"), "utf8"));
   for (const m of readdirSync(CF).filter(f => /^migrate_\d+.*\.sql$/.test(f)).sort())
     for (const st of readFileSync(join(CF, m), "utf8").replace(/^\s*--.*$/gm, "").split(";")) { try { if (st.trim()) sqlite.exec(st); } catch {} }
-  const W = { sqlite, MAILS: [], intents: [], C: { n: 0, over: 0, worst: {}, failBatch: 0 } };
+  const W = { sqlite, MAILS: [], intents: [], reads: [], C: { n: 0, over: 0, worst: {}, failBatch: 0 } };
   const hit = () => { W.C.n++; if (W.C.n > LIMIT) { W.C.over++; throw new Error("D1_ERROR: Too many API requests by single worker invocation."); } };
   const db = { prepare(sql) { const st = sqlite.prepare(sql); let args = [];
     const o = { bind(...a) { args = a.map(x => x === undefined ? null : typeof x === "boolean" ? Number(x) : x); return o; },
@@ -115,6 +118,7 @@ const soon = h => new RealDate(fakeNow + h * 3600000).toISOString();
   check("S3 in the end every card was charged under ONE idempotency key, has ONE Spring payment row and got ONE 'renewed' email",
     Object.keys(byCust).length === N && Object.values(byCust).every(s => s.size === 1) && keys.size === N && rows.length === N && rows.every(r => r.c === 1) && Object.keys(rm).length === N && Object.values(rm).every(n => n === 1)
     && W.sqlite.prepare("SELECT COUNT(*) n FROM card_renew WHERE state='paid'").get().n === N, `customers ${Object.keys(byCust).length} keys ${keys.size} rows ${rows.length} emails ${Object.keys(rm).length}/${Object.values(rm).reduce((a, b) => a + b, 0)}`);
+  check("S3 the 5 cards left 'charged' were finished by reading their payment back from Stripe - no second charge request at all", W.intents.length === N && W.reads.length === 5 && new Set(W.reads).size === 5, `charge requests ${W.intents.length}, read back ${W.reads.length}`);
   check("S3 never more than 50 calls in one request", W.C.over === 0 && W.C.worst["/pay/tick"] <= 45, `limit hits ${W.C.over}, worst ${W.C.worst["/pay/tick"]}`); }
 
 globalThis.Date = RealDate;

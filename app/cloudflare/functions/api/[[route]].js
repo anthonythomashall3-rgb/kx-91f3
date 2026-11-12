@@ -1547,7 +1547,7 @@ export async function onRequest(context) {
       await runBatches(db, acts.splice(0));
     }
     // 2) Charges that are due (at most once a day after a failure).
-    const due = (await db.prepare("SELECT c.email AS email, c.customer AS customer, c.pm AS pm, c.brand AS brand, c.last4 AS last4, c.tries AS tries, s.code AS code FROM card_renew c JOIN pay_codes_students s ON s.email=c.email WHERE c.autorenew=1 AND c.rterm=? AND c.state IN ('reminded','failed','charged') AND c.charge_on<=? AND (c.fail_day IS NULL OR c.fail_day<?) AND COALESCE(c.tries,0)<? AND c.pm IS NOT NULL AND c.customer IS NOT NULL LIMIT 5")
+    const due = (await db.prepare("SELECT c.email AS email, c.customer AS customer, c.pm AS pm, c.brand AS brand, c.last4 AS last4, c.tries AS tries, c.state AS state, c.pi AS pi, s.code AS code FROM card_renew c JOIN pay_codes_students s ON s.email=c.email WHERE c.autorenew=1 AND c.rterm=? AND c.state IN ('reminded','failed','charged') AND c.charge_on<=? AND (c.fail_day IS NULL OR c.fail_day<?) AND COALESCE(c.tries,0)<? AND c.pm IS NOT NULL AND c.customer IS NOT NULL LIMIT 5")
       .bind(R, day, day, RENEW_TRIES).all()).results;
     // 5 cards an hour: one call stays inside Workers Free's 50 subrequests / database calls. Each card goes
     // 'reminded' -> 'charged' (Stripe took the money; the one "renewed" email) -> 'paid' (the payment is written,
@@ -1564,7 +1564,12 @@ export async function onRequest(context) {
       const f = new URLSearchParams({ amount: String(amt), currency: "usd", customer: r.customer, payment_method: r.pm, off_session: "true", confirm: "true",
         description: "LOCKqz " + r.code + " renewal", "metadata[code]": r.code, "metadata[kind]": "student", "metadata[term]": R, "metadata[renew]": "1" });
       let res; out.sub++;
-      try { res = await stripeApi("payment_intents", f, { "Idempotency-Key": `lqz-renew:${r.email}:${R}:${tries}:${amt}` }); } catch { res = { ok: false, d: {} }; }
+      // A card already 'charged' is never charged again: its payment is read back from Stripe by its id.
+      if (r.state === "charged" && r.pi) {
+        try { res = await stripeApi("payment_intents/" + encodeURIComponent(r.pi)); } catch { res = { ok: false, d: {} }; }
+        if (!(res.ok && res.d && res.d.status === "succeeded")) { out.retry++; continue; }
+      } else if (r.state === "charged") { out.retry++; continue; }
+      else try { res = await stripeApi("payment_intents", f, { "Idempotency-Key": `lqz-renew:${r.email}:${R}:${tries}:${amt}` }); } catch { res = { ok: false, d: {} }; }
       const d = res.d || {}, err = d.error || null, pi = String(d.id || err?.payment_intent?.id || "").slice(0, 80) || null;
       if (res.ok && d.status === "succeeded") {
         credits.push({ txn: "stripe:" + d.id, amount: Number(d.amount_received || d.amount) / 100, note: r.code, via: "stripe-card", payer: r.email, want_term: R });
