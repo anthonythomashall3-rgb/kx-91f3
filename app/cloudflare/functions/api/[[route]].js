@@ -2952,7 +2952,8 @@ export async function onRequest(context) {
       if (pc) st.push(db.prepare("UPDATE payments SET payer=NULL, note=NULL WHERE code=?").bind(pc.code), db.prepare("DELETE FROM pay_codes_students WHERE email=?").bind(email));
       // Everything else kept per email: the saved card and its semester renewals (never charged again),
       // renewal / pay reminder records, a professor's assistive-tool allowance or let-in, Google set-up links.
-      for (const t of ["card_renew", "renew_optout", "renew_sent", "pay_nudge", "assist", "letin", "gsign"]) st.push(db.prepare(`DELETE FROM ${t} WHERE email=?`).bind(email));
+      // ... and an unused invitation sent to that address.
+      for (const t of ["card_renew", "renew_optout", "renew_sent", "pay_nudge", "assist", "letin", "gsign", "invites"]) st.push(db.prepare(`DELETE FROM ${t} WHERE email=?`).bind(email));
       st.push(db.prepare("INSERT OR REPLACE INTO forgotten (email, at) VALUES (?,?)").bind(email, now()));
       await runBatches(db, st);
       // The card saved at Stripe for the renewals is taken off too (Stripe keeps the payment records it must).

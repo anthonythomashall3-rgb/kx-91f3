@@ -60,6 +60,12 @@ check("E1 no email says undefined / null / NaN", MAILS.every(m => !/undefined|\b
 const em = sqlite.prepare("SELECT email FROM roster WHERE user_id='9100'").get()?.email;
 check("E2 a class-list email with spaces and capitals is stored trimmed and lower-case", em === "stu.zero@usc.edu", JSON.stringify(em));
 
+// E4: Forget removes everything stored for an email, an unused invitation included
+await api("/invite", { email: "gone@usc.edu" }, { teacher: ADMIN });
+const before = sqlite.prepare("SELECT COUNT(*) n FROM invites WHERE email='gone@usc.edu'").get().n;
+const fg = await api("/forget", { email: "gone@usc.edu" }, { teacher: ADMIN });
+check("E4 Forget also removes an unused invitation sent to that email", before === 1 && fg.status === 200 && sqlite.prepare("SELECT COUNT(*) n FROM invites WHERE email='gone@usc.edu'").get().n === 0, before + " " + fg.status + " " + JSON.stringify(fg.data));
+
 const hd = readFileSync(join(CF, "public", "_headers"), "utf8");
 check("E3 every page forbids being framed by another site", /^\/\*\n  X-Frame-Options: DENY\n  Content-Security-Policy: frame-ancestors 'none'\n/m.test(hd) && hd.includes("/download/lockqz-prof-firefox.xpi\n  Content-Type: application/x-xpinstall"));
 const pages = readdirSync(join(CF, "public")).filter(f => /\.(html|js)$/.test(f)).map(f => readFileSync(join(CF, "public", f), "utf8")).join("\n");
