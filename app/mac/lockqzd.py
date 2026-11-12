@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.6.17"
+VERSION = "0.6.18"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -958,6 +958,7 @@ def _student(v, fallback):
     return str(v)[:200] if isinstance(v, str) and v.strip() else fallback
 
 class H(BaseHTTPRequestHandler):
+    timeout = 30   # a caller that connects and then says nothing is let go after 30 seconds
     # No CORS headers and no OPTIONS handler: a web page can never pass a preflight, so it cannot
     # send the token header to this server. The Host check also refuses DNS-rebinding requests.
     def _auth(self):

@@ -61,6 +61,14 @@ except Exception as e: st = "no answer: %s" % e
 check("H3 a token header with accented text gets a plain 401, not a dropped connection", st == 401, str(st))
 st, body = req(D.TOKEN)
 check("H3 the real token still works", st == 200 and json.loads(body).get("state") == "unlocked", str(st))
+import socket, time
+D.H.timeout = 1   # the shipped value is 30 seconds; 1 here so the test is quick
+quiet = socket.create_connection(("127.0.0.1", port), timeout=5); t0 = time.time()
+try: gone = quiet.recv(1) == b""
+except OSError: gone = True
+check("H7 a caller that connects and says nothing is let go (30 seconds shipped), and the helper keeps answering",
+      gone and time.time() - t0 < 4 and req(D.TOKEN)[0] == 200 and "    timeout = 30" in open(os.path.join(MAC, "lockqzd.py")).read(), "%.1fs" % (time.time() - t0))
+quiet.close()
 srv.shutdown()
 
 # --- follow-up: the cap's clock, the hosts block's END line, the installer's config read ---

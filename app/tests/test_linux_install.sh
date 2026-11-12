@@ -39,6 +39,7 @@ check "nftables table loaded (DoT, DoH, model ports, VPN, QUIC-to-AI sets)" "sud
 check "Chrome AI policy on" "python3 -c \"import json;d=json.load(open('/etc/opt/chrome/policies/managed/zz-lockqz.json'));assert d['GenAiDefaultSettings']==2 and d['GeminiSettings']==1 and 'chatgpt.com' in d['URLBlocklist']\""
 check "Firefox AI policy on" "python3 -c \"import json;d=json.load(open('/etc/firefox/policies/policies.json'))['policies'];assert d['LOCKqzManaged'] and d['DNSOverHTTPS']['Enabled'] is False\""
 check "status locked" "curl -s -H '$H' $B/status | grep -q '\"engine_locked\": true'"
+check "whole AI / tunnel domains are refused on port 53 by the firewall (any resolver)" "sudo iptables -S LOCKQZW | grep -q '776f726b657273' && sudo iptables -C OUTPUT -j LOCKQZW"
 if [ "$WILD" = 1 ]; then
   check "whole AI / tunnel domains are routed to LOCKqz's own link (systemd-resolved)" "resolvectl domain lockqz0 | grep -q '~workers.dev' && resolvectl domain lockqz0 | grep -q '~openai.azure.com'"
   check "a name under such a domain does not resolve during the quiz (workers.dev)" "! timeout 30 resolvectl query -4 workers.dev"
@@ -55,6 +56,7 @@ check "unlock accepted" "grep -q '\"unlocked\"' /tmp/unlock.json"
 check "hosts clean" "! grep -q 'LOCKqz START' /etc/hosts"
 check "chatgpt.com resolvable again" "! getent ahosts chatgpt.com | grep -q '^0.0.0.0'"
 check "nftables table gone" "! sudo nft list table inet lockqz"
+check "the port-53 rules are gone after unlock" "! sudo iptables -S LOCKQZW"
 check "LOCKqz's DNS link is gone after unlock" "! ip link show lockqz0"
 if [ "$WILD" = 1 ]; then check "workers.dev resolves again" "timeout 30 resolvectl query -4 workers.dev"; fi
 check "Chrome policy removed" "[ ! -f /etc/opt/chrome/policies/managed/zz-lockqz.json ]"

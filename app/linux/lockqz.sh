@@ -241,7 +241,42 @@ WILD_DOMAINS=(openai.azure.com cognitiveservices.azure.com services.ai.azure.com
               ngrok.io ngrok-free.app ngrok.app ngrok.dev ngrok-free.dev trycloudflare.com loca.lt serveo.net \
               localhost.run pinggy.link pinggy.io zrok.io learnwise.ai forethought.ai)
 WILD_IF="${LOCKQZ_WILD_IF:-lockqz0}"
+# The same domains on every Linux, with or without systemd-resolved: a DNS question (port 53, any server, the
+# local one included) that asks for a name under one of them is refused by the firewall, so it fails at once.
+WILD_CHAIN=LOCKQZW
+wild_hex() {   # workers.dev -> |07|workers|03|dev|00|  (the name as it travels in a DNS question)
+  local out="" l IFS=.
+  for l in $1; do out+="$(printf '|%02x|%s' "${#l}" "$l")"; done
+  printf '%s|00|' "$out"
+}
+wild_fw_on() {
+  command -v iptables >/dev/null 2>&1 || return 0
+  local t d h
+  for t in iptables ip6tables; do
+    command -v "$t" >/dev/null 2>&1 || continue
+    if "$t" -C OUTPUT -j "$WILD_CHAIN" 2>/dev/null && [ "$("$t" -S "$WILD_CHAIN" 2>/dev/null | grep -c -- '-A ')" -ge $(( ${#WILD_DOMAINS[@]} * 2 )) ]; then continue; fi
+    "$t" -N "$WILD_CHAIN" 2>/dev/null || "$t" -F "$WILD_CHAIN" 2>/dev/null || continue
+    for d in "${WILD_DOMAINS[@]}"; do
+      h=$(wild_hex "$d")
+      "$t" -A "$WILD_CHAIN" -p udp --dport 53 -m string --algo bm --icase --hex-string "$h" -j REJECT 2>/dev/null
+      "$t" -A "$WILD_CHAIN" -p tcp --dport 53 -m string --algo bm --icase --hex-string "$h" -j REJECT 2>/dev/null
+    done
+    "$t" -C OUTPUT -j "$WILD_CHAIN" 2>/dev/null || "$t" -I OUTPUT -j "$WILD_CHAIN" 2>/dev/null
+  done
+  return 0
+}
+wild_fw_off() {
+  command -v iptables >/dev/null 2>&1 || return 0
+  local t rc=0
+  for t in iptables ip6tables; do
+    command -v "$t" >/dev/null 2>&1 || continue
+    "$t" -D OUTPUT -j "$WILD_CHAIN" 2>/dev/null; "$t" -F "$WILD_CHAIN" 2>/dev/null; "$t" -X "$WILD_CHAIN" 2>/dev/null
+    "$t" -S "$WILD_CHAIN" >/dev/null 2>&1 && rc=1
+  done
+  return $rc
+}
 wild_on() {
+  wild_fw_on
   command -v resolvectl >/dev/null 2>&1 && command -v ip >/dev/null 2>&1 || return 0
   systemctl is-active --quiet systemd-resolved 2>/dev/null || return 0
   if ip link show "$WILD_IF" >/dev/null 2>&1 && resolvectl domain "$WILD_IF" 2>/dev/null | grep -q '~workers\.dev'; then return 0; fi
@@ -256,6 +291,7 @@ wild_on() {
   return 0
 }
 wild_off() {
+  wild_fw_off || return 1
   command -v ip >/dev/null 2>&1 || return 0
   ip link show "$WILD_IF" >/dev/null 2>&1 || return 0
   ip link del "$WILD_IF" 2>/dev/null

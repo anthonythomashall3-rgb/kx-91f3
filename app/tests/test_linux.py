@@ -250,6 +250,23 @@ for name, body in (("ip", 'echo "ip $*" >> "%s/log"\ncase "$1 $2" in "link show"
     with open(os.path.join(fake, name), "w") as f: f.write("#!/bin/bash\n" + body)
     os.chmod(os.path.join(fake, name), 0o755)
 with open(os.path.join(fake, "systemctl"), "w") as f: f.write("#!/bin/bash\nexit 0\n")
+# a pretend iptables / ip6tables that keeps its chains as files (no root, nothing real is touched)
+_ipt = """#!/bin/bash
+d="%s/$(basename "$0")"; mkdir -p "$d"
+case "$1" in
+  -N) [ -e "$d/$2" ] && exit 1; : > "$d/$2";;
+  -F) [ -e "$d/$2" ] || exit 1; : > "$d/$2";;
+  -X) [ -e "$d/$2" ] || exit 1; rm -f "$d/$2";;
+  -S) [ -e "$d/$2" ] || exit 1; cat "$d/$2";;
+  -A) c="$2"; shift 2; echo "-A $c $*" >> "$d/$c";;
+  -C) [ -e "$d/hook.$4" ];;
+  -I) : > "$d/hook.$4";;
+  -D) [ -e "$d/hook.$4" ] || exit 1; rm -f "$d/hook.$4";;
+esac
+"""
+for name in ("iptables", "ip6tables"):
+    with open(os.path.join(fake, name), "w") as f: f.write(_ipt % wst)
+    os.chmod(os.path.join(fake, name), 0o755)
 wfn = eng[eng.index("WILD_DOMAINS=("):eng.index("do_lock() {")]
 def runw(body): return subprocess.run(["bash", "-c", "set -uo pipefail\n" + wfn + "\n" + body], capture_output=True, text=True, env=dict(os.environ, PATH=fake + ":" + os.environ["PATH"]))
 r = runw("wild_on; echo rc=$?; wild_on; echo rc=$?")
@@ -259,6 +276,22 @@ check("lock: LOCKqz's own link is made once, given a dead DNS server and every w
       and doms == ["~" + d for d in _wild(eng)] and "resolvectl default-route lockqz0 false" in wlog and wlog.count("resolvectl domain lockqz0 ~") == 1, wlog[-600:] + r.stderr)
 r = runw("wild_off; echo rc=$?; wild_off; echo rc=$?")
 check("unlock: the link is removed (and a second unlock has nothing to do)", r.stdout.split() == ["rc=0", "rc=0"] and not os.path.exists(os.path.join(wst, "link")) and open(os.path.join(wst, "log")).read().count("ip link del lockqz0") == 1, r.stdout + r.stderr)
+# the same domains in the firewall, for a Linux without systemd-resolved
+r = runw("wild_hex workers.dev; echo; wild_hex cognitiveservices.azure.com; echo; wild_fw_on; wild_fw_on; echo rc=$?")
+def _rules(t):
+    try: return open(os.path.join(wst, t, "LOCKQZW")).read().splitlines()
+    except OSError: return None
+r4, r6 = _rules("iptables"), _rules("ip6tables"); nd = len(_wild(eng))
+check("a domain is written the way it travels in a DNS question (length byte before each label, end byte last)",
+      r.stdout.split()[:2] == ["|07|workers|03|dev|00|", "|11|cognitiveservices|05|azure|03|com|00|"], r.stdout + r.stderr)
+check("lock: every whole domain is refused on port 53 (UDP and TCP, IPv4 and IPv6), written once however often lock runs",
+      r.stdout.split()[-1] == "rc=0" and r4 is not None and r6 is not None and len(r4) == nd * 2 and len(r6) == nd * 2
+      and all(("--dport 53" in x and "--icase" in x and "-j REJECT" in x) for x in r4 + r6) and sum("-p tcp" in x for x in r4) == nd
+      and any("|09|learnwise|02|ai|00|" in x for x in r4) and os.path.exists(os.path.join(wst, "iptables", "hook.LOCKQZW")), str(r4 and len(r4)) + r.stderr)
+r = runw("wild_fw_off; echo rc=$?; wild_fw_off; echo rc=$?")
+check("unlock: those rules and their chain are gone (IPv4 and IPv6); a second unlock has nothing to do",
+      r.stdout.split() == ["rc=0", "rc=0"] and _rules("iptables") is None and _rules("ip6tables") is None and not os.path.exists(os.path.join(wst, "iptables", "hook.LOCKQZW")), r.stdout + r.stderr)
+check("it runs with and without systemd-resolved, and unlock is incomplete while it is left", "wild_on() {\n  wild_fw_on\n" in eng and "wild_off() {\n  wild_fw_off || return 1\n" in eng)
 check("the whole-domain layer is part of lock and unlock; unlock is incomplete while the link is left", "wild_on || true" in eng and "wild_off || rc=1" in eng)
 check("the iptables fallback covers IPv6 too (local model ports, VPN ports)", 'for a in ::1/128 fc00::/7 fe80::/10; do ip6tables -A LOCKQZ' in eng and 'ip6tables -A LOCKQZ -p udp -m multiport --dports "${VPN_UDP// /}" -j DROP' in eng)
 check("the address resolver never asks the answer-nothing server of LOCKqz's own link", 's != "192.0.2.254"' in open(os.path.join(LINUX, "browser-policy.py")).read() and "resolvectl dns \"$WILD_IF\" 192.0.2.254" in eng)
