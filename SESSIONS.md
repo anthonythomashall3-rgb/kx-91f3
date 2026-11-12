@@ -8,6 +8,7 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 
 ## Working now
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
+- 2026-11-12 08:20 PT — ACTIVE 01UUDg7bsaVV (12 Nov, sweep 18, extension 1.0.8): app/cloudflare/functions/api/[[route]].js (/sync), app/cloudflare/public/sync.js, app/extension-prof/* (manifest, dist), app/tests/test_sweep18.mjs, app/tests/run_all.sh, tests that name the extension version.
 
 ## Recently finished
 - 2026-11-12 07:50 PT — 01UUDg7bsaVV: sweep 17 (server only, apps stay 0.6.18). Exam emails: a tick reads only the email records of the classes with an exam in the next 49 hours, through the table's key (nothing is read when no exam is coming). Tests: test_sweep15.mjs (13). Files: app/cloudflare/functions/api/[[route]].js, app/tests/test_sweep15.mjs.
