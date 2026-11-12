@@ -25,6 +25,12 @@ Needs Node 22.5 or newer. No packages to install.
 The server listens on 127.0.0.1 only. Put Cloudflare in front of it with a Tunnel (`cloudflared`), so the
 machine has no open port and students' addresses arrive in `CF-Connecting-IP`.
 
+## Every processor
+
+`WORKERS=auto` (or a number) in `lockqz.env` runs that many server processes on the one port and the one
+database file. A slow request (a professor's 300-student class list) then never holds up the students, and
+a process that stops is started again by itself. Only the first process makes the database copies.
+
 ## Moving the data
 
     npx wrangler d1 export lockqz --remote --output lockqz-export.sql

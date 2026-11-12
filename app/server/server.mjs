@@ -3,6 +3,8 @@
 // file for the database, no per-day request allowance. Node 22.5+, no packages to install.
 //   node server.mjs            settings come from the environment and from ./lockqz.env (KEY=value lines)
 import http from "node:http";
+import cluster from "node:cluster";
+import os from "node:os";
 import tls from "node:tls";
 import { Duplex } from "node:stream";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from "node:fs";
@@ -79,12 +81,29 @@ export async function loadApi(cloudflareDir, workDir, build = {}) {
   try { return (await import(pathToFileURL(f).href)).onRequest; } finally { try { unlinkSync(f); } catch {} }
 }
 
-export async function start(opts = {}) {
+// Where things are and what the settings say (wrangler.toml [vars] < lockqz.env < the environment < opts.env).
+export function settings(opts = {}) {
   const cf = resolve(opts.cloudflareDir || join(HERE, "..", "cloudflare"));
   const fileEnv = readEnvFile(opts.envFile === undefined ? join(HERE, "lockqz.env") : opts.envFile);
   const env = { ...readWranglerVars(join(cf, "wrangler.toml")), ...pick(fileEnv), ...(opts.inheritEnv === false ? {} : pick(process.env)), ...(opts.env || {}) };
   const data = resolve(opts.dataDir || env.LOCKQZ_DATA || join(HERE, "data"));
   mkdirSync(data, { recursive: true });
+  const schoolsFile = join(data, "schools.json");
+  const multiCfg = opts.schools ? readSchools(opts.schools) : existsSync(schoolsFile) ? readSchools(schoolsFile) : null;
+  return { cf, env, data, multiCfg };
+}
+
+// Bring every database up to date and close it again (done once, before several server processes start).
+export function prepare(opts = {}) {
+  const { cf, data, multiCfg } = settings(opts), applied = {};
+  const files = multiCfg ? multiCfg.list.map(x => [x.id, join(data, "schools", x.id + ".db")]) : [["lockqz", opts.dbFile || join(data, "lockqz.db")]];
+  if (multiCfg) mkdirSync(join(data, "schools"), { recursive: true });
+  for (const [id, f] of files) { const d = openDb(f); try { applied[id] = migrate(d, cf); } finally { d.close(); } }
+  return applied;
+}
+
+export async function start(opts = {}) {
+  const { cf, env, data, multiCfg } = settings(opts);
   if (typeof env.MAIL_OPEN !== "function" && typeof env.MAIL_SINK !== "function") env.MAIL_OPEN = mailOpen(env);
   // This server answers for its own address: it never forwards the API to another LOCKqz host.
   if (env.NO_API_PROXY === undefined) env.NO_API_PROXY = "1";
@@ -93,8 +112,6 @@ export async function start(opts = {}) {
   globalThis.caches = { get default() { return scope.getStore()?.cache || ownCache; } };
   let version = ""; try { version = readFileSync(join(cf, "..", "VERSION"), "utf8").trim(); } catch {}
   // Several schools: opts.schools, or a schools.json next to the data. Otherwise one school, one database.
-  const schoolsFile = join(data, "schools.json");
-  const multiCfg = opts.schools ? readSchools(opts.schools) : existsSync(schoolsFile) ? readSchools(schoolsFile) : null;
   let db = null, applied = [], onRequest = null, multi = null;
   if (multiCfg) {
     multi = openSchools(multiCfg, { dataDir: data, cloudflareDir: cf, baseEnv: env, version,
@@ -122,7 +139,7 @@ export async function start(opts = {}) {
       if (path === "/healthz") {
         let ok = true; try { for (const d of allDbs()) d.sqlite.prepare("SELECT 1").get(); } catch { ok = false; }
         res.writeHead(ok ? 200 : 500, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-        return res.end(JSON.stringify({ ok, version, up_s: Math.round((Date.now() - counters.started) / 1000), requests: counters.requests, errors: counters.errors, db: db.stats, ...(multi ? { schools: Object.fromEntries([...multi.schools.values()].map(x => [x.id, { requests: counters.bySchool[x.id] || 0, written: x.db.stats.written }])) } : {}) }));
+        return res.end(JSON.stringify({ ok, version, pid: process.pid, worker: Number(env.LOCKQZ_WORKER || 1), up_s: Math.round((Date.now() - counters.started) / 1000), requests: counters.requests, errors: counters.errors, db: db.stats, ...(multi ? { schools: Object.fromEntries([...multi.schools.values()].map(x => [x.id, { requests: counters.bySchool[x.id] || 0, written: x.db.stats.written }])) } : {}) }));
       }
       if (!path.startsWith("/api/") && path !== "/api") { res.writeHead(404, { "Content-Type": "application/json" }); return res.end('{"error":"not found"}'); }
       const chunks = []; let size = 0;
@@ -170,7 +187,8 @@ export async function start(opts = {}) {
     }
     return multi ? made : made[0];
   };
-  const timer = every > 0 ? setInterval(() => { try { takeSnapshot(); } catch (e) { console.error("snapshot:", e.message); } }, every * 60000) : null;
+  // With several server processes only the first one makes the copies.
+  const timer = every > 0 && String(env.LOCKQZ_WORKER || "1") === "1" ? setInterval(() => { try { takeSnapshot(); } catch (e) { console.error("snapshot:", e.message); } }, every * 60000) : null;
   if (timer) timer.unref();
 
   const port = Number(opts.port ?? env.PORT ?? 8787), bind = opts.host || env.BIND || "127.0.0.1";
@@ -181,7 +199,7 @@ export async function start(opts = {}) {
 
 // Only the settings the API itself reads are taken from the process environment (never PATH, HOME, ...),
 // and never the hooks that exist for tests.
-const OWN = ["PORT", "BIND", "PUBLIC_HOST", "TRUST_PROXY", "MAX_BODY", "LOCKQZ_DATA", "LOCKQZ_BUILD", "SNAPSHOT_MIN", "SNAPSHOT_KEEP"];
+const OWN = ["PORT", "BIND", "PUBLIC_HOST", "TRUST_PROXY", "MAX_BODY", "LOCKQZ_DATA", "LOCKQZ_BUILD", "SNAPSHOT_MIN", "SNAPSHOT_KEEP", "WORKERS", "LOCKQZ_WORKER"];
 const HOOK = /(_TEST$|^MAIL_SINK$|^MAIL_OPEN$|^SES_FETCH$|^DB$)/;
 let API_NAMES = null;
 function pick(e) {
@@ -193,8 +211,24 @@ function pick(e) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const s = await start();
-  console.log(`LOCKqz API ${s.env.LOCKQZ_BUILD || ""} on ${s.server.address().address}:${s.port}` + (s.applied.length ? `, applied ${s.applied.length} database steps` : ""));
-  if (String(s.env.REQUIRE_SIGNED || "") !== "1") console.log("warning: REQUIRE_SIGNED is not 1");
-  for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, async () => { await s.close(); process.exit(0); });
+  // WORKERS=n (or "auto" = one per processor): n server processes share the port and the database file, so
+  // one slow request (a big class list) never holds up every student, and every processor is used.
+  const w0 = settings().env.WORKERS, want = String(w0 || "1").toLowerCase() === "auto" ? Math.max(1, os.availableParallelism?.() || os.cpus().length) : Math.max(1, Math.min(64, Number(w0) || 1));
+  if (cluster.isPrimary && want > 1) {
+    const applied = prepare();
+    const steps = Object.values(applied).reduce((a, x) => a + x.length, 0);
+    console.log(`LOCKqz API: starting ${want} server processes` + (steps ? `, applied ${steps} database steps` : ""));
+    let stopping = false; const born = new Map();
+    const fork = id => { const w = cluster.fork({ LOCKQZ_WORKER: String(id) }); born.set(w.id, { id, at: Date.now() }); };
+    for (let i = 1; i <= want; i++) fork(i);
+    cluster.on("exit", (w, code) => { const b = born.get(w.id); born.delete(w.id); if (stopping || !b) return;
+      console.error(`server process ${b.id} stopped (code ${code}); starting it again`);
+      setTimeout(() => fork(b.id), Date.now() - b.at < 5000 ? 2000 : 100); });   // a process that dies at once is not restarted in a tight loop
+    for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { stopping = true; for (const w of Object.values(cluster.workers)) w.process.kill("SIGTERM"); setTimeout(() => process.exit(0), 4000).unref(); });
+  } else {
+    const s = await start();
+    console.log(`LOCKqz API ${s.env.LOCKQZ_BUILD || ""} on ${s.server.address().address}:${s.port}` + (want > 1 ? ` (process ${s.env.LOCKQZ_WORKER})` : "") + (s.applied.length ? `, applied ${s.applied.length} database steps` : ""));
+    if (String(s.env.REQUIRE_SIGNED || "") !== "1") console.log("warning: REQUIRE_SIGNED is not 1");
+    for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, async () => { await s.close(); process.exit(0); });
+  }
 }
