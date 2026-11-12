@@ -1,2 +1,7 @@
+# No LOCKqz page is ever shown inside another site's frame.
+/*
+  X-Frame-Options: DENY
+  Content-Security-Policy: frame-ancestors 'none'
+
 /download/lockqz-prof-firefox.xpi
   Content-Type: application/x-xpinstall

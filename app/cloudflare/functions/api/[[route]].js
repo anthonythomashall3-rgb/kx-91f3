@@ -829,6 +829,7 @@ export async function onRequest(context) {
   const sesFail = e => db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("mail", null, null, "ses_failed", String(e && e.message || e).slice(0, 200), now()).run().catch(() => {});
   // -> "ses" | "gmail"; throws { budget: true } when neither channel has room, or the Gmail error.
   async function sendVia(to, subject, text, opts, cls) {
+    subject = String(subject == null ? "" : subject).replace(/\s+/g, " ").trim().slice(0, 250);   // a subject is one line, whatever an exam or class is called
     if (!opts || !opts.html) opts = { ...(opts || {}), html: autoHtml(text, { sign: !(opts && opts.inbox) }) };   // every email branded
     text = mailLinks(env, text); opts = { ...opts, html: mailLinks(env, opts.html) };
     const k = Array.isArray(to) ? to.length : 1;
@@ -3131,7 +3132,7 @@ export async function onRequest(context) {
           if (!s || typeof s !== "object") continue;
           const uid = String(s.id ?? "");
           if (keep.has(uid)) continue;
-          const v = [str(s.name), (str(s.email) || "").toLowerCase() || null, str(s.username), str(s.org_id), str(s.role, 80)];
+          const v = [str(s.name), (str(s.email) || "").trim().toLowerCase() || null, str(s.username), str(s.org_id), str(s.role, 80)];
           if (v[1] && forgotten.has(v[1])) continue;
           keep.add(uid);
           if (whoId && uid === whoId && v[1] === myEmail && INSTR_RE.test(v[4] || "")) selfInstr = true;
