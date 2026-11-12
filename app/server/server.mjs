@@ -132,6 +132,8 @@ export async function start(opts = {}) {
   const pending = new Set();
 
   const allDbs = () => multi ? [...multi.schools.values()].map(x => x.db) : [db];
+  const hasSecret = e => !!String(e.ROT_SECRET || e.TEACHER_KEY || "").trim();
+  const unset = multi ? ![...multi.schools.values()].every(x => hasSecret(x.env)) : !hasSecret(env);
   const server = http.createServer(async (req, res) => {
     counters.requests++;
     try {
@@ -139,9 +141,11 @@ export async function start(opts = {}) {
       if (path === "/healthz") {
         let ok = true; try { for (const d of allDbs()) d.sqlite.prepare("SELECT 1").get(); } catch { ok = false; }
         res.writeHead(ok ? 200 : 500, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-        return res.end(JSON.stringify({ ok, version, pid: process.pid, worker: Number(env.LOCKQZ_WORKER || 1), up_s: Math.round((Date.now() - counters.started) / 1000), requests: counters.requests, errors: counters.errors, db: db.stats, ...(multi ? { schools: Object.fromEntries([...multi.schools.values()].map(x => [x.id, { requests: counters.bySchool[x.id] || 0, written: x.db.stats.written }])) } : {}) }));
+        return res.end(JSON.stringify({ ok, configured: !unset, version, pid: process.pid, worker: Number(env.LOCKQZ_WORKER || 1), up_s: Math.round((Date.now() - counters.started) / 1000), requests: counters.requests, errors: counters.errors, db: db.stats, ...(multi ? { schools: Object.fromEntries([...multi.schools.values()].map(x => [x.id, { requests: counters.bySchool[x.id] || 0, written: x.db.stats.written }])) } : {}) }));
       }
       if (!path.startsWith("/api/") && path !== "/api") { res.writeHead(404, { "Content-Type": "application/json" }); return res.end('{"error":"not found"}'); }
+      // Without its own secret the API would sign with a value anyone can read: it answers nothing until one is set.
+      if (unset) { res.writeHead(503, { "Content-Type": "application/json", "Cache-Control": "no-store" }); return res.end('{"error":"not_configured"}'); }
       const chunks = []; let size = 0;
       for await (const c of req) { size += c.length; if (size > maxBody) { res.writeHead(413, { "Content-Type": "application/json" }); return res.end('{"error":"too large"}'); } chunks.push(c); }
       const headers = new Headers();
@@ -229,6 +233,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const s = await start();
     console.log(`LOCKqz API ${s.env.LOCKQZ_BUILD || ""} on ${s.server.address().address}:${s.port}` + (want > 1 ? ` (process ${s.env.LOCKQZ_WORKER})` : "") + (s.applied.length ? `, applied ${s.applied.length} database steps` : ""));
     if (String(s.env.REQUIRE_SIGNED || "") !== "1") console.log("warning: REQUIRE_SIGNED is not 1");
+    if (!String(s.env.ROT_SECRET || s.env.TEACHER_KEY || "").trim()) console.log("warning: no ROT_SECRET / TEACHER_KEY in lockqz.env - the API answers 503 not_configured until one is set");
     for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, async () => { await s.close(); process.exit(0); });
   }
 }

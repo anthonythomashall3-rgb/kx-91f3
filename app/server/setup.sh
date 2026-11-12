@@ -38,13 +38,16 @@ mkdir -p "$SRV/data"; chown -R lockqz:lockqz "$SRV/data"; chmod 700 "$SRV/data"
 if [ ! -f "$SRV/lockqz.env" ]; then
   # Until the real settings file is put in place the server runs with test settings and no secrets.
   printf 'PORT=8787\nBIND=127.0.0.1\nTRUST_PROXY=1\nWORKERS=auto\nSNAPSHOT_MIN=15\nSNAPSHOT_KEEP=8\nREQUIRE_SIGNED=1\n' > "$SRV/lockqz.env"
-  echo "lockqz.env: created with no secrets (fill it in before real use)"
+  echo "lockqz.env: created with no secrets - the API answers 503 not_configured until they are filled in"
 fi
 chown root:lockqz "$SRV/lockqz.env"; chmod 640 "$SRV/lockqz.env"
 
 # A small machine (1 GB) gets a swap file so a burst never runs it out of memory.
 if [ "$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)" -lt 2000 ] && ! swapon --show | grep -q .; then
-  say "swap"; fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap -q /swapfile && swapon /swapfile && grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  say "swap"
+  if fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap -q /swapfile && swapon /swapfile; then
+    grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  else rm -f /swapfile; echo "no swap file (this disk does not take one); carrying on"; fi
 fi
 
 say "service"

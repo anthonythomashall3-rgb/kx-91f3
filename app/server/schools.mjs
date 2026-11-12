@@ -115,7 +115,15 @@ export function openSchools(cfg, { dataDir, cloudflareDir, baseEnv, loadApi, ver
     const response = await s.onRequest({ ...ctx, request: makeRequest(), env: s.env });
     // Remember where this computer / sign-in belongs, from what the school's API answered.
     if (response.status === 200) {
-      if (dev && (p.by !== "default" || path === "/register")) learn("device", dev, s.id);
+      // A computer is noted under a school only when that school holds it, and a computer already noted under
+      // another school moves only on its own signature (the key that other school holds for it).
+      if (dev && (p.by !== "default" || path === "/register")) {
+        const cur = known("device", dev), here = () => !!s.db.sqlite.prepare("SELECT 1 FROM devices WHERE device_id=?").get(dev);
+        if (cur !== s.id) {
+          const old = cur ? schools.get(cur).db.sqlite.prepare("SELECT device_key FROM devices WHERE device_id=?").get(dev) : null;
+          if (old && old.device_key ? signedBy(headers, "/api" + path, raw)(String(old.device_key)) && here() : here()) learn("device", dev, s.id);
+        }
+      }
       if (/json/.test(response.headers.get("content-type") || "") && !headers.get("x-lockqz-device")) {
         let j = null; try { j = await response.clone().json(); } catch {}
         if (j && typeof j === "object") {

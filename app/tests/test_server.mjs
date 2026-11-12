@@ -146,6 +146,13 @@ try {
   check("a typed-in address header is not believed", q.status === 200 && s.db.sqlite.prepare("SELECT reg_ip FROM devices WHERE device_id LIKE 'win-%'").get().reg_ip === "127.0.0.1", JSON.stringify(s.db.sqlite.prepare("SELECT reg_ip FROM devices").all()));
   await s.close();
 
+  console.log("S6b a server with no secret of its own answers nothing");
+  s = await start({ port: 0, dataDir: join(tmp, "nosecret"), envFile: null, inheritEnv: false, env: { REQUIRE_SIGNED: "1" } });
+  q = await call("/version", null, { method: "GET" });
+  const hz = await (await fetch("http://127.0.0.1:" + s.port + "/healthz")).json();
+  check("the API is closed (503 not_configured) and /healthz says so, until ROT_SECRET or TEACHER_KEY is set", q.status === 503 && q.data?.error === "not_configured" && hz.ok === true && hz.configured === false, q.status + " " + JSON.stringify(hz).slice(0, 80));
+  await s.close();
+
   console.log("S7 moving the data: a SQL export becomes the server's database");
   const src = openDb(join(tmp, "src.db")); migrate(src, CF);
   src.sqlite.prepare("INSERT INTO devices (device_id,student,platform,version,installed_at,last_seen,student_verified) VALUES (?,?,?,?,?,?,1)").run("mac-x", "o'brien@usc.edu", "mac", "0.6.18", "2026-11-01T00:00:00Z", "2026-11-01T00:00:00Z");

@@ -27,6 +27,7 @@ Running it again brings the machine to the newest code and restarts the service.
 ## Run
 
     cp lockqz.env.example lockqz.env && chmod 600 lockqz.env    # fill in the secrets
+                                                                # until ROT_SECRET or TEACHER_KEY is set the API answers 503 not_configured
     node --no-warnings server.mjs
 
 The server listens on 127.0.0.1 only. Put Cloudflare in front of it with a Tunnel (`cloudflared`), so the

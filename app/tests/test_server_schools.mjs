@@ -106,6 +106,17 @@ try {
   r = await call("/sync", { host: "learn.state.edu", courses: [] }, { headers: { "X-LOCKqz-Sync": "sync-usc-0123456789abcdef" } });
   check("a Sync sent from State's Brightspace goes to State, where a USC key opens nothing", (s.counters.bySchool.state || 0) === before + 2 && r.status >= 400, String(r.status));
 
+  console.log("M6b a computer stays at its school unless it moves itself");
+  r = await call("/version", null, { method: "GET", headers: { "X-LOCKqz-Device": DU, "X-LOCKqz-School": "state" } });
+  check("naming another school in a request that carries someone's computer id moves nothing", r.status === 200 && s.multi.known("device", DU) === "usc", String(s.multi.known("device", DU)));
+  r = await call("/register", { device_id: DU, key: randomBytes(32).toString("hex"), platform: "mac-15", version: "0.6.18", student: "eve@state.edu" }, { headers: { ...ip(), "X-LOCKqz-School": "state" } });
+  check("registering that id at the other school with another key moves nothing either", s.multi.known("device", DU) === "usc", r.status + " " + s.multi.known("device", DU));
+  const again = await call("/report", { device_id: DU, event: "heartbeat", quiz_id: LOCK_ID }, { key: KU, device: DU });
+  check("the real computer still reaches USC with its own key", again.status === 200 && again.data.verified !== false, JSON.stringify(again.data));
+  const DN = "mac-eeeeeeee-0000-0000-0000-000000000009";
+  r = await call("/version", null, { method: "GET", headers: { "X-LOCKqz-Device": DN, "X-LOCKqz-School": "state" } });
+  check("a computer no school holds is not noted anywhere", s.multi.known("device", DN) === null, String(s.multi.known("device", DN)));
+
   console.log("M7 the clock, health, copies");
   r = await call("/cron", {}, { headers: { "X-LOCKqz-Pay": "clock-secret-0123456789" } });
   const clock = id => dbOf(id).prepare("SELECT COUNT(*) n FROM sync_nudges WHERE ou='clock'").get().n;
