@@ -1823,7 +1823,9 @@ export async function onRequest(context) {
       if (op === "status") {
         const ver = Number(d?.student_verified) === 1 && !!d?.student;
         // paid: this term's fee (the agent's one-time "LOCKqz is ready" notice waits for verified + paid).
-        return json({ student: d?.student || null, verified: ver, codes: codesOn, paid: ver ? await studentPaid(String(d.student).toLowerCase()) : !feeOn(), ...(ver ? { vtoken: await vtokenFor(String(d.student).toLowerCase()) } : {}) });
+        // pay_url: the student's own pay page while this term's fee is unpaid - the app opens it right after setup.
+        const paidNow = ver ? await studentPaid(String(d.student).toLowerCase()) : !feeOn();
+        return json({ student: d?.student || null, verified: ver, codes: codesOn, paid: paidNow, ...(ver && !paidNow ? { pay_url: await payLink(String(d.student).toLowerCase()) } : {}), ...(ver ? { vtoken: await vtokenFor(String(d.student).toLowerCase()) } : {}) });
       }
       // Google sign-in instead of an emailed code: a one-time link for this computer; the page it opens
       // confirms the email (POST /auth/google) and the app sees it through "status".

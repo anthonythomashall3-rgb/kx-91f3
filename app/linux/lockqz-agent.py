@@ -341,6 +341,9 @@ class Agent(M.Agent):
         if len(names) == 1: return "\n\n%s was closed for the quiz so its AI stays off. You can reopen it; your tabs come back." % names[0]
         return "\n\n%s were closed for the quiz so their AI stays off. You can reopen them; your tabs come back." % (", ".join(names[:-1]) + " and " + names[-1])
 
+    def open_page(self, u):
+        subprocess.run(["xdg-open", u], timeout=10, capture_output=True)
+
     def payment(self, r):
         pay = r.get("pay") if isinstance(r, dict) else None
         if not isinstance(pay, dict): return False

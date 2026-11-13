@@ -307,6 +307,17 @@ function Save-Student($email, $verified) {
   try { $o | ConvertTo-Json | Set-Content $StudentFile -Encoding UTF8 }
   catch { Log "could not save student: $_" }
 }
+function Open-PayAfterSetup {
+  # Right after the one-time setup: this semester's fee is not paid yet -> the student's own pay page opens by
+  # itself (no email to wait for). Nothing opens for a paid student or when there is no fee.
+  try {
+    $st = Verify "status" $null
+    if ($st -and ($st.verified -is [bool]) -and $st.verified -and ($st.paid -is [bool]) -and (-not $st.paid) -and $st.pay_url) {
+      $u = [string]$st.pay_url
+      if ($u.StartsWith("https://lockqz.com/") -or $u.StartsWith("https://lockqz.pages.dev/")) { Start-Process $u; Log "setup done: pay page opened" }
+    }
+  } catch { Log "pay page after setup: $_" }
+}
 function Read-SetupState {
   $s = @{ next = 0; fails = 0; tried = 0; sent_email = ""; sent_at = 0; r = "" }
   try { if (Test-Path $SetupFile) { $j = Get-Content $SetupFile -Raw | ConvertFrom-Json; foreach ($k in @($s.Keys)) { if ($null -ne $j.$k) { $s[$k] = $j.$k } } } } catch {}
@@ -416,10 +427,12 @@ if ($Setup) {
   if (-not $mtx.WaitOne(0)) { exit }
   $state = Read-SetupState; $state.tried = Now-Sec
   $saved = $null; try { if (Test-Path $StudentFile) { $sj = Get-Content $StudentFile -Raw | ConvertFrom-Json; $saved = $sj.student; if ($sj.vtoken) { $script:VToken = [string]$sj.vtoken } } } catch {}
+  $wasVerified = $false; try { $wasVerified = [bool]$sj.verified } catch {}
   $got = $null
   try { $got = Setup-Identity $saved $state } catch { Log "identity setup error: $_"; $state.r = "server" }
   if ($got) {
     Save-Student $got.student $got.verified
+    if ($got.verified -and (-not $wasVerified)) { Open-PayAfterSetup }   # setup just finished: straight to the pay page
     $state.fails = 0; $state.next = 0
     try { Helper "/student" @{ student = $got.student } | Out-Null } catch {}
     Log "student $($got.student) verified=$($got.verified)"

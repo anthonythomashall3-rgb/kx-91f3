@@ -766,9 +766,11 @@ class Agent:
                 got = setup_identity(self.verify_call, MacUI(), self.student or "",
                                      lambda e: self.save_student(e, False), self.id_state)
                 if got:
+                    was = self.verified
                     self.save_student(*got); self.id_fails, self.id_next = 0, 0.0
                     try: self.helper("/student", {"student": self.student})
                     except Exception: pass
+                    if self.verified and not was: self.pay_after_setup()   # setup just finished: straight to the pay page
                     log("student %s (%s)" % (self.student, "verified" if self.verified else "unconfirmed"))
                 elif self.id_state.get("r") == "closed":
                     self.id_next = time.time() + (600 if (quiz or self.quiz) else 6 * 3600)
@@ -780,6 +782,19 @@ class Agent:
             finally: self.id_busy = False
         threading.Thread(target=run, daemon=True).start()
 
+    def open_page(self, u):
+        subprocess.run(["open", u], timeout=10)
+
+    def pay_after_setup(self):
+        """Right after the one-time setup: this semester's fee is not paid yet -> the student's own pay page opens
+        by itself (no email to wait for). Once per setup; nothing opens for a paid student or when there is no fee."""
+        try:
+            st = self.verify_call("status")
+            u = str(st.get("pay_url") or "")
+            if st.get("verified") is True and st.get("paid") is False and u.startswith(("https://lockqz.com/", "https://lockqz.pages.dev/")):
+                self.open_page(u); log("setup done: pay page opened")
+        except Exception as e: log("pay page after setup: %s" % e)
+
     def payment(self, r):
         # Student fee unpaid: open the payment page once per quiz. The password arrives by itself
         # (re-checked every 15s) as soon as the Venmo/Zelle payment is matched.
@@ -789,7 +804,7 @@ class Agent:
             self.pay_shown = True
             u = str(pay.get("url") or "https://lockqz.com/pay")
             if u.startswith(("https://lockqz.com/", "https://lockqz.pages.dev/")):
-                try: subprocess.run(["open", u], timeout=10)
+                try: self.open_page(u)
                 except Exception: pass
             dialog(pay_text(pay))
         return True
