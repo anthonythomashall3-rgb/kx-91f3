@@ -640,26 +640,6 @@ export async function onRequest(context) {
   const p = url.pathname.replace(/^\/api/, "") || "/";
   const db = env.DB;
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
-  // HANDOVER-BEGIN  One-time hand-over of this site's settings to the LOCKqz server (13 Nov 2026). It answers
-  // only the holder of the one-time code, only until HANDOVER_UNTIL, and only as text that the server's own
-  // key can open. Removed again right after use.
-  if (p === "/handover" && request.method === "POST") {
-    const HANDOVER_UNTIL = 1794578484000, HANDOVER_CODE_SHA256 = "a6e5771f98c690a01270ca31ebcb4fd5af8f5c096a391bf86b7009264c26f31c";
-    const HANDOVER_KEY = "MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAh1Zutk+wY2ELaqAPKyLHRyr+Ahpa/T/7ToizkhoqyKtzw/F/RrfF+bnMeWR0GZlboe6S5k+Wpv7L5vbmags/kgXX3BJPhb0tQK/+ZTeG1qXwx9ENH4V/2D8MGBiIxDPPmGOGGTL1ZTXAssWmiRgV2HQ+Hc7wDxnAxZQ9wvgU1riIt9tr1rNqzD1gb1up2xBBddTq/aAK8+pHcQF3E1bWxtYfJaM8EkZOxVWDo2Xciuu6tYDItqMqLkhPkPTARfSzdEbuW7bAMa51A3e+TaUZzJbr8pzEhTdl6yqEBOLrJsoh/ABsxxgR3qE+v7twOcJOixSUcN2e0WwR1fSXKkLgV97zOEtAMxmwV0eVZmtBoV6hWQnykK+Xug/Ujko+ENUQwsRtqq7VfKcMZaEDlNtiP6SYooQOqCmY53WiKZ9tsvfIEhwxNHYy+0ZuQSF79NnbyfF3ARHCKTjPna3PJntMkJ9h5N5Zi/3B5Jwd2PpOehNm766E7WzCkmqMWIrlXe/57UpwJbYN6Xz0lEggMrAnJ4gpiykF4lCPZUCdzdJpz03E6O5x8bt1hG4oCyCvgceFEMs1Tg86hJRNDLPQtMUBzARHTQZX5K5mmB+FCKHss7g4gDIvpX/yOZB9Y93VFE8AiPXqndY/9sCYWjUDiBw7wOi7J2ubj2EBPPrYuBz9HNUCAwEAAQ==";
-    const te = new TextEncoder(), hex = b => [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, "0")).join("");
-    const b64 = b => { let t = ""; for (const x of new Uint8Array(b)) t += String.fromCharCode(x); return btoa(t); };
-    const given = hex(await crypto.subtle.digest("SHA-256", te.encode(String(request.headers.get("X-LOCKqz-Handover") || ""))));
-    let diff = 0; for (let i = 0; i < 64; i++) diff |= given.charCodeAt(i) ^ HANDOVER_CODE_SHA256.charCodeAt(i);
-    if (Date.now() > HANDOVER_UNTIL || diff !== 0) return json({ error: "not found" }, 404);
-    const settings = {}; for (const [k, v] of Object.entries(env)) if (typeof v === "string") settings[k] = v;
-    const pub = await crypto.subtle.importKey("spki", Uint8Array.from(atob(HANDOVER_KEY), c => c.charCodeAt(0)), { name: "RSA-OAEP", hash: "SHA-256" }, false, ["encrypt"]);
-    const aes = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt"]);
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const body = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aes, te.encode(JSON.stringify(settings)));
-    const key = await crypto.subtle.encrypt({ name: "RSA-OAEP" }, pub, await crypto.subtle.exportKey("raw", aes));
-    return json({ key: b64(key), iv: b64(iv), body: b64(body) });
-  }
-  // HANDOVER-END
   // One API, one set of secrets (25 Oct 2026): the other LOCKqz *.pages.dev addresses (prof., the old
   // lockdownqz ones, per-deploy preview hosts) run in Cloudflare environments that do not carry the main
   // site's secrets (email codes, signing), so they forward every API call to the main site instead of

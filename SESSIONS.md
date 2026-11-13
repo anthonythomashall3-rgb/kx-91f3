@@ -7,11 +7,14 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-11-13 04:35 PT — 01UUDg7a: one-time hand-over of the site settings to the plain server: a temporary route in app/cloudflare/functions/api/[[route]].js (one block before /version), removed again within the hour. Touches nothing else.
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
 
 ## Recently finished
+<<<<<<< Updated upstream
 - 2026-11-13 06:40 PT — 01UUDg7bsaVV: sweep 23, apps 0.6.21 (Mac / Linux helper). The admin's computer (developer mode) looks for signed updates like every other one whenever it is not in a quiz. Tests: test_sweep22.py R4 (10). Files: app/mac/lockqzd.py, app/tests/test_sweep22.py, app/VERSION, lockqzd.ps1 (version).
+=======
+- 2026-11-13 05:05 PT — 01UUDg7a: the site's settings were handed to the plain server once (a temporary route, live for a few minutes, answering only the server's one-time code with text only the server's key opens) and the route is removed again; app/cloudflare/functions/api/[[route]].js is back to what it was before. Nothing else changed.
+>>>>>>> Stashed changes
 - 2026-11-13 05:50 PT — 01UUDg7bsaVV: removed .github/workflows/dns.yml (the _dmarc record is in place, set in Cloudflare; the repo's token does not edit DNS).
 - 2026-11-13 05:10 PT — 01UUDg7bsaVV: sweep 22, apps 0.6.20 (Mac / Linux helper). An unlock whose server answer arrives after another quiz was locked leaves that quiz alone (409 not_this_quiz); the watcher logs a failed cycle and runs the next one. Tests: test_sweep22.py (8, incl. 300 control requests from 12 callers at once). Files: app/mac/lockqzd.py, app/tests/test_sweep22.py, run_all.sh, app/VERSION, lockqzd.ps1 (version).
 - 2026-11-13 04:20 PT — 01UUDg7bsaVV: sweep 21, apps 0.6.19. Android: during a quiz the phone also blocks the 27 whole domains the computers block (workers.dev, vercel.app, the tunnels, Azure OpenAI ...; never pages.dev); Private DNS switched on in the middle of a quiz is reported with the heartbeat, once per lock. Tests: test_android.py (56), UnitTests.kt wholeDomainsAreBlockedDuringAQuiz. Files: app/android DnsVpnService.kt, QuizAccessibilityService.kt, UnitTests.kt, app/VERSION, lockqzd.py / lockqzd.ps1 (version).
