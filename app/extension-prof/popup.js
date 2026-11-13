@@ -47,6 +47,26 @@
       else if ((n.signin && (!was || Date.now() - t0 > 45000)) || Date.now() - t0 > 180000) { clearInterval(wait); $("sync").textContent = "Sync now"; await draw(); }
     }, 1000);
   };
-  api.storage.onChanged.addListener(ch => { if (ch.lastSync || ch.signin || ch.key) draw(); });
+  // Another school's Brightspace: the professor types its address; the browser asks them to allow that one
+  // address; LOCKqz checks that it really is a Brightspace; from then on the extension works there as at USC.
+  const origin = t => { let v = String(t || "").trim().toLowerCase(); if (!v) return ""; if (!/^https?:\/\//.test(v)) v = "https://" + v;
+    try { const u = new URL(v); return u.protocol === "https:" && u.hostname.includes(".") && !u.port && !u.username ? "https://" + u.hostname : ""; } catch { return ""; } };
+  const USC = ["https://brightspace.usc.edu", "https://usc.brightspace.com"];
+  async function drawSchool() { const s2 = await api.storage.local.get(["school"]); $("schname").textContent = s2.school ? new URL(s2.school).hostname : "USC"; }
+  $("schgo").onclick = async () => {
+    const o = origin($("schin").value), msg = t => { $("schmsg").textContent = t; };
+    if (!o) return msg("Type your school's Brightspace address.");
+    if (USC.includes(o)) { await api.runtime.sendMessage({ t: "school", school: null }); await drawSchool(); return msg("Connected."); }
+    let ok = false; try { ok = await api.permissions.request({ origins: [o + "/*"] }); } catch {}   // asked right on the click
+    if (!ok) return msg("Allow the address to connect it.");
+    $("schgo").disabled = true; msg("Checking\u2026");
+    let bs = false; try { const r = await fetch(o + "/d2l/api/versions/", { credentials: "omit" }); const d = r.ok ? await r.json() : null; bs = Array.isArray(d) && d.some(x => x && x.ProductCode === "lp"); } catch {}
+    if (!bs) { try { await api.permissions.remove({ origins: [o + "/*"] }); } catch {} $("schgo").disabled = false; return msg("That is not a Brightspace address."); }
+    let done = null; try { done = await api.runtime.sendMessage({ t: "school", school: o }); } catch {}
+    $("schgo").disabled = false; await drawSchool();
+    msg(done && done.ok ? "Connected." : "Could not connect. Try again.");
+  };
+  drawSchool();
+  api.storage.onChanged.addListener(ch => { if (ch.lastSync || ch.signin || ch.key) draw(); if (ch.school) drawSchool(); });
   draw().then(fetchStatus);
 })();

@@ -9,6 +9,7 @@
 //   E5 an exam within the hour: the extension opens its own pinned Brightspace tab and the gate starts there
 //   E6 a quiet background panel never gates; exam over -> the extension closes its exam tab
 //   E7 the packaged sync.js / lq.js are the site's own (no drift)
+//   E8 another school's Brightspace: the professor connects its address in the popup; the extension syncs there
 // Original header of the test this one is built from:
 // The dashboard's "Sync now" button, end to end in a REAL Chromium: the real dashboard page and the real
 // sync.js, served at their real addresses (prof.lockqz.pages.dev, brightspace.usc.edu) by request
@@ -109,6 +110,11 @@ const EXTDIR = join(tmp, "ext"); execFileSync("unzip", ["-q", ZIP, "-d", EXTDIR]
 check("E7 packaged sync.js is the site's own", readFileSync(join(EXTDIR, "sync.js")).equals(SYNC_JS));
 check("E7 packaged lq.js is the site's own", readFileSync(join(EXTDIR, "lq.js")).equals(readFileSync(join(CF, "public", "lq.js"))));
 const man = JSON.parse(readFileSync(join(EXTDIR, "manifest.json"), "utf8"));
+check("E8 package asks for other addresses only when the professor connects one", JSON.stringify(man.optional_host_permissions) === '["https://*/*"]' && man.permissions.includes("scripting") && !man.host_permissions.some(h => /\*\/\*$/.test(h.replace("https://", "")) && h.startsWith("https://*")));
+// A test browser cannot answer the "allow this address" question, so the second school's address is allowed
+// up front here (the popup then gets "yes" without the question, as it does for a professor who said yes).
+const SCHOOL = "learn.stateu.edu";
+writeFileSync(join(EXTDIR, "manifest.json"), JSON.stringify({ ...man, host_permissions: [...man.host_permissions, `https://${SCHOOL}/*`, "https://www.example.org/*"] }));
 check("E7 Chromium manifest: service worker only, no Firefox keys", man.background.service_worker === "background.js" && !man.background.scripts && !man.browser_specific_settings);
 
 // ---- the browser ----
@@ -130,18 +136,20 @@ const server = createServer({ key: readFileSync(join(tmp, "k.pem")), cert: readF
     }
     if ((host === "prof.lockqz.pages.dev" || host === "professor.lockqz.com") && (u.pathname === "/dashboard" || u.pathname === "/")) return send(200, "text/html", DASH_HTML);
     if ((host === "prof.lockqz.pages.dev" || host === "professor.lockqz.com") && u.pathname === "/lq.js") return send(200, "application/javascript", LQ_JS);
-    if (host === "brightspace.usc.edu" && (u.pathname.startsWith("/d2l/api/") || u.pathname === "/d2l/lp/auth/xsrf-tokens")) {
-      const r = brightspace(u, req.method, body.toString()); return send(r.status, r.contentType, r.body);
+    if ((host === "brightspace.usc.edu" || host === SCHOOL) && (u.pathname.startsWith("/d2l/api/") || u.pathname === "/d2l/lp/auth/xsrf-tokens")) {
+      if (host === SCHOOL) schoolCalls.push(u.pathname);
+      const r = brightspace(u, req.method, body.toString()); return send(r.status, r.contentType, r.body, host === SCHOOL ? { "Access-Control-Allow-Origin": "*" } : {});
     }
-    if (host === "brightspace.usc.edu") return send(200, "text/html", "<!doctype html><title>Homepage - USC Brightspace</title><h1>Brightspace</h1>");
+    if (host === "brightspace.usc.edu" || host === SCHOOL) return send(200, "text/html", "<!doctype html><title>Homepage - Brightspace</title><h1>Brightspace</h1>");
+    if (host === "www.example.org") return send(200, "text/html", "<!doctype html><title>Not a Brightspace</title>");
     return send(204, "text/plain", "");
   } catch (e) { console.log("server error", u.href, e.message); return send(500, "text/plain", String(e)); }
 });
 await new Promise(r => server.listen(0, "127.0.0.1", r));
-const PORT = server.address().port;
+const PORT = server.address().port, schoolCalls = [];
 const context = await chromium.launchPersistentContext(join(tmp, "profile"), { channel: "chromium", headless: true, ignoreHTTPSErrors: true,
   args: [`--disable-extensions-except=${EXTDIR}`, `--load-extension=${EXTDIR}`, "--ignore-certificate-errors", "--no-proxy-server",
-    `--host-resolver-rules=MAP brightspace.usc.edu 127.0.0.1:${PORT}, MAP prof.lockqz.pages.dev 127.0.0.1:${PORT}, MAP lockqz.pages.dev 127.0.0.1:${PORT}, MAP professor.lockqz.com 127.0.0.1:${PORT}, MAP lockqz.com 127.0.0.1:${PORT}, MAP * ~NOTFOUND`] });
+    `--host-resolver-rules=MAP brightspace.usc.edu 127.0.0.1:${PORT}, MAP prof.lockqz.pages.dev 127.0.0.1:${PORT}, MAP lockqz.pages.dev 127.0.0.1:${PORT}, MAP professor.lockqz.com 127.0.0.1:${PORT}, MAP lockqz.com 127.0.0.1:${PORT}, MAP ${SCHOOL} 127.0.0.1:${PORT}, MAP www.example.org 127.0.0.1:${PORT}, MAP * ~NOTFOUND`] });
 await context.addInitScript(t => { if (location.host === "prof.lockqz.pages.dev" || location.host === "professor.lockqz.com") { localStorage.setItem("lockqz_token", t); localStorage.setItem("lockqz_tour_prof@usc.edu", "1"); localStorage.setItem("lockqz_welcome_prof@usc.edu", "1"); } }, PROF);
 let sw = context.serviceWorkers()[0] || await context.waitForEvent("serviceworker", { timeout: 15000 });
 const syncs = () => lqCalls.filter(c => c === "/sync").length;
@@ -206,6 +214,34 @@ await sw.evaluate(() => chrome.storage.local.set({ schedule: [], gates: 0, gateS
 await sw.evaluate(() => serial(tick));
 check("exam tab closed", await waitFor(() => bsTabs().length === 0), bsTabs().length);
 check("no page errors on the dashboard", errors.length === 0, errors.join(" | "));
+
+console.log("E8 another school's Brightspace");
+env.BS_HOSTS = "brightspace.usc.edu,usc.brightspace.com," + SCHOOL;
+BS.quizzes[0].StartDate = new Date(Date.now() + 5 * 86400e3).toISOString(); BS.quizzes[0].EndDate = new Date(Date.now() + 6 * 86400e3).toISOString();   // no exam near: no exam tab
+const extId = new URL(sw.url()).host;
+const pop = await context.newPage(); await pop.goto(`chrome-extension://${extId}/popup.html`);
+check("the popup shows USC's Brightspace to start with", await waitFor(async () => (await pop.textContent("#schname")) === "USC"));
+await pop.evaluate(() => { document.getElementById("sch").open = true; });
+await pop.fill("#schin", "www.example.org"); await pop.click("#schgo");
+check("an address that is not a Brightspace is refused", await waitFor(async () => /not a Brightspace/.test(await pop.textContent("#schmsg"))), await pop.textContent("#schmsg"));
+check("and nothing changed", (await store("school")).school == null && (await pop.textContent("#schname")) === "USC");
+const b8 = syncs(), sc8 = schoolCalls.length;
+await pop.fill("#schin", `https://${SCHOOL}/d2l/home`); await pop.click("#schgo");
+check("the school's address connects", await waitFor(async () => /^Connected\./.test(await pop.textContent("#schmsg"))), await pop.textContent("#schmsg"));
+check("the popup names the school", (await pop.textContent("#schname")) === SCHOOL);
+check("the extension remembers it", (await store("school")).school === "https://" + SCHOOL);
+check("its pages get the LOCKqz script", await sw.evaluate(async () => { const r = await chrome.scripting.getRegisteredContentScripts({ ids: ["lqz-school"] }); return r.length === 1 && r[0].matches[0]; }) === `https://${SCHOOL}/d2l/*`);
+check("a sync ran at the school's Brightspace by itself", await waitFor(() => syncs() >= b8 + 1 && schoolCalls.length > sc8 + 1), lqCalls.slice(-5).join(",") + " " + schoolCalls.length);
+const schoolTabs = () => context.pages().filter(p => { try { return new URL(p.url()).host === SCHOOL; } catch { return false; } });
+check("its background tab closed itself", await waitFor(() => schoolTabs().length === 0), schoolTabs().length);
+check("no USC tab was opened for it", bsTabs().length === 0, bsTabs().length);
+await sw.evaluate(() => schoolScript());
+check("asking again keeps one script (browser start, update)", await sw.evaluate(async () => (await chrome.scripting.getRegisteredContentScripts()).length) === 1);
+await pop.fill("#schin", "brightspace.usc.edu"); await pop.click("#schgo");
+check("back to USC", await waitFor(async () => (await pop.textContent("#schname")) === "USC" && (await store("school")).school == null));
+check("the school's script is gone", await waitFor(async () => await sw.evaluate(async () => (await chrome.scripting.getRegisteredContentScripts()).length) === 0));
+check("a web page cannot set the school", await dash.evaluate(() => new Promise(r => { try { chrome.runtime.sendMessage({ t: "school", school: "https://evil.example" }, () => r(true)); } catch { r(true); } setTimeout(() => r(true), 500); })) && (await store("school")).school == null);
+await pop.close();
 
 await context.close(); server.close();
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);

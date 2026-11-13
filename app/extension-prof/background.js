@@ -6,8 +6,26 @@
 // 3. Dashboard "Sync now": runs in an open Brightspace tab, or a background one it opens and closes.
 // It never signs in for the professor: if Brightspace asks for a sign-in, it tells them.
 const api = globalThis.browser ?? chrome;
-const BS_HOME = "https://brightspace.usc.edu/d2l/home";
-const BS_URLS = ["https://brightspace.usc.edu/d2l/*", "https://usc.brightspace.com/d2l/*"];
+// The professor's Brightspace: USC's by default; another school's once the professor connects it in the popup
+// (the browser asks them for that one address then; nothing else on the web is ever asked for).
+const USC_HOME = "https://brightspace.usc.edu/d2l/home";
+const USC_URLS = ["https://brightspace.usc.edu/d2l/*", "https://usc.brightspace.com/d2l/*"];
+const SCHOOL_RE = /^https:\/\/[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/;
+const okSchool = o => typeof o === "string" && SCHOOL_RE.test(o) && o.includes(".");
+const bsHome = st => okSchool(st && st.school) ? st.school + "/d2l/home" : USC_HOME;
+const bsUrls = st => okSchool(st && st.school) ? [st.school + "/d2l/*"] : USC_URLS;
+// The school's pages get the same content script USC's get from the manifest. Registered again after a
+// browser start or an update (an update drops it), and only while the professor's permission stands.
+async function schoolScript() {
+  const st = await get(["school"]);
+  if (!api.scripting || !api.scripting.registerContentScripts) return false;
+  let have = []; try { have = await api.scripting.getRegisteredContentScripts({ ids: ["lqz-school"] }); } catch {}
+  const want = okSchool(st.school) ? st.school + "/d2l/*" : null;
+  let allowed = false; if (want) { try { allowed = await api.permissions.contains({ origins: [st.school + "/*"] }); } catch {} }
+  if (have.length && (!want || !allowed || (have[0].matches || [])[0] !== want)) { try { await api.scripting.unregisterContentScripts({ ids: ["lqz-school"] }); } catch {} have = []; }
+  if (want && allowed && !have.length) { try { await api.scripting.registerContentScripts([{ id: "lqz-school", matches: [want], js: ["content-bs.js"], runAt: "document_idle", persistAcrossSessions: true }]); } catch { return false; } }
+  return !!(want && allowed);
+}
 const DASH_URLS = ["https://professor.lockqz.com/*"];
 const MIN = 60000;
 const QUIET_MS = 15 * MIN, BG_MS = 6 * 60 * MIN, LEAD_MS = 65 * MIN, AFTER_MS = 10 * MIN;
@@ -24,12 +42,12 @@ const badge = t => { try { api.action.setBadgeText({ text: t }); api.action.setB
 
 function startAlarm() { api.alarms.create("tick", { periodInMinutes: 1 }); }
 api.runtime.onInstalled.addListener(d => {
-  startAlarm();
+  startAlarm(); schoolScript();
   // First install: open the dashboard once, so it hands this extension the professor's Sync key.
   if (d && d.reason === "install") api.tabs.create({ url: BASES[0] + "/" });
 });
 api.runtime.onStartup.addListener(async () => {
-  startAlarm();
+  startAlarm(); schoolScript();
   await set({ gateTab: null, tmpTab: null });   // tab ids do not survive a browser restart
 });
 api.alarms.onAlarm.addListener(a => { if (a.name === "tick") serial(tick); });
@@ -52,15 +70,15 @@ async function note(st, now, text) {
   try { api.notifications.create("lqz", { type: "basic", iconUrl: "icon128.png", title: "LOCKqz", message: text }); } catch {}
 }
 api.notifications.onClicked.addListener(async () => {
-  const st = await get(["gateTab", "tmpTab"]);
+  const st = await get(["gateTab", "tmpTab", "school"]);
   const t = (await tabAlive(st.gateTab)) || (await tabAlive(st.tmpTab));
   if (t) { await api.tabs.update(t.id, { active: true }); try { await api.windows.update(t.windowId, { focused: true }); } catch {} }
-  else api.tabs.create({ url: BS_HOME });
+  else api.tabs.create({ url: bsHome(st) });
 });
 
 async function tick() {
   const now = Date.now();
-  const st = await get(["key", "schedule", "autoGate", "gateTab", "gateOpenedAt", "gateSeen", "gates", "tmpTab", "tmpAt", "tmpAsked", "lastSync", "lastCheck", "notedAt"]);
+  const st = await get(["key", "schedule", "autoGate", "gateTab", "gateOpenedAt", "gateSeen", "gates", "tmpTab", "tmpAt", "tmpAsked", "lastSync", "lastCheck", "notedAt", "school"]);
   if (!st.key) return;
   const gate = await tabAlive(st.gateTab);
   const gatesRunning = Number(st.gates) > 0 && now - Number(st.gateSeen || 0) < 2 * MIN;
@@ -70,7 +88,7 @@ async function tick() {
   if (examOn) {
     if (!gate) {
       // The page's "loaded" message waits behind this event (serial), so the id is saved before it is read.
-      const t = await api.tabs.create({ url: BS_HOME, active: false, pinned: true });
+      const t = await api.tabs.create({ url: bsHome(st), active: false, pinned: true });
       await set({ gateTab: t.id, gateOpenedAt: now, gateSeen: 0, gates: 0 });
     } else if (now - Math.max(Number(st.gateOpenedAt || 0), Number(st.gateSeen || 0)) > NO_ANSWER_MS) {
       // The exam tab is not running LOCKqz Sync: almost always a Brightspace sign-in page.
@@ -103,14 +121,14 @@ async function tick() {
 
 async function syncNow(asked) {
   const now = Date.now();
-  const st = await get(["gateTab", "tmpTab"]);
+  const st = await get(["gateTab", "tmpTab", "school"]);
   const gate = await tabAlive(st.gateTab);
-  const tabs = gate ? [gate] : await api.tabs.query({ url: BS_URLS });
+  const tabs = gate ? [gate] : await api.tabs.query({ url: bsUrls(st) });
   for (const t of tabs) {
     try { await api.tabs.sendMessage(t.id, { t: "run", force: true }); return; } catch {}   // no content script there: next one
   }
   if (await tabAlive(st.tmpTab)) return;   // one already on its way
-  const t = await api.tabs.create({ url: BS_HOME, active: false });   // its "loaded" waits behind this event (serial)
+  const t = await api.tabs.create({ url: bsHome(st), active: false });   // its "loaded" waits behind this event (serial)
   await set({ tmpTab: t.id, tmpAt: now, tmpAsked: !!asked });
 }
 
@@ -140,6 +158,20 @@ async function handle(msg, sender) {
     return { ok: true };
   }
   if (msg.t === "sync") { await syncNow(true); return { ok: true }; }
+  // The popup connected another school's Brightspace (the professor already allowed that address there), or
+  // went back to USC (school: null). Only the extension's own pages may say so.
+  if (msg.t === "school") {
+    if (!sender || sender.id !== api.runtime.id || !String(sender.url || "").startsWith(api.runtime.getURL(""))) return;
+    if (msg.school !== null && !okSchool(msg.school)) return { ok: false };
+    // Tabs LOCKqz opened at the Brightspace before this one are closed; the next check opens them at the new one.
+    const was = await get(["gateTab", "tmpTab"]);
+    for (const id of [was.gateTab, was.tmpTab]) if (id != null) { try { await api.tabs.remove(id); } catch {} }
+    await set({ school: msg.school, lastRun: 0, welcomed: 0, gateTab: null, tmpTab: null, gates: 0 });
+    const on = await schoolScript();
+    if (msg.school !== null && !on) { await set({ school: null }); return { ok: false }; }
+    const st = await get(["key"]); if (st.key) await syncNow(false);
+    return { ok: true };
+  }
   if (msg.t === "loaded") {
     const st = await get(["key", "base", "gateTab", "tmpTab", "lastRun", "welcomed", "lastSync"]);
     if (!st.key) return {};

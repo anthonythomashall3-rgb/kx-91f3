@@ -37,6 +37,8 @@ Connects a professor's Brightspace courses to LOCKqz so their exams are protecte
 - power: Keeps the professor's computer from going to sleep only while one of their protected exams is running, so students can open and finish the exam; released as soon as the exam ends.
 - Host permission brightspace.usc.edu / usc.brightspace.com: Reads the professor's own courses, class lists and quizzes from Brightspace and sets each protected exam's password, using the professor's own Brightspace sign-in.
 - Host permission professor.lockqz.com / lockqz.com: Connects to the professor's LOCKqz dashboard and the LOCKqz service.
+- scripting: Used only when a professor at another school connects their own school's Brightspace address in the extension's popup: it runs the same LOCKqz script on that one address that the package already runs on USC's Brightspace. No remote code.
+- Optional host permission https://*/* (asked for one address at a time, only when the professor types their school's Brightspace address and presses Connect): every school has its own Brightspace address, so the list cannot be fixed in the package. The extension checks that the address is a Brightspace before using it and never asks for any other site.
 
 ## Remote code
 No, I am not using remote code. (All code is inside the package.)

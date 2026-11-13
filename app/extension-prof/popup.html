@@ -21,6 +21,9 @@
     <div id="next" class="nx" hidden></div>
     <div class="mu"><b style="color:#1a1a1a">Exam day:</b> keep this browser open on Brightspace.</div>
     <div class="bt"><button id="dash">Open dashboard</button><button id="sync" class="p">Sync now</button></div>
+    <details class="mu" id="sch"><summary style="cursor:pointer;font-weight:600;color:#1a1a1a">Brightspace: <span id="schname">USC</span></summary>
+      <div style="display:flex;gap:6px;margin-top:6px"><input id="schin" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="yourschool.brightspace.com" aria-label="Your school's Brightspace address" style="flex:1;min-width:0;border:1px solid #e6e3dc;border-radius:8px;padding:8px 9px;font:inherit;font-size:13px"><button id="schgo" class="p" style="flex:0 0 auto">Connect</button></div>
+      <div id="schmsg" class="mu" style="margin-top:6px" role="status"></div></details>
     <details class="mu"><summary style="cursor:pointer;font-weight:600;color:#1a1a1a">If LOCKqz is down</summary>
       <ol style="margin:6px 0 0;padding-left:18px;line-height:1.5"><li>Brightspace &rarr; Quizzes &rarr; the exam &rarr; Edit.</li><li>Restrictions: turn off "only users with special access", clear the password and any IP limit.</li><li>Save. Students open the exam without LOCKqz.</li></ol></details>
   </div>
