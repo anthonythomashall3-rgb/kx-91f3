@@ -8,6 +8,7 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 
 ## Working now
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
+- 2026-11-13 07:20 PT — ACTIVE 01UUDg7bsaVV (13 Nov, pay page after setup, apps 0.6.22): app/cloudflare/functions/api/[[route]].js (/verify status), app/cloudflare/wrangler.toml (PAY_NUDGE_HOURS), app/mac/lockqz-agent.py, app/linux/lockqz-agent.py, app/windows/lockqz-agent.ps1, app/tests/test_pay_after_setup.{mjs,py}, app/tests/run_all.sh, app/VERSION, lockqzd.py / lockqzd.ps1 (version).
 
 ## Recently finished
 - 2026-11-13 06:40 PT — 01UUDg7bsaVV: sweep 23, apps 0.6.21 (Mac / Linux helper). The admin's computer (developer mode) looks for signed updates like every other one whenever it is not in a quiz. Tests: test_sweep22.py R4 (10). Files: app/mac/lockqzd.py, app/tests/test_sweep22.py, app/VERSION, lockqzd.ps1 (version).
