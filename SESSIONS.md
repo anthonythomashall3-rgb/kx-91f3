@@ -8,6 +8,7 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 
 ## Working now
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
+- 2026-11-13 03:50 PT — ACTIVE 01UUDg7bsaVV (13 Nov, sweep 21, apps 0.6.19): app/android/app/src/main/java/app/lockqz/DnsVpnService.kt, app/android/app/src/test/java/app/lockqz/UnitTests.kt, app/tests/test_android.py, app/VERSION, app/mac/lockqzd.py + app/windows/lockqzd.ps1 (version only).
 
 ## Recently finished
 - 2026-11-12 22:00 PT — 01UUDg7bsaVV: Chrome Web Store upload ends green when the package's version is already in the store (app/extension-prof/cws-publish.mjs). Firefox 1.0.8 is Mozilla-signed and live; lockqz.com has its _dmarc record.
