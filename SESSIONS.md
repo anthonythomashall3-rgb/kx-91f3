@@ -8,6 +8,7 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 
 ## Working now
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
+- 2026-11-13 09:00 PT — ACTIVE 01UUDg7bsaVV (13 Nov, pay page without the emailed link): app/cloudflare/functions/api/[[route]].js (/pay/start, /pay/stripe), app/cloudflare/public/pay.html, app/tests/test_round3_api.mjs, app/tests/test_pay_after_setup.mjs.
 
 ## Recently finished
 - 2026-11-13 09:30 PT — 01UUDg7a: plain server: a school is added while it runs. app/server/add-school.mjs (checks the address is a Brightspace, writes data/schools.json), 'systemctl reload lockqz-api' replaces the server processes one at a time with no request lost; a one-school server's database becomes data/schools/usc.db. test_server_add_school.mjs (29 checks) in run_all.sh.
