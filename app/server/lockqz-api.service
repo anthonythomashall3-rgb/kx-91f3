@@ -9,6 +9,7 @@ Wants=network-online.target
 User=lockqz
 WorkingDirectory=/opt/lockqz/app/server
 ExecStart=/usr/local/bin/node --no-warnings server.mjs
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=2
 NoNewPrivileges=true

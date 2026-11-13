@@ -70,3 +70,15 @@ address in it (a quiz's address, or the Sync's); the professor sign-in or Sync k
 computer that signed it; the email domain in it; otherwise the default school. The clock calls (`/cron`,
 `/pay/tick`) run for every school. `schools.mjs` holds the rules; `test_server_schools.mjs` checks them.
 Without a `schools.json` the server is one school with one database (`data/lockqz.db`).
+
+### Adding a school while the server runs
+
+    sudo -u lockqz node add-school.mjs --name "State University" --brightspace learn.stateu.edu --domain stateu.edu
+    sudo systemctl reload lockqz-api
+
+`add-school.mjs` checks that the address answers as a Brightspace, refuses an id, address or email domain
+another school already has, and writes `data/schools.json`. The reload reads the settings again and replaces
+the server processes one at a time (each only once its replacement answers), so no request is lost. On a
+server that had one school so far, that school is written down first and its database becomes
+`data/schools/usc.db`. A `schools.json` that does not load leaves the running server as it is.
+`test_server_add_school.mjs` checks all of this.

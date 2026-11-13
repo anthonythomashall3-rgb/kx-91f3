@@ -85,6 +85,7 @@ run "Plain server (app/server): the same API over real HTTP on a SQLite file, da
 run "Plain server, several schools: one database per school, requests handed to the right school" node --no-warnings test_server_schools.mjs
 run "Exam day with a full-size database: fee on, professors and admin at work, no whole-table reads" node --no-warnings test_scale_full.mjs
 run "Plain server on every processor: three server processes, one port, one database file" node --no-warnings test_server_workers.mjs
+run "Plain server: a school is added while it runs (own database, reload loses no request)" node --no-warnings test_server_add_school.mjs
 run "Microsoft Store button by itself + automatic Store submissions; Firefox package signed by Mozilla" node --no-warnings test_store_ff.mjs
 run "Apple Developer ID: Mac installer signing + notarization wiring, signed package never replaced" bash test_signing_mac.sh
 run "Download page on a Mac: Apple-signed installer = one download, command one click away (real Chromium)" node --no-warnings test_download_mac.mjs

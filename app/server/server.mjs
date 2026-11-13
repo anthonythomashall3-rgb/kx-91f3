@@ -7,7 +7,7 @@ import cluster from "node:cluster";
 import os from "node:os";
 import tls from "node:tls";
 import { Duplex } from "node:stream";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync, renameSync, rmSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -98,6 +98,13 @@ export function prepare(opts = {}) {
   const { cf, data, multiCfg } = settings(opts), applied = {};
   const files = multiCfg ? multiCfg.list.map(x => [x.id, join(data, "schools", x.id + ".db")]) : [["lockqz", opts.dbFile || join(data, "lockqz.db")]];
   if (multiCfg) mkdirSync(join(data, "schools"), { recursive: true });
+  // The first time a server with one school gets a schools.json: its database becomes the default school's.
+  const single = join(data, "lockqz.db"), first = multiCfg && join(data, "schools", multiCfg.default + ".db");
+  if (multiCfg && !opts.dbFile && existsSync(single) && !existsSync(first)) {
+    const d = openDb(single); try { d.sqlite.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } finally { d.close(); }
+    renameSync(single, first); for (const x of ["-wal", "-shm"]) { try { rmSync(single + x); } catch {} }
+    console.log(`the database is now school "${multiCfg.default}" (data/schools/${multiCfg.default}.db)`);
+  }
   for (const [id, f] of files) { const d = openDb(f); try { applied[id] = migrate(d, cf); } finally { d.close(); } }
   return applied;
 }
@@ -229,11 +236,33 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       console.error(`server process ${b.id} stopped (code ${code}); starting it again`);
       setTimeout(() => fork(b.id), Date.now() - b.at < 5000 ? 2000 : 100); });   // a process that dies at once is not restarted in a tight loop
     for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { stopping = true; for (const w of Object.values(cluster.workers)) w.process.kill("SIGTERM"); setTimeout(() => process.exit(0), 4000).unref(); });
+    // "systemctl reload lockqz-api" (after add-school.mjs, or a settings change): the settings are read again and
+    // the server processes are replaced one at a time, each only once its replacement answers. No request is lost.
+    let reloading = false;
+    process.on("SIGHUP", async () => {
+      if (reloading || stopping) return; reloading = true;
+      try {
+        try { prepare(); } catch (e) { console.error("reload: not done, the settings do not load: " + e.message); return; }
+        for (const old of Object.values(cluster.workers)) {
+          const b = born.get(old.id); if (!b) continue;
+          born.delete(old.id);   // its exit is expected
+          const w = cluster.fork({ LOCKQZ_WORKER: String(b.id) }); born.set(w.id, { id: b.id, at: Date.now() });
+          const up = await new Promise(ok => { const t = setTimeout(() => ok(false), 60000); w.once("listening", () => { clearTimeout(t); ok(true); }); w.once("exit", () => { clearTimeout(t); ok(false); }); });
+          if (!up) { born.set(old.id, b); console.error(`reload: server process ${b.id} did not come up again; the running one stays`); born.delete(w.id); try { w.process.kill("SIGTERM"); } catch {} return; }
+          // The old process takes no new requests, finishes the ones it has, then stops (10 s at most).
+          const gone = new Promise(ok => old.once("exit", ok)); try { old.disconnect(); } catch {}
+          const t = setTimeout(() => { try { old.process.kill("SIGTERM"); } catch {} }, 10000); await gone; clearTimeout(t);
+        }
+        console.log("reload: done");
+      } finally { reloading = false; }
+    });
   } else {
     const s = await start();
     console.log(`LOCKqz API ${s.env.LOCKQZ_BUILD || ""} on ${s.server.address().address}:${s.port}` + (want > 1 ? ` (process ${s.env.LOCKQZ_WORKER})` : "") + (s.applied.length ? `, applied ${s.applied.length} database steps` : ""));
     if (String(s.env.REQUIRE_SIGNED || "") !== "1") console.log("warning: REQUIRE_SIGNED is not 1");
     if (!String(s.env.ROT_SECRET || s.env.TEACHER_KEY || "").trim()) console.log("warning: no ROT_SECRET / TEACHER_KEY in lockqz.env - the API answers 503 not_configured until one is set");
     for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, async () => { await s.close(); process.exit(0); });
+    // One server process: a reload is a clean stop; the service starts it again with the new settings.
+    if (cluster.isPrimary) process.on("SIGHUP", async () => { await s.close(); process.exit(0); });
   }
 }
