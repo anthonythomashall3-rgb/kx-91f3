@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-13 13:20 PT — 01UUDg7a: several schools on the Cloudflare site itself: app/cloudflare/functions/api/_middleware.js (new), app/cloudflare/migrate_042_who.sql (new), app/cloudflare/functions/api/[[route]].js (only MAIL.invite / MAIL.welcome 'Open Brightspace' address + their 3 call sites), app/tests/test_cf_schools.mjs (new), one line in app/tests/run_all.sh, app/cloudflare/SCHOOLS.md (new).
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
 
 ## Recently finished
