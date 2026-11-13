@@ -9,6 +9,7 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 ## Working now
 - 2026-11-13 04:35 PT — 01UUDg7a: one-time hand-over of the site settings to the plain server: a temporary route in app/cloudflare/functions/api/[[route]].js (one block before /version), removed again within the hour. Touches nothing else.
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
+- 2026-11-13 06:10 PT — ACTIVE 01UUDg7bsaVV (13 Nov, sweep 23, apps 0.6.21): app/mac/lockqzd.py, app/tests/test_sweep22.py, app/VERSION, app/windows/lockqzd.ps1 (version only).
 
 ## Recently finished
 - 2026-11-13 05:50 PT — 01UUDg7bsaVV: removed .github/workflows/dns.yml (the _dmarc record is in place, set in Cloudflare; the repo's token does not edit DNS).
