@@ -80,12 +80,42 @@ export async function onRequest(context) {
   const fresh = () => new Request(request.url, { method: request.method, headers, body: raw.byteLength ? raw : undefined });
   const run = (s, req) => { const e = envOf(s); return e.DB ? api({ ...context, request: req, env: e }) : json({ error: "school not set up", school: s.id }, 503); };
 
+  // A payment code (LQ… a professor's, LQS… a student's) belongs to the school that gave it out.
+  const CODE = /\bLQS?[A-Z0-9]{5}\b/, codeIn = t => (CODE.exec(String(t || "").toUpperCase()) || [])[0] || "";
+  async function schoolOfCode(code) {
+    if (!code) return null;
+    const k = await known("code", code); if (k) return k;
+    for (const s of cfg.byId.values()) { const d = dbOf(s.id); if (!d) continue;
+      try { if (await d.prepare("SELECT 1 AS x FROM pay_codes WHERE code=? UNION ALL SELECT 1 FROM pay_codes_students WHERE code=? LIMIT 1").bind(code, code).first()) { await learn("code", code, s.id); return s.id; } } catch {} }
+    return null;
+  }
+  const mailIn = t => (String(t || "").match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/) || [])[0] || "";
+  const schoolOfPayment = async x => (await schoolOfCode(codeIn(`${x?.note || ""} ${x?.subject || ""} ${x?.code || ""}`))) || byDomain(cfg.domains, domainOf(mailIn(x?.note))) || cfg.default;
+
   const named = low(headers.get("x-lockqz-school") || "");
   if (named && !cfg.byId.has(named)) return json({ error: "unknown school" }, 400);
   if (EVERY.has(path) && !named) {   // one call for all schools; with many schools the caller names each school in turn
     let first = null;
     for (const s of cfg.byId.values()) { const r = await run(s, fresh()); if (s.id === cfg.default || !first) first = r; }
     return first;
+  }
+
+  // Payment notices (the bank-mail script): each payment goes to the school its code belongs to; one without a
+  // known code goes to the first school, where the admin sees it for review.
+  if (path === "/pay/notify" && request.method === "POST" && !named) {
+    const many = Array.isArray(body.payments), list = many ? body.payments.slice(0, 100) : [body];
+    const where = []; for (const x of list) where.push(await schoolOfPayment(x));
+    const ids = [...new Set(where)];
+    if (ids.length <= 1) return run(cfg.byId.get(ids[0] || cfg.default), request);
+    const results = new Array(list.length).fill(null);
+    for (const id of ids) {
+      const idx = where.map((w, i) => w === id ? i : -1).filter(i => i >= 0);
+      const r = await run(cfg.byId.get(id), new Request(request.url, { method: "POST", headers, body: JSON.stringify({ ...(many ? body : {}), payments: idx.map(i => list[i]) }) }));
+      if (r.status !== 200) return r;
+      let j = null; try { j = await r.json(); } catch {}
+      idx.forEach((i, n) => { results[i] = j && Array.isArray(j.results) ? j.results[n] ?? null : null; });
+    }
+    return json({ results }, 200);
   }
 
   // Which school is this request for? Most certain first.
@@ -96,7 +126,10 @@ export async function onRequest(context) {
     if (h) { const s = cfg.hosts.get(h); if (s) { school = s; by = "brightspace"; } else if (hostOf(body.url)) by = "other_school"; } }
   if (!school && !by) for (const [kind, v] of [["teacher", headers.get("x-lockqz-teacher")], ["sync", headers.get("x-lockqz-sync")]]) { const s = await known(kind, v); if (s) { school = s; by = kind; break; } }
   if (!school && !by) { const s = await known("device", dev); if (s) { school = s; by = "device"; } }
-  if (!school && !by) for (const e of [body.email, body.student]) { const s = byDomain(cfg.domains, domainOf(e)); if (s) { school = s; by = "email"; break; } }
+  if (!school && !by) {   // a payment code: Stripe's confirmation carries it, so do the pay pages
+    const o = body?.data?.object || {}, c = codeIn(`${body.code || ""} ${url.searchParams.get("code") || ""} ${o.metadata?.code || ""} ${o.client_reference_id || ""}`);
+    const sc = await schoolOfCode(c); if (sc) { school = sc; by = "code"; } }
+  if (!school && !by) for (const e of [body.email, body.student, url.searchParams.get("email")]) { const s = byDomain(cfg.domains, domainOf(e)); if (s) { school = s; by = "email"; break; } }
   // A quiz at a Brightspace that is no school here: the computer's own school says so ("other school").
   if (!school && by === "other_school") school = await known("device", dev);
   if (!school) { school = cfg.default; by = by || "default"; }

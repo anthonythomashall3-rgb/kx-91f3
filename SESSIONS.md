@@ -7,10 +7,10 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-11-13 15:15 PT — 01UUDg7a: payments find their school by the payment code (several schools on the Cloudflare site; no change for one school): app/cloudflare/functions/api/_middleware.js, app/tests/test_cf_schools.mjs, app/cloudflare/SCHOOLS.md.
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
 
 ## Recently finished
+- 2026-11-13 15:40 PT — 01UUDg7a: with several schools, payments find their school by the payment code (bank-mail notices split per school, Stripe confirmation and pay pages routed by code; no code = first school, for review). No change for one school. test_cf_schools.mjs S6 (35 checks in the file).
 - 2026-11-13 14:30 PT — 01UUDg7a: several schools on the Cloudflare site itself: functions/api/_middleware.js picks each request's school (own D1 database per school, binding DB_<ID>, setting SCHOOLS); does nothing while there is one school. add-school.py + SCHOOLS.md; deploy.sh applies schema and migrations to every database in wrangler.toml; emails name the school's own Brightspace. test_cf_schools.mjs (28 checks).
 - 2026-11-13 12:45 PT — 01UUDg7a: app/server/backup.sh: nightly encrypted copies of the plain server's databases to a private repository (seven rotate by weekday); installed and read back once on the machine.
 - 2026-11-13 12:00 PT — 01UUDg7a: .github/workflows/server-watch.yml asks the plain server every 15 minutes; three misses fail the run and GitHub emails the owner.

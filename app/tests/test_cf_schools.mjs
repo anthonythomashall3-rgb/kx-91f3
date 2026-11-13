@@ -101,6 +101,28 @@ const w0 = count(usc, "SELECT COUNT(*) n FROM who");
 await call("/me", { headers: { "X-LOCKqz-Teacher": ps.data.token } }); await signed(a, "/covered", { url: SU, device_id: a.id });
 check("requests from known people write nothing new to the directory", count(usc, "SELECT COUNT(*) n FROM who") === w0);
 
+console.log("S6 payments find their school");
+{ const PAYH = { "X-LOCKqz-Pay": "pay-secret-0123456789" }, fee = { STUDENT_FEE_FROM: "2020-01-01" }, envFee = { ...base, ...fee, SCHOOLS };
+  const st = await call("/pay/start", { body: { email: "sam@stateu.edu" }, env: envFee }), us = await call("/pay/start", { body: { email: "uma@usc.edu" }, env: envFee });
+  const cS = st.data?.code, cU = us.data?.code;
+  check("each student gets a payment code from their own school", /^LQS/.test(String(cS)) && /^LQS/.test(String(cU)) && count(stateu, "SELECT COUNT(*) n FROM pay_codes_students WHERE code=?", cS) === 1 && count(usc, "SELECT COUNT(*) n FROM pay_codes_students WHERE code=?", cU) === 1 && count(usc, "SELECT COUNT(*) n FROM pay_codes_students WHERE code=?", cS) === 0, JSON.stringify([st, us]).slice(0, 300));
+  const amt = Number(st.data?.amount || st.data?.total || 200);
+  const n = await call("/pay/notify", { env: envFee, headers: PAYH, body: { payments: [
+    { txn: "z-1", amount: amt, note: "lockqz " + cS, via: "zelle", payer: "Sam" },
+    { txn: "z-2", amount: amt, note: cU, via: "zelle", payer: "Uma" },
+    { txn: "z-3", amount: 5, note: "thanks", via: "zelle", payer: "Nobody" } ] } });
+  const pay = (db, txn) => db.sqlite.prepare("SELECT code FROM payments WHERE txn=?").get(txn);
+  check("one notice with payments for two schools: each lands in its school", n.status === 200 && n.data?.results?.length === 3 && pay(stateu, "z-1")?.code === cS && !pay(usc, "z-1") && pay(usc, "z-2")?.code === cU && !pay(stateu, "z-2"), JSON.stringify(n).slice(0, 400));
+  check("the answers come back in the order sent", n.data?.results?.[0]?.ok === true && n.data?.results?.[1]?.ok === true && !!n.data?.results?.[2], JSON.stringify(n.data?.results).slice(0, 300));
+  check("a payment with no code goes to the first school for review", !!pay(usc, "z-3") && !pay(stateu, "z-3"));
+  const again = await call("/pay/notify", { env: envFee, headers: PAYH, body: { txn: "z-1", amount: amt, note: cS, via: "zelle" } });
+  check("the same payment told twice counts once", again.status === 200 && count(stateu, "SELECT COUNT(*) n FROM payments WHERE txn='z-1'") === 1 && count(usc, "SELECT COUNT(*) n FROM payments WHERE txn='z-1'") === 0, JSON.stringify(again).slice(0, 200));
+  const noKey = await call("/pay/notify", { env: envFee, body: { txn: "z-9", amount: amt, note: cS } });
+  check("a notice without the secret is refused at every school", noKey.status === 401 && !pay(stateu, "z-9") && !pay(usc, "z-9"));
+  const stat = await call("/pay/status?email=sam%40stateu.edu&code=" + cS, { env: envFee });
+  check("the pay page's status question reaches the student's school", stat.status === 200 && stat.data?.paid === true, JSON.stringify(stat).slice(0, 200));
+}
+
 console.log("S5 add-school.py writes a setting the site loads");
 { const { execFileSync } = await import("node:child_process");
   const toml = join(tmp, "wrangler.toml"); writeFileSync(toml, readFileSync(join(CF, "wrangler.toml")));

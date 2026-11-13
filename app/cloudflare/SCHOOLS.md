@@ -22,6 +22,13 @@ In `SCHOOLS`, a school's `"env": { ... }` overrides any setting for that school 
 dates (`TERM_DATES`) or prices. Its Brightspace addresses, the address the emails name, and its Google sign-in
 domain come from the school's entry by themselves.
 
+## Payments
+
+A payment code belongs to the school that gave it out. A bank-mail notice (`/api/pay/notify`) may carry
+payments for several schools: each is recorded at its own school and the answers come back in the order sent.
+Stripe's confirmation and the pay pages are routed by the code they carry. A payment with no known code goes to
+the first school, where the admin sees it for review.
+
 ## The clock
 
 `/api/cron` and `/api/pay/tick` reach every school in one call. With many schools, call them once per school
