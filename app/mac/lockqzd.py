@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.6.20"
+VERSION = "0.6.21"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -828,8 +828,9 @@ def check_update():
     """Signed self-update; only while no quiz is locked. Returns True when an update was installed.
     A bad signature, hash, file name or download leaves the install untouched. Never raises."""
     if not UPDATE_OK or not UPDATE_URL or not os.path.isfile(PUBKEY): return False
-    # Never download during a quiz (no traffic, no CPU, nothing swapped while the student works).
-    if STATE["state"] != "unlocked" or STATE["quiz_id"]: return False
+    # Never download during a quiz (no traffic, no CPU, nothing swapped while the student works). The admin's
+    # computer (developer mode) updates like every other one whenever it is not in a quiz.
+    if STATE["state"] not in ("unlocked", "developer") or STATE["quiz_id"]: return False
     stage = os.path.join(UPDATE_DIR, ".update")
     try:
         body = _fetch(UPDATE_URL + "/update.json", 200_000)
@@ -860,7 +861,7 @@ def check_update():
                 log("update: SHA-256 mismatch for %s - ignored" % name); shutil.rmtree(stage, ignore_errors=True); return False
             with open(os.path.join(stage, name), "wb") as f: f.write(data)
         with LOCK:
-            if STATE["state"] != "unlocked" or STATE["quiz_id"]:
+            if STATE["state"] not in ("unlocked", "developer") or STATE["quiz_id"]:
                 log("update: quiz in progress - deferred"); shutil.rmtree(stage, ignore_errors=True); return False
             # Rollback kit (lockqz-boot.sh uses it): the files this update replaces, the names it adds,
             # and a .pending marker the NEW helper clears once it answers /status. A helper that keeps

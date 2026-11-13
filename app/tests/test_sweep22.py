@@ -3,6 +3,7 @@
   R1 an unlock that is still waiting for the server's answer never ends ANOTHER quiz locked meanwhile;
   R2 the helper's watcher keeps running after a cycle that failed (full disk, a broken file): the block is still
      re-applied, the safety cap still ends a lock, heartbeats continue;
+  R4 the admin's computer (developer mode) looks for updates like every other one when it is not in a quiz;
   R3 300 mixed control requests from 12 callers at once: every one is answered, the helper's state and the block
      always agree at the end, the lock record on disk matches.
 """
@@ -123,6 +124,16 @@ check("the engine never ran twice at the same time", ENG["overlap"] == 0, str(EN
 check("at the end the helper's state, the block and the lock record on disk agree",
       (st["state"] == "locked") == ENG["up"] and ((rec is not None and rec.get("quiz_id") == st["quiz_id"]) if st["state"] == "locked" else rec is None),
       "state %s quiz %s block %s record %s" % (st["state"], st["quiz_id"], ENG["up"], rec))
+
+print("R4 the admin's computer (developer mode) updates too")
+asked = []
+def fake_fetch(url, limit=0): asked.append(url); raise OSError("no network in this test")
+D._fetch = fake_fetch; D.UPDATE_OK = True; D.UPDATE_URL = "https://example.invalid/download"; D.PUBKEY = bl; D.UPDATE_DIR = TMP
+def tries(state, quiz):
+    asked.clear(); D.STATE.update(state=state, quiz_id=quiz); D.check_update(); return len(asked) > 0
+check("an idle student computer looks for an update; one in a quiz does not", tries("unlocked", None) and not tries("locked", "700-1"))
+check("the admin's computer looks for an update when it is not in a quiz, and not while it is in one", tries("developer", None) and not tries("developer", "700-1"))
+D.STATE.update(state="unlocked", quiz_id=None)
 srv.shutdown()
 print("\nRESULT: %d passed, %d failed" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)
