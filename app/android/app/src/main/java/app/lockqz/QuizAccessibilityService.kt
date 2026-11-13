@@ -87,6 +87,7 @@ class QuizAccessibilityService : AccessibilityService() {
     private val capped = java.util.concurrent.ConcurrentHashMap<String, Long>()   // released quiz id -> last time its page was seen
     private val browsers = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()   // every app that opens https links
     @Volatile private var otherProfileTold = false
+    @Volatile private var pdnsTold = false               // Private DNS already reported for this lock
 
     override fun onServiceConnected() {
         instance = this
@@ -164,7 +165,7 @@ class QuizAccessibilityService : AccessibilityService() {
         if (!DnsVpnService.running) { try { DnsVpnService.start(this) } catch (e: Exception) { Log.w(TAG, "vpn start: $e") }; Thread.sleep(1500) }
         if (!DnsVpnService.running) { notifyOnce("vpn", "LOCKqz is off", "Open LOCKqz and allow the AI block (VPN) to get the quiz password."); return }
         DnsVpnService.setBlocklist(Api.blocklist(this))
-        DnsVpnService.locked = true; quiz = id; quizUrl = url; lastSeen = System.currentTimeMillis(); missingSince = 0; pwShown = null; held = false; holdUntil = 0; askFailSince = 0; pwNext = 0
+        DnsVpnService.locked = true; quiz = id; quizUrl = url; lastSeen = System.currentTimeMillis(); missingSince = 0; pwShown = null; held = false; holdUntil = 0; askFailSince = 0; pwNext = 0; pdnsTold = false
         getSharedPreferences("lockqz", Context.MODE_PRIVATE).edit().putString("locked_quiz", id).apply()
         checkOtherProfiles(id)
         Log.i(TAG, "locked $id")
@@ -196,7 +197,7 @@ class QuizAccessibilityService : AccessibilityService() {
     private fun password(url: String, id: String, quiet: Boolean = false) {
         if (quiz != id) return
         privateDnsOn()?.let { srv ->
-            if (!quiet) { Api.report(this, "tamper", id, JSONObject().put("detail", "private_dns:$srv")); notifyOnce("pdns", "Turn Private DNS off", "Settings > Network & internet > Private DNS > Off. LOCKqz gives you the quiz password once it is off.") }
+            if (!quiet) { pdnsTold = true; Api.report(this, "tamper", id, JSONObject().put("detail", "private_dns:$srv")); notifyOnce("pdns", "Turn Private DNS off", "Settings > Network & internet > Private DNS > Off. LOCKqz gives you the quiz password once it is off.") }
             main.postDelayed({ if (quiz == id && pwShown == null) exec.execute { password(quizUrl ?: url, id) } }, 15_000); return
         }
         val (code, j) = Api.password(this, url)
@@ -236,6 +237,10 @@ class QuizAccessibilityService : AccessibilityService() {
     }
 
     private fun beat(id: String) {
+        // Private DNS switched on in the middle of the quiz: the professor is told once, the student is told how to undo it.
+        val srv = privateDnsOn()
+        if (srv == null) pdnsTold = false
+        else if (!pdnsTold) { pdnsTold = true; Api.report(this, "tamper", id, JSONObject().put("detail", "private_dns:$srv")); notify("Turn Private DNS off", "Settings > Network & internet > Private DNS > Off. Your professor sees that it is on.", important = true) }
         val (_, j) = Api.report(this, "heartbeat", id)
         if (j?.optBoolean("unlock") == true) release(id, j.optString("reason", "quiz_ended"))
     }

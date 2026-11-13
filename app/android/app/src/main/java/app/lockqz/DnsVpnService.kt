@@ -56,7 +56,13 @@ class DnsVpnService : VpnService() {
         val DOH_NETS6 = listOf("2a07:a8c0::" to 32, "2a07:a8c1::" to 32, "2a0d:2a00:1::" to 48, "2a0d:2a00:2::" to 48)   // NextDNS, CleanBrowsing
         fun start(c: Context) { c.startForegroundService(Intent(c, DnsVpnService::class.java).setAction(ACTION_START)) }
         fun stop(c: Context) { c.startForegroundService(Intent(c, DnsVpnService::class.java).setAction(ACTION_STOP)) }
-        fun setBlocklist(hosts: List<String>) { blocked = hosts.map { it.lowercase() }.toSet() }
+        // Whole domains under which anyone can put up a chat proxy or a tunnel to a model at home - the same list
+        // the computers block during a quiz (never pages.dev: LOCKqz itself lives there).
+        val WILD_DOMAINS = listOf("openai.azure.com", "cognitiveservices.azure.com", "services.ai.azure.com", "inference.ai.azure.com", "ai.azure.com",
+            "workers.dev", "hf.space", "modal.run", "vercel.app", "fly.dev", "replit.dev", "replit.app", "repl.co",
+            "ngrok.io", "ngrok-free.app", "ngrok.app", "ngrok.dev", "ngrok-free.dev", "trycloudflare.com", "loca.lt", "serveo.net",
+            "localhost.run", "pinggy.link", "pinggy.io", "zrok.io", "learnwise.ai", "forethought.ai")
+        fun setBlocklist(hosts: List<String>) { blocked = (hosts.map { it.lowercase() } + WILD_DOMAINS).toSet() }
         /** Is this name (or a parent domain of it) on the list? */
         fun isBlocked(name: String): Boolean {
             if (!locked) return false

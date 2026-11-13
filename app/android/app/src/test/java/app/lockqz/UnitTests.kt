@@ -39,6 +39,13 @@ class UnitTests {
         assertFalse(DnsVpnService.isBlocked("notopenai.com")); assertFalse(DnsVpnService.isBlocked("brightspace.com"))
         DnsVpnService.locked = false; assertFalse(DnsVpnService.isBlocked("chat.openai.com"))
     }
+    @Test fun wholeDomainsAreBlockedDuringAQuiz() {
+        DnsVpnService.setBlocklist(listOf("openai.com")); DnsVpnService.locked = true
+        for (h in listOf("my-chat.workers.dev", "x.y.vercel.app", "abc123.trycloudflare.com", "school.openai.azure.com", "a.ngrok-free.app", "space.hf.space"))
+            assertTrue(h, DnsVpnService.isBlocked(h))
+        for (h in listOf("lockqz.pages.dev", "brightspace.usc.edu", "myworkers.dev", "vercel.com")) assertFalse(h, DnsVpnService.isBlocked(h))
+        DnsVpnService.locked = false; assertFalse(DnsVpnService.isBlocked("my-chat.workers.dev"))
+    }
     @Test fun quizUrls() {
         val c = QuizAccessibilityService
         val attempt = "https://usc.brightspace.com/d2l/lms/quizzing/user/attempt/quiz_start_frame_auto.d2l?ou=123&isprv=0&qi=456"

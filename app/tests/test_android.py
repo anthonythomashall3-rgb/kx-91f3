@@ -57,6 +57,16 @@ check("block only while locked; parent domains match", "if (!locked) return fals
 check("VPN revoked -> watcher told", "override fun onRevoke()" in d and "onRevoked?.invoke()" in d and '"vpn_revoked"' in q)
 check("same protocol as the helpers: HMAC headers, register, platform tag android-", all(x in rd("app/src/main/java/app/lockqz/Api.kt") for x in ['"POST\\n${url.path}\\n$ts\\n${sha256Hex(raw)}"', "X-LOCKqz-Sig", '"/register"', '"android-']))
 
+_k = rd("app/src/main/java/app/lockqz/DnsVpnService.kt")
+_wa = set(re.findall(r'"([a-z0-9.-]+)"', re.search(r"val WILD_DOMAINS = listOf\(([^)]*)\)", _k).group(1)))
+_wm = set(re.search(r"WILD_DOMAINS=\(([^)]*)\)", open(os.path.join(APP, "mac", "extra-block.sh")).read()).group(1).replace("\\", " ").split())
+check("the phone blocks the same whole domains as the computers during a quiz (27, never pages.dev), on top of the served list",
+      _wa == _wm and len(_wa) == 27 and "pages.dev" not in _wa and "(hosts.map { it.lowercase() } + WILD_DOMAINS).toSet()" in _k
+      and "wholeDomainsAreBlockedDuringAQuiz" in rd("app/src/test/java/app/lockqz/UnitTests.kt"), sorted(_wa ^ _wm))
+_q = rd("app/src/main/java/app/lockqz/QuizAccessibilityService.kt")
+check("Private DNS switched on in the middle of a quiz is reported with the heartbeat, once per lock",
+      re.search(r"private fun beat\(id: String\) \{[^}]*val srv = privateDnsOn\(\)[^}]*if \(srv == null\) pdnsTold = false[^}]*else if \(!pdnsTold\) \{ pdnsTold = true; Api\.report\(this, \"tamper\", id, JSONObject\(\)\.put\(\"detail\", \"private_dns:\$srv\"\)\)", _q, re.S) is not None
+      and "askFailSince = 0; pwNext = 0; pdnsTold = false" in _q)
 print("A5 site + CI")
 idx = open(os.path.join(APP, "cloudflare/public/index.html")).read(); guard = open(os.path.join(APP, "cloudflare/functions/download/[[path]].js")).read()
 rel = open(os.path.join(APP, "..", ".github/workflows/release.yml")).read()
