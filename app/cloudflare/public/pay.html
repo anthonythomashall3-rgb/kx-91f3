@@ -149,13 +149,16 @@ async function bankDetails(email){ const b = $("bsend"); b.disabled = true; b.in
   b.disabled = false; b.textContent = d.sent ? "Sent ✓ Check " + email : "Email me the bank details";
   $("bmsg").textContent = d.error ? d.error : d.paid ? "Already paid." : "Sent to " + email + ". Send the amount with memo " + (who ? who.code : "") + ". Access turns on by itself when the money arrives."; }
 // Polling: 10 s, slowing to 60 s; stops after 15 min or while the tab is hidden ("Check again" restarts it).
-let poll = null, polls = 0, since = 0, who = null;
+// Back from the card checkout (FAST): every 1.5 s for the first 20 s, so "paid" shows the moment the card is charged.
+// Paying by Zelle / Venmo (PAYING: memo copied, Venmo opened): every 8 s for 10 minutes, so the page follows the match.
+let poll = null, polls = 0, since = 0, who = null, FAST = false;
 function stopPoll(){ clearTimeout(poll); poll = null; }
 function schedule(){ stopPoll();
   if (document.visibilityState === "hidden") return;
   if (Date.now() - since > 15 * 60000) { $("wait").textContent = "Paid already? Check again."; return; }
   if (!PAYING) { $("wait").innerHTML = ""; } else if (!/lqload/.test($("wait").innerHTML || "")) $("wait").innerHTML = WAITING();
-  poll = setTimeout(check, Math.min(60000, 10000 * Math.pow(1.5, polls++))); }
+  const age = Date.now() - since;
+  poll = setTimeout(check, FAST && age < 20000 ? 1500 : PAYING && age < 600000 ? 8000 : Math.min(60000, 10000 * Math.pow(1.5, polls++))); }
 const WAITING = () => lqL("Processing your payment", "This should take no longer than a minute");
 function startPoll(){ polls = 0; since = Date.now(); $("wait").innerHTML = PAYING ? WAITING() : ""; schedule(); }
 function showGot(got, due, paidMoney){ got = Number(got) || 0; $("got").hidden = !(got > 0); if (!(got > 0)) return;
@@ -217,7 +220,8 @@ async function stripe(email, method, btn){
   $("err").hidden = true; const b = btn || $(method === "card" ? "cgo" : "ach"), t = b.textContent; b.disabled = true; b.innerHTML = '<span class="spin"></span>' + t;
   let d; try { d = await (await fetch(API + "/pay/stripe", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ email, method, t: TOK }) })).json(); } catch { d = { error:"No connection. Try again." }; }
   if (d.url) { location.href = d.url; return; }
-  b.disabled = false; b.textContent = t; $("err").textContent = d.error || "Try again."; $("err").hidden = false; try { $("err").scrollIntoView({ block: "center", behavior: "smooth" }); } catch {}
+  b.disabled = false; b.textContent = t;
+  if (d.paid || d.processing) { FAST = true; since = Date.now(); polls = 0; stopPoll(); if (d.paid) return check(); schedule(); } $("err").textContent = d.error || "Try again."; $("err").hidden = false; try { $("err").scrollIntoView({ block: "center", behavior: "smooth" }); } catch {}
 }
 function paid(){ stopPoll(); PAYING = false; who = null; $("f").hidden = true; $("pay").hidden = true; $("done").hidden = false; $("keep").hidden = false;
   if (UNTIL) { $("until").textContent = new Date(UNTIL + "T12:00:00").toLocaleDateString("en-US", { month:"long", day:"numeric", year:"numeric" }); $("untilp").hidden = false; } }
@@ -231,7 +235,7 @@ const qs = new URLSearchParams(location.search), q = qs.get("email");
 const TOK = qs.get("t") || "", TOK_EMAIL = (q || "").trim().toLowerCase();
 (async () => {
   if (q && qs.get("renew") === "off") try { await fetch(API + "/pay/renew", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ email: q.trim().toLowerCase(), on: false, t: TOK }) }); } catch {}
-  if (qs.get("stripe")) PAYING = true;
+  if (qs.get("stripe")) PAYING = FAST = true;
   if (q) { $("em").value = q; start(q.trim().toLowerCase()); }
 })();
 </script>

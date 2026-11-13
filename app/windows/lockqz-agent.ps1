@@ -535,7 +535,14 @@ function Handle-Pw($pr, [bool]$first, [string]$note) {
     }
     return "pw"
   }
-  if (Show-Pay $pr) { $script:PwNext = $now.AddSeconds(15); if ($first -and $note) { Show-Message ("AI is locked for this quiz." + $note) }; return "pay" }
+  if (Show-Pay $pr) {
+    # Unpaid at the exam: asked again at the server's pace (a few seconds) for the first 10 minutes after the
+    # pay page opened, so the password follows the payment at once; after that every 15 s.
+    if ($null -eq $script:PaySince) { $script:PaySince = $now }
+    $prc = 15; $prn = 0
+    if (($null -ne $pr.recheck) -and [int]::TryParse([string]$pr.recheck, [ref]$prn) -and (($now - [datetime]$script:PaySince).TotalSeconds -lt 600)) { $prc = [Math]::Max(2, [Math]::Min(15, $prn)) }
+    $script:PwNext = $now.AddSeconds($prc); if ($first -and $note) { Show-Message ("AI is locked for this quiz." + $note) }; return "pay"
+  }
   $why = if ($pr) { [string]$pr.reason } else { "" }
   if ($why -eq "not started") {
     $opens = $null; $si = [int64]0
@@ -654,7 +661,7 @@ while ($true) {
           # Brave reads its quiz policies (Leo, Tor windows, VPN off) only when it starts: close it once.
           if (Close-Browsers @("brave") $QuizProc) { $closed += "Brave" }
           $note = if ($closed.Count -gt 1) { "`n`n" + (($closed[0..($closed.Count-2)]) -join ", ") + " and " + $closed[-1] + " were closed for the quiz so their AI stays off. You can reopen them; your tabs come back." } elseif ($closed.Count) { "`n`n" + $closed[0] + " was closed for the quiz so its AI stays off. You can reopen it; your tabs come back." } else { "" }
-          $LastPw = $null; $StartTold = $null; $script:PayShown = $false; $res = $null
+          $LastPw = $null; $StartTold = $null; $script:PayShown = $false; $script:PaySince = $null; $res = $null
           for ($i = 0; ($i -lt 3) -and (-not $res); $i++) {
             try { $res = Handle-Pw (Helper "/password" @{ url = $quizWin.Url }) $true $note } catch { Log "password via helper failed: $_" }
             if (-not $res) { Start-Sleep -Seconds 2 }

@@ -38,6 +38,7 @@ def _helper_version():
     except Exception:
         return "0"
 VERSION = _helper_version()
+PAY_FAST = 600   # s: how long an unpaid student's password is asked for at the server's fast pace
 POLL, POLL_LOCKED, GRACE, BEAT = 2, 1, 30, 60   # agent reports (every 60s) only while the helper is unreachable
 DEV_KEY = os.path.join(USER_DIR, "developer.key")
 DEV_KEY_HASH = "4695a520432e105e967dd2703366c24c039fe0a850fe35db03b73b6b9506aecd"
@@ -869,7 +870,12 @@ class Agent:
                     dialog(("The quiz password changed.\n\nNew password:  %s" if had else "Quiz password:  %s") % pw + "\n(copied to your clipboard)")
             return "pw"
         if self.payment(r):
-            self.pw_next = now + 15
+            # Unpaid at the exam: asked again at the server's pace (a few seconds) for the first 10 minutes after
+            # the pay page opened, so the password follows the payment at once; after that every 15 s.
+            if not getattr(self, "pay_since", 0): self.pay_since = now
+            rc = r.get("recheck")
+            fast = isinstance(rc, (int, float)) and not isinstance(rc, bool) and now - self.pay_since < PAY_FAST
+            self.pw_next = now + (max(2, min(15, rc)) if fast else 15)
             if first and note: dialog("AI is locked for this quiz." + note)
             return "pay"
         if reason == "not started":
@@ -957,7 +963,7 @@ class Agent:
         log("LOCKED %s" % self.quiz)
         dev = developer_mode()
         note = "" if dev else self.close_for_quiz(app)
-        self.pw, self.pay_shown, res = None, False, None
+        self.pw, self.pay_shown, self.pay_since, res = None, False, 0, None
         for attempt in range(3):   # the helper fetches it (signed); retry a brief network blip
             try:
                 res = self.pw_reply(self.helper("/password", {"url": url}), time.time(), first=True, note=note)

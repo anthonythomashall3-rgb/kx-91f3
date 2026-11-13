@@ -197,6 +197,7 @@ const LIVE_MEM = new Map();
 // isolate, and in this data center's cache per quiz (one Sync tab = one data center). Unpaid emails are
 // re-checked every round, so a new payment admits at once; a voided payment stops admitting within PAID_TTL.
 const PAID_MEM = new Map(), PAID_TTL = 300000;
+const SETTLE_MEM = new Map();   // payment code -> when Stripe was last asked about its checkout (stripeSettle)
 const WRITE_CAP = e => /row write limit|exceeded D1.*writ/i.test(String(e));
 const liveKey = (quiz, codes) => `${quiz}|${codes ? 1 : 0}`;
 const liveCacheReq = (origin, key) => new Request(`${origin}/__lqz_cache/live/${encodeURIComponent(key)}`);
@@ -1009,6 +1010,9 @@ export async function onRequest(context) {
   // A Google Apps Script in the Gmail that receives the Venmo/Zelle alerts posts each payment to
   // /pay/notify. The memo code (LQSxxxxx student, LQxxxxx professor) says who paid.
   const STUDENT_FEE = Number(env.STUDENT_FEE || 180);
+  // How soon an app asks again while its student is unpaid at an exam (seconds; apps 0.6.23+, for the first
+  // minutes after the pay page opened): the quiz password follows the payment within this.
+  const PAY_RECHECK_S = Math.max(2, Math.min(60, Number(env.PAY_RECHECK_S) || 3));
   // Student payment routes (no fees): Zelle (the business account's Zelle when ZELLE_BUSINESS_TO is set)
   // and bank transfer by invoice. Venmo only if STUDENT_VENMO=1 (off: personal Venmo bans business use).
   const stuZelle = () => String(env.ZELLE_BUSINESS_TO || env.ZELLE_TO || "") || null;
@@ -1122,7 +1126,9 @@ export async function onRequest(context) {
     if (prev && /^cs_[A-Za-z0-9_]+$/.test(String(prev.id || "")) && Date.now() - Date.parse(last.ts) < 24 * 3600000) {
       const same = prev.amt === amt && prev.method === method && String(prev.term) === String(term) && Date.now() - Date.parse(last.ts) < STRIPE_REUSE_MS;
       const g = await stripeApi("checkout/sessions/" + prev.id);
-      if (g.ok && g.d.status === "complete") return BUSY_PAYING;          // paid; the webhook is on its way
+      // Paid and not recorded yet: Stripe's notice is on its way. One LOCKqz already recorded (and, to be paying
+      // again, one that was refunded since) is over: a new checkout is made.
+      if (g.ok && g.d.status === "complete" && !(await db.prepare("SELECT 1 AS x FROM payments WHERE txn=?").bind("stripe:" + String(g.d.payment_intent || g.d.id)).first())) return BUSY_PAYING;
       if (g.ok && g.d.status === "open") {
         if (same && g.d.url) return { url: g.d.url, amount: amt / 100, reused: true };
         const x = await stripeApi("checkout/sessions/" + prev.id + "/expire", new URLSearchParams());
@@ -1172,6 +1178,48 @@ export async function onRequest(context) {
     const t = Number(parts.t); if (!t || Math.abs(unixNow() - t) > 300 || !v1.length) return false;
     const want = await hmacHex(String(env.STRIPE_WEBHOOK_SECRET), `${parts.t}.${rawText}`);
     return v1.some(v => sameHex(v, want));
+  }
+  // A paid Checkout Session, recorded like any other payment (txn = the PaymentIntent, so it counts once however
+  // often and by whichever road it arrives: Stripe's notice, or LOCKqz asking Stripe itself).
+  const sessionPaid = o => !!o && o.payment_status === "paid" && o.mode === "payment" && String(o.currency).toLowerCase() === "usd";
+  async function creditSession(o) {
+    const code = String(o.metadata?.code || o.client_reference_id || "");
+    const res = await applyPayments([{ txn: "stripe:" + (o.payment_intent || o.id), amount: Number(o.amount_total) / 100, note: code,
+      via: "stripe-" + ((o.payment_method_types || [])[0] === "us_bank_account" ? "bank" : "card"), payer: String(o.customer_details?.email || o.customer_email || "") }]);
+    if (o.metadata?.save === "1" && o.customer && autoRenewOn() && res[0]?.ok && !(res[0].matched === null && !res[0].duplicate))
+      try { await saveCard(code, String(o.customer), String(o.payment_intent || ""), res[0]); } catch {}
+    return res[0];
+  }
+  // Access the moment the card is charged: Stripe's notice usually lands a few seconds after the payer is back on
+  // LOCKqz's page (and is sent again only after minutes when one delivery fails). So whenever someone who started
+  // a card checkout in the last hours still shows unpaid, LOCKqz asks Stripe about that checkout itself and
+  // records the payment at once. 1 database read; Stripe is asked only while such a checkout exists, at most once
+  // every 2 s per code and server instance. -> true when a payment was recorded by this call.
+  const SETTLE_MS = 3 * 3600000;
+  async function stripeSettle(code) {
+    if (!stripeOn() || !code) return false;
+    try {
+      const last = await db.prepare("SELECT id, detail, ts FROM events WHERE device_id=? AND event='stripe_sess' ORDER BY id DESC LIMIT 1").bind("code:" + code).first();
+      if (!last || !(Date.now() - Date.parse(last.ts) < SETTLE_MS)) return false;
+      let sess = null; try { sess = JSON.parse(last.detail); } catch {}
+      if (!sess || !/^cs_[A-Za-z0-9_]+$/.test(String(sess.id || ""))) return false;
+      const t = Date.now(); if (t - (SETTLE_MEM.get(code) || 0) < 2000) return false;
+      if (SETTLE_MEM.size > 5000) SETTLE_MEM.clear();
+      SETTLE_MEM.set(code, t);
+      const g = await stripeApi("checkout/sessions/" + sess.id);
+      if (!(g.ok && g.d.status === "complete" && sessionPaid(g.d)) || String(g.d.metadata?.code || g.d.client_reference_id || "") !== code) return false;
+      const r = await creditSession(g.d);
+      if (r && r.duplicate) SETTLE_MEM.set(code, t + 600000);   // already recorded (e.g. refunded since): not asked again for 10 minutes
+      return !!(r && r.ok && !r.duplicate);
+    } catch { return false; }
+  }
+  // Paid, asking Stripe when a card checkout of this student may have been paid a moment ago.
+  async function studentPaidNow(email) {
+    if (await studentPaid(email)) return true;
+    if (!stripeOn()) return false;
+    email = String(email || "").trim().toLowerCase(); if (!email) return false;
+    const c = await db.prepare("SELECT code FROM pay_codes_students WHERE email=?").bind(email).first();
+    return !!(c && await stripeSettle(c.code)) && studentPaid(email);
   }
   const feeOn = () => { const from = String(env.STUDENT_FEE_FROM || ""); return /^\d{4}-\d{2}-\d{2}$/.test(from) && laToday() >= from; };
   // ---- terms: USC's academic calendar (usc.edu/academic-calendar), codes YYYY1/2/3 ----
@@ -1228,6 +1276,7 @@ export async function onRequest(context) {
     for (let i = 0; i < 5; i++) {
       const code = "LQS" + rid(5).toUpperCase().replace(/[^A-Z0-9]/g, "X");
       const r = await db.prepare("INSERT OR IGNORE INTO pay_codes_students (email,code) VALUES (?,?)").bind(email, code).run();
+      stMemo.delete(email);
       if (r.meta.changes) return code;
       const again = await db.prepare("SELECT code FROM pay_codes_students WHERE email=?").bind(email).first(); if (again) return again.code;
     }
@@ -1237,8 +1286,17 @@ export async function onRequest(context) {
   const COUNTS = "COALESCE(matched,'') NOT IN ('void','review')";
   const paidSum = async (code, term) => Number((await db.prepare(`SELECT COALESCE(SUM(${CREDIT()}),0) AS s FROM payments WHERE code=? AND term=? AND ${COUNTS}`).bind(code, term).first())?.s || 0);
   // Paid = this term's fee paid, or (in the weeks before the next term / after classes end) the next term's.
+  // Read once per request (the pay page and /password ask several times in one call); dropped whenever this
+  // request writes a payment or makes a pay code.
+  const stMemo = new Map();
   async function studentStatus(email) {
     email = String(email||"").trim().toLowerCase();
+    if (stMemo.has(email)) return { ...stMemo.get(email) };
+    const out = await studentStatusRead(email);
+    if (email) stMemo.set(email, out);
+    return { ...out };
+  }
+  async function studentStatusRead(email) {
     const [cur, nxt] = curTerms();
     if (!email) return { paid: !feeOn(), received: 0, term: cur, code: null };
     const c = await db.prepare("SELECT code FROM pay_codes_students WHERE email=?").bind(email).first();
@@ -1396,6 +1454,7 @@ export async function onRequest(context) {
       rows.push([x.txn, x.code, x.amount, x.via, x.payer, x.why ? `${x.note} [review: ${x.why}]`.slice(0, 400) : x.note, x.term, t, x.review ? "review" : null]);
     }
     await runBatches(db, multiInsert(db, "INSERT OR IGNORE INTO payments (txn,code,amount,via,payer,note,term,received_at,matched)", 9, rows));
+    stMemo.clear();
     // Settle: students are paid by their sums (computed on read); professors get activated.
     const stu = codes.filter(c => /^LQS[A-Z0-9]{5}$/.test(c)), prof = codes.filter(c => !/^LQS[A-Z0-9]{5}$/.test(c));
     const stuEmail = new Map(), profId = new Map();
@@ -1833,7 +1892,7 @@ export async function onRequest(context) {
         const ver = Number(d?.student_verified) === 1 && !!d?.student;
         // paid: this term's fee (the agent's one-time "LOCKqz is ready" notice waits for verified + paid).
         // pay_url: the student's own pay page while this term's fee is unpaid - the app opens it right after setup.
-        const paidNow = ver ? await studentPaid(String(d.student).toLowerCase()) : !feeOn();
+        const paidNow = ver ? await studentPaidNow(String(d.student).toLowerCase()) : !feeOn();
         return json({ student: d?.student || null, verified: ver, codes: codesOn, paid: paidNow, ...(ver && !paidNow ? { pay_url: await payLink(String(d.student).toLowerCase()) } : {}), ...(ver ? { vtoken: await vtokenFor(String(d.student).toLowerCase()) } : {}) });
       }
       // Google sign-in instead of an emailed code: a one-time link for this computer; the page it opens
@@ -2092,9 +2151,9 @@ export async function onRequest(context) {
         // is never enough to ride on someone else's payment.
         const unconfirmed = Number(stu?.student_verified) !== 1;
         const who = unconfirmed ? null : stu?.student;
-        if (!(await studentPaid(who))) return unconfirmed
+        if (!(await studentPaidNow(who))) return unconfirmed
           ? json({ password: null, reason: "verify", needs_verify: true }, 402)   // no pay block: the agent re-runs email setup
-          : json({ password: null, reason: "unpaid", pay: oldAppPay(await oldAppUrl(await payInfo(who), v.ok ? v.dev : null), v.ok ? v.dev : null) }, 402);
+          : json({ password: null, reason: "unpaid", recheck: PAY_RECHECK_S, pay: oldAppPay(await oldAppUrl(await payInfo(who), v.ok ? v.dev : null), v.ok ? v.dev : null) }, 402);
         // One payment = one student. A paid email cannot be shared: (1) never on two computers in a quiz
         // at the same time; (2) at most 2 computers per email (seen in the last 30 days, not revoked).
         // Staff (professors / admin) are exempt.
@@ -2414,6 +2473,10 @@ export async function onRequest(context) {
         if (n) { await db.prepare("UPDATE teachers SET name=? WHERE id=? AND TRIM(COALESCE(name,''))=''").bind(n, me.id).run(); me.name = n; } }
       if (me.trial && me.id !== "admin") { const end = termEndOf(curTerms()[0]);
         if (!me.active_until || me.active_until < end) { await db.prepare("UPDATE teachers SET active_until=? WHERE id=?").bind(end, me.id).run(); me.active_until = end; } }
+      // A professor back from the card checkout: active the moment the card is charged (stripeSettle).
+      if (!me.active && me.id !== "admin" && stripeOn()) { const pc = await db.prepare("SELECT code FROM pay_codes WHERE teacher_id=?").bind(me.id).first();
+        if (pc && await stripeSettle(pc.code)) { const t2 = await db.prepare("SELECT active_until FROM teachers WHERE id=?").bind(me.id).first();
+          me.active_until = t2?.active_until || null; me.active = !!me.active_until && me.active_until >= laToday(); } }
       return json({ email: me.email, name: me.name, admin: me.admin, verified: !!me.verified, active: me.active, active_until: me.active_until, ...(me.trial ? { trial: true } : {}), ...(me.admin ? { clock: await clockState() } : {}) });
     }
     if (p === "/logout" && request.method === "POST") {
@@ -2621,19 +2684,20 @@ export async function onRequest(context) {
         if (!feeOn()) return json({ required: false });
         if (await db.prepare("SELECT 1 FROM teachers WHERE email=? AND role<>'admin' AND (vouched=1 OR verified=1)").bind(email).first())
           return json({ professor: true, dashboard: DASH_URL, required: true });
-        const paidT = await studentPaid(email);
+        const paidT = await studentPaidNow(email);
         const inf = await payInfo(email, clientIp, !paidT);
         if (inf.limited) return json({ error:"too many requests — try again in an hour" }, 429);
         const sT = await studentStatus(email), [cT, nT] = curTerms();
         const upT = sT.code && (ahead() || inGap()) && FULL(await paidSum(sT.code, nT), STUDENT_FEE) ? nT : cT;
-        return json({ ...inf, url: PAY_URL, card_renew: null, paid: paidT, required: true, term: sT.term, until: termEndOf(paidT ? upT : sT.term), received: sT.received, money: sT.money, limited: true });
+        // card_renew stays: a card paid from this page is saved and renews like any other, so its button says so.
+        return json({ ...inf, url: PAY_URL, paid: paidT, required: true, term: sT.term, until: termEndOf(paidT ? upT : sT.term), received: sT.received, money: sT.money, limited: true });
       }
       const ro = await db.prepare("SELECT 1 FROM renew_optout WHERE email=?").bind(email).first().catch(() => null);
       // A professor's account (e.g. "Stop these emails" in his renewal email opens this page): professors pay on
       // their dashboard, never the student fee, so the student pay page is not shown for that email.
       if (await db.prepare("SELECT 1 FROM teachers WHERE email=? AND role<>'admin' AND (vouched=1 OR verified=1)").bind(email).first())
         return json({ professor: true, dashboard: DASH_URL, required: feeOn(), renew: !ro });
-      const info = await payInfo(email, clientIp, !(await studentPaid(email)));
+      const info = await payInfo(email, clientIp, !(await studentPaidNow(email)));
       if (info.limited) return json({ error:"too many requests — try again in an hour" }, 429);
       const stt = await studentStatus(email);
       // "Access until": for someone already paid, the last day of what they PAID (next term only when that one
@@ -2649,7 +2713,10 @@ export async function onRequest(context) {
       const stt = await studentStatus(email);
       const tok = String(url.searchParams.get("token")||""), code = String(url.searchParams.get("code")||"").trim().toUpperCase();
       if (!((tok && sameHex(tok, await statusToken(email))) || (code && stt.code && code === stt.code))) return json({ error:"code or token required (from /pay/start)" }, 403);
-      return json({ paid: await studentPaid(email), required: feeOn(), received: stt.received, money: stt.money, amount: STUDENT_FEE, term: stt.term, ways: taxOn() ? waysFor("student", Math.max(0, STUDENT_FEE - stt.received)) : null });
+      // A card checkout paid a moment ago counts now (stripeSettle), so the totals are read again after it.
+      const paidS = await studentPaid(email) || (!!stt.code && await stripeSettle(stt.code) && await studentPaid(email));
+      const sN = await studentStatus(email);
+      return json({ paid: paidS, required: feeOn(), received: sN.received, money: sN.money, amount: STUDENT_FEE, term: sN.term, ways: taxOn() ? waysFor("student", Math.max(0, STUDENT_FEE - sN.received)) : null });
     }
     // Student: start a Stripe Checkout (card or bank) for what is still due this term.
     if (p === "/pay/stripe" && request.method === "POST") {
@@ -2663,7 +2730,7 @@ export async function onRequest(context) {
       await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + clientIp, null, null, "pay_stripe", null, now()).run();
       const code = await studentCode(email, clientIp);
       if (!code || typeof code === "object") return json({ error:"too many requests — try again in an hour" }, 429);
-      if (await studentPaid(email)) return json({ error:"already paid" }, 409);
+      if (await studentPaidNow(email)) return json({ error:"already paid", paid: true }, 409);
       const st = await studentStatus(email), due = Math.round(STUDENT_FEE * 100) - Math.round(st.received * 100);
       const r = await stripeCheckout({ kind: "student", method, code, email, term: st.term, dueC: due, back: mineS ? await payLink(email) : PAY_URL + "?email=" + encodeURIComponent(email) });
       return json(r, r.url ? 200 : r.processing ? 409 : 503);
@@ -2676,14 +2743,8 @@ export async function onRequest(context) {
       const text = new TextDecoder().decode(raw);
       if (!(await stripeVerified(request.headers.get("Stripe-Signature"), text))) return json({ error:"bad signature" }, 400);
       const ev = body, o = ev?.data?.object || {};
-      if ((ev.type === "checkout.session.completed" || ev.type === "checkout.session.async_payment_succeeded") && o.payment_status === "paid" && o.mode === "payment" && String(o.currency).toLowerCase() === "usd") {
-        const code = String(o.metadata?.code || o.client_reference_id || "");
-        const res = await applyPayments([{ txn: "stripe:" + (o.payment_intent || o.id), amount: Number(o.amount_total) / 100, note: code,
-          via: "stripe-" + ((o.payment_method_types || [])[0] === "us_bank_account" ? "bank" : "card"), payer: String(o.customer_details?.email || o.customer_email || "") }]);
-        if (o.metadata?.save === "1" && o.customer && autoRenewOn() && res[0]?.ok && !(res[0].matched === null && !res[0].duplicate))
-          try { await saveCard(code, String(o.customer), String(o.payment_intent || ""), res[0]); } catch {}
-        return json({ ok: true, result: res[0] });
-      }
+      if ((ev.type === "checkout.session.completed" || ev.type === "checkout.session.async_payment_succeeded") && sessionPaid(o))
+        return json({ ok: true, result: await creditSession(o) });
       // A card renewal (off-session PaymentIntent from /pay/tick): credited here too, in case the tick never saw
       // Stripe's answer (same txn, so it counts once). Checkout's own PaymentIntents carry no renew mark.
       if (ev.type === "payment_intent.succeeded" && o.metadata?.renew === "1" && String(o.currency).toLowerCase() === "usd" && /^pi_/.test(String(o.id || ""))) {

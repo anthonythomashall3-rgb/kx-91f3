@@ -38,6 +38,9 @@ run "17/18 Student email code (once per computer; real API + fake SMTP)" node --
 run "Per-section billing (\$1,000 per USC section, Venmo code)" node --no-warnings test_sections.mjs
 run "Student fee + automatic Venmo/Zelle matching" node --no-warnings test_pay.mjs
 run "Stripe card + bank (ACH): fee-inclusive prices, signed webhook, refunds void" node --no-warnings test_stripe.mjs
+run "Sweep 24 (server): access the moment the card is charged - Stripe asked directly, no wait for its notice" node --no-warnings test_sweep24.mjs
+run "Sweep 24 (pay page, real Chromium): back from the card checkout = paid at once; Zelle / Venmo checks every 8 s" node --no-warnings test_sweep24_page.mjs
+run "Sweep 24 (apps): unpaid at the exam - the password is asked for every few seconds" python3 test_sweep24.py
 run "Pay reminder email (one, 2 h after install, unpaid only)" node --no-warnings test_pay_nudge.mjs
 run "Pay page after setup (server): the status check carries the pay page while unpaid; the pay email is off on the live site" node --no-warnings test_pay_after_setup.mjs
 run "Pay page after setup (apps): opens once right after setup on Mac, Linux, Windows; never for a paid student" python3 test_pay_after_setup.py
