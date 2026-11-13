@@ -38,7 +38,8 @@ try {
   child.stdout.on("data", d => out.push(String(d))); child.stderr.on("data", d => out.push(String(d)));
   let up = false; for (let i = 0; i < 100 && !up; i++) { await sleep(150); up = (await req("GET", "/healthz")).status === 200; }
   check("the server answers", up, out.join("").slice(-400));
-  const pids = new Set(); for (let i = 0; i < 60 && pids.size < 3; i++) { const h = await req("GET", "/healthz"); if (h.data?.pid) pids.add(h.data.pid); }
+  // the processes come up one after another: keep asking (up to 30 s) until all three have answered
+  const pids = new Set(); for (const t0 = Date.now(); pids.size < 3 && Date.now() - t0 < 30000;) { const h = await req("GET", "/healthz"); if (h.data?.pid) pids.add(h.data.pid); else await sleep(100); }
   check("three different processes answer on the one port", pids.size === 3, [...pids].join(","));
   check("the database was set up once, before they started", /starting 3 server processes, applied \d+ database steps/.test(out.join("")), out.join("").slice(0, 300));
 
