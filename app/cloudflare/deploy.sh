@@ -66,6 +66,11 @@ fi
 # counts every row as written. 17 files x every deploy exhausted the free 100k rows/day limit and froze
 # all LOCKqz writes (locks, codes). Use the query path (--command) and run each migration only once.
 q(){ $W d1 execute "$DB" --remote --json --command "$1" 2>/dev/null; }
+# Every database listed in wrangler.toml gets the schema and the new migrations: the first is the site's own,
+# the others are further schools' (functions/api/_middleware.js, SCHOOLS.md).
+DBS=$(grep -E '^database_name' wrangler.toml | sed -E 's/.*"([^"]+)".*/\1/')
+for DB in ${DBS:-lockqz}; do
+echo "== database $DB =="
 echo "== schema (idempotent; CREATE TABLE IF NOT EXISTS; query path) =="
 q "$(grep -v '^[[:space:]]*--' schema.sql)" >/dev/null && echo "  schema ok" || echo "  schema: check manually"
 q "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, at TEXT)" >/dev/null
@@ -87,6 +92,8 @@ for m in migrate_*.sql; do
 done
 # New indexes: let SQLite's planner learn them (cheap; reads a sample of each index).
 [ $applied -eq 1 ] && { q "PRAGMA optimize" >/dev/null && echo "  PRAGMA optimize ok" || echo "  PRAGMA optimize: skipped"; }
+done
+DB=lockqz
 
 echo "== one build for every address (version $VERSION, build $BUILD) =="
 bash build-prof.sh

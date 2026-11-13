@@ -533,16 +533,19 @@ const courseLabel = c => { const name = String(c && c.name || "").replace(/^\d+_
   return code && name && !name.toLowerCase().startsWith(code.toLowerCase()) ? `${code} \u2013 ${name}` : (name || code || "your class"); };
 // Student install steps. fee: "$200 by Zelle, or $210 by card or Venmo" while the semester fee is on, else null.
 // lockqz.com shows the steps for the computer it is opened on (Mac command or installer, Microsoft Store, Linux, Android).
-const stepsTxt = fee => `1. Install LOCKqz on your computer: ${SITE_URL} \u2014 follow the steps there (about one minute).\n${fee ? `2. Pay for this semester when LOCKqz asks: ${fee}.\n3.` : "2."} Open Brightspace once: ${BS_URL} \u2014 LOCKqz will tell you it's ready.\n\n${fee ? "Nothing else to do this semester." : "Nothing else to do, ever."}\n\nOn exam day: open the exam in Brightspace like normal. LOCKqz enters the password for you.`;
+// The Brightspace address the emails below name: the school's own (setting BS_URL) while one is being written.
+// The emails are built in one go (no waiting inside), so two requests never see each other's address.
+let BS_CUR = BS_URL;
+const stepsTxt = fee => `1. Install LOCKqz on your computer: ${SITE_URL} \u2014 follow the steps there (about one minute).\n${fee ? `2. Pay for this semester when LOCKqz asks: ${fee}.\n3.` : "2."} Open Brightspace once: ${BS_CUR} \u2014 LOCKqz will tell you it's ready.\n\n${fee ? "Nothing else to do this semester." : "Nothing else to do, ever."}\n\nOn exam day: open the exam in Brightspace like normal. LOCKqz enters the password for you.`;
 const stepsHtml = fee => `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 16px"><tr><td style="padding:6px 0;font-size:15px"><b>1.</b> ${mailBtn(SITE_URL, "Install LOCKqz")} <span style="color:#5c5952">on your computer \u2014 follow the steps there (about one minute).</span></td></tr>
-${fee ? `<tr><td style="padding:6px 0;font-size:15px"><b>2.</b> Pay for this semester when LOCKqz asks: ${hesc(fee)}.</td></tr>\n` : ""}<tr><td style="padding:6px 0;font-size:15px"><b>${fee ? 3 : 2}.</b> ${mailBtn(BS_URL, "Open Brightspace")} <span style="color:#5c5952">once \u2014 LOCKqz will tell you it's ready.</span></td></tr></table>
+${fee ? `<tr><td style="padding:6px 0;font-size:15px"><b>2.</b> Pay for this semester when LOCKqz asks: ${hesc(fee)}.</td></tr>\n` : ""}<tr><td style="padding:6px 0;font-size:15px"><b>${fee ? 3 : 2}.</b> ${mailBtn(BS_CUR, "Open Brightspace")} <span style="color:#5c5952">once \u2014 LOCKqz will tell you it's ready.</span></td></tr></table>
 ${P(`<b>${fee ? "Nothing else to do this semester." : "Nothing else to do, ever."}</b>`)}${P("<b>On exam day:</b> open the exam in Brightspace like normal. LOCKqz enters the password for you.")}`;
 const signTxt = (prof, course) => `Respectfully,\n${prof ? `Professor ${prof}\n` : ""}${course}`;
 const signHtml = (prof, course) => P(`Respectfully,<br>${prof ? `Professor ${hesc(prof)}<br>` : ""}<span style="color:#5c5952">${hesc(course)}</span>`);
 const studentFooter = last => `Sent by LOCKqz on behalf of ${last ? `Professor ${hesc(last)}` : "your professor"}. Replies go to your professor. <a href="${SITE_URL}/privacy" style="color:#8a877f">lockqz.com/privacy</a>`;
 // "Free for you" line for fee-exempt professors (FEE_EXEMPT): a soft box in the LOCKqz colours.
 const FREE_HTML = `<p style="margin:0 0 14px"><span style="display:inline-block;background:#fbeaea;border:1px solid #f0caca;color:#990000;font-weight:700;border-radius:8px;padding:8px 12px">LOCKqz is free for you.</span></p>`;
-const MAIL = {
+const MAIL0 = {
   // To a professor you invite (admin page, Email it). link = the one-time sign-up link.
   // last = the professor's last name ("Hi Professor Bristow,"); free = fee-exempt (FEE_EXEMPT) -> "free for you".
   invite({ link, storeUrl, last, free }) {
@@ -550,14 +553,14 @@ const MAIL = {
     const hi = last ? `Hi Professor ${last},` : "Hi,";
     const subject = last ? `Professor ${last}, your LOCKqz account is ready` : "Your LOCKqz professor account";
     const FREE = "LOCKqz is free for you.";
-    const text = `${hi}\n\n${free ? FREE + " It" : "LOCKqz"} blocks AI on students' computers during your Brightspace exams and turns it back on when they submit.\n\n1. Create your account (this link works once): ${link}\n2. Add LOCKqz to Chrome: ${store} \u2014 click Add to Chrome, then Add extension. If Chrome says Proceed with caution, click Continue to install.\n3. Open Brightspace: ${BS_URL} \u2014 sign in as usual. Every exam is protected automatically.\n\nOn exam day, keep Chrome open until the exam ends.\n\nRespectfully,\nThe LOCKqz Team`;
+    const text = `${hi}\n\n${free ? FREE + " It" : "LOCKqz"} blocks AI on students' computers during your Brightspace exams and turns it back on when they submit.\n\n1. Create your account (this link works once): ${link}\n2. Add LOCKqz to Chrome: ${store} \u2014 click Add to Chrome, then Add extension. If Chrome says Proceed with caution, click Continue to install.\n3. Open Brightspace: ${BS_CUR} \u2014 sign in as usual. Every exam is protected automatically.\n\nOn exam day, keep Chrome open until the exam ends.\n\nRespectfully,\nThe LOCKqz Team`;
     const row = (n, btn, rest) => `<tr><td style="padding:6px 0;font-size:15px"><b>${n}.</b> ${btn} <span style="color:#5c5952">${rest}</span></td></tr>`;
     const html = mailWrap(P(hesc(hi)) + (free ? FREE_HTML : "") +
       P("LOCKqz blocks AI on students' computers during your Brightspace exams and turns it back on when they submit.") +
       `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 16px">` +
       row(1, mailBtn(link, "Create your account"), "\u2014 this link works once.") +
       row(2, mailBtn(store, "Add LOCKqz to Chrome"), "\u2014 click <b>Add to Chrome</b>, then <b>Add extension</b>. If Chrome says <b>Proceed with caution</b>, click <b>Continue to install</b>.") +
-      row(3, mailBtn(BS_URL, "Open Brightspace"), "and sign in as usual. Every exam is protected automatically.") + `</table>` +
+      row(3, mailBtn(BS_CUR, "Open Brightspace"), "and sign in as usual. Every exam is protected automatically.") + `</table>` +
       P("<b>On exam day, keep Chrome open</b> until the exam ends.") +
       P("Respectfully,<br>The LOCKqz Team"));
     return { subject, text, html };
@@ -568,10 +571,10 @@ const MAIL = {
     // pay: the account is not active yet (no invite date, not fee-exempt): activating comes first.
     const n0 = pay ? 1 : 0;
     const subject = `Welcome to LOCKqz \u2014 ${pay ? 3 : 2} steps and you're done`;
-    const text = `${last ? `Hi Professor ${last},` : "Hi,"}\n\nYour LOCKqz account is ready.${free ? " LOCKqz is free for you." : ""} ${pay ? "Three steps:" : "Two steps, about one minute:"}\n\n${pay ? `1. Activate LOCKqz on your dashboard: ${DASH_URL}\n` : ""}${1 + n0}. Add LOCKqz to Chrome: ${store} \u2014 click Add to Chrome, then Add extension. If Chrome says Proceed with caution, click Continue to install.\n${2 + n0}. Open Brightspace: ${BS_URL} \u2014 and sign in as usual. Your classes appear on your LOCKqz dashboard within a minute.\n\nFrom then on LOCKqz protects every exam in every class automatically. You never set a password.\n\nOn exam day: keep Chrome open and signed in to Brightspace on a computer that's on, until the exam ends. If Chrome is closed, students wait at the start of the exam until you open it.\n\nWhen your classes appear, click Email students on each class so students install LOCKqz before the first exam.\n\nDashboard: ${DASH_URL}\n\nRespectfully,\nThe LOCKqz Team`;
+    const text = `${last ? `Hi Professor ${last},` : "Hi,"}\n\nYour LOCKqz account is ready.${free ? " LOCKqz is free for you." : ""} ${pay ? "Three steps:" : "Two steps, about one minute:"}\n\n${pay ? `1. Activate LOCKqz on your dashboard: ${DASH_URL}\n` : ""}${1 + n0}. Add LOCKqz to Chrome: ${store} \u2014 click Add to Chrome, then Add extension. If Chrome says Proceed with caution, click Continue to install.\n${2 + n0}. Open Brightspace: ${BS_CUR} \u2014 and sign in as usual. Your classes appear on your LOCKqz dashboard within a minute.\n\nFrom then on LOCKqz protects every exam in every class automatically. You never set a password.\n\nOn exam day: keep Chrome open and signed in to Brightspace on a computer that's on, until the exam ends. If Chrome is closed, students wait at the start of the exam until you open it.\n\nWhen your classes appear, click Email students on each class so students install LOCKqz before the first exam.\n\nDashboard: ${DASH_URL}\n\nRespectfully,\nThe LOCKqz Team`;
     const html = mailWrap(P(last ? `Hi Professor ${hesc(last)},` : "Hi,") + (free ? FREE_HTML : "") + P(`Your LOCKqz account is ready. ${pay ? "Three steps:" : "Two steps, about one minute:"}`) +
       `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 16px">${pay ? `<tr><td style="padding:6px 0;font-size:15px"><b>1.</b> ${mailBtn(DASH_URL, "Activate LOCKqz")} <span style="color:#5c5952">on your dashboard.</span></td></tr>` : ""}<tr><td style="padding:6px 0;font-size:15px"><b>${1 + n0}.</b> ${mailBtn(store, "Add LOCKqz to Chrome")} <span style="color:#5c5952">\u2014 click <b>Add to Chrome</b>, then <b>Add extension</b>. If Chrome says <b>Proceed with caution</b>, click <b>Continue to install</b>.</span></td></tr>
-<tr><td style="padding:6px 0;font-size:15px"><b>${2 + n0}.</b> ${mailBtn(BS_URL, "Open Brightspace")} <span style="color:#5c5952">and sign in as usual. Your classes appear on your LOCKqz dashboard within a minute.</span></td></tr></table>` +
+<tr><td style="padding:6px 0;font-size:15px"><b>${2 + n0}.</b> ${mailBtn(BS_CUR, "Open Brightspace")} <span style="color:#5c5952">and sign in as usual. Your classes appear on your LOCKqz dashboard within a minute.</span></td></tr></table>` +
       P("From then on LOCKqz protects every exam in every class automatically. You never set a password.") +
       P("<b>On exam day: keep Chrome open and signed in to Brightspace</b> on a computer that's on, until the exam ends. If Chrome is closed, students wait at the start of the exam until you open it.") +
       P("When your classes appear, click <b>Email students</b> on each class so students install LOCKqz before the first exam.") +
@@ -635,6 +638,7 @@ const MAIL_HARD_MAX = 480, MAIL_AUTO_MAX = 250, MAIL_BATCH = 90;   // Gmail: at 
 
 export async function onRequest(context) {
   const { request, env } = context;
+  const MAIL = new Proxy(MAIL0, { get: (t, k) => typeof t[k] === "function" ? (...a) => { BS_CUR = String(env.BS_URL || BS_URL); try { return t[k](...a); } finally { BS_CUR = BS_URL; } } : t[k] });
   const STALE_MS = staleMsFor(env);
   const url = new URL(request.url);
   const p = url.pathname.replace(/^\/api/, "") || "/";

@@ -87,6 +87,7 @@ run "Exam day with a full-size database: fee on, professors and admin at work, n
 run "Plain server on every processor: three server processes, one port, one database file" node --no-warnings test_server_workers.mjs
 run "Plain server: a school is added while it runs (own database, reload loses no request)" node --no-warnings test_server_add_school.mjs
 run "Each school's own term dates (TERM_DATES); a broken setting changes nothing" node --no-warnings test_term_dates.mjs
+run "Several schools on the Cloudflare site: own database each, requests find their school" node --no-warnings test_cf_schools.mjs
 run "Microsoft Store button by itself + automatic Store submissions; Firefox package signed by Mozilla" node --no-warnings test_store_ff.mjs
 run "Apple Developer ID: Mac installer signing + notarization wiring, signed package never replaced" bash test_signing_mac.sh
 run "Download page on a Mac: Apple-signed installer = one download, command one click away (real Chromium)" node --no-warnings test_download_mac.mjs

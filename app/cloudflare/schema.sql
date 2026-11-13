@@ -216,3 +216,7 @@ CREATE TRIGGER IF NOT EXISTS trg_devices_locks_upd AFTER UPDATE OF student, plat
   BEGIN UPDATE locks SET student=NEW.student, platform=NEW.platform, sv=COALESCE(NEW.student_verified,0) WHERE device_id=NEW.device_id; END;
 CREATE TRIGGER IF NOT EXISTS trg_devices_locks_ins AFTER INSERT ON devices
   BEGIN UPDATE locks SET student=NEW.student, platform=NEW.platform, sv=COALESCE(NEW.student_verified,0) WHERE device_id=NEW.device_id; END;
+
+-- Several schools on one site: which school a computer, a professor's sign-in or a Sync key belongs to
+-- (hashes only for sign-ins and keys). Empty while there is one school.
+CREATE TABLE IF NOT EXISTS who (kind TEXT NOT NULL, k TEXT NOT NULL, school TEXT NOT NULL, at TEXT, PRIMARY KEY (kind, k)) WITHOUT ROWID;
