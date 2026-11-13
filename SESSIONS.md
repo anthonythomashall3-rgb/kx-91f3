@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-13 05:40 PT — 01UUDg7a: the professor extension at any school's Brightspace (extension 1.0.9): app/extension-prof/{manifest.json,background.js,popup.html,popup.js}, app/tests/test_prof_extension.mjs (new section at the end), app/tests/test_sweep18.mjs untouched. Not touching sync.js, the dashboard or the API.
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
 - 2026-11-13 07:20 PT — ACTIVE 01UUDg7bsaVV (13 Nov, pay page after setup, apps 0.6.22): app/cloudflare/functions/api/[[route]].js (/verify status), app/cloudflare/wrangler.toml (PAY_NUDGE_HOURS), app/mac/lockqz-agent.py, app/linux/lockqz-agent.py, app/windows/lockqz-agent.ps1, app/tests/test_pay_after_setup.{mjs,py}, app/tests/run_all.sh, app/VERSION, lockqzd.py / lockqzd.ps1 (version).
 
