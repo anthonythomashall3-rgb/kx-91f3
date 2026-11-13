@@ -86,3 +86,8 @@ server that had one school so far, that school is written down first and its dat
 A school whose terms differ from the built-in calendar gets its own dates in its `env` in `schools.json`:
 `"env": { "TERM_DATES": "{\"20271\":[\"2027-01-19\",\"2027-05-08\"]}" }` (term code = year + 1 spring,
 2 summer, 3 fall; first day of classes, last day of finals). `test_term_dates.mjs` checks it.
+
+## Watch
+
+`.github/workflows/server-watch.yml` asks the server every 15 minutes from outside. Three misses in a row fail
+the run and GitHub emails the repository owner.

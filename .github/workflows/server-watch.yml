@@ -1,0 +1,24 @@
+# Watches the plain server (app/server) every 15 minutes from outside. When it does not answer three times
+# in a row the run fails, and GitHub emails the repository owner. Free: a public repository's Actions minutes.
+name: Server watch
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+permissions: {}
+concurrency: { group: server-watch, cancel-in-progress: true }
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ask the server
+        run: |
+          url=https://server.lockqz.com/api/version
+          for i in 1 2 3; do
+            code=$(curl -s -m 20 -o body.txt -w '%{http_code}' "$url" || true)
+            # 200 = serving. 503 "not_configured" = the machine and its connection are up, the API is not switched on yet.
+            if [ "$code" = 200 ] || { [ "$code" = 503 ] && grep -q not_configured body.txt; }; then echo "server answers ($code)"; exit 0; fi
+            echo "try $i: $code"; sleep 30
+          done
+          echo "::error::The LOCKqz server did not answer three times in a row (last: $code)."; exit 1
