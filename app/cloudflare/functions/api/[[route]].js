@@ -2604,16 +2604,20 @@ export async function onRequest(context) {
       if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_start' AND " + RL_EV + " AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 30)
         return json({ error:"too many requests — try again in an hour" }, 429);
       await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + clientIp, null, null, "pay_start", null, now()).run();
-      // No link token (someone typed an email): nothing about that email is shown. The owner gets their own
-      // pay link by email (same answer for every address, so the reply never says whether it paid).
-      if (!(await payOk(email, body.t))) {
+      // No link token (someone typed an email): the pay page itself, at once, with no email to wait for - the memo
+      // code, the prices and whether this term is paid. What only the email's owner may see or change (receipts,
+      // renewal emails, the saved card, the devices) stays behind the owner's link: no token is handed out here.
+      const mine = await payOk(email, body.t);
+      if (!mine) {
         if (!feeOn()) return json({ required: false });
-        const recent = await db.prepare("SELECT 1 FROM events WHERE device_id=? AND quiz_id IS NULL AND event='pay_link' AND ts>?").bind("mail:" + email, new Date(Date.now() - 600000).toISOString()).first();
-        if (!recent) {
-          await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("mail:" + email, null, null, "pay_link", clientIp, now()).run();
-          try { await mailOut(email, "Your LOCKqz pay link", `Open your LOCKqz pay page:\n${await payLink(email)}\n\nThis link is only for ${email}. If you did not ask for it, ignore this email.`); } catch {}
-        }
-        return json({ link_sent: true, to: email, required: true });
+        if (await db.prepare("SELECT 1 FROM teachers WHERE email=? AND role<>'admin' AND (vouched=1 OR verified=1)").bind(email).first())
+          return json({ professor: true, dashboard: DASH_URL, required: true });
+        const paidT = await studentPaid(email);
+        const inf = await payInfo(email, clientIp, !paidT);
+        if (inf.limited) return json({ error:"too many requests — try again in an hour" }, 429);
+        const sT = await studentStatus(email), [cT, nT] = curTerms();
+        const upT = sT.code && (ahead() || inGap()) && FULL(await paidSum(sT.code, nT), STUDENT_FEE) ? nT : cT;
+        return json({ ...inf, url: PAY_URL, card_renew: null, paid: paidT, required: true, term: sT.term, until: termEndOf(paidT ? upT : sT.term), received: sT.received, money: sT.money, limited: true });
       }
       const ro = await db.prepare("SELECT 1 FROM renew_optout WHERE email=?").bind(email).first().catch(() => null);
       // A professor's account (e.g. "Stop these emails" in his renewal email opens this page): professors pay on
@@ -2643,7 +2647,7 @@ export async function onRequest(context) {
       if (!stripeOn()) return json({ error:"Card payments are not on yet." }, 503);
       const email = String(body.email||"").trim().toLowerCase(), method = body.method === "bank" && stripeBank() ? "bank" : "card";
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"enter your school email" }, 400);
-      if (!(await payOk(email, body.t))) return json({ error:"Open the pay link LOCKqz emailed you." }, 403);
+      const mineS = await payOk(email, body.t);   // paying needs no link; coming back with the owner's link does
       const hr = new Date(Date.now() - 3600000).toISOString();
       if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_stripe' AND " + RL_EV + " AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 20)
         return json({ error:"too many requests — try again in an hour" }, 429);
@@ -2652,7 +2656,7 @@ export async function onRequest(context) {
       if (!code || typeof code === "object") return json({ error:"too many requests — try again in an hour" }, 429);
       if (await studentPaid(email)) return json({ error:"already paid" }, 409);
       const st = await studentStatus(email), due = Math.round(STUDENT_FEE * 100) - Math.round(st.received * 100);
-      const r = await stripeCheckout({ kind: "student", method, code, email, term: st.term, dueC: due, back: await payLink(email) });
+      const r = await stripeCheckout({ kind: "student", method, code, email, term: st.term, dueC: due, back: mineS ? await payLink(email) : PAY_URL + "?email=" + encodeURIComponent(email) });
       return json(r, r.url ? 200 : r.processing ? 409 : 503);
     }
     // Stripe's webhook (signed). Paid checkouts are recorded like any other payment (txn = the

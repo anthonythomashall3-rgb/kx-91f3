@@ -76,7 +76,7 @@ r = await st(q.get("email"), q.get("t"));
 check("it opens al's pay page: his memo code and the amount, not paid", r.status === 200 && /^LQS/i.test(String(r.data.code || "")) && !r.data.paid, JSON.stringify(r.data).slice(0, 200));
 const al = r.data;
 r = await st("bo@usc.edu", q.get("t"));
-check("the same key does not open another student's", r.status !== 200 || !r.data?.code, r.status + " " + JSON.stringify(r.data).slice(0, 80));
+check("the same key is not another student's link: for bo it gives only what a typed email gives (no owner's key, no renewal switch)", r.status === 200 && r.data?.limited === true && !("token" in r.data) && !("renew" in r.data), r.status + " " + JSON.stringify(r.data).slice(0, 120));
 r = await onRequest({ request: new Request(BASE + "/api/pay/notify", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Pay": fee.PAY_SECRET }, body: JSON.stringify({ payments: [{ txn: "z1", amount: 200, payer: "Al", note: al.code, via: "zelle" }] }) }), env: fee });
 r = await call(fee, "/verify", { op: "status" }, S);
 check("once the payment arrived: paid, and no pay link any more", r.data.paid === true && !("pay_url" in r.data), JSON.stringify(r.data));

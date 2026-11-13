@@ -174,16 +174,16 @@ async function start(email){
   let d; try { d = await (await fetch(API + "/pay/start", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ email, t: email === TOK_EMAIL ? TOK : undefined }) })).json(); } catch { d = { error:"No connection. Try again." }; }
   $("ld").innerHTML = "";
   if (d.error) { $("err").textContent = d.error; $("err").hidden = false; return; }
-  // Typed an email (no link token): LOCKqz emails that address its own pay link; nothing else is shown.
-  if (d.link_sent) { $("err").textContent = "We emailed your pay link to " + email + ". Open it from that inbox to pay."; $("err").hidden = false; return; }
+  // Typed an email (no link in hand): the pay page opens at once. The renewal-email switch needs the owner's link.
+  const OWN = !d.limited;
   history.replaceState(null, "", "?email=" + encodeURIComponent(email) + (TOK && email === TOK_EMAIL ? "&t=" + encodeURIComponent(TOK) : ""));
   // A professor's email (the "Stop these emails" link in a renewal email): professors pay on their dashboard.
-  if (d.professor) { stopPoll(); $("f").hidden = true; $("pay").hidden = true; renewUi(email, d.renew);
+  if (d.professor) { stopPoll(); $("f").hidden = true; $("pay").hidden = true; if (OWN) renewUi(email, d.renew);
     $("err").innerHTML = 'This is a LOCKqz professor account. Professors pay on the dashboard: <a href="https://professor.lockqz.com/">professor.lockqz.com</a>'; $("err").hidden = false; return; }
   if (!d.required) { stopPoll(); $("f").hidden = true; $("pay").hidden = true; $("free").hidden = false; return; }   // fee not on yet
   const amt = money(d.amount);
   $("amt").textContent = amt; $("price").hidden = false;
-  UNTIL = d.until; renewUi(email, d.renew);
+  UNTIL = d.until; if (OWN) renewUi(email, d.renew);
   if (d.paid) { if (Number(d.money) > 0) $("amt").textContent = money2(d.money); else if (d.ways && d.ways.zelle) $("amt").textContent = money2(d.ways.zelle.total); $("cardnext").hidden = !d.card_auto; return paid(); }
   who = { email, code: d.code, amount: d.amount };
   $("code").textContent = d.code;
