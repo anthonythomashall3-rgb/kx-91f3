@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.6.19"
+VERSION = "0.6.20"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -892,63 +892,70 @@ def check_update():
         return False
 
 def watcher():
+    """Every 5 seconds, for as long as the helper runs. A cycle that fails (a full disk, a file that cannot be
+    written) is logged and the next one runs: the cap, the block check and the heartbeat never stop for good."""
     cycles, last_beat = 0, time.time()
     while True:
         time.sleep(5); cycles += 1
-        do_cap = do_tamper = do_beat = cap_end_known = False; qid = None
-        share_token(console_uid())   # the student who is logged in now can reach the helper
-        # Decide inside the lock; do all network OUTSIDE it so a slow post never
-        # stalls a /lock or /status request coming from the agent.
-        with LOCK:
-            if developer_mode():
-                if STATE["state"] != "developer":
-                    log("developer mode ON — not locking on this Mac")
-                    unlock_now(STATE["quiz_id"])
-                    STATE["state"] = "developer"
-                elif STATE["quiz_id"]:
-                    # Admin in a quiz: keep the signed lock alive so the quiz gate admits him.
-                    qid = STATE["quiz_id"]; do_beat = time.time() - last_beat >= BEAT_SECS
-            elif STATE["state"] == "developer":
-                STATE.update(state="unlocked", quiz_id=None)
-            if STATE["state"] == "locked":
-                qid = STATE["quiz_id"]
-                # safety cap (quiz end + 15 min, or 6 h when the end is unknown, never > 24 h): a
-                # failsafe for a broken agent - normally AI comes back the moment the quiz is submitted.
-                cap_at = STATE["cap_at"] or (STATE["locked_since"] + STATE["max_minutes"] * 60)
-                # Wall clock AND monotonic clock must both say the cap is reached: an admin who moves the
-                # Mac's date forward 24 h must not end the lock (time.monotonic() ignores date changes).
-                mono_ok = STATE.get("mono_since") is None or steady() - STATE["mono_since"] >= cap_at - STATE["locked_since"]
-                if STATE["locked_since"] and time.time() >= cap_at and mono_ok:
-                    log("safety cap reached — auto-unlocking")
-                    cap_end_known = STATE["end_known"]
-                    save_capped(qid)
-                    unlock_now(qid); do_cap = True
-                else:
-                    do_tamper = not engine_locked()
-                    if do_tamper:
-                        log("TAMPER: block missing during quiz — re-applying")
-                    engine("lock")   # idempotent; re-kills reopened AI apps
-                    do_beat = time.time() - last_beat >= (30 if STATE.get("release_pending") else BEAT_SECS)
-            elif STATE["unlock_pending"]:
-                # An earlier unlock failed part-way: keep trying until every layer is really gone.
-                if engine("unlock"):
-                    STATE["unlock_pending"] = False; clear_lock(); log("pending unlock completed")
-        if do_cap:    report("unlock", {"quiz_id": qid, "detail": {"reason": "cap", "end_known": cap_end_known}}); continue
-        if do_tamper: report("tamper", {"quiz_id": qid, "detail": "hosts_block_removed"})
-        # Liveness ping: proves the helper is still running. If the student kills it
-        # mid-quiz these stop, last_lock goes stale, and the teacher's live monitor
-        # flags "helper killed". UPDATE-only on the server — tiny at finals scale.
-        if do_beat:
-            last_beat = time.time()
-            report("heartbeat", {"quiz_id": qid, "source": "helper"})
-        if cycles % 8640 == 0:   # ~every 12h — keeps API calls minimal
-            refresh_blocklist()
-        if cycles % 720 == 0:    # ~hourly: keep the helper log small
-            rotate_log()
-        if cycles % 720 == 0 and not NET["registered"]:   # ~hourly until the server knows this key
-            register()
-        if cycles % UPDATE_EVERY == 0:   # ~every 6h: signed self-update (skips itself during a quiz)
-            check_update()
+        try: last_beat = watch_once(cycles, last_beat)
+        except Exception as e: log("watcher cycle failed: %s" % e)
+
+def watch_once(cycles, last_beat):
+    do_cap = do_tamper = do_beat = cap_end_known = False; qid = None
+    share_token(console_uid())   # the student who is logged in now can reach the helper
+    # Decide inside the lock; do all network OUTSIDE it so a slow post never
+    # stalls a /lock or /status request coming from the agent.
+    with LOCK:
+        if developer_mode():
+            if STATE["state"] != "developer":
+                log("developer mode ON — not locking on this Mac")
+                unlock_now(STATE["quiz_id"])
+                STATE["state"] = "developer"
+            elif STATE["quiz_id"]:
+                # Admin in a quiz: keep the signed lock alive so the quiz gate admits him.
+                qid = STATE["quiz_id"]; do_beat = time.time() - last_beat >= BEAT_SECS
+        elif STATE["state"] == "developer":
+            STATE.update(state="unlocked", quiz_id=None)
+        if STATE["state"] == "locked":
+            qid = STATE["quiz_id"]
+            # safety cap (quiz end + 15 min, or 6 h when the end is unknown, never > 24 h): a
+            # failsafe for a broken agent - normally AI comes back the moment the quiz is submitted.
+            cap_at = STATE["cap_at"] or (STATE["locked_since"] + STATE["max_minutes"] * 60)
+            # Wall clock AND monotonic clock must both say the cap is reached: an admin who moves the
+            # Mac's date forward 24 h must not end the lock (time.monotonic() ignores date changes).
+            mono_ok = STATE.get("mono_since") is None or steady() - STATE["mono_since"] >= cap_at - STATE["locked_since"]
+            if STATE["locked_since"] and time.time() >= cap_at and mono_ok:
+                log("safety cap reached — auto-unlocking")
+                cap_end_known = STATE["end_known"]
+                save_capped(qid)
+                unlock_now(qid); do_cap = True
+            else:
+                do_tamper = not engine_locked()
+                if do_tamper:
+                    log("TAMPER: block missing during quiz — re-applying")
+                engine("lock")   # idempotent; re-kills reopened AI apps
+                do_beat = time.time() - last_beat >= (30 if STATE.get("release_pending") else BEAT_SECS)
+        elif STATE["unlock_pending"]:
+            # An earlier unlock failed part-way: keep trying until every layer is really gone.
+            if engine("unlock"):
+                STATE["unlock_pending"] = False; clear_lock(); log("pending unlock completed")
+    if do_cap:    report("unlock", {"quiz_id": qid, "detail": {"reason": "cap", "end_known": cap_end_known}}); return last_beat
+    if do_tamper: report("tamper", {"quiz_id": qid, "detail": "hosts_block_removed"})
+    # Liveness ping: proves the helper is still running. If the student kills it
+    # mid-quiz these stop, last_lock goes stale, and the teacher's live monitor
+    # flags "helper killed". UPDATE-only on the server — tiny at finals scale.
+    if do_beat:
+        last_beat = time.time()
+        report("heartbeat", {"quiz_id": qid, "source": "helper"})
+    if cycles % 8640 == 0:   # ~every 12h — keeps API calls minimal
+        refresh_blocklist()
+    if cycles % 720 == 0:    # ~hourly: keep the helper log small
+        rotate_log()
+    if cycles % 720 == 0 and not NET["registered"]:   # ~hourly until the server knows this key
+        register()
+    if cycles % UPDATE_EVERY == 0:   # ~every 6h: signed self-update (skips itself during a quiz)
+        check_update()
+    return last_beat
 
 def _qid(v):
     """A quiz id from the agent, or None. Only short [A-Za-z0-9_-] ids are stored or reported."""
@@ -1105,10 +1112,15 @@ class H(BaseHTTPRequestHandler):
                     with LOCK: STATE.pop("ask_fail_since", None)
                 if hold:
                     with LOCK:
-                        STATE["release_pending"] = True; STATE["hold_until"] = time.time() + 30
+                        if STATE["state"] == "locked" and STATE["quiz_id"] == qid:   # still this quiz (the answer took a while)
+                            STATE["release_pending"] = True; STATE["hold_until"] = time.time() + 30
                     log("unlock held: the server cannot confirm the quiz is over for %s yet" % qid)
                     return self._send(202, {"ok": False, "state": "locked", "pending": "brightspace"})
             with LOCK:
+                # While the server was being asked, this quiz ended another way and ANOTHER quiz was locked: its
+                # block is not this request's to end.
+                if ask and STATE["state"] == "locked" and STATE["quiz_id"] and STATE["quiz_id"] != qid:
+                    return self._send(409, {"ok": False, "error": "not_this_quiz"})
                 STATE["release_pending"] = False; STATE.pop("hold_until", None)
                 ok = unlock_now(qid) if STATE["state"] != "developer" else (STATE.update(state="unlocked", quiz_id=None) or True)
             # Nothing was locked (already released by the server or the cap, or never locked): nothing to report.

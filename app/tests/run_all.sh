@@ -74,6 +74,7 @@ run "Bug sweep 9: 'Access until' is what the student paid, a professor email on 
 run "Bug sweep 10: the same request several times at the same moment (sign-up double click, memo codes, payments, webhooks)" node --no-warnings test_sweep10.mjs
 run "Bug sweep 12: an exam deleted in Brightspace is let go, schema.sql has every table, account panel and support form" node --no-warnings test_sweep12.mjs
 run "Bug sweep 12 (helper): a list addition during a quiz is applied in the same step, any token text gets a plain 401" python3 test_sweep12.py
+run "Bug sweep 22 (helper): a late unlock answer never ends another quiz, the watcher survives a bad cycle, 300 requests at once" python3 test_sweep22.py
 run "Bug sweep 12 (same moment): three payment ticks at once send one renewed email" node --no-warnings test_sweep12_race.mjs
 run "Bug sweep 13: one-line email subjects, no raw HTML in emails, trimmed class-list emails, pages never framed" node --no-warnings test_sweep13.mjs
 run "Bug sweep 15: every request fits the free plan per call at scale - exam emails, renewals, card renewals, email every class" node --no-warnings test_sweep15.mjs

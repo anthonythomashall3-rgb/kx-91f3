@@ -8,9 +8,9 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 
 ## Working now
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
-- 2026-11-13 04:40 PT — ACTIVE 01UUDg7bsaVV (13 Nov, sweep 22, apps 0.6.20): app/mac/lockqzd.py, app/tests/test_sweep12.py, app/tests/test_sweep22.py, app/tests/run_all.sh, app/VERSION, app/windows/lockqzd.ps1 (version only).
 
 ## Recently finished
+- 2026-11-13 05:10 PT — 01UUDg7bsaVV: sweep 22, apps 0.6.20 (Mac / Linux helper). An unlock whose server answer arrives after another quiz was locked leaves that quiz alone (409 not_this_quiz); the watcher logs a failed cycle and runs the next one. Tests: test_sweep22.py (8, incl. 300 control requests from 12 callers at once). Files: app/mac/lockqzd.py, app/tests/test_sweep22.py, run_all.sh, app/VERSION, lockqzd.ps1 (version).
 - 2026-11-13 04:20 PT — 01UUDg7bsaVV: sweep 21, apps 0.6.19. Android: during a quiz the phone also blocks the 27 whole domains the computers block (workers.dev, vercel.app, the tunnels, Azure OpenAI ...; never pages.dev); Private DNS switched on in the middle of a quiz is reported with the heartbeat, once per lock. Tests: test_android.py (56), UnitTests.kt wholeDomainsAreBlockedDuringAQuiz. Files: app/android DnsVpnService.kt, QuizAccessibilityService.kt, UnitTests.kt, app/VERSION, lockqzd.py / lockqzd.ps1 (version).
 - 2026-11-12 22:00 PT — 01UUDg7bsaVV: Chrome Web Store upload ends green when the package's version is already in the store (app/extension-prof/cws-publish.mjs). Firefox 1.0.8 is Mozilla-signed and live; lockqz.com has its _dmarc record.
 - 2026-11-12 15:50 PT — 01UUDg7bsaVV: .github/workflows/dns.yml (run by hand) keeps lockqz.com's _dmarc record as written in the file. One new file, nothing else touched.
