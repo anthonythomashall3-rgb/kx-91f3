@@ -2,6 +2,8 @@
 // (Chrome Web Store API v2, service account). Run by .github/workflows/cws.yml when the manifest version changes.
 // Env: CWS_SA_KEY (the service account's JSON key), CWS_PUBLISHER (publisher id), CWS_ITEM (item id).
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createSign } from "node:crypto";
 
 const key = JSON.parse(process.env.CWS_SA_KEY || "{}");
@@ -19,6 +21,11 @@ const tok = await (await fetch("https://oauth2.googleapis.com/token", { method: 
 if (!tok.access_token) { console.error("CWS: could not get a token:", JSON.stringify(tok)); process.exit(1); }
 const H = { Authorization: "Bearer " + tok.access_token };
 const NAME = `publishers/${PUB}/items/${ITEM}`, BASE = "https://chromewebstore.googleapis.com";
+
+// The version in this package is already in the store (published or in review): nothing to send.
+{ const here = dirname(fileURLToPath(import.meta.url)), ver = JSON.parse(readFileSync(join(here, "manifest.json"), "utf8")).version;
+  const st = await (await fetch(`${BASE}/v2/${NAME}:fetchStatus`, { headers: H })).json();
+  if (JSON.stringify(st).includes(`"crxVersion":"${ver}"`)) { console.log(`CWS: version ${ver} is already in the store.`); process.exit(0); } }
 
 let up = await (await fetch(`${BASE}/upload/v2/${NAME}:upload`, { method: "POST", headers: { ...H, "Content-Type": "application/zip" }, body: readFileSync(ZIP) })).json();
 console.log("CWS upload:", JSON.stringify(up));
