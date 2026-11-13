@@ -82,3 +82,7 @@ the server processes one at a time (each only once its replacement answers), so 
 server that had one school so far, that school is written down first and its database becomes
 `data/schools/usc.db`. A `schools.json` that does not load leaves the running server as it is.
 `test_server_add_school.mjs` checks all of this.
+
+A school whose terms differ from the built-in calendar gets its own dates in its `env` in `schools.json`:
+`"env": { "TERM_DATES": "{\"20271\":[\"2027-01-19\",\"2027-05-08\"]}" }` (term code = year + 1 spring,
+2 summer, 3 fall; first day of classes, last day of finals). `test_term_dates.mjs` checks it.

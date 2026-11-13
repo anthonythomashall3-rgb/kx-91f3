@@ -1175,6 +1175,11 @@ export async function onRequest(context) {
   // lasts through its last day; after that the person is unpaid until they pay for the next term.
   // Years not listed use typical USC dates until the table is updated.
   const TERMS = { "20263": ["2026-08-24","2026-12-16"], "20271": ["2027-01-11","2027-05-12"], "20272": ["2027-05-19","2027-08-10"] };
+  // A school with its own calendar sets TERM_DATES (JSON, the same shape: {"20271":["2027-01-19","2027-05-08"]}).
+  // Its terms replace the ones above; an entry that is not two dates in order is left out.
+  try { const own = JSON.parse(env.TERM_DATES || "null"), D = /^\d{4}-\d{2}-\d{2}$/;
+    if (own && typeof own === "object") for (const [c, v] of Object.entries(own))
+      if (/^\d{4}[123]$/.test(c) && Array.isArray(v) && v.length === 2 && D.test(v[0]) && D.test(v[1]) && v[0] < v[1]) TERMS[c] = [v[0], v[1]]; } catch {}
   const termDates = code => { code = String(code); return TERMS[code] || ({ 1:[`${code.slice(0,4)}-01-10`,`${code.slice(0,4)}-05-14`], 2:[`${code.slice(0,4)}-05-18`,`${code.slice(0,4)}-08-12`], 3:[`${code.slice(0,4)}-08-22`,`${code.slice(0,4)}-12-18`] })[code.slice(4)]; };
   const nextTerm = code => { const y = +String(code).slice(0,4), t = +String(code).slice(4); return t < 3 ? `${y}${t+1}` : `${y+1}1`; };
   const prevTerm = code => { const y = +String(code).slice(0,4), t = +String(code).slice(4); return t > 1 ? `${y}${t-1}` : `${y-1}3`; };
