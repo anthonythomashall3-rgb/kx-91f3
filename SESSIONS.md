@@ -7,10 +7,10 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-11-13 12:30 PT — 01UUDg7a: nightly database copies of the plain server: app/server/backup.sh (new), app/server/README.md.
 - 2026-10-31 08:00 PT — 01UUDg7Y: Store certification fix (Windows 'Test it now' 2-minute lock: app/windows/lockqzd.ps1, app/windows/store/*, app/tests/test_windows_store.ps1, test_windows_lint.py; version bump app/VERSION + both daemons). (Google client ID part taken over by 01UzHDaG 31 Oct 18:50 PT: stale claim.)
 
 ## Recently finished
+- 2026-11-13 12:45 PT — 01UUDg7a: app/server/backup.sh: nightly encrypted copies of the plain server's databases to a private repository (seven rotate by weekday); installed and read back once on the machine.
 - 2026-11-13 12:00 PT — 01UUDg7a: .github/workflows/server-watch.yml asks the plain server every 15 minutes; three misses fail the run and GitHub emails the owner.
 - 2026-11-13 10:20 PT — 01UUDg7a: each school's own term dates: setting TERM_DATES (JSON) replaces the built-in calendar (per school in schools.json env); a broken setting changes nothing. test_term_dates.mjs in run_all.sh.
 - 2026-11-13 09:35 PT — 01UUDg7bsaVV: server + web. lockqz.com/pay: typing an email opens the pay page at once (memo code, prices, paid or not; card checkout works) and sends no email; receipts, the renewal switch, the saved card and devices stay behind the owner's own link. Tests: test_round3_api.mjs S8 (33), test_pay_after_setup.mjs (10). Files: [[route]].js (/pay/start, /pay/stripe), public/pay.html, those two tests.

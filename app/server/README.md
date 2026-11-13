@@ -91,3 +91,9 @@ A school whose terms differ from the built-in calendar gets its own dates in its
 
 `.github/workflows/server-watch.yml` asks the server every 15 minutes from outside. Three misses in a row fail
 the run and GitHub emails the repository owner.
+
+## Nightly copies
+
+`backup.sh` (installed as a daily timer by `sudo bash backup.sh install`) snapshots every database, encrypts the
+pack to a public key whose private half is kept off the machine, and pushes it to a private repository; seven
+files rotate by weekday. The top of the script shows how to read a copy back.
