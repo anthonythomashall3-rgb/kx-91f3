@@ -284,6 +284,8 @@ function Policy($verb) {
   if (-not (Test-Path $Policy)) { return "" }
   return ((& powershell -NoProfile -ExecutionPolicy Bypass -File $Policy $verb) -join "`n")
 }
+$script:LqSw = [Diagnostics.Stopwatch]::StartNew()
+function Lap([string]$n) { if ($env:LOCKQZ_TIMING) { Write-Host ("TIMING {0,-10} {1,6:N1} s" -f $n, $script:LqSw.Elapsed.TotalSeconds) } }
 function Do-Lock {
   if ((Is-Locked) -and -not (Block-Intact)) {
     # Markers kept, AI lines deleted (admin edit): rewrite the block whole.
@@ -301,18 +303,25 @@ function Do-Lock {
   }
   New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
   if (-not (Test-Path $Backup)) { Copy-Item $Hosts $Backup -Force }
+  Lap "start"
   $wrote = Write-Hosts ("`r`n" + ((Get-HostsLines (Get-Domains)) -join "`r`n") + "`r`n") $true
+  Lap "hosts"
   ipconfig /flushdns | Out-Null
+  Lap "flushdns"
 
   # Firewall backup: DoT/DoQ + known DoH resolvers, local AI model servers, VPN protocols.
   Ensure-FirewallRules
+  Lap "firewall"
   # Wildcard AI domains (NRPT) + connections already open to AI hosts.
   Wild-On; Warm-Apply
+  Lap "names+warm"
 
   # Browser AI + AI search answers + extensions off, Windows Copilot/Recall/Click to Do off (quiz only).
   $pol = Policy "lock"
+  Lap "policy"
 
   Kill-AiAndTools
+  Lap "apps"
   if ($pol -match "FAILED") { "LOCKqz: browser policy not applied ($pol)" }
   if ($wrote -and (Is-Locked) -and $TestMode) { "LOCKqz: LOCKED (test: AI apps, overlays and local models closed; Windows Copilot/Recall off)" }
   elseif ($wrote -and (Is-Locked)) { "LOCKqz: LOCKED (AI apps, VPNs, VMs, remote-desktop, overlays and local models closed; Windows Copilot/Recall off)" }
@@ -323,14 +332,19 @@ function Do-Unlock {
   $wrote = $true
   # The professor's per-quiz assistive-tool allowance ends with the lock (every unlock path runs here).
   Remove-Item -LiteralPath "$StateDir\assist.json" -Force -ErrorAction SilentlyContinue
+  Lap "start"
   if (Is-Locked) {
     $wrote = Write-Hosts (Remove-Block (Read-Hosts)) $false
     ipconfig /flushdns | Out-Null
   }
+  Lap "hosts"
   Get-NetFirewallRule -DisplayName "$FwTag-*" -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+  Lap "firewall"
   Wild-Off; Warm-Clear
+  Lap "names+warm"
   # Restores exactly the policy values that were there before the quiz (nothing if none were changed).
   $pol = Policy "unlock"
+  Lap "policy"
   if ($pol -match "incomplete") { "LOCKqz: policy restore pending ($pol)" }
   if ($wrote -and -not (Is-Locked)) { "LOCKqz: UNLOCKED" } else { "LOCKqz: UNLOCK FAILED (the hosts file could not be written)" }
 }

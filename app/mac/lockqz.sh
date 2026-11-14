@@ -117,6 +117,7 @@ do_lock() {
   fi
   local already=0 rc=0; is_locked && already=1
   mkdir -p "$STATE"; [ -f "$BACKUP" ] || cp "$HOSTS" "$BACKUP" 2>/dev/null || true
+  export LOCKQZ_PREFS_DIRTY="$STATE/prefs.dirty"   # settings changed below: the preferences service restarts once, last
   hosts_writable
   hosts_add_block "$HOSTS" "$BLOCKLIST" || rc=1   # idempotent
   is_locked || rc=1
@@ -129,6 +130,7 @@ do_lock() {
   close_ai_apps || true   # ALWAYS: close AI apps reopened mid-quiz
   extra_lock || rc=1      # ALWAYS: re-close VPN/VM/remote/overlay/local-model, keep Apple Intelligence off
   write_status locked || true
+  prefs_flush || true     # last: nothing in this pass reads settings after it
   [ "$already" = 1 ] || say "LOCKED. AI domains blackholed; firewall up (incl. local-model + VPN ports); browser AI off; AI apps, VPNs, VMs, remote-desktop and overlay tools closed; Apple Intelligence + AirPlay Receiver off."
   return $rc
 }
@@ -139,6 +141,7 @@ do_unlock() {
   need_root
   if [ "$DRYRUN" = "1" ]; then say "[dry-run] would strip LOCKqz block, flush pf, flush DNS, restore Apple Intelligence + AirPlay Receiver."; extra_unlock; return 0; fi
   local rc=0
+  mkdir -p "$STATE" 2>/dev/null || true; export LOCKQZ_PREFS_DIRTY="$STATE/prefs.dirty"
   if is_locked; then
     hosts_writable
     hosts_remove_block "$HOSTS" || rc=1
@@ -151,6 +154,7 @@ do_unlock() {
   extra_unlock || { say "Apple Intelligence / AirPlay Receiver / proxy settings could not be fully restored"; rc=1; }
   dns_back "$BLOCKLIST" || true   # AI names answer again before the unlock is reported done
   write_status unlocked || true
+  prefs_flush || true     # last: the preferences service restarts once
   if [ "$rc" = 0 ]; then say "UNLOCKED. AI access restored."; else say "UNLOCK INCOMPLETE - the helper will retry."; fi
   return $rc
 }

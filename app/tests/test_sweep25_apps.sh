@@ -101,6 +101,22 @@ S=$(date +%s%N); ( PATH="$TMP/bin:$PATH"; killall() { :; }; dns_back "$TMP/bl" )
 check "never answering: gives up after 6 looks (about 3 s), the unlock still completes" '[ "$(grep -c "^-q" "$TMP/dslog")" = 6 ] && [ $(( (E - S) / 1000000 )) -lt 5000 ]'
 check "the Mac unlock calls it after every layer is off" 'grep -q "dns_back \"\$BLOCKLIST\" || true" "$APP/mac/lockqz.sh"'
 
+echo "T4c Mac: the preferences service is restarted once per lock / unlock, as the last step"
+rm -f "$TMP/klog"
+( STATE="$TMP/state"; source "$APP/mac/extra-block.sh"; killall() { echo "killall $*" >> "$TMP/klog"; }
+  export LOCKQZ_PREFS_DIRTY="$TMP/prefs.dirty"
+  prefs_changed; prefs_changed; [ -f "$TMP/prefs.dirty" ] && echo flagged >> "$TMP/klog"
+  prefs_flush; prefs_flush; [ -f "$TMP/prefs.dirty" ] || echo cleared >> "$TMP/klog" )
+check "two settings changes inside a lock: no restart yet, a flag is left" '[ "$(sed -n 1p "$TMP/klog")" = flagged ]'
+check "the last step restarts it exactly once and clears the flag (a second call does nothing)" '[ "$(grep -c "^killall cfprefsd$" "$TMP/klog")" = 1 ] && grep -q "^cleared$" "$TMP/klog"'
+rm -f "$TMP/klog"
+( STATE="$TMP/state"; source "$APP/mac/extra-block.sh"; killall() { echo "killall $*" >> "$TMP/klog"; }; unset LOCKQZ_PREFS_DIRTY; prefs_changed; prefs_flush )
+check "outside the engine: restarted at once, nothing left for later" '[ "$(cat "$TMP/klog")" = "killall cfprefsd" ]'
+check "nothing changed in a pass: no restart" '( STATE="$TMP/state"; source "$APP/mac/extra-block.sh"; killall() { echo x >> "$TMP/klog2"; }; export LOCKQZ_PREFS_DIRTY="$TMP/none.dirty"; prefs_flush; [ ! -f "$TMP/klog2" ] )'
+check "the browser policy leaves the flag instead of restarting, when the engine asks" 'grep -q "flag = os.environ.get(\"LOCKQZ_PREFS_DIRTY\")" "$APP/mac/browser-policy.py"'
+check "lock and unlock: the flag is named first, the restart is the last step" '[ "$(grep -c "export LOCKQZ_PREFS_DIRTY=" "$APP/mac/lockqz.sh")" = 2 ] && [ "$(grep -c "^  prefs_flush || true" "$APP/mac/lockqz.sh")" = 2 ] && ! grep -q "killall cfprefsd" "$APP/mac/lockqz.sh"'
+check "no other restart of the preferences service is left in the engine" '[ "$(grep -c "killall cfprefsd" "$APP/mac/extra-block.sh")" = 2 ]'
+
 echo "T5 every platform uses the one-look way"
 check "Mac: AI apps closed from running_named" 'grep -q "running_named \"\${AI_APPS\[@\]}\"" "$APP/mac/lockqz.sh"'
 check "Mac: no loop over every AI app name with pgrep" '! grep -q "pgrep -if -- \"\$(app_re \"\$a\")\" >/dev/null 2>&1 && osascript" "$APP/mac/lockqz.sh"'

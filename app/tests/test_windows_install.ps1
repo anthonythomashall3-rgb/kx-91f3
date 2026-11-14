@@ -63,6 +63,16 @@ $r = Invoke-RestMethod "$B/unlock" -Method Post -Headers $H -Body '{"quiz_id":"c
 Check "unlock accepted" ($r.state -eq 'unlocked')
 $hosts = Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw
 Check "hosts file clean" (-not ($hosts -match 'LOCKqz START'))
+# Where a first lock and an unlock spend their time (the engine itself, each step timed; printed for the record).
+$env:LOCKQZ_TIMING = "1"
+foreach ($c in 'lock','unlock') {
+  $sw = [Diagnostics.Stopwatch]::StartNew(); $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Dest\lockqz.ps1" $c 2>&1; $sw.Stop()
+  $out | Where-Object { "$_" -match '^TIMING' } | ForEach-Object { Write-Host "INFO  $c $_" }
+  Write-Host ("INFO  engine {0} took {1:N1} s in all" -f $c, $sw.Elapsed.TotalSeconds)
+}
+$env:LOCKQZ_TIMING = $null
+$hosts = Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw
+Check "hosts file clean after the timed unlock" (-not ($hosts -match 'LOCKqz START'))
 Check "firewall rules removed" (@(Get-NetFirewallRule -DisplayName 'LOCKqz-AI-*' -ErrorAction SilentlyContinue).Count -eq 0)
 $ip = try { ([System.Net.Dns]::GetHostAddresses('chatgpt.com') | Select-Object -First 1).IPAddressToString } catch { 'unresolved' }
 Check "chatgpt.com reachable again ($ip)" ($ip -ne '0.0.0.0' -and $ip -ne 'unresolved')

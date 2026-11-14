@@ -70,6 +70,19 @@ XB_MARK="LOCKqzManaged"
 xb_say() { echo "LOCKqz: $*"; }
 
 type app_re >/dev/null 2>&1 || app_re() { printf '/%s\\.app/Contents/MacOS/' "$(printf '%s' "$1" | sed 's/[][\\.^$*+?(){}|]/\\&/g')"; }
+# The preferences service (cfprefsd) is restarted ONCE per lock / unlock, as the engine's last step. macOS does
+# not start a service again within 10 s of its last start, so a second restart in the same lock made every
+# settings read after it wait for seconds. Outside the engine (no LOCKQZ_PREFS_DIRTY) it is restarted at once.
+prefs_changed() {
+  if [ -n "${LOCKQZ_PREFS_DIRTY:-}" ] && : > "$LOCKQZ_PREFS_DIRTY" 2>/dev/null; then return 0; fi
+  killall cfprefsd 2>/dev/null || true
+}
+prefs_flush() {
+  [ -n "${LOCKQZ_PREFS_DIRTY:-}" ] && [ -f "$LOCKQZ_PREFS_DIRTY" ] || return 0
+  rm -f "$LOCKQZ_PREFS_DIRTY" 2>/dev/null || true
+  killall cfprefsd 2>/dev/null || true
+}
+
 # Without lockqz-core.sh's running_named: the same answer, one look per name.
 type running_named >/dev/null 2>&1 || running_named() {
   local a; [ "${1:-}" = "-s" ] && shift
@@ -129,7 +142,7 @@ with open(tmp, "wb") as f: plistlib.dump(cur, f)
 os.chmod(tmp, 0o644); os.replace(tmp, path)
 PY
   # Nudge the OS to re-read managed prefs and stop any running generative helpers.
-  killall cfprefsd 2>/dev/null || true
+  prefs_changed
   pkill -i -f "GenerativeExperiences|IntelligencePlatform|WritingTools|ImagePlayground|com.apple.generativeexperiencesd" 2>/dev/null || true
   return 0
 }
@@ -140,7 +153,7 @@ apple_intelligence_on() {
     # Ours: put back exactly what was there before, or remove it if nothing was.
     if [ -f "$AI_BACKUP" ]; then cp -p "$AI_BACKUP" "$AI_MDM.lockqz.tmp" && mv -f "$AI_MDM.lockqz.tmp" "$AI_MDM" || return 1
     else rm -f "$AI_MDM" || return 1; fi
-    killall cfprefsd 2>/dev/null || true
+    prefs_changed
   fi
   # Not ours (absent, or replaced by a real MDM mid-quiz): leave it alone. Either way the quiz is over.
   rm -f "$AI_BACKUP" "$AI_NONE"

@@ -344,6 +344,12 @@ def write(domain, pol, merge):
 def refresh():
     # Make cfprefsd drop its cache so the browsers see the change immediately.
     if DIR == "/Library/Managed Preferences":
+        # Inside a lock / unlock the engine restarts the preferences service once, as its last step (it names
+        # a flag file to leave); on its own this does it at once.
+        flag = os.environ.get("LOCKQZ_PREFS_DIRTY")
+        if flag:
+            try: open(flag, "w").close(); return
+            except Exception: pass
         subprocess.run(["killall", "cfprefsd"], capture_output=True)
 
 def _candidates():
