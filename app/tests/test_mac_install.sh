@@ -45,6 +45,10 @@ curl -s -m 90 -X POST -H "$H" -H 'Content-Type: application/json' -d '{"quiz_id"
 check "unlock accepted" "grep -q '\"unlocked\"' /tmp/unlock.json"
 check "hosts clean" "! grep -q 'LOCKqz START' /etc/hosts"
 check "chatgpt.com reachable again" "! dscacheutil -q host -a name chatgpt.com | grep -q '0.0.0.0'"
+# How the name service answers in the seconds after the unlock (printed for the record).
+for i in $(seq 0 25); do r="$(dscacheutil -q host -a name chatgpt.com 2>&1 | tr '\n' ' ')"; echo "INFO  t+${i}s chatgpt.com: $r"; echo "$r" | grep -q '0\.0\.0\.0' || break; sleep 1; done
+echo "INFO  poe.com (never asked during the lock): $(dscacheutil -q host -a name poe.com 2>&1 | tr '\n' ' ')"
+echo "INFO  hosts lines naming chatgpt: $(grep -c chatgpt /etc/hosts)   resolver files: $(ls /etc/resolver 2>/dev/null | wc -l | tr -d ' ')"
 check "Chrome AI policy removed" "[ ! -f '/Library/Managed Preferences/com.google.Chrome.plist' ]"
 
 sleep 3
