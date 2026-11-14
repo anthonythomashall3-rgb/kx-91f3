@@ -65,6 +65,11 @@ echo "INFO  hosts: $(wc -l < /etc/hosts | tr -d ' ') lines; LOCKqz/chatgpt lines
 echo "INFO  hosts tail:"; tail -4 /etc/hosts | sed 's/^/INFO    /'
 check "Chrome AI policy removed" "[ ! -f '/Library/Managed Preferences/com.google.Chrome.plist' ]"
 
+# Where a first lock and an unlock spend their seconds (the engine itself, traced; one line per second that passes).
+lq_trace() { sudo bash -c 'PS4="+T\${SECONDS} "; set -x; source "$0" "$1"' "$DEST/lockqz.sh" "$1" 2>&1 | awk -v w="$1" '/^\++T[0-9]+ / { t=$1; gsub(/\+/,"",t); if (t != p) { print "INFO  " w " " substr($0, 1, 170); p = t } } END { print "INFO  " w " ended at " p }'; }
+lq_trace lock; lq_trace unlock
+check "hosts clean after the traced unlock" "! grep -q 'LOCKqz START' /etc/hosts"
+
 sleep 3
 check "daemon reports reach the server (no 403 in log)" "! grep -q '403' \"$DEST/lockqzd.log\""
 check "server reachable with app user agent" "/usr/bin/python3 -c \"import urllib.request,json;r=urllib.request.urlopen(urllib.request.Request('https://lockqz.pages.dev/api/blocklist',headers={'User-Agent':'LOCKqz/0.2.0 (macOS)'}),timeout=10);assert len(json.load(r)['domains'])>=20\""
