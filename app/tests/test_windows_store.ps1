@@ -80,7 +80,10 @@ $s = $null; for ($i = 0; $i -lt 90; $i++) { $s = WaitState "unlocked" 1; if ($s 
 $clean = (($s.state -eq "unlocked") -and -not (HostsBlocked))
 if (-not $clean) { Write-Host ("      state: " + ($s | ConvertTo-Json -Compress) + " hosts blocked: " + (HostsBlocked)); }
 Check "Test it now: ends by itself (AI back)" $clean
-Check "Test it now: stop ends a running test" (((PostCode "/test" '{"secs":120}') -eq 200) -and ((PostCode "/test" '{"stop":true}') -eq 200) -and ((WaitState "unlocked" 5).state -eq "unlocked") -and -not (HostsBlocked))
+# Same wait as above: the block goes when the unlock finishes, a moment after "unlocked" is reported.
+$started = ((PostCode "/test" '{"secs":120}') -eq 200); $stopped = ((PostCode "/test" '{"stop":true}') -eq 200)
+$s = $null; for ($i = 0; $i -lt 60; $i++) { $s = WaitState "unlocked" 1; if ($s -and $s.state -eq "unlocked" -and -not $s.engine_locked -and -not (HostsBlocked)) { break }; Start-Sleep 1 }
+Check "Test it now: stop ends a running test" ($started -and $stopped -and ($s.state -eq "unlocked") -and -not (HostsBlocked))
 PostCode "/lock" '{"quiz_id":"ci-store-quiz","student":"CI"}' | Out-Null
 Check "Test it now: refused during a quiz lock (409)" ((PostCode "/test" '{"secs":10}') -eq 409)
 Check "Test it now: stop never ends a quiz lock" (((PostCode "/test" '{"stop":true}') -eq 200) -and ((Invoke-RestMethod "$B/status" -Headers $H -TimeoutSec 10).state -eq "locked") -and (HostsBlocked))
