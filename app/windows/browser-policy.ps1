@@ -99,13 +99,26 @@ function Get-AssistExtensions {
 }
 
 # ---------------- registry layer (the only code that touches the registry) ----------------
-function RG-KeyExists($path) { Test-Path -LiteralPath $path }
+function RG-KeyExists($path) {
+  $r = RG-NetKey $path
+  if ($r) { $k = $null; try { $k = $r[0].OpenSubKey($r[1], $false); if ($k) { return $true } else { return $false } } catch { } finally { if ($k) { $k.Close() } } }
+  Test-Path -LiteralPath $path
+}
 function RG-CreateKey($path) { New-Item -Path $path -ErrorAction Stop | Out-Null }   # parent must exist
 function RG-RemoveKey($path) { Remove-Item -LiteralPath $path -ErrorAction Stop }    # never recursive
 function RG-ValueNames($path) { try { @((Get-Item -LiteralPath $path -ErrorAction Stop).GetValueNames()) } catch { @() } }
 function RG-SubKeyCount($path) { try { [int](Get-Item -LiteralPath $path -ErrorAction Stop).SubKeyCount } catch { 0 } }
 function RG-Read($path, $name) {
   # -> $null when the value does not exist, else @{ kind = "DWord"|"String"|...; value = <data> }
+  $r = RG-NetKey $path
+  if ($r) {
+    $nk = $null; $ok = $false; $got = $null
+    try {
+      $nk = $r[0].OpenSubKey($r[1], $false); $ok = $true
+      if ($nk -and (@($nk.GetValueNames()) -contains $name)) { $got = @{ kind = [string]$nk.GetValueKind($name); value = $nk.GetValue($name, $null, "DoNotExpandEnvironmentNames") } }
+    } catch { $ok = $false } finally { if ($nk) { $nk.Close() } }
+    if ($ok) { return $got }
+  }
   try { $k = Get-Item -LiteralPath $path -ErrorAction Stop } catch { return $null }
   if (@($k.GetValueNames()) -notcontains $name) { return $null }
   return @{ kind = [string]$k.GetValueKind($name); value = $k.GetValue($name, $null, "DoNotExpandEnvironmentNames") }
@@ -176,24 +189,32 @@ function Get-HostEntries {
   # Plain host lines of blocklist.txt (the hosts-file entries), mirrored into the browsers' own URL
   # filters. Chromium matches subdomains too. URLBlocklist / WebsiteFilter take <= 1000 entries.
   if (-not (Test-Path $BlockFile)) { return @() }
-  $all = @(Get-Content $BlockFile | ForEach-Object { $_.Trim().ToLower() } | Where-Object { $_ -match '^[a-z0-9-]+(\.[a-z0-9-]+)+$' } | Select-Object -Unique)
+  # Worked out once per run for the same file (asked for by the registry plan and by the Firefox files).
+  $fi = Get-Item -LiteralPath $BlockFile; $stamp = "$($fi.FullName)|$($fi.Length)|$($fi.LastWriteTimeUtc.Ticks)"
+  if ($script:HostMemo -and $script:HostMemo.stamp -eq $stamp) { return @($script:HostMemo.list) }
+  $seen = New-Object 'System.Collections.Generic.HashSet[string]'
+  $all = @(foreach ($l in [IO.File]::ReadAllLines($fi.FullName)) { $h = $l.Trim().ToLower(); if (($h -match '^[a-z0-9-]+(\.[a-z0-9-]+)+$') -and $seen.Add($h)) { $h } })
   # A listed host already covers its subdomains in every browser filter, so chat.openai.com next to
   # openai.com only spends one of the 1000 entries (the hosts file keeps both).
   $have = @{}; foreach ($h in $all) { $have[$h] = $true }
-  @($all | Where-Object {
+  $list = @($all | Where-Object {
     $parts = $_.Split('.'); $keep = $true
     for ($i = 1; $i -lt $parts.Count - 1; $i++) { if ($have.ContainsKey(($parts[$i..($parts.Count - 1)] -join '.'))) { $keep = $false; break } }
     $keep })
+  $script:HostMemo = @{ stamp = $stamp; list = $list }
+  @($list)
 }
 function Get-ConsoleUserSids {
   # SIDs of the users signed in at this PC (owners of explorer.exe), for per-user (HKU) policies.
+  if ($null -ne $script:SidMemo) { return @($script:SidMemo) }   # asked for twice in a run; the look takes about a second
   $out = @()
   try {
     foreach ($p in @(Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" -ErrorAction Stop)) {
       try { $o = Invoke-CimMethod -InputObject $p -MethodName GetOwnerSid -ErrorAction Stop; if ($o.Sid) { $out += [string]$o.Sid } } catch { }
     }
   } catch { }
-  @($out | Where-Object { $_ -match '^S-1-(5-21|12-1)-[0-9-]+$' } | Select-Object -Unique)
+  $script:SidMemo = @($out | Where-Object { $_ -match '^S-1-(5-21|12-1)-[0-9-]+$' } | Select-Object -Unique)
+  @($script:SidMemo)
 }
 function Test-DirectInternet {
   # $true when the internet answers WITHOUT a proxy (any HTTP reply counts, even an error page).

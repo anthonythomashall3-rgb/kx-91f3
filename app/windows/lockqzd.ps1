@@ -678,6 +678,11 @@ while ($listener.IsListening) {
         $out.engine_unlocked = Stop-Test; $out.state = $State.state
         break
       }
+      # A request naming another quiz than the locked one never ends this lock (a late ask for an earlier quiz).
+      if (($State.state -eq "locked") -and $body.quiz_id -and $State.quiz_id -and ([string]$body.quiz_id -ne [string]$State.quiz_id)) {
+        $res.StatusCode = 409; $out = @{ ok = $false; state = "locked"; error = "not_this_quiz" }
+        break
+      }
       $q = if ($State.quiz_id) { $State.quiz_id } else { $body.quiz_id }
       $wasLocked = ($State.state -eq "locked")   # nothing locked (already released, or never): nothing to report
       $who = Get-Requester $req

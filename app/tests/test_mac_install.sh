@@ -22,8 +22,8 @@ TOK="$(sudo cat "$DEST/helper.token")"
 check "daemon registered (launchd)" "sudo launchctl print system/com.lockqz.helper"
 
 H="X-LOCKqz-Token: $TOK"; B=http://127.0.0.1:8787
-for i in $(seq 1 30); do curl -sf -m 2 -H "$H" $B/status >/dev/null && break; sleep 2; done
-check "daemon answering" "curl -sf -m 3 -H '$H' $B/status"
+UP=0; for i in $(seq 1 30); do if curl -sf -m 3 -H "$H" $B/status >/dev/null; then UP=1; break; fi; sleep 2; done
+check "daemon answering" "[ $UP = 1 ]"
 CU="$(stat -f %u /dev/console)"
 [ "$CU" != 0 ] && check "console user got a read-only token copy" "[ \"\$(stat -f %Su:%Lp \"$DEST/tokens/$CU\")\" = \"\$(id -un $CU):400\" ]"
 check "browser-origin request refused (no CORS)" "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -H '$H' -H 'Origin: https://evil.example' $B/status)\" = 401 ]"
@@ -64,6 +64,16 @@ echo "INFO  hosts lines naming chatgpt: $(grep -c chatgpt /etc/hosts)   resolver
 echo "INFO  hosts: $(wc -l < /etc/hosts | tr -d ' ') lines; LOCKqz/chatgpt lines:"; grep -n "LOCKqz\|chatgpt" /etc/hosts | head -12 | sed 's/^/INFO    /'
 echo "INFO  hosts tail:"; tail -4 /etc/hosts | sed 's/^/INFO    /'
 check "Chrome AI policy removed" "[ ! -f '/Library/Managed Preferences/com.google.Chrome.plist' ]"
+
+# A lock that lasts a while, as a quiz does (several 5 s passes go by), then the unlock: timed through the helper.
+curl -s -m 90 -X POST -H "$H" -H 'Content-Type: application/json' -d '{"quiz_id":"ci-test-2","student":"CI"}' $B/lock >/dev/null
+sleep 14
+T0=$(python3 -c 'import time; print(time.time())'); curl -s -m 10 -H "$H" $B/status >/dev/null
+echo "INFO  status answer during the quiz took $(python3 -c "import time; print(round(time.time()-$T0, 1))") s"
+T0=$(python3 -c 'import time; print(time.time())')
+curl -s -m 90 -X POST -H "$H" -H 'Content-Type: application/json' -d '{"quiz_id":"ci-test-2"}' $B/unlock >/tmp/unlock2.json
+echo "INFO  unlock after a 14 s quiz took $(python3 -c "import time; print(round(time.time()-$T0, 1))") s"
+check "second unlock accepted, hosts clean" "grep -q '\"unlocked\"' /tmp/unlock2.json && ! grep -q 'LOCKqz START' /etc/hosts"
 
 # Where a first lock and an unlock spend their seconds (the engine itself, traced; one line per second that passes).
 lq_trace() { sudo bash -c 'PS4="+T\${SECONDS} "; set -x; source "$0" "$1"' "$DEST/lockqz.sh" "$1" 2>&1 | awk -v w="$1" '/^\++T[0-9]+ / { t=$1; gsub(/\+/,"",t); if (t != p && p != "") print "INFO  " w " until " t ": " substr(last, 1, 170); p = t; last = $0 } END { print "INFO  " w " ended at " p }'; }

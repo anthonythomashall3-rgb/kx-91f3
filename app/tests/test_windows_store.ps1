@@ -96,6 +96,7 @@ PostCode "/test" '{"secs":120}' | Out-Null
 PostCode "/lock" '{"quiz_id":"ci-store-quiz2","student":"CI"}' | Out-Null
 Start-Sleep 12
 Check "Test it now: a quiz that opens during a test takes over (state locked, block kept)" (((Invoke-RestMethod "$B/status" -Headers $H -TimeoutSec 10).state -eq "locked") -and (HostsBlocked))
+Check "an unlock that names another quiz does not end this one (409)" (((PostCode "/unlock" '{"quiz_id":"ci-store-quiz"}') -eq 409) -and ((Invoke-RestMethod "$B/status" -Headers $H -TimeoutSec 10).state -eq "locked") -and (HostsBlocked))
 Check "Test it now: the quiz that took over has the full block (VPN port rule back)" ($null -ne (Get-NetFirewallRule -DisplayName "LOCKqz-AI-vpn-udp" -ErrorAction SilentlyContinue))
 PostCode "/unlock" '{"quiz_id":"ci-store-quiz2"}' | Out-Null
 Check "Test it now: clean after the quiz" (((WaitState "unlocked" 10).state -eq "unlocked") -and -not (HostsBlocked))
