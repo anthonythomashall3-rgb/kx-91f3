@@ -162,7 +162,7 @@
       <button class="btn prime hide" id="fset" onclick="setNewPw()">Set new password</button>
       <div class="muted" id="fmsg"></div>
     </div>
-    <p class="muted" style="font-size:13px"><a href="/privacy.html">Privacy</a></p>
+    <p class="muted" style="font-size:13px"><a href="/privacy">Privacy</a></p>
   </div>
 </div>
 
@@ -258,18 +258,19 @@ async function logout(){ await post("/logout"); token=""; localStorage.removeIte
 async function boot(){
   if(!token) return;
   $("login").classList.add("hide"); $("app").classList.remove("hide"); $("app").innerHTML = lqL("Opening LOCKqz", "This takes about 2 seconds");
-  const m = await get("/me");
+  const R = await loadAll(), m = R[0];   // everything the first screen needs, asked for at once (one wait, not two)
   if(m.error){ $("app").classList.add("hide"); $("login").classList.remove("hide"); $("lerr").textContent = m._status===401 ? "" : m.error; if(m._status===401){ token=""; localStorage.removeItem("lockqz_token"); } return; }
   ME = m;
   $("login").classList.add("hide"); $("app").classList.remove("hide"); $("menu").classList.remove("hide");
   $("who").insertAdjacentHTML("afterbegin", esc(m.name||m.email));
   if(m.admin) $("m-admin").classList.remove("hide");
-  await refresh(); route();
+  applyAll(R); route();
   if(m.trial && (m.admin || welcomed()) && typeof lqWelcome === "function") lqWelcome(m.email);
   if(!AUTO) AUTO = setInterval(autoRefresh, 900000);
 }
-async function refresh(){
-  const [m,b,q,k] = await Promise.all([get("/me"), get("/bs"), get("/quizzes"), SYNCKEY?{key:SYNCKEY}:get("/synckey")]);
+const loadAll = () => Promise.all([get("/me"), get("/bs"), get("/quizzes"), SYNCKEY?{key:SYNCKEY}:get("/synckey")]);
+async function refresh(){ applyAll(await loadAll()); }
+function applyAll([m,b,q,k]){
   if(!m.error) ME = m;
   LOADERR = b.error || q.error || "";
   if(!b.error) BS = b.courses ? b : { courses: [] };

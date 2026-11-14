@@ -156,6 +156,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_quizzes_ou_qi ON quizzes(ou, qi);
 CREATE TABLE IF NOT EXISTS renew_optout (email TEXT PRIMARY KEY, at TEXT);
 CREATE TABLE IF NOT EXISTS renew_sent (email TEXT NOT NULL, term TEXT NOT NULL, at TEXT, PRIMARY KEY (email, term));
 CREATE TABLE IF NOT EXISTS pay_nudge (email TEXT PRIMARY KEY, at TEXT NOT NULL, sent INTEGER DEFAULT 1);   -- one pay reminder per student (migrate_040)
+CREATE TABLE IF NOT EXISTS rl (k TEXT PRIMARY KEY, n INTEGER NOT NULL DEFAULT 0, at TEXT NOT NULL);   -- per-address hourly counters (migrate_043)
+CREATE INDEX IF NOT EXISTS idx_rl_at ON rl(at);
 CREATE TABLE IF NOT EXISTS letin (ou TEXT NOT NULL, qi TEXT NOT NULL, email TEXT NOT NULL, user_id TEXT, by_teacher TEXT, at TEXT, PRIMARY KEY (ou, qi, email));   -- students a professor lets into an exam without LOCKqz (migrate_038)
 CREATE TABLE IF NOT EXISTS gsign (n TEXT PRIMARY KEY, device_id TEXT NOT NULL, at TEXT NOT NULL, email TEXT, done INTEGER DEFAULT 0);   -- one-time Google sign-in links for a computer's setup (migrate_039)
 CREATE INDEX IF NOT EXISTS idx_gsign_dev_at ON gsign(device_id, at);

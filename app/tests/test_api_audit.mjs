@@ -245,7 +245,11 @@ check("...and stops writing rows", n("SELECT COUNT(*) FROM events WHERE event='l
 for (let i = 0; i < 5; i++) await call("/forgot", { email: "p@usc.edu" }, { ip: "7.7.7.7" });
 check("5 /forgot for one email write one row", n("SELECT COUNT(*) FROM events WHERE event='reset_request' AND detail='p@usc.edu'") === 1);
 st = []; for (let i = 0; i < 25; i++) st.push((await call("/pay/start", { email: `new${i}@usc.edu` }, { ip: "8.8.4.4" })).status);
-check("/pay/start: one IP cannot mint unlimited new pay codes", st.slice(-3).every(s => s === 429) && n("SELECT COUNT(*) FROM pay_codes_students WHERE email LIKE 'new%'") <= 20, st.join(","));
+check("/pay/start: a class on one address is answered (25 new students in a row)", st.every(s => s === 200) && n("SELECT COUNT(*) FROM pay_codes_students WHERE email LIKE 'new%'") === 25, st.join(","));
+// The ceiling per address and hour (2,000 new pay codes): past it nothing more is minted.
+sqlite.prepare("UPDATE rl SET n=2000 WHERE k LIKE 'pay_code|8.8.4.4|%'").run();
+st = []; for (let i = 25; i < 28; i++) st.push((await call("/pay/start", { email: `new${i}@usc.edu` }, { ip: "8.8.4.4" })).status);
+check("/pay/start: one IP cannot mint unlimited new pay codes", st.every(s => s === 429) && n("SELECT COUNT(*) FROM pay_codes_students WHERE email LIKE 'new%'") === 25, st.join(","));
 check("/pay/start for an email that already has a code still works", (await call("/pay/start", { email: "new0@usc.edu" }, { ip: "8.8.4.4" })).status === 200);
 check("schema: events(event,ts) index", !!one("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_events_event_ts'"));
 check("/live reads events by exact quiz id (no LIKE scan)", !/quiz_id LIKE \?\)\s*AND event='tamper'/.test(SRC) && !/\(e\.quiz_id=\? OR e\.quiz_id LIKE \?\)/.test(SRC));

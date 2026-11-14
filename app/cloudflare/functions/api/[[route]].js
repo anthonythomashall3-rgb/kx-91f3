@@ -200,6 +200,9 @@ const PAID_MEM = new Map(), PAID_TTL = 300000;
 const SETTLE_MEM = new Map();   // payment code -> when Stripe was last asked about its checkout (stripeSettle)
 const WRITE_CAP = e => /row write limit|exceeded D1.*writ/i.test(String(e));
 const liveKey = (quiz, codes) => `${quiz}|${codes ? 1 : 0}`;
+// Shared answers kept in the data center's cache sit under a path nobody can guess (a tag derived from the site's
+// secret), so no address on the site can ever hand one out by its quiz number.
+let CACHE_TAG = { s: null, t: "" };
 const liveCacheReq = (origin, key) => new Request(`${origin}/__lqz_cache/live/${encodeURIComponent(key)}`);
 async function liveBust(origin, quizId) {
   const ou = String(quizId || "").split("-")[0];
@@ -644,6 +647,9 @@ export async function onRequest(context) {
   const url = new URL(request.url);
   const p = url.pathname.replace(/^\/api/, "") || "/";
   const db = env.DB;
+  const cacheBase = async () => { const k = String(env.ROT_SECRET || env.TEACHER_KEY || "");
+    if (CACHE_TAG.s !== k) CACHE_TAG = { s: k, t: (await sha256hex(enc.encode("lqz-cache:" + k))).slice(0, 32) };
+    return url.origin + "/" + CACHE_TAG.t; };
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   // One API, one set of secrets (25 Oct 2026): the other LOCKqz *.pages.dev addresses (prof., the old
   // lockdownqz ones, per-deploy preview hosts) run in Cloudflare environments that do not carry the main
@@ -651,7 +657,13 @@ export async function onRequest(context) {
   // answering with weaker rules. The dashboard and Sync panel call the main site directly; only old
   // installs and old Sync bookmarks come through here.
   const MAIN = String(env.API_HOST || "lockqz.pages.dev").toLowerCase();
-  if (url.hostname.toLowerCase() !== MAIN && /(\.pages\.dev|(^|\.)lockqz\.com)$/i.test(url.hostname) && String(env.NO_API_PROXY || "") !== "1") {
+  // lockqz.com is the same Pages production as the main site (same database, same secrets), so it answers by
+  // itself: one request instead of two for every call from a LOCKqz page or the professor extension, no extra
+  // hop, and each visitor counted by their own address. Only the hosts named in API_DIRECT, and only where the
+  // secrets are present.
+  const DIRECT = String(env.API_DIRECT || "").toLowerCase().split(/[\s,]+/).filter(Boolean).includes(url.hostname.toLowerCase())
+    && !!(env.DB && env.ROT_SECRET && env.MAIL_USER && env.MAIL_APP_PASSWORD) && String(env.REQUIRE_SIGNED || "").trim() === "1";
+  if (!DIRECT && url.hostname.toLowerCase() !== MAIN && /(\.pages\.dev|(^|\.)lockqz\.com)$/i.test(url.hostname) && String(env.NO_API_PROXY || "") !== "1") {
     const h = new Headers(request.headers); h.delete("host");
     const init = { method: request.method, headers: h, redirect: "manual" };
     if (request.method !== "GET" && request.method !== "HEAD") init.body = await request.arrayBuffer();
@@ -682,6 +694,15 @@ export async function onRequest(context) {
     if (t) me = { id:t.id, email:t.email, name:t.name, admin: t.role === "admin", trial, verified: t.role === "admin" || t.verified === 1, active: t.role === "admin" || trial || (!!t.active_until && t.active_until >= laToday()), active_until: t.active_until||null, bs_user_id: t.bs_user_id||null, vouched: t.role === "admin" || Number(t.vouched) === 1 || t.verified === 1 };
   }
   const clientIp = request.headers.get("CF-Connecting-IP") || "?";
+  // Room for one more of a busy public step from this address this hour? One counter row per address per hour
+  // (table rl): the count costs one row however many people do the same step in that hour, and a refused call
+  // writes nothing. Sized for a whole lecture hall behind one campus address. A database hiccup never blocks.
+  const ipRoom = async (kind, perHour) => {
+    try { return !!(await db.prepare("INSERT INTO rl (k,n,at) VALUES (?,1,?) ON CONFLICT(k) DO UPDATE SET n=n+1 WHERE n<? RETURNING n")
+      .bind(`${kind}|${clientIp}|${Math.floor(Date.now() / 3600000)}`, now(), perHour).first()); }
+    catch (e) { if (WRITE_CAP(e)) throw e; return true; }
+  };
+  const IP_REG = 3000, IP_PAY_OPEN = 3000, IP_PAY_CARD = 2000, IP_PAY_CODE = 2000, IP_CODES = 1000;
   // The sync key (in the bookmarklet URL, readable by any script on the Brightspace page) authorizes
   // ONLY the Brightspace-connector endpoints. Account management needs the real session token.
   const viaSyncKey = !!(request.headers.get("X-LOCKqz-Sync") || "").trim() && !(hdr && adminKey && sameHex(hdr, adminKey)) && !(hdr);
@@ -787,6 +808,7 @@ export async function onRequest(context) {
       db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE event='reset_request' AND " + RL_EV + " AND ts<? LIMIT 100)").bind(ago(30)),
       db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id LIMIT (CASE WHEN (SELECT ts FROM events ORDER BY id LIMIT 1) < ? THEN 300 ELSE 0 END)) AND ts<?").bind(ago(EVENT_DAYS), ago(EVENT_DAYS)),
       db.prepare("DELETE FROM email_codes WHERE expires<?").bind(Date.now() - 86400000),
+      db.prepare("DELETE FROM rl WHERE at<?").bind(ago(2)),
       db.prepare("DELETE FROM mail_sent WHERE ou='_all' AND day<?").bind(new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 13))];
   };
   // REQUIRE_GATE=1: every LOCKqz-protected quiz is gated (the Sync tab hides it and admits only students
@@ -1269,9 +1291,7 @@ export async function onRequest(context) {
     const ex = await db.prepare("SELECT code FROM pay_codes_students WHERE email=?").bind(email).first();
     if (ex) return ex.code;
     if (limitIp) {
-      const n = (await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_code_new' AND " + RL_EV + " AND ts>? AND device_id=?").bind(new Date(Date.now() - 3600000).toISOString(), "ip:" + limitIp).first()).n;
-      if (n >= 20) return { limited: true };
-      await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + limitIp, null, null, "pay_code_new", null, now()).run();
+      if (!(await ipRoom("pay_code", IP_PAY_CODE))) return { limited: true };
     }
     for (let i = 0; i < 5; i++) {
       const code = "LQS" + rid(5).toUpperCase().replace(/[^A-Z0-9]/g, "X");
@@ -1340,7 +1360,7 @@ export async function onRequest(context) {
     const ttl = Number(env.PAID_CACHE_MS ?? PAID_TTL); if (!(ttl > 0)) return paidEmails(list);   // tests: 0 = off
     const t = Date.now(), ems = [...new Set(list.map(e => String(e||"").trim().toLowerCase()).filter(e => e.includes("@")))];
     const ok = new Set(); if (!ems.length) return ok;
-    const ck = new Request(`${url.origin}/__lqz_cache/paid/${encodeURIComponent(quiz)}`);
+    const ck = new Request(`${await cacheBase()}/__lqz_cache/paid/${encodeURIComponent(quiz)}`);
     let shared = {};
     try { if (typeof caches !== "undefined" && caches.default) { const h = await caches.default.match(ck); if (h) shared = await h.json() || {}; } } catch {}
     const until = e => Math.max(PAID_MEM.get(e) || 0, Number(shared[e]) || 0);
@@ -1781,13 +1801,13 @@ export async function onRequest(context) {
   }
 
   // Email a fresh 6-digit code (H5 limits: per computer 5/h 15/day, per RECIPIENT 3/h 5/day across computers and
-  // the download page, per IP 10/h, global MAIL_DAILY_MAX with half kept for synced class lists) -> null when sent,
+  // the download page, per address 1,000/h, global MAIL_DAILY_MAX with half kept for synced class lists) -> null when sent,
   // else the error response. dev = the computer (app email setup) or "web:<email>" (download-page sign-in).
   async function issueEmailCode(dev, email, web = false) {
     const since = ms => new Date(Date.now() - ms).toISOString(), hr = since(3600000);
     const c = await db.prepare("SELECT COALESCE(SUM(ts>=? AND device_id=?),0) AS dh, COALESCE(SUM(device_id=?),0) AS dd, COALESCE(SUM(ts>=? AND student=?),0) AS eh, COALESCE(SUM(student=?),0) AS ed, COALESCE(SUM(ts>=? AND detail=?),0) AS ih, COUNT(*) AS total FROM events WHERE event='code_sent' AND " + RL_EV + " AND ts>=?")
       .bind(hr, dev, dev, hr, email, email, hr, "ip:" + clientIp, since(86400000)).first();
-    if (Number(c.dh) >= 5 || Number(c.dd) >= 15 || Number(c.eh) >= 3 || Number(c.ed) >= 5 || Number(c.ih) >= 10) return json({ error: "too_many_codes", retry_minutes: 60 }, 429);
+    if (Number(c.dh) >= 5 || Number(c.dd) >= 15 || Number(c.eh) >= 3 || Number(c.ed) >= 5 || Number(c.ih) >= IP_CODES) return json({ error: "too_many_codes", retry_minutes: 60 }, 429);
     // The one Gmail budget: codes are essential (room is always kept for them); an email on no synced class
     // list may use only the first half, so a flood of strangers cannot starve real students.
     // With SES on, its budget applies (and Gmail stays the fallback); otherwise the Gmail budget.
@@ -1867,9 +1887,7 @@ export async function onRequest(context) {
       const id = String(body.device_id || "").trim(), key = String(body.key || "").trim().toLowerCase();
       if (!/^[A-Za-z0-9._-]{6,80}$/.test(id) || id === "unknown") return json({ error: "bad device id" }, 400);
       if (!/^[0-9a-f]{64}$/.test(key)) return json({ error: "bad key" }, 400);
-      const regIp = request.headers.get("CF-Connecting-IP") || "?";
-      const regN = (await db.prepare("SELECT COUNT(*) AS n FROM devices WHERE reg_ip=? AND registered_at>?").bind(regIp, new Date(Date.now()-3600000).toISOString()).first()).n;
-      if (regN > 30) return json({ error: "too many registrations" }, 429);
+      if (!(await ipRoom("reg", IP_REG))) return json({ error: "too many registrations" }, 429);
       await db.prepare("INSERT INTO devices (device_id,student,platform,version,installed_at,last_seen,device_key,registered_at,reg_ip) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET device_key=excluded.device_key, registered_at=excluded.registered_at, reg_ip=excluded.reg_ip, platform=COALESCE(excluded.platform,devices.platform), version=COALESCE(excluded.version,devices.version), last_seen=excluded.last_seen WHERE devices.device_key IS NULL")
         .bind(id, lowMail(str(body.student)), str(body.platform, 60), str(body.version, 60), now(), now(), key, now(), request.headers.get("CF-Connecting-IP") || null).run();
       const d = await db.prepare("SELECT device_key, revoked FROM devices WHERE device_id=?").bind(id).first();
@@ -2671,11 +2689,8 @@ export async function onRequest(context) {
     if (p === "/pay/start" && request.method === "POST") {
       const email = String(body.email||"").trim().toLowerCase();
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"enter your school email" }, 400);
-      // Per IP: 30 lookups an hour (each lookup hands out that email's memo code).
-      const hr = new Date(Date.now() - 3600000).toISOString();
-      if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_start' AND " + RL_EV + " AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 30)
-        return json({ error:"too many requests — try again in an hour" }, 429);
-      await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + clientIp, null, null, "pay_start", null, now()).run();
+      // Per address and hour (each lookup hands out that email's memo code).
+      if (!(await ipRoom("pay_open", IP_PAY_OPEN))) return json({ error:"too many requests — try again in an hour" }, 429);
       // No link token (someone typed an email): the pay page itself, at once, with no email to wait for - the memo
       // code, the prices and whether this term is paid. What only the email's owner may see or change (receipts,
       // renewal emails, the saved card, the devices) stays behind the owner's link: no token is handed out here.
@@ -2724,10 +2739,7 @@ export async function onRequest(context) {
       const email = String(body.email||"").trim().toLowerCase(), method = body.method === "bank" && stripeBank() ? "bank" : "card";
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"enter your school email" }, 400);
       const mineS = await payOk(email, body.t);   // paying needs no link; coming back with the owner's link does
-      const hr = new Date(Date.now() - 3600000).toISOString();
-      if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_stripe' AND " + RL_EV + " AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 20)
-        return json({ error:"too many requests — try again in an hour" }, 429);
-      await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + clientIp, null, null, "pay_stripe", null, now()).run();
+      if (!(await ipRoom("pay_card", IP_PAY_CARD))) return json({ error:"too many requests — try again in an hour" }, 429);
       const code = await studentCode(email, clientIp);
       if (!code || typeof code === "object") return json({ error:"too many requests — try again in an hour" }, 429);
       if (await studentPaidNow(email)) return json({ error:"already paid", paid: true }, 409);
@@ -3359,7 +3371,7 @@ export async function onRequest(context) {
       }
       if (cur.length) batches.push(cur);
       for (const b of batches) await db.batch(b);
-      if (bUp.length) for (const ou of new Set(bUp.map(r => r[0]))) await liveBust(url.origin, ou);
+      if (bUp.length) for (const ou of new Set(bUp.map(r => r[0]))) await liveBust(await cacheBase(), ou);
       // VERIFY ONLY FROM A TRUSTED ROSTER -- a student can never become a professor. Verified iff the
       // account is VOUCHED (admin invite) AND a trusted roster lists this email as Instructor with the
       // Brightspace id bound above. A grad student who instructs one course and takes another is still
@@ -3633,7 +3645,7 @@ export async function onRequest(context) {
         if (!add.length) return json({ ou, qi, gated: true, keep: k0 });
         keep = JSON.stringify([...k0, ...add].slice(0, 3000));
         await db.prepare("UPDATE quizzes SET sa_keep=? WHERE qi=? AND ou=? AND gated=1").bind(keep, qi, ou).run();
-        await liveBust(url.origin, `${ou}-${qi}`);
+        await liveBust(await cacheBase(), `${ou}-${qi}`);
         return json({ ou, qi, gated: true, keep: JSON.parse(keep) });
       }
       if (body.on && !(Number(cur.gated) === 1 && keep)) keep = JSON.stringify((Array.isArray(body.keep) ? body.keep : []).map(String).filter(x => /^\d+$/.test(x)).slice(0, 3000));
@@ -3652,7 +3664,7 @@ export async function onRequest(context) {
       // owner's last gate stops.
       if (!body.on && cur.teacher_id) st.push(db.prepare("UPDATE teachers SET sync_key=NULL, sync_key_kept=0 WHERE id=? AND sync_key_kept=1 AND NOT EXISTS (SELECT 1 FROM quizzes WHERE teacher_id=? AND gated=1)").bind(cur.teacher_id, cur.teacher_id));
       await db.batch(st);
-      await liveBust(url.origin, `${ou}-${qi}`);
+      await liveBust(await cacheBase(), `${ou}-${qi}`);
       return json({ ou, qi, gated: !!body.on, keep: keep ? JSON.parse(keep) : [] });
     }
     // The Sync tab confirms the exact password it just wrote into Brightspace for a gated quiz.
@@ -3856,7 +3868,8 @@ export async function onRequest(context) {
       if (TTL > 0) {
         const m = LIVE_MEM.get(ck);
         if (m && nowMs - m.at < TTL && nowMs >= m.at) return new Response(m.body, { headers: cacheHdr });
-        try { if (typeof caches !== "undefined" && caches.default) { const hit = await caches.default.match(liveCacheReq(url.origin, ck)); if (hit) { const b = await hit.text(); LIVE_MEM.set(ck, { at: nowMs, body: b }); return new Response(b, { headers: cacheHdr }); } } } catch {}
+        try { if (typeof caches !== "undefined" && caches.default) { const hit = await caches.default.match(liveCacheReq(await cacheBase(), ck)); if (hit) { const at = Number(hit.headers.get("X-LQ-At")) || nowMs;   // an answer keeps its own age: never older than TTL
+            if (nowMs - at < TTL && nowMs >= at) { const b = await hit.text(); LIVE_MEM.set(ck, { at, body: b }); return new Response(b, { headers: cacheHdr }); } } } } catch {}
       }
       const liveOut = await (async () => {
       const qc = col => exact ? { sql: `${col}=?`, args: [quiz] } : { sql: `${col}>=? AND ${col}<?`, args: [quiz + "-", quiz + "."] };
@@ -4013,7 +4026,7 @@ export async function onRequest(context) {
       if (TTL > 0) {
         LIVE_MEM.set(ck, { at: nowMs, body: bodyStr });
         if (LIVE_MEM.size > 500) LIVE_MEM.delete(LIVE_MEM.keys().next().value);
-        try { if (typeof caches !== "undefined" && caches.default) await caches.default.put(liveCacheReq(url.origin, ck), new Response(bodyStr, { headers: { "Content-Type": "application/json", "Cache-Control": `max-age=${Math.max(1, Math.round(TTL / 1000))}` } })); } catch {}
+        try { if (typeof caches !== "undefined" && caches.default) await caches.default.put(liveCacheReq(await cacheBase(), ck), new Response(bodyStr, { headers: { "Content-Type": "application/json", "X-LQ-At": String(nowMs), "Cache-Control": `max-age=${Math.max(1, Math.round(TTL / 1000))}` } })); } catch {}
       }
       return new Response(bodyStr, { headers: cacheHdr });
     }
