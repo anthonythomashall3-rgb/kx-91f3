@@ -177,6 +177,9 @@ function RG-Write($path, $name, $value, $kind) {
   $script:Writes++; $script:REG[$path][$name] = @{ kind = $kind; value = $value }
 }
 function RG-Remove($path, $name) { if (-not (RG-Read $path $name)) { throw "no value" }; $script:REG[$path].Remove($name) }
+function RG-ReadAll($path) { RG-ValueNames $path | ForEach-Object { $v = RG-Read $path $_; if ($v) { @{ name = [string]$_; kind = $v.kind; value = $v.value } } } }
+function RG-WriteMany($path, $pairs) { foreach ($p in $pairs) { RG-Write $path $p[0] $p[1] "String" } }
+function RG-RemoveMany($path, $names) { foreach ($n in $names) { RG-Remove $path $n } }
 # signed-in users (HKU) and the direct-internet probe, mocked: no CIM, no network in a test
 $SID1 = "S-1-5-21-111-222-333-1001"; $SID2 = "S-1-5-21-111-222-333-1002"
 $script:Sids = @($SID1); $script:DirectOk = $true; $script:Probes = 0

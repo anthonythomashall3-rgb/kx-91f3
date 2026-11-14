@@ -318,6 +318,7 @@ function Do-Lock {
 
   # Browser AI + AI search answers + extensions off, Windows Copilot/Recall/Click to Do off (quiz only).
   $pol = Policy "lock"
+  if ($env:LOCKQZ_TIMING) { "$pol" -split "`n" | Where-Object { $_ -match '^TIMING' } | ForEach-Object { Write-Host $_ } }
   Lap "policy"
 
   Kill-AiAndTools
@@ -344,6 +345,7 @@ function Do-Unlock {
   Lap "names+warm"
   # Restores exactly the policy values that were there before the quiz (nothing if none were changed).
   $pol = Policy "unlock"
+  if ($env:LOCKQZ_TIMING) { "$pol" -split "`n" | Where-Object { $_ -match '^TIMING' } | ForEach-Object { Write-Host $_ } }
   Lap "policy"
   if ($pol -match "incomplete") { "LOCKqz: policy restore pending ($pol)" }
   if ($wrote -and -not (Is-Locked)) { "LOCKqz: UNLOCKED" } else { "LOCKqz: UNLOCK FAILED (the hosts file could not be written)" }

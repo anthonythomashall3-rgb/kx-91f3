@@ -137,6 +137,34 @@ function RG-Remove($path, $name) {
   }
   Remove-ItemProperty -LiteralPath $path -Name $name -ErrorAction Stop
 }
+# The long browser-filter lists (hundreds of entries per browser family) are read, written and removed with ONE
+# open of their key: value by value, each call opened the key again and listed all its values, so a lock or
+# an unlock spent seconds here. Anything .NET refuses falls back to the single-value calls above.
+function RG-ReadAll($path) {
+  # -> every value of the key as @{ name; kind; value } (nothing when the key does not exist)
+  $r = RG-NetKey $path
+  if (-not $r) { RG-ValueNames $path | ForEach-Object { $v = RG-Read $path $_; if ($v) { @{ name = [string]$_; kind = $v.kind; value = $v.value } } }; return }
+  $k = $null
+  try { $k = $r[0].OpenSubKey($r[1], $false) } catch { $k = $null }
+  if (-not $k) { return }
+  try { foreach ($n in $k.GetValueNames()) { @{ name = [string]$n; kind = [string]$k.GetValueKind($n); value = $k.GetValue($n, $null, "DoNotExpandEnvironmentNames") } } }
+  finally { $k.Close() }
+}
+function RG-WriteMany($path, $pairs) {
+  # $pairs: a list of @(name, text) - string values
+  $r = RG-NetKey $path; $k = $null
+  if ($r) { try { $k = $r[0].OpenSubKey($r[1], $true) } catch { $k = $null } }
+  if (-not $k) { foreach ($p in $pairs) { RG-Write $path $p[0] $p[1] "String" }; return }
+  try { foreach ($p in $pairs) { try { $k.SetValue([string]$p[0], [string]$p[1], [Microsoft.Win32.RegistryValueKind]::String) } catch { RG-Write $path $p[0] $p[1] "String" } } }
+  finally { $k.Close() }
+}
+function RG-RemoveMany($path, $names) {
+  $r = RG-NetKey $path; $k = $null
+  if ($r) { try { $k = $r[0].OpenSubKey($r[1], $true) } catch { $k = $null } }
+  if (-not $k) { foreach ($n in $names) { RG-Remove $path $n }; return }
+  try { foreach ($n in $names) { try { $k.DeleteValue([string]$n, $true) } catch { RG-Remove $path $n } } }
+  finally { $k.Close() }
+}
 # -------------------------------------------------------------------------------------------
 
 function Get-PathEntries {
@@ -284,9 +312,30 @@ function Get-Ancestors($path) {
   foreach ($seg in $path.Substring($root.Length + 1).Split("\")) { $cur = "$cur\$seg"; $out += $cur }
   return $out
 }
-function Ensure-Key($path) { foreach ($k in Get-Ancestors $path) { if (-not (RG-KeyExists $k)) { RG-CreateKey $k } } }
-function Snapshot($path) {
-  @(RG-ValueNames $path | ForEach-Object { $r = RG-Read $path $_; if ($r) { @{ name = [string]$_; kind = $r.kind; value = $r.value } } })
+# Keys already seen (or made) in this run are not looked up again ($script:KeyOk is set only while a plan is applied).
+$script:KeyOk = $null
+function Ensure-Key($path) {
+  if ($script:KeyOk -and $script:KeyOk.ContainsKey($path)) { return }
+  foreach ($k in Get-Ancestors $path) {
+    if ($script:KeyOk -and $script:KeyOk.ContainsKey($k)) { continue }
+    if (-not (RG-KeyExists $k)) { RG-CreateKey $k }
+    if ($script:KeyOk) { $script:KeyOk[$k] = 1 }
+  }
+}
+function Snapshot($path) { @(RG-ReadAll $path) }
+function New-TextSet($items) {   # membership as -contains has it (case ignored), without walking the list each time
+  $set = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+  foreach ($x in $items) { [void]$set.Add([string]$x) }
+  return ,$set
+}
+function Add-ListItems($path, $items) {
+  # Adds the items the list does not hold yet, numbered after its highest number: one write for all.
+  $have = @(Snapshot $path)
+  $data = New-TextSet @($have | ForEach-Object { [string]$_.value })
+  $n = 0; foreach ($h in $have) { $i = 0; if ([int]::TryParse([string]$h.name, [ref]$i) -and $i -gt $n) { $n = $i } }
+  $add = New-Object System.Collections.ArrayList
+  foreach ($it in $items) { if ($data.Add([string]$it)) { $n++; [void]$add.Add(@([string]$n, [string]$it)) } }
+  if ($add.Count -gt 0) { RG-WriteMany $path $add }
 }
 function New-PolicyBackup($plan) {
   # Records the state of everything $plan touches BEFORE any change.
@@ -337,18 +386,13 @@ function Apply-Op($op) {
   Ensure-Key $op.path
   switch ($op.op) {
     "v"    { RG-Write $op.path $op.name $op.value $op.kind }
-    "list" {
-      $have = @(Snapshot $op.path)
-      $data = @($have | ForEach-Object { [string]$_.value })
-      $n = 0; foreach ($h in $have) { $i = 0; if ([int]::TryParse([string]$h.name, [ref]$i) -and $i -gt $n) { $n = $i } }
-      foreach ($it in $op.items) { if ($data -notcontains $it) { $n++; RG-Write $op.path "$n" $it "String"; $data += $it } }
-    }
+    "list" { Add-ListItems $op.path $op.items }
     "rlist" {
       # Only our entries during the quiz; the backup holds theirs and Restore-Backup puts them back.
-      foreach ($h in @(Snapshot $op.path)) { if ($op.items -notcontains [string]$h.value) { RG-Remove $op.path $h.name } }
-      $data = @(Snapshot $op.path | ForEach-Object { [string]$_.value })
-      $n = 0; foreach ($h in @(Snapshot $op.path)) { $i = 0; if ([int]::TryParse([string]$h.name, [ref]$i) -and $i -gt $n) { $n = $i } }
-      foreach ($it in $op.items) { if ($data -notcontains $it) { $n++; RG-Write $op.path "$n" $it "String"; $data += $it } }
+      $ours = New-TextSet $op.items
+      $drop = @(Snapshot $op.path | Where-Object { -not $ours.Contains([string]$_.value) } | ForEach-Object { [string]$_.name })
+      if ($drop.Count -gt 0) { RG-RemoveMany $op.path $drop }
+      Add-ListItems $op.path $op.items
     }
     "ffprefs" { RG-Write $op.path $op.name ([string[]]@(Merge-FfPrefs (RG-Read $op.path $op.name) $op.prefs)) "MultiString" }
   }
@@ -366,7 +410,8 @@ function Restore-Backup($b) {
     try {
       $keep = @{}; foreach ($x in @($l.values)) { if ($x) { $keep[[string]$x.name] = $x } }
       if (-not (RG-KeyExists $l.path)) { if ($keep.Count -eq 0) { continue }; Ensure-Key $l.path }
-      foreach ($n in @(RG-ValueNames $l.path)) { if (-not $keep.ContainsKey([string]$n)) { RG-Remove $l.path $n } }
+      $drop = @(RG-ValueNames $l.path | Where-Object { -not $keep.ContainsKey([string]$_) } | ForEach-Object { [string]$_ })
+      if ($drop.Count -gt 0) { RG-RemoveMany $l.path $drop }
       foreach ($x in $keep.Values) { RG-Write $l.path $x.name (As-Kind $x.value $x.kind) $x.kind }
     } catch { $fails++ }
   }
@@ -467,7 +512,10 @@ function Remove-FirefoxForkFiles {
   }
 }
 
+$script:PolSw = [Diagnostics.Stopwatch]::StartNew()
+function Lap([string]$n) { if ($env:LOCKQZ_TIMING) { Write-Host ("TIMING policy {0,-8} {1,6:N1} s" -f $n, $script:PolSw.Elapsed.TotalSeconds) } }
 function Do-Lock {
+  Lap "start"
   # Back up FIRST, and only once per quiz: a re-run must never back up LOCKqz's own values.
   $b = Load-Backup
   if (-not $b) {
@@ -493,17 +541,24 @@ function Do-Lock {
       if (-not (Save-Backup $nb)) { $plan = @($plan | Where-Object { $missing -notcontains $_ }) }
     }
   }
+  Lap "backup"
   $fails = 0
-  foreach ($op in $plan) { try { Apply-Op $op } catch { $fails++ } }
+  $script:KeyOk = @{}
+  try { foreach ($op in $plan) { try { Apply-Op $op } catch { $fails++ } } } finally { $script:KeyOk = $null }
+  Lap "apply"
   Apply-FirefoxForkFiles $keep
+  Lap "firefox"
   $note = ""; if ($keep) { $note = " (network needs its proxy: browser proxy setting kept)" }
   if ($fails) { "LOCKqz browser policy: LOCKED ($fails values could not be set)$note" } else { "LOCKqz browser policy: LOCKED$note" }
 }
 
 function Do-Unlock {
+  Lap "start"
   $b = Load-Backup
+  Lap "read"
   if ($b) {
     $fails = Restore-Backup $b
+    Lap "restore"
     if ($fails -gt 0) { Remove-FirefoxForkFiles; "LOCKqz browser policy: restore incomplete ($fails) - will retry"; return }
     Remove-Item $BackupFile -Force
   } else { Legacy-Cleanup }

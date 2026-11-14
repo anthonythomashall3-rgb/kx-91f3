@@ -124,6 +124,8 @@ check "Linux: kill lists from running_named -s" 'grep -q "running_named -s \"\$@
 check "Linux: open connections looked at once (ss -Htn)" 'grep -q "ss -Htn" "$APP/linux/lockqz.sh"'
 check "Windows: one Get-Process for the whole list, closed by process id" 'grep -q "foreach (\$p in @(Get-Process -ErrorAction SilentlyContinue))" "$APP/windows/lockqz.ps1" && grep -q "Stop-Process -Id \$p.Id -Force" "$APP/windows/lockqz.ps1" && ! grep -q "Stop-Process -Name \$a" "$APP/windows/lockqz.ps1"'
 check "Windows: names compared without case" 'grep -q "StringComparer\]::OrdinalIgnoreCase" "$APP/windows/lockqz.ps1"'
+check "Windows browser policy: the long lists are written and removed with one open of their key" 'grep -qF "RG-WriteMany \$path \$add" "$APP/windows/browser-policy.ps1" && [ "$(grep -cF "{ RG-RemoveMany " "$APP/windows/browser-policy.ps1")" -ge 2 ] && grep -qF "function RG-ReadAll" "$APP/windows/browser-policy.ps1"'
+check "Windows browser policy: no list is walked once per entry any more" '! grep -q "\$data += \$it" "$APP/windows/browser-policy.ps1" && ! grep -q "notcontains \$it" "$APP/windows/browser-policy.ps1"'
 V="$(cat "$APP/VERSION")"
 check "version $V in both helpers" 'grep -q "^VERSION = \"$V\"" "$APP/mac/lockqzd.py" && grep -q "^\\\$Version = \"$V\"" "$APP/windows/lockqzd.ps1"'
 
