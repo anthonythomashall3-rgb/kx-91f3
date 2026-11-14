@@ -49,9 +49,9 @@ OVERLAY_APPS=(cluely Cluely interview-coder InterviewCoder lockedin-ai FinalRoun
 
 _kill_list() {   # _kill_list label name...
   local label="$1"; shift
-  local n
-  for n in "$@"; do
-    if [ "$DRYRUN" = "1" ]; then pgrep -x -- "$n" >/dev/null 2>&1 && echo "    [dry-run] would close $label: $n"; continue; fi
+  local kind n   # only the ones running now (running_named: one look at the process table per list)
+  running_named -s "$@" | while IFS=$'\t' read -r kind n; do
+    if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would close $label: $n"; continue; fi
     pkill -x -- "$n" 2>/dev/null || true
   done
 }
@@ -205,11 +205,9 @@ warm_apply() {
     fi
     if [ ! -f "$STATE/warm.killed" ] || [ "$WARM_IPS" -nt "$STATE/warm.killed" ]; then
       if command -v ss >/dev/null 2>&1; then
-        local ip
-        while read -r ip; do
-          [ -z "$ip" ] && continue
-          case "$ip" in *:*) ss -K dst "[$ip]" >/dev/null 2>&1 ;; *) ss -K dst "$ip" >/dev/null 2>&1 ;; esac
-        done < "$WARM_IPS"
+        # several at a time: the list holds a thousand addresses and more, one ss call each
+        { grep -v ':' "$WARM_IPS" 2>/dev/null || true; } | grep . | xargs -P 8 -I{} ss -K dst {} >/dev/null 2>&1 || true
+        { grep ':' "$WARM_IPS" 2>/dev/null || true; } | xargs -P 8 -I{} ss -K dst '[{}]' >/dev/null 2>&1 || true
       fi
       touch "$STATE/warm.killed"
     fi

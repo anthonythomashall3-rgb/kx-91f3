@@ -153,8 +153,14 @@ function Write-Hosts([string]$text, [bool]$append) {
 
 function Kill-AiAndTools {
   $all = if ($TestMode) { $AiApps + $OverlayApps + $ModelProcs } else { $AiApps + $VmApps + $RemoteApps + $OverlayApps + $ModelProcs + $VpnApps }
-  foreach ($a in $all) {
-    Stop-Process -Name $a -Force -ErrorAction SilentlyContinue
+  # One look at the running programs for the whole list (the lock pass repeats every few seconds during a quiz).
+  $want = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+  $wild = @()
+  foreach ($a in $all) { if ($a -match '[*?\[]') { $wild += $a } else { [void]$want.Add([string]$a) } }
+  foreach ($p in @(Get-Process -ErrorAction SilentlyContinue)) {
+    $n = [string]$p.ProcessName; $hit = $want.Contains($n)
+    if (-not $hit) { foreach ($w in $wild) { if ($n -like $w) { $hit = $true; break } } }
+    if ($hit) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
   }
 }
 function Ensure-FirewallRules {

@@ -68,3 +68,23 @@ hosts_remove_block() {
 
 # app_re <name> -> regex matching ONLY a process launched from "<name>.app" (used with pkill -f).
 app_re() { printf '/%s\\.app/Contents/MacOS/' "$(printf '%s' "$1" | sed 's/[][\\.^$*+?(){}|]/\\&/g')"; }
+
+# running_named [-s] name... -> which of the given names are running now, one per line: "app<TAB>name" (a process
+# launched from "<name>.app") or "proc<TAB>name" (a process with exactly that name). ONE look at the process table
+# for the whole list, however long it is: the lock pass runs every few seconds during a quiz and must stay light.
+# Names compare without case, as pkill -i does; -s = exact case, process names only (Linux: pkill -x).
+running_named() {
+  local cs=0; [ "${1:-}" = "-s" ] && { cs=1; shift; }
+  [ $# -gt 0 ] || return 0
+  { printf '%s\n' "$@"; echo "==LQ=="; ps -axww -o comm= 2>/dev/null; echo "==LQ=="; [ "$cs" = 1 ] || ps -axww -o args= 2>/dev/null; } | awk -v cs="$cs" '
+    function key(s) { return cs ? s : tolower(s) }
+    $0 == "==LQ==" { sec++; next }
+    sec == 0 { if ($0 != "") want[key($0)] = $0; next }
+    sec == 1 { b = $0; sub(/[ \t]+$/, "", b); if (substr(b, 1, 1) == "/") sub(/^.*\//, "", b); b = key(b)
+               if ((b in want) && !(b in hit)) hit[b] = "proc"; next }
+    { s = tolower($0)
+      while (match(s, /\/[^\/]+\.app\/contents\/macos\//)) {
+        x = substr(s, RSTART + 1, RLENGTH - 21); if (x in want) hit[x] = "app"
+        s = substr(s, RSTART + RLENGTH - 1) } }
+    END { for (k in hit) printf "%s\t%s\n", hit[k], want[k] }'
+}

@@ -161,7 +161,11 @@ console.log("S4 roster sync: a class list longer than LOCKqz reads (3,000) never
 console.log("S5 self-signup is rate-limited per IP; invite sign-ups are not");
 { let ok = 0, last = null;
   for (let i = 0; i < 11; i++) { last = await call("/signup", { email: `spam${i}@x.com`, password: "spampass12" }, { ip: "10.55.0.1" }); if (last.status === 200) ok++; }
-  check("10 self-sign-ups from one IP in an hour, the 11th is refused (429)", ok === 10 && last.status === 429, `${ok} ${last.status}`);
+  check("11 self-sign-ups in a row from one address are answered (a department on one campus address)", ok === 11, `${ok} ${last.status}`);
+  sqlite.prepare("UPDATE rl SET n=1000 WHERE k LIKE 'signup|10.55.0.1|%'").run();   // the ceiling: 1,000 per address per hour
+  const before = n("SELECT COUNT(*) FROM teachers");
+  last = await call("/signup", { email: "spam-over@x.com", password: "spampass12" }, { ip: "10.55.0.1" });
+  check("past 1,000 in an hour from one address: refused (429), no account row written", last.status === 429 && n("SELECT COUNT(*) FROM teachers") === before, `${last.status}`);
   const code = (await call("/invite", { email: "late@usc.edu", until: "2099-12-31" }, { teacher: ADMIN })).data?.code;
   r = await call("/signup", { email: "late@usc.edu", password: "latepass12", invite: code }, { ip: "10.55.0.1" });
   check("an invited professor from the same IP still signs up", r.status === 200 && !!r.data?.token, JSON.stringify(r.data));

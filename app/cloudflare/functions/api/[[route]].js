@@ -702,7 +702,7 @@ export async function onRequest(context) {
       .bind(`${kind}|${clientIp}|${Math.floor(Date.now() / 3600000)}`, now(), perHour).first()); }
     catch (e) { if (WRITE_CAP(e)) throw e; return true; }
   };
-  const IP_REG = 3000, IP_PAY_OPEN = 3000, IP_PAY_CARD = 2000, IP_PAY_CODE = 2000, IP_CODES = 1000;
+  const IP_REG = 3000, IP_PAY_OPEN = 3000, IP_PAY_CARD = 2000, IP_PAY_CODE = 2000, IP_CODES = 1000, IP_SIGNUP = 1000, IP_SUPPORT = 500, IP_BANK = 1000;
   // The sync key (in the bookmarklet URL, readable by any script on the Brightspace page) authorizes
   // ONLY the Brightspace-connector endpoints. Account management needs the real session token.
   const viaSyncKey = !!(request.headers.get("X-LOCKqz-Sync") || "").trim() && !(hdr && adminKey && sameHex(hdr, adminKey)) && !(hdr);
@@ -2319,13 +2319,10 @@ export async function onRequest(context) {
       // Only an INVITED (vouched) account can verify -- by syncing a course whose trusted roster lists
       // its email as Instructor. Without that, anyone could sign up as bristow@usc.edu before his roster
       // is seeded and later "verify" as him. The invite also sets the paid window.
-      // Self-signup (no valid invite): 10 per IP per hour, checked before any password hashing or row is
-      // written (else one script fills the D1 free plan's 100k rows/day and burns CPU on PBKDF2).
+      // Self-signup (no valid invite): counted per address and hour, checked before any password hashing or row
+      // is written.
       if (!invPre && !proved) {
-        const hr = new Date(Date.now() - 3600000).toISOString();
-        if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='signup' AND " + RL_EV + " AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 10)
-          return json({ error:"too many sign-ups from here — try again in an hour" }, 429);
-        await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + clientIp, null, null, "signup", null, now()).run();
+        if (!(await ipRoom("signup", IP_SIGNUP))) return json({ error:"too many sign-ups from here — try again in an hour" }, 429);
       }
       const n = (await db.prepare("SELECT COUNT(*) AS n FROM teachers").first()).n;
       let inv = null;
@@ -2403,9 +2400,7 @@ export async function onRequest(context) {
         const hd = String(env.GOOGLE_HD ?? "usc.edu").trim().toLowerCase();
         if (hd && g.hd !== hd && !g.email.endsWith("@" + hd)) return json({ error: "No LOCKqz professor account for " + g.email + ". Use your " + hd + " Google account." }, 404);
         if (await lockedOnly(g.email)) return json({ error: STUDENT_EMAIL_MSG }, 403);
-        const hr = new Date(Date.now() - 3600000).toISOString();
-        if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='signup' AND " + RL_EV + " AND ts>? AND device_id=?").bind(hr, "ip:" + ip).first()).n) >= 10)
-          return json({ error: "too many sign-ups from here — try again in an hour" }, 429);
+        if (!(await ipRoom("signup", IP_SIGNUP))) return json({ error: "too many sign-ups from here — try again in an hour" }, 429);
         const salt = rid(16), token = hex(crypto.getRandomValues(new Uint8Array(24)));
         // A random password nobody knows: Google signs them in (a password can be set later).
         const pwh = await hashPw(hex(crypto.getRandomValues(new Uint8Array(24))), salt, PEPPER), name = g.name || t?.name || (await rosterName(g.email)) || null;
@@ -2821,7 +2816,7 @@ export async function onRequest(context) {
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: "Enter your email." }, 400);
       if (msg.length < 5) return json({ error: "Write your message." }, 400);
       const hr = new Date(Date.now() - 3600000).toISOString(), day = new Date(Date.now() - 86400000).toISOString();
-      if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='support' AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 5
+      if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='support' AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= IP_SUPPORT
        || Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='support' AND ts>? AND student=?").bind(hr, email).first()).n) >= 5)
         return json({ error: "Too many messages. Try again in an hour." }, 429);
       if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='support' AND ts>?").bind(day).first()).n) >= Number(env.SUPPORT_MAX_DAY || 60))
@@ -2838,7 +2833,7 @@ export async function onRequest(context) {
       const email = String(body.email || "").trim().toLowerCase();
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: "enter your school email" }, 400);
       const hr = new Date(Date.now() - 3600000).toISOString(), ten = new Date(Date.now() - 600000).toISOString();
-      if (!script && Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_bank' AND " + RL_EV + " AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= 10)
+      if (!script && Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_bank' AND " + RL_EV + " AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= IP_BANK)
         return json({ error: "too many requests — try again in an hour" }, 429);
       if (await db.prepare("SELECT 1 FROM events WHERE event='pay_bank' AND " + RL_EV + " AND student=? AND ts>?").bind(email, ten).first())
         return json({ ok: true, sent: true, to: email, again: true });   // one email per address per 10 minutes

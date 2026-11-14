@@ -96,9 +96,10 @@ kill_named() {
   pkill -ix -- "$1" 2>/dev/null || true
   pkill -if -- "$(app_re "$1")" 2>/dev/null || true
 }
-close_ai_apps() {
-  for a in "${AI_APPS[@]}"; do
-    pgrep -if -- "$(app_re "$a")" >/dev/null 2>&1 && osascript -e "tell application \"$a\" to quit" 2>/dev/null || true
+close_ai_apps() {   # only the ones running now (running_named: one look at the process table)
+  local kind a
+  running_named "${AI_APPS[@]}" | while IFS=$'\t' read -r kind a; do
+    if [ "$kind" = app ]; then osascript -e "tell application \"$a\" to quit" 2>/dev/null || true; fi
     kill_named "$a"
   done
 }

@@ -70,19 +70,23 @@ XB_MARK="LOCKqzManaged"
 xb_say() { echo "LOCKqz: $*"; }
 
 type app_re >/dev/null 2>&1 || app_re() { printf '/%s\\.app/Contents/MacOS/' "$(printf '%s' "$1" | sed 's/[][\\.^$*+?(){}|]/\\&/g')"; }
-_kill_list() {   # _kill_list "label" name...
-  local label="$1"; shift
-  local a
+# Without lockqz-core.sh's running_named: the same answer, one look per name.
+type running_named >/dev/null 2>&1 || running_named() {
+  local a; [ "${1:-}" = "-s" ] && shift
   for a in "$@"; do
-    local re; re="$(app_re "$a")"
-    if [ "$DRYRUN" = "1" ]; then
-      { pgrep -ix -- "$a" || pgrep -if -- "$re"; } >/dev/null 2>&1 && echo "    [dry-run] would close ($label): $a"
-      continue
-    fi
+    if pgrep -if -- "$(app_re "$a")" >/dev/null 2>&1; then printf 'app\t%s\n' "$a"
+    elif pgrep -ix -- "$a" >/dev/null 2>&1; then printf 'proc\t%s\n' "$a"; fi
+  done
+}
+_kill_list() {   # _kill_list "label" name...   (only the ones running now: one look at the process table per list)
+  local label="$1"; shift
+  local kind a
+  running_named "$@" | while IFS=$'\t' read -r kind a; do
+    if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would close ($label): $a"; continue; fi
     # exact process name or "<name>.app" only -- never a loose substring of a command line
-    pgrep -if -- "$re" >/dev/null 2>&1 && osascript -e "tell application \"$a\" to quit" 2>/dev/null || true
+    if [ "$kind" = app ]; then osascript -e "tell application \"$a\" to quit" 2>/dev/null || true; fi
     pkill -ix -- "$a" 2>/dev/null || true
-    pkill -if -- "$re" 2>/dev/null || true
+    pkill -if -- "$(app_re "$a")" 2>/dev/null || true
   done
 }
 
@@ -333,11 +337,9 @@ _warm_age() {   # seconds since the file changed (macOS stat; GNU stat in the Li
   echo $(( $(date +%s) - m ))
 }
 warm_kill_states() {   # kill the states pf already holds to the listed addresses (once per lock)
-  local ip
-  while read -r ip; do
-    [ -z "$ip" ] && continue
-    case "$ip" in *:*) pfctl -k ::/0 -k "$ip" >/dev/null 2>&1 ;; *) pfctl -k 0.0.0.0/0 -k "$ip" >/dev/null 2>&1 ;; esac
-  done < "$WARM_IPS"
+  # Several at a time: the list holds a thousand addresses and more, one pfctl call each.
+  { grep -v ':' "$WARM_IPS" 2>/dev/null || true; } | grep . | xargs -P 8 -I{} pfctl -k 0.0.0.0/0 -k {} >/dev/null 2>&1 || true
+  { grep ':' "$WARM_IPS" 2>/dev/null || true; } | xargs -P 8 -I{} pfctl -k ::/0 -k {} >/dev/null 2>&1 || true
 }
 warm_apply() {   # called on every lock pass (5 s): cheap unless the list changed
   local rc=0
