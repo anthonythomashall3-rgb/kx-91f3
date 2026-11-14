@@ -37,3 +37,13 @@ app/cloudflare/.deploy/
 # Plain server: secrets and data never go in the repo
 app/server/lockqz.env
 app/server/data/
+
+# local-only (not for this PUBLIC repo): USC vendor docs, signing material, store/build artifacts
+06_usc_forms/LOCKqz - Brightspace API Access Request.pdf
+06_usc_forms/LOCKqz - HECVAT 4.1.6 (API request).xlsx
+06_usc_forms/reference/BEFORE_COM/
+09_firefox_signing/
+MICROSOFT-STORE/
+previews/
+*.msix
+LOCKqz-extension-*.zip
