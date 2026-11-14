@@ -12,7 +12,7 @@ source "$APP/mac/lockqz-core.sh"
 (exec -a "/Applications/LM Studio.app/Contents/MacOS/LM Studio" sleep 60) &
 (exec -a "/Users/x/Apps/Cluely.app/Contents/MacOS/Cluely --hidden" sleep 60) &
 (exec -a "/Applications/Google Chrome.app/Contents/Frameworks/x/Google Chrome Helper --enable-features=MediaFoundation,Dia" sleep 60) &
-cp "$(command -v sleep)" "$TMP/ollama"; "$TMP/ollama" 60 &
+cp "$(command -v bash)" "$TMP/ollama"; "$TMP/ollama" -c 'sleep 60; :' &   # a real program file named ollama (sleep itself can be a multi-call binary)
 sleep 0.6
 
 echo "T1 running_named: which listed names are running"
