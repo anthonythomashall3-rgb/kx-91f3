@@ -31,7 +31,13 @@ check "no CORS preflight answer" "! curl -s -i -X OPTIONS $B/lock | grep -qi 'ac
 check "rejects wrong token" "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -H 'X-LOCKqz-Token: nope' $B/status)\" = 401 ]"
 check "no developer mode on a student machine" "curl -s -H '$H' $B/status | grep -q '\"developer\": false'"
 
+# This test drives the helper by hand (no quiz page is open). The student's agent would take such a lock over and,
+# seeing it ended by someone else within its 30 s grace, put it back: keep it out of this lock / unlock.
+for u in $(ps -axo uid=,args= | awk '/lockqz-agent\.py/ && !/awk/ {print $1}' | sort -u); do sudo launchctl bootout "gui/$u/com.lockqz.agent" 2>/dev/null || true; done
+sudo pkill -f 'lockqz-agent\.py' 2>/dev/null || true
+T0=$(python3 -c 'import time; print(time.time())')
 curl -s -m 90 -X POST -H "$H" -H 'Content-Type: application/json' -d '{"quiz_id":"ci-test","student":"CI"}' $B/lock >/tmp/lock.json
+echo "INFO  first lock took $(python3 -c "import time; print(round(time.time()-$T0, 1))") s"
 check "lock accepted" "grep -q '\"locked\"' /tmp/lock.json"
 check "hosts has block" "grep -q 'LOCKqz START' /etc/hosts"
 for d in chatgpt.com claude.ai gemini.google.com perplexity.ai; do
@@ -41,7 +47,13 @@ check "pf anchor loaded" "sudo pfctl -a com.lockqz -sr | grep -q block"
 check "Chrome AI policy on" "[ -f '/Library/Managed Preferences/com.google.Chrome.plist' ]"
 check "status locked" "curl -s -H '$H' $B/status | grep -q '\"engine_locked\": true'"
 
+# One lock pass of the kind that repeats every 5 s during a quiz (the engine itself, timed).
+T0=$(python3 -c 'import time; print(time.time())'); sudo bash "$DEST/lockqz.sh" lock >/dev/null 2>&1
+PASS_S=$(python3 -c "import time; print(round(time.time()-$T0, 1))"); echo "INFO  repeat lock pass took $PASS_S s"
+check "the repeat lock pass takes under 10 s on this test machine (it repeats every 5 s during a quiz)" "python3 -c 'import sys; sys.exit(0 if $PASS_S < 10 else 1)'"
+T0=$(python3 -c 'import time; print(time.time())')
 curl -s -m 90 -X POST -H "$H" -H 'Content-Type: application/json' -d '{"quiz_id":"ci-test"}' $B/unlock >/tmp/unlock.json
+echo "INFO  unlock took $(python3 -c "import time; print(round(time.time()-$T0, 1))") s"
 check "unlock accepted" "grep -q '\"unlocked\"' /tmp/unlock.json"
 check "hosts clean" "! grep -q 'LOCKqz START' /etc/hosts"
 check "chatgpt.com reachable again" "! dscacheutil -q host -a name chatgpt.com | grep -q '0.0.0.0'"
@@ -51,8 +63,6 @@ echo "INFO  poe.com (never asked during the lock): $(dscacheutil -q host -a name
 echo "INFO  hosts lines naming chatgpt: $(grep -c chatgpt /etc/hosts)   resolver files: $(ls /etc/resolver 2>/dev/null | wc -l | tr -d ' ')"
 echo "INFO  hosts: $(wc -l < /etc/hosts | tr -d ' ') lines; LOCKqz/chatgpt lines:"; grep -n "LOCKqz\|chatgpt" /etc/hosts | head -12 | sed 's/^/INFO    /'
 echo "INFO  hosts tail:"; tail -4 /etc/hosts | sed 's/^/INFO    /'
-echo "INFO  helper log:"; sudo tail -25 "$DEST/lockqzd.log" 2>/dev/null | cut -c1-220 | sed 's/^/INFO    /'
-echo "INFO  engine processes:"; ps -axww -o pid=,ppid=,etime=,args= | grep -i "lockqz" | grep -v grep | cut -c1-200 | sed 's/^/INFO    /'
 check "Chrome AI policy removed" "[ ! -f '/Library/Managed Preferences/com.google.Chrome.plist' ]"
 
 sleep 3
