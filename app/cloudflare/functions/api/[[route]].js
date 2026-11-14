@@ -264,6 +264,7 @@ async function rotatingPw(secret, ou, qi, bucket) {
 }
 const enc = new TextEncoder();
 const unixNow = () => Math.floor(Date.now() / 1000);
+const inviteCutoff = env => { const d = Number(env?.INVITE_TTL_DAYS ?? 30); return d > 0 ? new Date(Date.now() - d * 86400000).toISOString() : ""; };   // unused invite codes expire after INVITE_TTL_DAYS (default 30; 0 = off)
 async function sha256hex(bytes) { return hex(await crypto.subtle.digest("SHA-256", bytes)); }
 async function hmacHex(keyText, msg) {
   const k = await crypto.subtle.importKey("raw", enc.encode(keyText), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -2289,7 +2290,7 @@ export async function onRequest(context) {
       // an admin invite code for that email, or the 6-digit code LOCKqz emailed to it (/signup/code). So a
       // student can't pre-register bristow@usc.edu.
       const codeUp = String(body.invite||"").trim().toUpperCase();
-      const invPre = codeUp ? await db.prepare("SELECT email FROM invites WHERE code=? AND used_at IS NULL AND (email IS NULL OR email=?)").bind(codeUp, email).first() : null;
+      const invPre = codeUp ? await db.prepare("SELECT email FROM invites WHERE code=? AND used_at IS NULL AND (email IS NULL OR email=?) AND (created_at IS NULL OR created_at > ?)").bind(codeUp, email, inviteCutoff(env)).first() : null;
       // The emailed code (used when there is no invite): 15 minutes, 5 tries, only its hash is stored.
       let proved = false;
       const ecode = String(body.code||"").replace(/\D/g, "");
@@ -2329,8 +2330,8 @@ export async function onRequest(context) {
       {
         const code = String(body.invite||"").trim().toUpperCase();
         if (code) {
-          inv = await db.prepare("SELECT code,email,active_until,used_at FROM invites WHERE code=?").bind(code).first();
-          if (inv && !inv.used_at && (!inv.email || inv.email === email)) {
+          inv = await db.prepare("SELECT code,email,active_until,used_at,created_at FROM invites WHERE code=?").bind(code).first();
+          if (inv && !inv.used_at && (!inv.email || inv.email === email) && (inv.created_at == null || inv.created_at > inviteCutoff(env))) {
             const u = await db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE code=? AND used_at IS NULL").bind(now(), email, inv.code).run();
             if (!u.meta.changes) inv = null;   // lost the race — treat as no invite
           } else inv = null;
@@ -2477,8 +2478,8 @@ export async function onRequest(context) {
     // Public: is this invite link valid? (lets the sign-up form open and prefill the email)
     if (p === "/invite-check") {
       const code = String(url.searchParams.get("code")||"").trim().toUpperCase();
-      const inv = code ? await db.prepare("SELECT email,used_at FROM invites WHERE code=?").bind(code).first().catch(()=>null) : null;
-      return json(inv && !inv.used_at ? { ok:true, email: inv.email||null } : { ok:false });
+      const inv = code ? await db.prepare("SELECT email,used_at,created_at FROM invites WHERE code=?").bind(code).first().catch(()=>null) : null;
+      return json(inv && !inv.used_at && (inv.created_at == null || inv.created_at > inviteCutoff(env)) ? { ok:true, email: inv.email||null } : { ok:false });
     }
     if (p === "/me") {
       if (!me) return json({ error:"unauthorized" }, 401);

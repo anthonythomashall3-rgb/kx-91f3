@@ -180,5 +180,20 @@ r = await call("/teachers", null, { get: true, token: BT });
 check("a professor cannot read the list", r.status === 403);
 check("the admin table has the four set-up columns", dash.includes("<th>Extension</th><th>Brightspace</th><th>Students emailed</th><th>Protected exams</th>") && dash.includes("t.ext_seen?OK+esc(ago(t.ext_seen)):NO"));
 
+console.log("P8 unused invite codes expire after INVITE_TTL_DAYS (default 30; 0 = off)");
+let er = await call("/invite", { email: "fresh@usc.edu" }, { token: ADMIN });
+const freshCode = er.data?.code;
+let ec = await call("/invite-check?code=" + freshCode, null, { get: true });
+check("fresh invite: /invite-check ok", ec.data?.ok === true, JSON.stringify(ec.data));
+er = await call("/invite", { email: "stale@usc.edu" }, { token: ADMIN });
+const staleCode = er.data?.code;
+sqlite.prepare("UPDATE invites SET created_at=? WHERE code=?").run(new Date(Date.now() - 40*86400000).toISOString(), staleCode);
+ec = await call("/invite-check?code=" + staleCode, null, { get: true });
+check("expired invite (40d, TTL 30): /invite-check not ok", ec.data?.ok === false, JSON.stringify(ec.data));
+r = await call("/signup", { email: "stale@usc.edu", password: "stalepass123", invite: staleCode }, { ip: "10.9.0.1" });
+check("expired invite does not vouch the sign-up", row("stale@usc.edu")?.vouched !== 1, JSON.stringify({ status: r.status, row: row("stale@usc.edu") }));
+ec = await call("/invite-check?code=" + staleCode, null, { get: true, envx: { INVITE_TTL_DAYS: "0" } });
+check("INVITE_TTL_DAYS=0 disables expiry: expired invite valid again", ec.data?.ok === true, JSON.stringify(ec.data));
+
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
