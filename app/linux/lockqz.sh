@@ -205,9 +205,16 @@ warm_apply() {
     fi
     if [ ! -f "$STATE/warm.killed" ] || [ "$WARM_IPS" -nt "$STATE/warm.killed" ]; then
       if command -v ss >/dev/null 2>&1; then
-        # several at a time: the list holds a thousand addresses and more, one ss call each
-        { grep -v ':' "$WARM_IPS" 2>/dev/null || true; } | grep . | xargs -P 8 -I{} ss -K dst {} >/dev/null 2>&1 || true
-        { grep ':' "$WARM_IPS" 2>/dev/null || true; } | xargs -P 8 -I{} ss -K dst '[{}]' >/dev/null 2>&1 || true
+        # One look at the open connections: only the listed addresses that have one are cut (the list holds a
+        # thousand addresses and more; an ss call for each took the first lock many seconds).
+        local hit
+        hit="$(ss -Htn 2>/dev/null | awk 'NR == FNR { if ($1 != "") w[$1] = 1; next }
+          { t = $NF; sub(/:[0-9*]+$/, "", t); gsub(/[][]/, "", t); sub(/%.*$/, "", t); if (t in w) h[t] = 1 }
+          END { for (k in h) print k }' "$WARM_IPS" - 2>/dev/null || true)"
+        if [ -n "$hit" ]; then
+          { printf '%s\n' "$hit" | grep -v ':' || true; } | xargs -P 8 -I{} ss -K dst {} >/dev/null 2>&1 || true
+          { printf '%s\n' "$hit" | grep ':' || true; } | xargs -P 8 -I{} ss -K dst '[{}]' >/dev/null 2>&1 || true
+        fi
       fi
       touch "$STATE/warm.killed"
     fi

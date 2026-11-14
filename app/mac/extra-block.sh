@@ -337,9 +337,17 @@ _warm_age() {   # seconds since the file changed (macOS stat; GNU stat in the Li
   echo $(( $(date +%s) - m ))
 }
 warm_kill_states() {   # kill the states pf already holds to the listed addresses (once per lock)
-  # Several at a time: the list holds a thousand addresses and more, one pfctl call each.
-  { grep -v ':' "$WARM_IPS" 2>/dev/null || true; } | grep . | xargs -P 8 -I{} pfctl -k 0.0.0.0/0 -k {} >/dev/null 2>&1 || true
-  { grep ':' "$WARM_IPS" 2>/dev/null || true; } | xargs -P 8 -I{} pfctl -k ::/0 -k {} >/dev/null 2>&1 || true
+  # One look at pf's state table: only the listed addresses it holds a state to are killed (the list holds a
+  # thousand addresses and more; a pfctl call for each took the first lock many seconds).
+  local hit
+  hit="$(pfctl -ss 2>/dev/null | awk 'NR == FNR { if ($1 != "") w[$1] = 1; next }
+    { for (i = 1; i <= NF; i++) { t = $i; gsub(/[()]/, "", t)
+        if (t ~ /\[[0-9]+\]$/) sub(/\[[0-9]+\]$/, "", t); else if (t ~ /^[0-9.]+:[0-9]+$/) sub(/:[0-9]+$/, "", t)
+        if (t in w) h[t] = 1 } }
+    END { for (k in h) print k }' "$WARM_IPS" - 2>/dev/null || true)"
+  [ -n "$hit" ] || return 0
+  { printf '%s\n' "$hit" | grep -v ':' || true; } | xargs -P 8 -I{} pfctl -k 0.0.0.0/0 -k {} >/dev/null 2>&1 || true
+  { printf '%s\n' "$hit" | grep ':' || true; } | xargs -P 8 -I{} pfctl -k ::/0 -k {} >/dev/null 2>&1 || true
 }
 warm_apply() {   # called on every lock pass (5 s): cheap unless the list changed
   local rc=0
@@ -382,8 +390,8 @@ extra_lock() {
   _kill_if_tunnel "${VPN_IF_TUNNEL[@]}"
   _kill_list "Apple Intelligence" "${APPLE_AI_APPS[@]}"
   local rc=0
+  airplay_receiver_off || rc=1      # before the next step restarts the preferences service (reads after it wait)
   apple_intelligence_off || rc=1
-  airplay_receiver_off || rc=1
   proxies_off || true
   wild_block_on || rc=1
   warm_apply || rc=1
@@ -394,8 +402,8 @@ extra_unlock() {
   # VPN/VM/remote/overlay/model apps are left for the student to reopen; only the
   # OS-level Apple Intelligence policy and the proxies must be actively restored.
   local rc=0
-  apple_intelligence_on || rc=1
   airplay_receiver_restore || rc=1
+  apple_intelligence_on || rc=1
   proxies_restore || true
   wild_block_off || rc=1
   warm_clear

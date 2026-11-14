@@ -47,14 +47,44 @@ check "no look per name any more (pgrep is not called)" '! grep -q "^pgrep" "$TM
 ( STATE="$TMP/state"; DRYRUN=1; source "$APP/mac/extra-block.sh"; _kill_list "overlay" "Cluely" "Pieces" > "$TMP/dry" )
 check "dry run names the running one only" 'grep -q "would close (overlay): Cluely" "$TMP/dry" && ! grep -q Pieces "$TMP/dry"'
 
-echo "T4 open connections to AI addresses are cut several at a time, each once"
-printf '#!/bin/bash\necho "$*" >> "%s/pflog"\nsleep 0.05\n' "$TMP" > "$TMP/bin/pfctl"; chmod +x "$TMP/bin/pfctl"
-for i in $(seq 1 40); do echo "198.51.100.$i"; done > "$TMP/warm"; for i in $(seq 1 20); do echo "2001:db8::$i"; done >> "$TMP/warm"; echo >> "$TMP/warm"
+echo "T4 open connections to AI addresses: one look at the state table, only the open ones are cut"
+cat > "$TMP/bin/pfctl" <<P
+#!/bin/bash
+echo "\$*" >> "$TMP/pflog"
+if [ "\$*" = "-ss" ]; then
+  for i in 3 7 11; do echo "ALL tcp 10.0.0.5:5\${i}000 -> 198.51.100.\$i:443       ESTABLISHED:ESTABLISHED"; done
+  echo "ALL tcp 10.0.0.5:52000 (203.0.113.9:52000) -> 198.51.100.20:443       ESTABLISHED:ESTABLISHED"
+  echo "ALL tcp 2001:db8:1::5[53000] -> 2001:db8::4[443]       ESTABLISHED:ESTABLISHED"
+  echo "ALL udp 10.0.0.5:54000 -> 192.0.2.77:443       MULTIPLE:MULTIPLE"
+fi
+P
+chmod +x "$TMP/bin/pfctl"
+for i in $(seq 1 1500); do echo "198.51.$((100 + i / 250)).$((i % 250))"; done > "$TMP/warm"; for i in $(seq 1 20); do echo "2001:db8::$i"; done >> "$TMP/warm"; echo >> "$TMP/warm"
 S=$(date +%s%N); ( PATH="$TMP/bin:$PATH"; STATE="$TMP/state"; source "$APP/mac/extra-block.sh"; WARM_IPS="$TMP/warm"; warm_kill_states ); E=$(date +%s%N)
-check "every IPv4 address once" '[ "$(grep -c "^-k 0.0.0.0/0 -k 198\.51\.100\." "$TMP/pflog")" = 40 ] && [ "$(sort "$TMP/pflog" | uniq -d | wc -l)" = 0 ]'
-check "every IPv6 address once, with the IPv6 form" '[ "$(grep -c "^-k ::/0 -k 2001:db8::" "$TMP/pflog")" = 20 ]'
-check "the empty line is skipped" '[ "$(wc -l < "$TMP/pflog")" = 60 ]'
-check "60 calls of 50 ms each finish in well under their 3 s in a row" '[ $(( (E - S) / 1000000 )) -lt 1800 ]'
+check "the state table is read once" '[ "$(grep -c "^-ss$" "$TMP/pflog")" = 1 ]'
+check "the four listed IPv4 addresses with a state are killed, each once (one behind a translated address too)" '[ "$(grep -c "^-k 0.0.0.0/0 -k 198\.51\.100\.\(3\|7\|11\|20\)$" "$TMP/pflog")" = 4 ]'
+check "the listed IPv6 address with a state is killed, in the IPv6 form" 'grep -q "^-k ::/0 -k 2001:db8::4$" "$TMP/pflog"'
+check "nothing else: 1,520 listed addresses, 5 calls (an address not on the list is left alone)" '[ "$(grep -c "^-k" "$TMP/pflog")" = 5 ] && ! grep -q "192.0.2.77" "$TMP/pflog"'
+check "done in well under a second" '[ $(( (E - S) / 1000000 )) -lt 1000 ]'
+rm -f "$TMP/pflog"; printf '#!/bin/bash\necho "$*" >> "%s/pflog"\n' "$TMP" > "$TMP/bin/pfctl"
+( PATH="$TMP/bin:$PATH"; STATE="$TMP/state"; source "$APP/mac/extra-block.sh"; WARM_IPS="$TMP/warm"; warm_kill_states )
+check "no state to any listed address: one look, no kill calls" '[ "$(cat "$TMP/pflog")" = "-ss" ]'
+# Linux: the same with ss
+cat > "$TMP/bin/ss" <<P
+#!/bin/bash
+echo "\$*" >> "$TMP/sslog"
+if [ "\$1" = "-Htn" ]; then
+  echo "ESTAB 0      0      10.0.0.5:51000  198.51.100.9:443"
+  echo "ESTAB 0      0      [2001:db8:1::5]:51001  [2001:db8::6]:443"
+  echo "ESTAB 0      0      10.0.0.5:51002  192.0.2.77:443"
+  echo "LISTEN 0     128    0.0.0.0:22  0.0.0.0:*"
+fi
+P
+chmod +x "$TMP/bin/ss"
+LNX="$(sed -n '/^warm_apply() {/,/^}/p' "$APP/linux/lockqz.sh")"
+( PATH="$TMP/bin:$PATH"; STATE="$TMP/lstate"; mkdir -p "$STATE"; WARM_IPS="$TMP/warm"; NFT_TABLE=lockqz; nft() { :; }; _age() { echo 0; }; WARM_MAX_AGE=99999; eval "$LNX"; warm_apply ) >/dev/null 2>&1
+check "Linux: open connections read once" '[ "$(grep -c "^-Htn$" "$TMP/sslog")" = 1 ]'
+check "Linux: only the listed addresses with an open connection are cut (IPv6 bracketed)" '[ "$(grep -c "^-K" "$TMP/sslog")" = 2 ] && grep -q "^-K dst 198.51.100.9$" "$TMP/sslog" && grep -q "^-K dst \[2001:db8::6\]$" "$TMP/sslog"'
 
 echo "T4b Mac unlock: AI names answer again before the unlock is reported done"
 printf 'chatgpt.com\nclaude.ai\n' > "$TMP/bl"
@@ -75,7 +105,7 @@ echo "T5 every platform uses the one-look way"
 check "Mac: AI apps closed from running_named" 'grep -q "running_named \"\${AI_APPS\[@\]}\"" "$APP/mac/lockqz.sh"'
 check "Mac: no loop over every AI app name with pgrep" '! grep -q "pgrep -if -- \"\$(app_re \"\$a\")\" >/dev/null 2>&1 && osascript" "$APP/mac/lockqz.sh"'
 check "Linux: kill lists from running_named -s" 'grep -q "running_named -s \"\$@\"" "$APP/linux/lockqz.sh"'
-check "Linux: open connections cut several at a time" 'grep -q "xargs -P 8 -I{} ss -K dst {}" "$APP/linux/lockqz.sh"'
+check "Linux: open connections looked at once (ss -Htn)" 'grep -q "ss -Htn" "$APP/linux/lockqz.sh"'
 check "Windows: one Get-Process for the whole list, closed by process id" 'grep -q "foreach (\$p in @(Get-Process -ErrorAction SilentlyContinue))" "$APP/windows/lockqz.ps1" && grep -q "Stop-Process -Id \$p.Id -Force" "$APP/windows/lockqz.ps1" && ! grep -q "Stop-Process -Name \$a" "$APP/windows/lockqz.ps1"'
 check "Windows: names compared without case" 'grep -q "StringComparer\]::OrdinalIgnoreCase" "$APP/windows/lockqz.ps1"'
 V="$(cat "$APP/VERSION")"

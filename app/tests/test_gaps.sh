@@ -64,6 +64,12 @@ chmod +x "$FB/dig"
 cat > "$FB/pfctl" <<'P'
 #!/bin/bash
 echo "$*" >> "$PFLOG"
+# pf's state table: a connection to one listed IPv4 address, one to a listed IPv6 address, one elsewhere.
+if [ "$*" = "-ss" ]; then
+  echo "ALL tcp 192.168.1.20:51515 -> 104.18.32.47:443       ESTABLISHED:ESTABLISHED"
+  echo "ALL tcp 2001:db8::20[51516] -> 2606:4700:4400::ac40:9bd1[443]       ESTABLISHED:ESTABLISHED"
+  echo "ALL tcp 192.168.1.20:51517 -> 93.184.216.34:443       ESTABLISHED:ESTABLISHED"
+fi
 P
 chmod +x "$FB/pfctl"
 printf 'chatgpt.com\nclaude.ai\nother.example\n' > "$TMP/bl"
@@ -77,6 +83,7 @@ check "public A + AAAA addresses kept" 'grep -q "^104.18.32.47$" "$TMP/g3" && gr
 check "CNAME noise, loopback, private, 0.0.0.0, link-local dropped" '! grep -qE "cname|^127\.|^10\.|^0\.0\.0\.0|^::1$|^fe80" "$TMP/g3"'
 check "table <lq_warm> replaced from the file on every pass (ruleset reloads empty it)" '[ "$(grep -c "^-a com.lockqz -t lq_warm -T replace" "$TMP/pflog1")" = 2 ]'
 check "states to each address killed ONCE (not every 5 s)" '[ "$(grep -c "^-k 0.0.0.0/0 -k 104.18.32.47$" "$TMP/pflog1")" = 1 ] && [ "$(grep -c "^-k ::/0 -k 2606:4700:4400::ac40:9bd1$" "$TMP/pflog1")" = 1 ]'
+check "an address pf holds no state to gets no call of its own (one look at the state table)" '! grep -q "^-k 0.0.0.0/0 -k 172.64.155.209$" "$TMP/pflog1" && ! grep -q "93.184.216.34" "$TMP/pflog1" && [ "$(grep -c "^-ss$" "$TMP/pflog1")" = 1 ]'
 check "unlock flushes the table" 'grep -q "^-a com.lockqz -t lq_warm -T flush" "$TMP/pflog2"'
 check "pf conf: table + pass-new-TCP(SYN) + drop untracked TCP + drop QUIC, all quick" 'grep -q "^table <lq_warm> persist" "$MAC/com.lockqz.pf.conf" && grep -q "^pass out quick proto tcp to <lq_warm> flags S/SA keep state" "$MAC/com.lockqz.pf.conf" && grep -q "^block drop out quick proto tcp to <lq_warm>$" "$MAC/com.lockqz.pf.conf" && grep -q "^block drop out quick proto udp to <lq_warm> port 443" "$MAC/com.lockqz.pf.conf"'
 check "pass rule comes before the block rules (quick: first match decides)" '[ "$(grep -n "to <lq_warm>" "$MAC/com.lockqz.pf.conf" | head -1 | cut -d: -f2 | cut -c1-4)" = "pass" ]'
