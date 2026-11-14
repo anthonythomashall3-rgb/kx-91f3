@@ -69,6 +69,21 @@ hosts_remove_block() {
 # app_re <name> -> regex matching ONLY a process launched from "<name>.app" (used with pkill -f).
 app_re() { printf '/%s\\.app/Contents/MacOS/' "$(printf '%s' "$1" | sed 's/[][\\.^$*+?(){}|]/\\&/g')"; }
 
+# dns_back <blocklist-file> : AI is really back - a blocked name no longer answers 0.0.0.0. macOS can keep the
+# old answer for a moment after the hosts file changed: the name cache is cleared again until the answer is gone
+# (about 3 s at most; one quick look when it already is). Not on Linux (no dscacheutil).
+dns_back() {
+  command -v dscacheutil >/dev/null 2>&1 || return 0
+  local d i; d="$(domains_from "$1" 2>/dev/null | sed -n 1p || true)"; [ -n "$d" ] || return 0
+  for i in 1 2 3 4 5 6; do
+    dscacheutil -q host -a name "$d" 2>/dev/null | grep '0\.0\.0\.0' >/dev/null || return 0
+    dscacheutil -flushcache 2>/dev/null || true
+    killall -HUP mDNSResponder 2>/dev/null || true
+    sleep 0.5
+  done
+  return 0
+}
+
 # running_named [-s] name... -> which of the given names are running now, one per line: "app<TAB>name" (a process
 # launched from "<name>.app") or "proc<TAB>name" (a process with exactly that name). ONE look at the process table
 # for the whole list, however long it is: the lock pass runs every few seconds during a quiz and must stay light.

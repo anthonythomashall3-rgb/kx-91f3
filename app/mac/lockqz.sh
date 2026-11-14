@@ -149,6 +149,7 @@ do_unlock() {
   unload_pf || { say "firewall anchor could not be emptied"; rc=1; }
   policy unlock || { say "browser policy could not be fully restored"; rc=1; }
   extra_unlock || { say "Apple Intelligence / AirPlay Receiver / proxy settings could not be fully restored"; rc=1; }
+  dns_back "$BLOCKLIST" || true   # AI names answer again before the unlock is reported done
   write_status unlocked || true
   if [ "$rc" = 0 ]; then say "UNLOCKED. AI access restored."; else say "UNLOCK INCOMPLETE - the helper will retry."; fi
   return $rc

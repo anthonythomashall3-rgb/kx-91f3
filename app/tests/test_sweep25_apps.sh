@@ -56,6 +56,21 @@ check "every IPv6 address once, with the IPv6 form" '[ "$(grep -c "^-k ::/0 -k 2
 check "the empty line is skipped" '[ "$(wc -l < "$TMP/pflog")" = 60 ]'
 check "60 calls of 50 ms each finish in well under their 3 s in a row" '[ $(( (E - S) / 1000000 )) -lt 1800 ]'
 
+echo "T4b Mac unlock: AI names answer again before the unlock is reported done"
+printf 'chatgpt.com\nclaude.ai\n' > "$TMP/bl"
+# A pretend macOS resolver that still gives the blocked answer for the first two looks.
+printf '#!/bin/bash\necho "$*" >> "%s/dslog"\ncase "$1" in -q) n=$(grep -c "^-q" "%s/dslog"); if [ "$n" -le 2 ]; then echo "ip_address: 0.0.0.0"; else echo "ip_address: 104.18.32.47"; fi;; esac\n' "$TMP" "$TMP" > "$TMP/bin/dscacheutil"; chmod +x "$TMP/bin/dscacheutil"
+( PATH="$TMP/bin:$PATH"; killall() { echo "killall $*" >> "$TMP/dslog"; }; dns_back "$TMP/bl" )
+check "the first blocked name is asked for" 'grep -q "^-q host -a name chatgpt.com$" "$TMP/dslog"'
+check "still the blocked answer: the name cache is cleared again (twice here), then it stops" '[ "$(grep -c "^-flushcache" "$TMP/dslog")" = 2 ] && [ "$(grep -c "^killall -HUP mDNSResponder" "$TMP/dslog")" = 2 ] && [ "$(grep -c "^-q" "$TMP/dslog")" = 3 ]'
+rm -f "$TMP/dslog"; printf '#!/bin/bash\necho "$*" >> "%s/dslog"\necho "ip_address: 104.18.32.47"\n' "$TMP" > "$TMP/bin/dscacheutil"
+( PATH="$TMP/bin:$PATH"; killall() { echo "killall $*" >> "$TMP/dslog"; }; dns_back "$TMP/bl" )
+check "already answering: one look, nothing cleared" '[ "$(wc -l < "$TMP/dslog")" = 1 ]'
+rm -f "$TMP/dslog"; printf '#!/bin/bash\necho "$*" >> "%s/dslog"\necho "ip_address: 0.0.0.0"\n' "$TMP" > "$TMP/bin/dscacheutil"
+S=$(date +%s%N); ( PATH="$TMP/bin:$PATH"; killall() { :; }; dns_back "$TMP/bl" ); E=$(date +%s%N)
+check "never answering: gives up after 6 looks (about 3 s), the unlock still completes" '[ "$(grep -c "^-q" "$TMP/dslog")" = 6 ] && [ $(( (E - S) / 1000000 )) -lt 5000 ]'
+check "the Mac unlock calls it after every layer is off" 'grep -q "dns_back \"\$BLOCKLIST\" || true" "$APP/mac/lockqz.sh"'
+
 echo "T5 every platform uses the one-look way"
 check "Mac: AI apps closed from running_named" 'grep -q "running_named \"\${AI_APPS\[@\]}\"" "$APP/mac/lockqz.sh"'
 check "Mac: no loop over every AI app name with pgrep" '! grep -q "pgrep -if -- \"\$(app_re \"\$a\")\" >/dev/null 2>&1 && osascript" "$APP/mac/lockqz.sh"'
