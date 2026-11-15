@@ -41,8 +41,6 @@ RESEND_TEST_TO = "athall@usc.edu,lockqz.app@gmail.com"
 # Second sender From the same address (SMTP2GO; Pages secret SMTP2GO_API_KEY turns it on): free 200 a day,
 # 1,000 a month from the account's billing day. Used when Resend's day is full or Resend refuses.
 SMTP2GO_CYCLE_DAY = "15"
-# TEMPORARY (15 Nov, inbox test of SMTP2GO): Resend takes 3 a day so the next test goes through SMTP2GO. Remove after the test.
-RESEND_DAILY_MAX = "3"
 # "1" = sign-in codes go through Resend / SMTP2GO too.
 RESEND_CODES = "0"
 # "0" = email that goes through Resend is never sent from the Gmail address instead (it waits when the day's allowance is used).
