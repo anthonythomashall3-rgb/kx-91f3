@@ -52,6 +52,7 @@ run "Income tax on top (25%), payments credited by how they came, bank details e
 run "Stripe one-time setup script (fake Stripe + wrangler)" bash test_stripe_setup.sh
 run "High-volume email: Amazon SES (SigV4 vs AWS test vector, codes/support via SES, Gmail fallback, budgets, bulk Bcc)" node --no-warnings test_mail_ses.mjs
 run "Email From lockqz.com: Resend (request shape, test list, budget, codes switch, Gmail backup on/off, bulk Bcc, 429 retry)" node --no-warnings test_mail_resend.mjs
+run "Email From lockqz.com: SMTP2GO second sender (request shape, after Resend, failed-in-200, day + month budgets, codes, Bcc)" node --no-warnings test_mail_smtp2go.mjs
 run "Gmail payment script parser (forged alerts refused)" node test_pay_script.mjs
 run "26 Oct fixes: one Stripe checkout per code, overpayments carried, unexpected local unlocks red, course password retired" node --no-warnings test_oct26_fixes.mjs
 run "Helper hardening: fast user switching, per-user tokens, Windows monotonic cap, local-model apps" bash test_helper_hardening.sh

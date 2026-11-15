@@ -488,7 +488,7 @@ const resendOn = env => !!(env.RESEND_API_KEY && env.RESEND_FROM);
 const resendMax = env => Math.max(1, Number(env.RESEND_DAILY_MAX || 100));
 const resendTo = (env, to) => { const t = String(env.RESEND_TEST_TO || "").toLowerCase().split(",").map(x => x.trim()).filter(Boolean);
   return !t.length || (!Array.isArray(to) && t.includes(String(to || "").trim().toLowerCase())); };
-const resendCodes = env => resendOn(env) && String(env.RESEND_CODES || "") === "1";
+const resendCodes = env => (resendOn(env) || !!(env.SMTP2GO_API_KEY && env.RESEND_FROM)) && String(env.RESEND_CODES || "") === "1";
 const gmailBackup = env => String(env.GMAIL_BACKUP || "") !== "0";
 const RESEND_BCC = 49;                                                   // Resend: at most 50 recipients per message (To + Bcc)
 const resendCost = to => Array.isArray(to) ? to.length + Math.ceil(to.length / RESEND_BCC) : 1;   // every recipient counts, the To copy too
@@ -508,7 +508,42 @@ async function resendSend(env, to, subject, text, opts = {}) {
   }
   return true;
 }
-const mailOn = env => sesOn(env) || resendOn(env) || typeof env.MAIL_SINK === "function" || !!(env.MAIL_USER && env.MAIL_APP_PASSWORD);
+// ---- SMTP2GO (15 Nov 2026): the second sender From lockqz.com (DKIM s1220308._domainkey, return path em1220308).
+// Same From (RESEND_FROM) and the same switches as Resend (RESEND_TEST_TO, RESEND_CODES, GMAIL_BACKUP); used when
+// Resend's day is full or Resend refuses. On when SMTP2GO_API_KEY (Pages secret) and RESEND_FROM exist.
+// Free plan: 200 a day (SMTP2GO_DAILY_MAX) and 1,000 a month (SMTP2GO_MONTHLY_MAX), the month starting on
+// SMTP2GO_CYCLE_DAY (the account's billing day).
+const smtp2goOn = env => !!(env.SMTP2GO_API_KEY && env.RESEND_FROM);
+const s2gDayMax = env => Math.max(1, Number(env.SMTP2GO_DAILY_MAX || 200));
+const s2gMonthMax = env => Math.max(1, Number(env.SMTP2GO_MONTHLY_MAX || 1000));
+const s2gCycle = (env, ms = Date.now()) => {   // "YYYY-MM-DD" of the current billing month's first day (UTC)
+  const d = new Date(ms), day = Math.min(28, Math.max(1, Number(env.SMTP2GO_CYCLE_DAY || 1)));
+  let y = d.getUTCFullYear(), m = d.getUTCMonth();
+  if (d.getUTCDate() < day) { m -= 1; if (m < 0) { m = 11; y -= 1; } }
+  return `${y}-${String(m + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+};
+const S2G_BCC = 99;                                                      // SMTP2GO: up to 100 per to / bcc list
+const s2gCost = to => Array.isArray(to) ? to.length + Math.ceil(to.length / S2G_BCC) : 1;
+// One SMTP2GO API call per <= 99 recipients (a list goes as Bcc). It answers 200 even when a message failed,
+// so data.failed / data.failures is checked too.
+async function smtp2goSend(env, to, subject, text, opts = {}) {
+  const from = String(env.RESEND_FROM), list = Array.isArray(to) ? to : [to];
+  const go = typeof env.SMTP2GO_FETCH === "function" ? env.SMTP2GO_FETCH : fetch;   // tests: fake SMTP2GO
+  for (let i = 0; i < list.length; i += S2G_BCC) {
+    const part = list.slice(i, i + S2G_BCC);
+    const body = JSON.stringify({ sender: `${env.MAIL_FROM_NAME || "LOCKqz"} <${from}>`, ...(Array.isArray(to) ? { to: [from], bcc: part } : { to: part }),
+      subject, text_body: String(text || ""), ...(opts.html ? { html_body: opts.html } : {}),
+      ...(opts.replyTo ? { custom_headers: [{ header: "Reply-To", value: String(opts.replyTo) }] } : {}), fastaccept: false });
+    const r = await go("https://api.smtp2go.com/v3/email/send", { method: "POST", headers: { "Content-Type": "application/json", "X-Smtp2go-Api-Key": String(env.SMTP2GO_API_KEY).trim() }, body });
+    let j = null, t = ""; try { t = await r.text(); j = JSON.parse(t); } catch {}
+    const d = (j && j.data) || {};
+    if (!r.ok || Number(d.failed || 0) > 0 || (Array.isArray(d.failures) && d.failures.length) || d.error || !(Number(d.succeeded || 0) > 0)) {
+      const e = new Error(`smtp2go ${r.status} ${String(d.error || (d.failures && d.failures[0]) || t).slice(0, 200)}`); e.smtp2go = r.status; throw e; }
+  }
+  return true;
+}
+const ownOn = env => resendOn(env) || smtp2goOn(env);                   // any sender From lockqz.com
+const mailOn = env => sesOn(env) || ownOn(env) || typeof env.MAIL_SINK === "function" || !!(env.MAIL_USER && env.MAIL_APP_PASSWORD);
 const gmailOn = env => typeof env.MAIL_SINK === "function" || !!(env.MAIL_USER && env.MAIL_APP_PASSWORD);
 
 // ---- Email templates (27 Oct 2026): text + HTML, the LOCKqz look (cardinal header, logo, 560px) ----
@@ -891,7 +926,14 @@ export async function onRequest(context) {
   const resendRoom = async (n, cls) => (await resendUsed()) + n <= (cls === "auto" ? Math.floor(resendMax(env) * 0.8) : resendMax(env));
   const resendCount = n => db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('_all','resend',?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(hourKey(), n, now()).run();
   const resendFail = e => db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("mail", null, null, "resend_failed", String(e && e.message || e).slice(0, 200), now()).run().catch(() => {});
-  // -> "ses" | "resend" | "gmail"; throws { budget: true } when no channel has room, or the last channel's error.
+  const s2gUsedDay = async () => Number((await db.prepare("SELECT COALESCE(SUM(n),0) AS n FROM mail_sent WHERE ou='_all' AND kind='smtp2go' AND day>=?").bind(hourKey(Date.now() - 24 * 3600000)).first())?.n || 0);
+  const s2gUsedMonth = async () => Number((await db.prepare("SELECT n FROM mail_sent WHERE ou='_month' AND kind='smtp2go' AND day=?").bind(s2gCycle(env)).first())?.n || 0);
+  const s2gRoom = async (n, cls) => (await s2gUsedDay()) + n <= (cls === "auto" ? Math.floor(s2gDayMax(env) * 0.8) : s2gDayMax(env)) && (await s2gUsedMonth()) + n <= s2gMonthMax(env);
+  const s2gCount = n => db.batch([
+    db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('_all','smtp2go',?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(hourKey(), n, now()),
+    db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('_month','smtp2go',?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(s2gCycle(env), n, now())]);
+  const s2gFail = e => db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("mail", null, null, "smtp2go_failed", String(e && e.message || e).slice(0, 200), now()).run().catch(() => {});
+  // -> "ses" | "resend" | "smtp2go" | "gmail"; throws { budget: true } when no channel has room, or the last channel's error.
   let mailOkMarked = false;
   async function sendVia(to, subject, text, opts, cls) {
     subject = String(subject == null ? "" : subject).replace(/\s+/g, " ").trim().slice(0, 250);   // a subject is one line, whatever an exam or class is called
@@ -905,13 +947,22 @@ export async function onRequest(context) {
       try { await sesSend(env, to, subject, text, opts); try { await sesCount(k); } catch {} return "ses"; }
       catch (e) { await sesFail(e); }
     }
-    const viaResend = resendOn(env) && resendTo(env, to), backup = !viaResend || gmailBackup(env);
-    if (viaResend && await resendRoom(resendCost(to), cls)) {
+    // From lockqz.com: Resend first, then SMTP2GO. Gmail only when GMAIL_BACKUP allows it.
+    const viaOwn = ownOn(env) && resendTo(env, to), backup = !viaOwn || gmailBackup(env);
+    let ownErr = null;
+    if (viaOwn && resendOn(env) && await resendRoom(resendCost(to), cls)) {
       try { await resendSend(env, to, subject, own.text, own.opts); try { await resendCount(resendCost(to)); } catch {}
         if (!mailOkMarked) { mailOkMarked = true; await clockMark("mail_ok"); }
         return "resend"; }
-      catch (e) { await resendFail(e); if (!backup) { await clockMark("mail_fail"); throw e; } }
+      catch (e) { ownErr = e; await resendFail(e); }
     }
+    if (viaOwn && smtp2goOn(env) && await s2gRoom(s2gCost(to), cls)) {
+      try { await smtp2goSend(env, to, subject, own.text, own.opts); try { await s2gCount(s2gCost(to)); } catch {}
+        if (!mailOkMarked) { mailOkMarked = true; await clockMark("mail_ok"); }
+        return "smtp2go"; }
+      catch (e) { ownErr = e; await s2gFail(e); }
+    }
+    if (ownErr && !backup) { await clockMark("mail_fail"); throw ownErr; }
     if (!backup || !gmailOn(env) || !(await mailRoom(k, cls))) { const e = new Error("mail_budget"); e.budget = true; throw e; }
     // A failed Gmail send is kept (time + reason in the activity log) and a good one clears it, so the admin
     // sees at once when sign-in codes and reminders stop going out (e.g. the Gmail connection was revoked).
@@ -1858,15 +1909,22 @@ export async function onRequest(context) {
     // list may use only the first half, so a flood of strangers cannot starve real students.
     // With SES on, its budget applies (and Gmail stays the fallback); otherwise the Gmail budget.
     // Resend with RESEND_CODES = "1": its budget applies; Gmail is the fallback unless GMAIL_BACKUP = "0".
+    // From lockqz.com with RESEND_CODES = "1": Resend's and SMTP2GO's budgets together (SMTP2GO also within its month).
     const ses = sesOn(env), rsd = !ses && resendCodes(env) && resendTo(env, email), gOk = gmailOn(env) && (!rsd || gmailBackup(env));
-    const cap = ses ? sesMax(env) : rsd ? resendMax(env) : MAIL_HARD_MAX, used = ses ? await sesUsed() : rsd ? await resendUsed() : await mailUsed(), half = Math.floor(cap / 2);
+    const rOn = rsd && resendOn(env), sOn = rsd && smtp2goOn(env);
+    const rUsed = rOn ? await resendUsed() : 0, sUsed = sOn ? await s2gUsedDay() : 0, sMonthOk = sOn && (await s2gUsedMonth()) + 1 <= s2gMonthMax(env);
+    const rFree = rOn && rUsed + 1 <= resendMax(env), sFree = sOn && sMonthOk && sUsed + 1 <= s2gDayMax(env);
+    const cap = ses ? sesMax(env) : rsd ? (rOn ? resendMax(env) : 0) + (sOn && sMonthOk ? s2gDayMax(env) : 0) : MAIL_HARD_MAX;
+    const used = ses ? await sesUsed() : rsd ? rUsed + (sOn && sMonthOk ? sUsed : 0) : await mailUsed(), half = Math.floor(cap / 2);
     if ((used + 1 > cap && !((ses || rsd) && gOk && (await mailUsed()) + 1 <= MAIL_HARD_MAX)) || (used >= half && !(await db.prepare("SELECT name FROM roster WHERE email=? AND name IS NOT NULL LIMIT 1").bind(email).first()))) return json({ error: "mail_busy" }, 503);
     const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, "0");
     let sent = false;
     if (ses && used + 1 <= cap) { const cm = codeMail(env, email, code, web);
       try { await sesSend(env, email, cm.subject, cm.text, { html: cm.html }); sent = true; try { await sesCount(1); } catch {} } catch (e) { await sesFail(e); } }
-    if (rsd && used + 1 <= cap) { const cm = codeMail(env, email, code, web);
+    if (!sent && rFree) { const cm = codeMail(env, email, code, web);
       try { await resendSend(env, email, cm.subject, cm.text, { html: cm.html }); sent = true; await clockMark("mail_ok"); try { await resendCount(1); } catch {} } catch (e) { await resendFail(e); } }
+    if (!sent && sFree) { const cm = codeMail(env, email, code, web);
+      try { await smtp2goSend(env, email, cm.subject, cm.text, { html: cm.html }); sent = true; await clockMark("mail_ok"); try { await s2gCount(1); } catch {} } catch (e) { await s2gFail(e); } }
     try { if (!sent) { if (!gOk) throw new Error("no mail channel"); await sendCode(env, email, code, web); await clockMark("mail_ok"); try { await mailCount(1); } catch {} } }
     catch (e) { await clockMark("mail_fail");   // the admin's home shows it until a send works again
       await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(dev, email, null, "code_send_failed", String(e).slice(0, 200), now()).run(); return json({ error: "send_failed" }, 502); }
