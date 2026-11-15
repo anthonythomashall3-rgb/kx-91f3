@@ -34,6 +34,14 @@ INVOICE_EMAIL = "support@lockqz.com"
 MAIL_REPLY_TO = "support@lockqz.com"
 # From address on LOCKqz emails: a "Send mail as" alias on the Gmail that sends them (lockqz.app@gmail.com, verified 1 Nov 2026).
 # MAIL_FROM_ADDR = "support@lockqz.com"   # OFF: USC mail (Proofpoint) held mail From the brand-new lockqz.com (1 Nov 2026); retry once the domain is a few weeks old.
+# Email From an address on lockqz.com, signed by lockqz.com (Resend; Pages secret RESEND_API_KEY turns it on; free 100 a day).
+RESEND_FROM = "support@lockqz.com"
+# First inbox checks: only email to these addresses goes through Resend. Empty = every LOCKqz email.
+RESEND_TEST_TO = "athall@usc.edu,lockqz.app@gmail.com"
+# "1" = sign-in codes go through Resend too.
+RESEND_CODES = "0"
+# "0" = email that goes through Resend is never sent from the Gmail address instead (it waits when the day's allowance is used).
+GMAIL_BACKUP = "0"
 # Student fee per semester (USD) and the date it starts (YYYY-MM-DD; empty = off).
 STUDENT_FEE = "180"
 # The "One step left: pay for LOCKqz" email, hours after an install (0 = off). Off (Anthony, 13 Nov 2026): from 0.6.22 the

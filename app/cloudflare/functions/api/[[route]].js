@@ -477,7 +477,38 @@ async function sesSend(env, to, subject, text, opts = {}) {
   }
   return true;
 }
-const mailOn = env => sesOn(env) || typeof env.MAIL_SINK === "function" || !!(env.MAIL_USER && env.MAIL_APP_PASSWORD);
+// ---- Resend (14 Nov 2026): sends LOCKqz's email From an address on lockqz.com, signed by lockqz.com itself
+// (DKIM record resend._domainkey), so the From address and the signature are the same domain. On when
+// RESEND_API_KEY (Pages secret) and RESEND_FROM (wrangler.toml) exist. Free plan: 100 emails a day (RESEND_DAILY_MAX).
+//   RESEND_TEST_TO = "a@x,b@y"  only email to these addresses goes through Resend (first inbox checks); empty = all.
+//   RESEND_CODES = "1"          sign-in codes go through Resend too.
+//   GMAIL_BACKUP = "0"          email Resend cannot take is not sent from the Gmail address: it answers
+//                               mail_busy / waits for a later tick instead.
+const resendOn = env => !!(env.RESEND_API_KEY && env.RESEND_FROM);
+const resendMax = env => Math.max(1, Number(env.RESEND_DAILY_MAX || 100));
+const resendTo = (env, to) => { const t = String(env.RESEND_TEST_TO || "").toLowerCase().split(",").map(x => x.trim()).filter(Boolean);
+  return !t.length || (!Array.isArray(to) && t.includes(String(to || "").trim().toLowerCase())); };
+const resendCodes = env => resendOn(env) && String(env.RESEND_CODES || "") === "1";
+const gmailBackup = env => String(env.GMAIL_BACKUP || "") !== "0";
+const RESEND_BCC = 49;                                                   // Resend: at most 50 recipients per message (To + Bcc)
+const resendCost = to => Array.isArray(to) ? to.length + Math.ceil(to.length / RESEND_BCC) : 1;   // every recipient counts, the To copy too
+// One Resend API call per <= 49 recipients (a list goes as Bcc, so no student sees another's address).
+async function resendSend(env, to, subject, text, opts = {}) {
+  const from = String(env.RESEND_FROM), list = Array.isArray(to) ? to : [to];
+  const go = typeof env.RESEND_FETCH === "function" ? env.RESEND_FETCH : fetch;   // tests: fake Resend
+  const pause = typeof env.RESEND_PAUSE === "function" ? env.RESEND_PAUSE : ms => new Promise(f => setTimeout(f, ms));
+  for (let i = 0; i < list.length; i += RESEND_BCC) {
+    const part = list.slice(i, i + RESEND_BCC);
+    const body = JSON.stringify({ from: `${env.MAIL_FROM_NAME || "LOCKqz"} <${from}>`, ...(Array.isArray(to) ? { to: [from], bcc: part } : { to: part }),
+      subject, text: String(text || ""), ...(opts.html ? { html: opts.html } : {}), ...(opts.replyTo ? { reply_to: [opts.replyTo] } : {}) });
+    const send = () => go("https://api.resend.com/emails", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + String(env.RESEND_API_KEY).trim() }, body });
+    let r = await send();
+    if (r.status === 429) { await pause(1100); r = await send(); }   // Resend's per-second limit: one retry
+    if (!r.ok) { let t = ""; try { t = (await r.text()).slice(0, 200); } catch {} const e = new Error(`resend ${r.status} ${t}`); e.resend = r.status; throw e; }
+  }
+  return true;
+}
+const mailOn = env => sesOn(env) || resendOn(env) || typeof env.MAIL_SINK === "function" || !!(env.MAIL_USER && env.MAIL_APP_PASSWORD);
 const gmailOn = env => typeof env.MAIL_SINK === "function" || !!(env.MAIL_USER && env.MAIL_APP_PASSWORD);
 
 // ---- Email templates (27 Oct 2026): text + HTML, the LOCKqz look (cardinal header, logo, 560px) ----
@@ -856,7 +887,11 @@ export async function onRequest(context) {
   const sesRoom = async (n, cls) => (await sesUsed()) + n <= (cls === "auto" ? Math.floor(sesMax(env) * 0.8) : sesMax(env));
   const sesCount = n => db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('_all','ses',?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(hourKey(), n, now()).run();
   const sesFail = e => db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("mail", null, null, "ses_failed", String(e && e.message || e).slice(0, 200), now()).run().catch(() => {});
-  // -> "ses" | "gmail"; throws { budget: true } when neither channel has room, or the Gmail error.
+  const resendUsed = async () => Number((await db.prepare("SELECT COALESCE(SUM(n),0) AS n FROM mail_sent WHERE ou='_all' AND kind='resend' AND day>=?").bind(hourKey(Date.now() - 24 * 3600000)).first())?.n || 0);
+  const resendRoom = async (n, cls) => (await resendUsed()) + n <= (cls === "auto" ? Math.floor(resendMax(env) * 0.8) : resendMax(env));
+  const resendCount = n => db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('_all','resend',?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(hourKey(), n, now()).run();
+  const resendFail = e => db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("mail", null, null, "resend_failed", String(e && e.message || e).slice(0, 200), now()).run().catch(() => {});
+  // -> "ses" | "resend" | "gmail"; throws { budget: true } when no channel has room, or the last channel's error.
   let mailOkMarked = false;
   async function sendVia(to, subject, text, opts, cls) {
     subject = String(subject == null ? "" : subject).replace(/\s+/g, " ").trim().slice(0, 250);   // a subject is one line, whatever an exam or class is called
@@ -867,7 +902,14 @@ export async function onRequest(context) {
       try { await sesSend(env, to, subject, text, opts); try { await sesCount(k); } catch {} return "ses"; }
       catch (e) { await sesFail(e); }
     }
-    if (!gmailOn(env) || !(await mailRoom(k, cls))) { const e = new Error("mail_budget"); e.budget = true; throw e; }
+    const viaResend = resendOn(env) && resendTo(env, to), backup = !viaResend || gmailBackup(env);
+    if (viaResend && await resendRoom(resendCost(to), cls)) {
+      try { await resendSend(env, to, subject, text, opts); try { await resendCount(resendCost(to)); } catch {}
+        if (!mailOkMarked) { mailOkMarked = true; await clockMark("mail_ok"); }
+        return "resend"; }
+      catch (e) { await resendFail(e); if (!backup) { await clockMark("mail_fail"); throw e; } }
+    }
+    if (!backup || !gmailOn(env) || !(await mailRoom(k, cls))) { const e = new Error("mail_budget"); e.budget = true; throw e; }
     // A failed Gmail send is kept (time + reason in the activity log) and a good one clears it, so the admin
     // sees at once when sign-in codes and reminders stop going out (e.g. the Gmail connection was revoked).
     try { await sendMail(env, to, subject, text, opts); }
@@ -1812,13 +1854,17 @@ export async function onRequest(context) {
     // The one Gmail budget: codes are essential (room is always kept for them); an email on no synced class
     // list may use only the first half, so a flood of strangers cannot starve real students.
     // With SES on, its budget applies (and Gmail stays the fallback); otherwise the Gmail budget.
-    const ses = sesOn(env), cap = ses ? sesMax(env) : MAIL_HARD_MAX, used = ses ? await sesUsed() : await mailUsed(), half = Math.floor(cap / 2);
-    if ((used + 1 > cap && !(ses && gmailOn(env) && (await mailUsed()) + 1 <= MAIL_HARD_MAX)) || (used >= half && !(await db.prepare("SELECT name FROM roster WHERE email=? AND name IS NOT NULL LIMIT 1").bind(email).first()))) return json({ error: "mail_busy" }, 503);
+    // Resend with RESEND_CODES = "1": its budget applies; Gmail is the fallback unless GMAIL_BACKUP = "0".
+    const ses = sesOn(env), rsd = !ses && resendCodes(env) && resendTo(env, email), gOk = gmailOn(env) && (!rsd || gmailBackup(env));
+    const cap = ses ? sesMax(env) : rsd ? resendMax(env) : MAIL_HARD_MAX, used = ses ? await sesUsed() : rsd ? await resendUsed() : await mailUsed(), half = Math.floor(cap / 2);
+    if ((used + 1 > cap && !((ses || rsd) && gOk && (await mailUsed()) + 1 <= MAIL_HARD_MAX)) || (used >= half && !(await db.prepare("SELECT name FROM roster WHERE email=? AND name IS NOT NULL LIMIT 1").bind(email).first()))) return json({ error: "mail_busy" }, 503);
     const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, "0");
     let sent = false;
     if (ses && used + 1 <= cap) { const cm = codeMail(env, email, code, web);
       try { await sesSend(env, email, cm.subject, cm.text, { html: cm.html }); sent = true; try { await sesCount(1); } catch {} } catch (e) { await sesFail(e); } }
-    try { if (!sent) { if (!gmailOn(env)) throw new Error("no mail channel"); await sendCode(env, email, code, web); await clockMark("mail_ok"); try { await mailCount(1); } catch {} } }
+    if (rsd && used + 1 <= cap) { const cm = codeMail(env, email, code, web);
+      try { await resendSend(env, email, cm.subject, cm.text, { html: cm.html }); sent = true; await clockMark("mail_ok"); try { await resendCount(1); } catch {} } catch (e) { await resendFail(e); } }
+    try { if (!sent) { if (!gOk) throw new Error("no mail channel"); await sendCode(env, email, code, web); await clockMark("mail_ok"); try { await mailCount(1); } catch {} } }
     catch (e) { await clockMark("mail_fail");   // the admin's home shows it until a send works again
       await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(dev, email, null, "code_send_failed", String(e).slice(0, 200), now()).run(); return json({ error: "send_failed" }, 502); }
     await db.batch([
