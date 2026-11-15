@@ -46,6 +46,7 @@ check("POST https://api.resend.com/emails with the key as a Bearer header (trimm
 check("the key is nowhere in the body", !/re_test_key/.test(q.init?.body || ""));
 check("From = LOCKqz <RESEND_FROM>, one To, Reply-To the sender, text + HTML", q.body?.from === "LOCKqz <support@lockqz.example>" && Array.isArray(q.body?.to) && q.body.to.length === 1
   && JSON.stringify(q.body?.reply_to) === '["bo@usc.edu"]' && /hello from the test/.test(q.body?.text || "") && typeof q.body?.html === "string" && q.body.html.length > 20 && !q.body.bcc, JSON.stringify(q.body).slice(0, 300));
+check("links and logo stay on lockqz.com (same domain as the sender)", /https:\/\/lockqz\.com\/icon-white\.png/.test(q.body?.html || "") && !/lockqz\.pages\.dev/.test((q.body?.html || "") + (q.body?.text || "")), (q.body?.html || "").match(/https?:\/\/[a-z.]+/g)?.join(" "));
 check("counted under Resend, not under Gmail", sum("resend") === 1 && sum("total") === 0, `resend=${sum("resend")} total=${sum("total")}`);
 
 console.log("R2 sign-in codes stay on Gmail until RESEND_CODES = 1");
@@ -88,6 +89,8 @@ r = await api("/account", { op: "send", email: "ann@usc.edu" });
 check("a listed address: Resend", r.data?.sent === true && rs.length === 1 && gmail.length === 0);
 r = await api("/account", { op: "send", email: "hal@usc.edu" });
 check("any other address: Gmail, exactly as before (GMAIL_BACKUP = 0 does not touch it)", r.data?.sent === true && rs.length === 1 && gmail.length === 1 && gmail[0].to === "hal@usc.edu");
+r = await api("/support", { email: "hal@usc.edu", name: "Hal", message: "a message for the Gmail path" });
+check("mail through Gmail still links through lockqz.pages.dev", gmail.length === 2 && /lockqz\.pages\.dev\/icon-white\.png/.test(gmail.at(-1).html || "") && !/https:\/\/lockqz\.com/.test(gmail.at(-1).html || ""), (gmail.at(-1).html || "").match(/https?:\/\/[a-z.]+/g)?.join(" "));
 
 console.log("R6 no key or no From address = as before");
 reset(); env = { ...base, ...RS, RESEND_API_KEY: "", RESEND_CODES: "1", GMAIL_BACKUP: "0" };

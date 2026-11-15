@@ -896,6 +896,9 @@ export async function onRequest(context) {
   async function sendVia(to, subject, text, opts, cls) {
     subject = String(subject == null ? "" : subject).replace(/\s+/g, " ").trim().slice(0, 250);   // a subject is one line, whatever an exam or class is called
     if (!opts || !opts.html) opts = { ...(opts || {}), html: autoHtml(text, { sign: !(opts && opts.inbox) }) };   // every email branded
+    // Mail sent From lockqz.com (Resend) keeps its lockqz.com links and logo: same domain as the sender.
+    // Every other channel sends from another domain, so its links go through lockqz.pages.dev (mailLinks).
+    const own = { text, opts };
     text = mailLinks(env, text); opts = { ...opts, html: mailLinks(env, opts.html) };
     const k = Array.isArray(to) ? to.length : 1;
     if (sesOn(env) && await sesRoom(k, cls)) {
@@ -904,7 +907,7 @@ export async function onRequest(context) {
     }
     const viaResend = resendOn(env) && resendTo(env, to), backup = !viaResend || gmailBackup(env);
     if (viaResend && await resendRoom(resendCost(to), cls)) {
-      try { await resendSend(env, to, subject, text, opts); try { await resendCount(resendCost(to)); } catch {}
+      try { await resendSend(env, to, subject, own.text, own.opts); try { await resendCount(resendCost(to)); } catch {}
         if (!mailOkMarked) { mailOkMarked = true; await clockMark("mail_ok"); }
         return "resend"; }
       catch (e) { await resendFail(e); if (!backup) { await clockMark("mail_fail"); throw e; } }
