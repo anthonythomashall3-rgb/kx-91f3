@@ -47,10 +47,12 @@ $ModelProcs = @("ollama","llama-server","llama-cli","llama-run","llamafile","kob
 # tor = the Tor Browser's network daemon (Tor resolves names remotely, past the hosts block).
 $VpnApps    = @("nordvpn","expressvpn","surfshark","protonvpn","mullvad","pia","piaservice","Cloudflare WARP","warp-svc","openvpn","wireguard","windscribe","tunnelbear","hssvpn","cyberghost","tor")
 $ModelPorts = @(11434,1234,4891,1337,7860)
-# 8080/8000/5000 are also ordinary web ports: blocked only to this PC and private networks (where a
-# llama.cpp / vLLM server would run), never to the internet.
+# 8080/8000/5000 are also ordinary web ports: blocked only to private networks (where a llama.cpp / vLLM
+# server would run), never to the internet. No loopback address in the list: Windows Firewall refuses a rule
+# that names one (the whole rule would not be made), and a model server on this PC itself is closed as a
+# program ($ModelProcs).
 $LocalModelPorts = @(8080,5000,8000)
-$LocalNets  = @("127.0.0.0/8","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","169.254.0.0/16","::1","fc00::/7","fe80::/10")
+$LocalNets  = @("10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","169.254.0.0/16","fc00::/7","fe80::/10")
 $VpnPorts   = @(51820,1194,500,4500)
 # Encrypted-DNS resolvers a browser may already be connected to (IPv4 + IPv6), incl. the
 # Firefox (mozilla.cloudflare-dns.com) and Chrome (chrome.cloudflare-dns.com) endpoints.

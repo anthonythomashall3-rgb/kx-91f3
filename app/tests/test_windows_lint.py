@@ -219,5 +219,11 @@ else:
     print("  skip: Store app compile check (no mcs; Windows CI compiles it with csc)")
 
 print("")
+print("T16 every firewall rule can be made: Windows Firewall refuses a rule that names a loopback address")
+import re as _re
+_eng16 = open(os.path.join(WIN, "lockqz.ps1"), encoding="utf-8").read()
+_nets = _re.search(r'^\$LocalNets\s*=\s*@\((.*?)\)', _eng16, _re.M).group(1)
+ok("no loopback address in the private-network list of the local-model rule") if not _re.search(r'"(127\.[0-9./]+|::1)"', _nets) and '"10.0.0.0/8"' in _nets and '"192.168.0.0/16"' in _nets else bad("loopback address in $LocalNets: New-NetFirewallRule fails and the rule is never made")
+ok("the quick look counts each rule in the rules' registry key; anything but exactly one goes on to the cmdlet") if "FirewallPolicy\\FirewallRules" in _eng16 and "if ([int]$cnt[$r.n] -ne 1) { $all = $false; break }" in _eng16 and "if ($all) { return }" in _eng16 else bad("firewall quick look missing")
 print(f"RESULT: {passed} passed, {failed} failed")
 sys.exit(0 if failed == 0 else 1)
