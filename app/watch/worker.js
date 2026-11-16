@@ -1,6 +1,6 @@
 // LOCKqz watch: a small Cloudflare Worker with its own clock (every 5 minutes, Workers Free). It asks the live
 // site what the Server watch workflow asks (both sites open; GET /api/watch: database read, database write, the
-// Gmail script's clock, last email) and tells the owner at once when something stops, again every 6 hours while
+// Gmail script's clock, last email, a payment waiting for the admin) and tells the owner at once when something stops, again every 6 hours while
 // it lasts, and once when it is fine again. The message does not go through LOCKqz's own email or database:
 // Cloudflare Email Routing sends it (send_email binding) to MAIL_TO, the routing's verified address(es).
 // What was last reported is kept in Workers KV (one small key).
@@ -10,6 +10,7 @@ const WORDS = {
   write: "the database refuses writes (daily limit?)",
   clock: "the Gmail payments script has stopped calling (payments by Zelle and Venmo, exam emails and renewals wait)",
   mail: "the last LOCKqz email failed and none has gone out since",
+  pay: "a payment that looks like LOCKqz's is waiting in Admin, Payments: its memo matched nobody, so that person has no access yet (Assign or Void it)",
 };
 
 // "" = all good, else what stopped (several parts joined with "; ").
@@ -24,7 +25,11 @@ export async function look(env) {
   else {
     let d = null; try { d = await w.json(); } catch {}
     if (!d || typeof d !== "object") out.push("the API does not answer (not JSON)");
-    else for (const k of Object.keys(WORDS)) if (d[k] !== true) out.push(WORDS[k]);
+    else {
+      const n = out.length;
+      for (const k of Object.keys(WORDS)) if (d[k] === false) out.push(WORDS[k]);
+      if (out.length === n && d.ok !== true) out.push("the API's watch answer is not all good");   // a part this Worker has no words for yet
+    }
   }
   return out.join("; ");
 }

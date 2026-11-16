@@ -35,7 +35,7 @@ console.log("W1 nothing has ever called: the clock is reported, the database is 
 let r = await get("/watch");
 check("answers 200 without a sign-in", r.status === 200);
 check("database read and write yes, clock no, ok no", r.data.db === true && r.data.write === true && r.data.clock === false && r.data.ok === false, JSON.stringify(r.data));
-check("only yes / no leaves (5 keys, all true or false)", Object.keys(r.data).sort().join() === "clock,db,mail,ok,write" && Object.values(r.data).every(v => typeof v === "boolean"));
+check("only yes / no leaves (6 keys, all true or false)", Object.keys(r.data).sort().join() === "clock,db,mail,ok,pay,write" && Object.values(r.data).every(v => typeof v === "boolean"));
 check("never kept by a cache", /no-store/.test(r.res.headers.get("Cache-Control") || ""));
 check("the watch call itself is kept (one row)", sqlite.prepare("SELECT COUNT(*) n FROM sync_nudges WHERE ou='clock' AND qi='watch'").get().n === 1);
 
@@ -67,10 +67,32 @@ check("writes refused (daily limit): write no, ok no, still answers 200", r.stat
 noDb = true; r = await get("/watch"); noDb = false;
 check("database down: db no, write no, ok no, still answers 200", r.status === 200 && r.data.db === false && r.data.write === false && r.data.ok === false, JSON.stringify(r.data));
 
+console.log("W4b a payment waiting for the admin");
+const payRow = (txn, code, amount, matched, days = 0) => sqlite.prepare("INSERT INTO payments (txn,code,amount,via,payer,note,term,received_at,matched) VALUES (?,?,?,?,?,?,?,?,?)").run(txn, code, amount, "zelle", "P", "", "20263", ago(days * 1440), matched);
+const PRICES = { ...env, STUDENT_TOTAL: "200", STUDENT_OTHER_TOTAL: "210", PROF_TOTAL: "6500", PROF_ZELLE_TOTAL: "6300", PROF_BANK_TOTAL: "6500" };
+clock({ cron: ago(1) });
+payRow("t1", "LQSAAAAA", 200, null); payRow("t2", null, 488, null); payRow("t3", null, 0, "review"); payRow("t4", null, 200, "void");
+r = await get("/watch", PRICES);
+check("credited, personal ($488), unreadable noise and voided rows are not waiting", r.data.pay === true && r.data.ok === true, JSON.stringify(r.data));
+payRow("t5", null, 200, null); r = await get("/watch", PRICES);
+check("a student price with no memo is waiting: pay no, ok no", r.data.pay === false && r.data.ok === false);
+sqlite.exec("UPDATE payments SET code='LQSBBBBB' WHERE txn='t5'"); r = await get("/watch", PRICES);
+check("assigned: fine again", r.data.pay === true && r.data.ok === true);
+payRow("t6", "LQSCCCCC", 0, "review"); r = await get("/watch", PRICES);
+check("a memo code held for review is waiting", r.data.pay === false);
+sqlite.exec("UPDATE payments SET matched='void' WHERE txn='t6'"); r = await get("/watch", PRICES);
+check("voided: fine again", r.data.pay === true);
+payRow("t7", null, 6300, null); r = await get("/watch", PRICES);
+check("a professor price with no memo is waiting", r.data.pay === false);
+sqlite.exec("DELETE FROM payments WHERE txn='t7'"); payRow("t8", null, 200, null, 30); r = await get("/watch", PRICES);
+check("older than 3 weeks is not reported for ever", r.data.pay === true);
+sqlite.exec("DELETE FROM payments");
+
 console.log("W5 the workflow asks it");
 const wf = readFileSync(join(HERE, "..", "..", ".github", "workflows", "server-watch.yml"), "utf8");
 check("asks lockqz.com/api/watch and both sites", wf.includes("https://lockqz.com/api/watch") && wf.includes("https://lockqz.com/ ") && wf.includes("https://professor.lockqz.com/ "));
-check("names each of db, write, clock, mail", ["db)", "write)", "clock)", "mail)"].every(k => wf.includes(k)) && wf.includes("for k in db write clock mail"));
+check("names each of db, write, clock, mail, pay", ["db)", "write)", "clock)", "mail)", "pay)"].every(k => wf.includes(k)) && wf.includes("for k in db write clock mail pay"));
+check("a part it has no words for still counts (ok is asked too)", wf.includes(`grep -q '"ok":true' watch.json`));
 check("the same trouble is reported again only after 6 hours", wf.includes("21600") && wf.includes("actions/cache/restore@v4") && wf.includes("actions/cache/save@v4"));
 check("still watches the plain server", wf.includes("https://server.lockqz.com/api/version"));
 check("runs every 15 minutes with no permissions", /cron: "7,22,37,52 \* \* \* \*"/.test(wf) && wf.includes("permissions: {}"));

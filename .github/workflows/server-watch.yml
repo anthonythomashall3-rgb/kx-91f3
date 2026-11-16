@@ -1,7 +1,8 @@
 # Watches LOCKqz from outside every 15 minutes. When something stops, the run fails and GitHub emails the
 # repository owner; the same trouble is reported again only every 6 hours. Free: a public repository's minutes.
 #   1. The live site (lockqz.com): the pages and the API answer, the database answers and takes a write,
-#      LOCKqz's clock (the Gmail script: payments, exam emails, renewals) is still calling, the last email went out.
+#      LOCKqz's clock (the Gmail script: payments, exam emails, renewals) is still calling, the last email went out,
+#      no payment is waiting for the admin.
 #   2. The plain server (app/server): answers.
 name: Server watch
 on:
@@ -37,15 +38,17 @@ jobs:
             [ "$prof" = 200 ] || live="${live:+$live; }the professor site does not open ($prof)"
             if [ "$code" != 200 ]; then live="${live:+$live; }the API does not answer ($code)"
             else
-              for k in db write clock mail; do
-                grep -q "\"$k\":true" watch.json && continue
+              for k in db write clock mail pay; do
+                grep -q "\"$k\":false" watch.json || continue
                 case $k in
                   db)    live="${live:+$live; }the database does not answer" ;;
                   write) live="${live:+$live; }the database refuses writes (daily limit?)" ;;
                   clock) live="${live:+$live; }the Gmail payments script has stopped calling (payments by Zelle and Venmo, exam emails and renewals wait)" ;;
                   mail)  live="${live:+$live; }the last LOCKqz email failed and none has gone out since" ;;
+                  pay)   live="${live:+$live; }a payment that looks like LOCKqz's is waiting in Admin, Payments (its memo matched nobody)" ;;
                 esac
               done
+              [ -n "$live" ] || grep -q '"ok":true' watch.json || live="the API's watch answer is not all good"
             fi
             [ -z "$live" ] && break
             echo "live try $i: $live"; [ "$i" = 3 ] || sleep 30

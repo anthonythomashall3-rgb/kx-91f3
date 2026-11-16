@@ -1992,10 +1992,10 @@ export async function onRequest(context) {
       return json({ id: ok ? sid : null, store_version: st.version || null, current: cur });
     }
     // Outside watch (GitHub "Server watch", every 15 minutes): does the database answer and take a write, is LOCKqz's
-    // clock (the Gmail script: payments, exam emails, renewals) still calling, did the last email go out.
-    // Only yes / no leaves here. One read and one write per call.
+    // clock (the Gmail script: payments, exam emails, renewals) still calling, did the last email go out, is a
+    // payment waiting for the admin. Only yes / no leaves here. Two reads and one write per call.
     if (p === "/watch" && request.method === "GET") {
-      const out = { ok: false, db: false, write: false, clock: false, mail: true };
+      const out = { ok: false, db: false, write: false, clock: false, mail: true, pay: true };
       try {
         const c = Object.fromEntries(((await db.prepare("SELECT qi, at FROM sync_nudges WHERE ou='clock'").all()).results || []).map(r => [r.qi, r.at]));
         out.db = true;
@@ -2005,7 +2005,15 @@ export async function onRequest(context) {
         out.mail = !(c.mail_fail && (!c.mail_ok || c.mail_fail > c.mail_ok) && age("mail_fail") > 20 * 60000 && age("mail_fail") < 3 * 86400000);
       } catch {}
       try { await db.prepare("INSERT OR REPLACE INTO sync_nudges (ou,qi,at) VALUES ('clock','watch',?)").bind(now()).run(); out.write = true; } catch {}
-      out.ok = out.db && out.write && out.clock && out.mail;
+      // A payment alert of the last 3 weeks that looks like LOCKqz's and that LOCKqz could not credit by itself, so
+      // someone who paid is still waiting: it carries a memo code but needs the admin's review, or it is exactly
+      // a LOCKqz price with no memo that matched. It is in Admin -> Payments (Assign or Void clears it).
+      try {
+        const prices = [...new Set(["student", "professor"].flatMap(k => ["zelle", "bank", "venmo"].map(w => Number(totalOf(k, w)))).filter(x => x > 0))], ph = placeholders(prices.length);
+        out.pay = !Number((await db.prepare(`SELECT COUNT(*) AS n FROM payments WHERE received_at > ? AND ((matched='review' AND (code IS NOT NULL OR amount IN (${ph}))) OR (code IS NULL AND matched IS NULL AND amount IN (${ph})))`)
+          .bind(new Date(Date.now() - 21 * 86400000).toISOString(), ...prices, ...prices).first())?.n || 0);
+      } catch { out.pay = true; }
+      out.ok = out.db && out.write && out.clock && out.mail && out.pay;
       return new Response(JSON.stringify(out), { status: 200, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...CORS } });
     }
     if (p === "/version") return json({ ...buildInfo(), codes_on: codesOn, strict, fee_on: feeOn(), stripe: stripeOn(), google: env.GOOGLE_CLIENT_ID || null, google_hd: env.GOOGLE_CLIENT_ID ? String(env.GOOGLE_HD ?? "usc.edu") : null });

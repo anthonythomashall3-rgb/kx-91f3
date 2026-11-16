@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.6.27"
+$Version = "0.6.28"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = if ($env:LOCKQZ_CONFIG) { $env:LOCKQZ_CONFIG } else { "$env:ProgramData\LOCKqz\config.json" }
@@ -485,9 +485,15 @@ $watcher.AddScript({
     return $did
   }
   $cycles = 0; $lastBeat = 0; $lastSweep = 0; $storeMiss = 0; $script:BeatSecs = 300
+  $wallCycle = [int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); $wallWoke = $wallCycle; $wallList = $wallCycle; $wallUpdate = $wallCycle
   while ($true) {
     Start-Sleep -Seconds 5; $cycles++
     $now = [int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    # By the clock as well as by cycles: cycles only count time awake, so a laptop that slept for days asks for the
+    # list additions and its update when it wakes (20 s after, once the network is back), not days of use later.
+    if (($now - $wallCycle) -lt 0 -or ($now - $wallCycle) -ge 60) { $wallWoke = $now }
+    $wallCycle = $now; $settled = ($now - $wallWoke) -ge 20
+    $listLate = $settled -and ((($now - $wallList) -lt 0) -or (($now - $wallList) -ge 43200))
     if ($State.state -eq "locked") {
       $capAt = [int64]$State.cap_at; if ($capAt -le 0) { $capAt = [int64]$State.locked_since + 60 * [int64]$State.max_minutes }
       # Wall clock AND monotonic clock must both say the cap is reached (as on the Mac): someone who moves
@@ -551,7 +557,8 @@ $watcher.AddScript({
       }
     }
     # A minute after start and every 12 h, never during a quiz: additions to the AI list from the server.
-    if ((($cycles -eq 12) -or ($cycles % 8640 -eq 0)) -and ($State.state -eq "unlocked")) {
+    if (($listLate -or ($cycles -eq 12) -or ($cycles % 8640 -eq 0)) -and ($State.state -eq "unlocked")) {
+      $wallList = $now
       $served = LQ-FetchBlocklist $Api $Version   # the download happens outside the engine lock: a quiz starting now never waits for it
       if ($null -ne $served) {
         $got = WLock
@@ -584,7 +591,8 @@ $watcher.AddScript({
     }
     # ~90 s after start, then every ~6 h: signed self-update (skips itself during a quiz)
     $every = if ($env:LOCKQZ_UPDATE_CYCLES) { [int]$env:LOCKQZ_UPDATE_CYCLES } else { 4320 }
-    if ($cycles -eq [math]::Min(18, $every) -or ($cycles % $every -eq 0)) { WUpdate }
+    $updateLate = $settled -and ($State.state -eq "unlocked") -and ((($now - $wallUpdate) -lt 0) -or (($now - $wallUpdate) -ge ($every * 5)))
+    if ($cycles -eq [math]::Min(18, $every) -or ($cycles % $every -eq 0) -or $updateLate) { $wallUpdate = $now; WUpdate }
   }
 }).AddArgument($State).AddArgument($Engine).AddArgument($Api).AddArgument($Device).AddArgument($Key).AddArgument($SignLib).AddArgument($Here).AddArgument($UpdateUrl).AddArgument($Version).AddArgument($Port).AddArgument($Token) | Out-Null
 # Fail safe on start: never leave a machine locked across a restart. The state is set BEFORE the

@@ -7,7 +7,7 @@ const { look, run, default: worker } = await import(pathToFileURL(join(W, "worke
 let pass = 0, fail = 0;
 const check = (m, c, i = "") => { if (c) { pass++; console.log("  ok:", m); } else { fail++; console.log("  FAIL:", m + (i ? `  (${i})` : "")); } };
 
-let site = { page: 200, prof: 200, api: 200, watch: { ok: true, db: true, write: true, clock: true, mail: true } };
+let site = { page: 200, prof: 200, api: 200, watch: { ok: true, db: true, write: true, clock: true, mail: true, pay: true } };
 let flaky = 0, mailDown = false;
 const mails = [], kv = new Map(); let puts = 0, sleeps = 0;
 const mk = (over = {}) => ({ SITE: "https://lockqz.example", PROF_SITE: "https://professor.lockqz.example", MAIL_FROM: "watch@lockqz.example", MAIL_TO: "owner@example.com",
@@ -20,7 +20,7 @@ const mk = (over = {}) => ({ SITE: "https://lockqz.example", PROF_SITE: "https:/
   MAIL: { send: async m => { if (mailDown) throw new Error("mail down"); mails.push(m); } }, MAKE_EMAIL: async (from, to, raw) => ({ from, to, raw }),
   STATE: { get: async k => kv.get(k) ?? null, put: async (k, v) => { puts++; kv.set(k, v); } }, SLEEP: async () => { sleeps++; }, ...over });
 const reset = () => { mails.length = 0; kv.clear(); puts = 0; sleeps = 0; flaky = 0; mailDown = false;
-  site = { page: 200, prof: 200, api: 200, watch: { ok: true, db: true, write: true, clock: true, mail: true } }; };
+  site = { page: 200, prof: 200, api: 200, watch: { ok: true, db: true, write: true, clock: true, mail: true, pay: true } }; };
 
 console.log("K1 looking");
 check("all good = nothing to say", (await look(mk())) === "");
@@ -28,6 +28,12 @@ site.watch.clock = false; let t = await look(mk());
 check("the stopped Gmail script is named", /Gmail payments script has stopped/.test(t), t);
 site.watch = { ok: false, db: false, write: false, clock: true, mail: false }; t = await look(mk());
 check("several parts are all named", /database does not answer/.test(t) && /refuses writes/.test(t) && /last LOCKqz email failed/.test(t) && t.split("; ").length === 3, t);
+reset(); site.watch.pay = false; site.watch.ok = false; t = await look(mk());
+check("a payment waiting for the admin is named", /waiting in Admin, Payments/.test(t) && t.split("; ").length === 1, t);
+reset(); delete site.watch.mail; t = await look(mk());
+check("a part the API does not send yet is not trouble", t === "", t);
+reset(); site.watch.ok = false; site.watch.later = false; t = await look(mk());
+check("a part with no words here still counts", /not all good/.test(t), t);
 reset(); site.page = 522; site.prof = 500; site.api = 503; t = await look(mk());
 check("sites and API that do not open are named with their code", /student site does not open \(522\)/.test(t) && /professor site does not open \(500\)/.test(t) && /API does not answer \(503\)/.test(t), t);
 reset(); site.watch = "<html>limit</html>"; t = await look(mk());

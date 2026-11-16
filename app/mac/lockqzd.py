@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.6.27"
+VERSION = "0.6.28"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -120,6 +120,7 @@ KEY_PATH = os.environ.get("LOCKQZ_KEY_PATH") or "/Library/Application Support/LO
 # must survive the helper being killed: on restart we resume an unexpired lock instead of unlocking.
 LOCKFILE = os.environ.get("LOCKQZ_LOCKFILE") or "/Library/Application Support/LOCKqz/active_lock.json"
 NET = {"skew": 0.0, "registered": False}   # skew: server clock minus ours, learned from a 401
+WALL = {k: time.time() for k in ("cycle", "woke", "blocklist", "update")}   # clock times of the last cycle, wake, list refresh, update check
 # Quiz released by the safety cap or by the server (submitted / ended / other school) - root-only
 # record: the agent is told not to re-lock it while its page stays open.
 CAPFILE = os.path.join(os.path.dirname(LOCKFILE), "capped.json")
@@ -948,13 +949,22 @@ def watch_once(cycles, last_beat):
     if do_beat:
         last_beat = time.time()
         report("heartbeat", {"quiz_id": qid, "source": "helper"})
-    if cycles % 8640 == 0:   # ~every 12h — keeps API calls minimal
+    # By the clock as well as by cycles: cycles only count time awake, so a laptop that slept for days asks for the
+    # list additions and its update when it wakes (20 s after, once the network is back), not days of use later.
+    now = time.time()
+    if not 0 <= now - WALL["cycle"] < 60: WALL["woke"] = now
+    WALL["cycle"] = now
+    settled = now - WALL["woke"] >= 20
+    late = lambda k, secs: settled and not 0 <= now - WALL[k] < secs
+    if cycles % 8640 == 0 or late("blocklist", 12 * 3600):   # ~every 12h — keeps API calls minimal
+        WALL["blocklist"] = now
         refresh_blocklist()
     if cycles % 720 == 0:    # ~hourly: keep the helper log small
         rotate_log()
     if cycles % 720 == 0 and not NET["registered"]:   # ~hourly until the server knows this key
         register()
-    if cycles % UPDATE_EVERY == 0:   # ~every 6h: signed self-update (skips itself during a quiz)
+    if cycles % UPDATE_EVERY == 0 or (STATE["state"] != "locked" and late("update", UPDATE_EVERY * 5)):   # ~every 6h: signed self-update (skips itself during a quiz)
+        WALL["update"] = now
         check_update()
     return last_beat
 
