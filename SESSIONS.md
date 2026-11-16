@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-16 04:35 PT — 01UUDg7YR3j2: server only. Outside watch of the live site (app/cloudflare/functions/api/[[route]].js: GET /watch, AI_DOMAINS additions; .github/workflows/server-watch.yml; app/tests/test_watch.mjs, run_all.sh).
 
 ## Recently finished
 - 2026-11-15 10:25 PT — 01UzHDaG: server only. SMTP2GO is the second sender From support@lockqz.com (domain verified: DKIM s1220308._domainkey, return path em1220308, link.lockqz.com): used when Resend's day is full or Resend refuses; same switches (RESEND_TEST_TO, RESEND_CODES, GMAIL_BACKUP). On when the Pages secret SMTP2GO_API_KEY exists. Budgets: 200 a day, 1,000 per billing month from SMTP2GO_CYCLE_DAY (15); a 200 answer with failed > 0 counts as a failure. test_mail_smtp2go.mjs (22). run_all green (real Chromium).
