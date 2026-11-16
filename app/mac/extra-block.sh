@@ -81,7 +81,17 @@ prefs_flush() {
   [ -n "${LOCKQZ_PREFS_DIRTY:-}" ] && [ -f "$LOCKQZ_PREFS_DIRTY" ] || return 0
   rm -f "$LOCKQZ_PREFS_DIRTY" 2>/dev/null || true
   killall cfprefsd 2>/dev/null || true
+  : > "$LOCKQZ_PREFS_DIRTY.flushed" 2>/dev/null || true   # when: a settings read in the next seconds would wait (prefs_settling)
 }
+# True for 12 s after this engine restarted the preferences service: macOS answers a settings read only when the
+# service is back, up to 10 s later, so a pass that only LOOKS at a setting it has just set leaves the look to
+# the next pass (the first repeat pass of a quiz comes 5 s after the lock; it took 9 s waiting for that answer).
+prefs_settling() {
+  local f="${LOCKQZ_PREFS_DIRTY:-}.flushed"
+  [ -n "${LOCKQZ_PREFS_DIRTY:-}" ] && [ -f "$f" ] || return 1
+  [ "$(_warm_age "$f")" -lt 12 ]
+}
+xb_lap() { type lap >/dev/null 2>&1 && lap "$1"; return 0; }
 
 # Without lockqz-core.sh's running_named: the same answer, one look per name.
 type running_named >/dev/null 2>&1 || running_named() {
@@ -233,6 +243,8 @@ airplay_receiver_off() {
   local u cur
   u="$(_cc_user)"; _cc_ok_user "$u" || return 0   # nobody signed in at the screen: nothing to mirror to
   if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would turn AirPlay Receiver off for $u (restored at unlock)"; return 0; fi
+  # Already set and recorded for this user in this quiz, and the preferences service is still coming back.
+  if grep -q "^$u|" "$AIRPLAY_STATE" 2>/dev/null && prefs_settling; then return 0; fi
   cur="$(_cc_get "$u")"
   mkdir -p "$(dirname "$AIRPLAY_STATE")" 2>/dev/null || true
   # Remember the value from BEFORE the quiz, once per user (a re-run must never save our own "0").
@@ -402,12 +414,18 @@ extra_lock() {
   _kill_cmd_res "${LOCAL_MODEL_CMD_RES[@]}"
   _kill_if_tunnel "${VPN_IF_TUNNEL[@]}"
   _kill_list "Apple Intelligence" "${APPLE_AI_APPS[@]}"
+  xb_lap x-kills
   local rc=0
   airplay_receiver_off || rc=1      # before the next step restarts the preferences service (reads after it wait)
+  xb_lap x-airplay
   apple_intelligence_off || rc=1
+  xb_lap x-apple-ai
   proxies_off || true
+  xb_lap x-proxies
   wild_block_on || rc=1
+  xb_lap x-names
   warm_apply || rc=1
+  xb_lap x-warm
   return $rc
 }
 
@@ -416,9 +434,13 @@ extra_unlock() {
   # OS-level Apple Intelligence policy and the proxies must be actively restored.
   local rc=0
   airplay_receiver_restore || rc=1
+  xb_lap x-airplay
   apple_intelligence_on || rc=1
+  xb_lap x-apple-ai
   proxies_restore || true
+  xb_lap x-proxies
   wild_block_off || rc=1
+  xb_lap x-names
   warm_clear
   rm -f "$PROXY_KEPT" 2>/dev/null || true
   return $rc

@@ -145,9 +145,15 @@ function Write-Hosts([string]$text, [bool]$append) {
     $fi = Get-Item -LiteralPath $Hosts -Force -ErrorAction Stop
     $ro = $fi.IsReadOnly
     if ($ro) { $fi.IsReadOnly = $false }
-    if ($append) { [IO.File]::AppendAllText($Hosts, $text, $Latin1) } else { [IO.File]::WriteAllText($Hosts, $text, $Latin1) }
-    return $true
-  } catch { return $false }
+    # Another program can hold the hosts file open for a moment (the DNS service re-reading it, a virus scanner
+    # looking at the change just made): the write is tried again for about a second before it counts as failed.
+    for ($try = 1; ; $try++) {
+      try {
+        if ($append) { [IO.File]::AppendAllText($Hosts, $text, $Latin1) } else { [IO.File]::WriteAllText($Hosts, $text, $Latin1) }
+        return $true
+      } catch [IO.IOException] { if ($try -ge 6) { $script:HostsWhy = "$($_.Exception.GetType().Name): $($_.Exception.Message)"; return $false }; Start-Sleep -Milliseconds 200 }
+    }
+  } catch { $script:HostsWhy = "$($_.Exception.GetType().Name): $($_.Exception.Message)"; return $false }
   finally { if ($ro) { try { (Get-Item -LiteralPath $Hosts -Force).IsReadOnly = $true } catch { } } }
 }
 
@@ -375,7 +381,9 @@ function Do-Unlock {
   if ($env:LOCKQZ_TIMING) { "$pol" -split "`n" | Where-Object { $_ -match '^TIMING' } | ForEach-Object { Write-Host $_ } }
   Lap "policy"
   if ($pol -match "incomplete") { "LOCKqz: policy restore pending ($pol)" }
-  if ($wrote -and -not (Is-Locked)) { "LOCKqz: UNLOCKED" } else { "LOCKqz: UNLOCK FAILED (the hosts file could not be written)" }
+  $still = Is-Locked
+  if ($env:LOCKQZ_TIMING) { Write-Host ("TIMING hosts written={0} block still there={1} {2}" -f $wrote, $still, $script:HostsWhy) }
+  if ($wrote -and -not $still) { "LOCKqz: UNLOCKED" } else { "LOCKqz: UNLOCK FAILED (the hosts file could not be written)" }
 }
 
 switch ($cmd) {

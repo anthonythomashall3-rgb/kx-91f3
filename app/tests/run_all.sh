@@ -57,6 +57,7 @@ run "Outside watch of the live site (GET /watch: database, clock, email; the Ser
 run "5-minute watch Worker (looks, tells once, again after 6 h, fine again; by hand)" node --no-warnings test_watch_worker.mjs
 run "A laptop that slept catches up by the clock (list additions, update check; Mac/Linux helper, Windows rule)" python3 test_wake_catchup.py
 run "A professor's sections are found by name through an index (no whole-table read)" node --no-warnings test_sections_lookup.mjs
+run "Mac: a pass right after the preferences service restarted does not wait for it (AirPlay switch look)" bash test_prefs_settling.sh
 run "Gmail payment script parser (forged alerts refused)" node test_pay_script.mjs
 run "26 Oct fixes: one Stripe checkout per code, overpayments carried, unexpected local unlocks red, course password retired" node --no-warnings test_oct26_fixes.mjs
 run "Helper hardening: fast user switching, per-user tokens, Windows monotonic cap, local-model apps" bash test_helper_hardening.sh

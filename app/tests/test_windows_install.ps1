@@ -69,7 +69,10 @@ Check "hosts file clean" (-not ($hosts -match 'LOCKqz START'))
 # Where a first lock and an unlock spend their time (the engine itself, each step timed; printed for the record).
 # The helper is kept out of this hand-driven lock and unlock: it clears a block it did not start within seconds,
 # which would run a second unlock beside the timed one.
-Stop-ScheduledTask -TaskName 'LOCKqz' -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3
+foreach ($t in 'LOCKqz','LOCKqz Agent') { Disable-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue | Out-Null; Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 3
+$up = $true; try { Invoke-RestMethod "$B/status" -Headers $H -TimeoutSec 3 | Out-Null } catch { $up = $false }
+Write-Host "INFO  helper answering during the timed part: $up"
 $env:LOCKQZ_TIMING = "1"
 $timed = @{}
 foreach ($c in 'lock','unlock') {
@@ -83,7 +86,8 @@ $env:LOCKQZ_TIMING = $null
 Check "the timed lock applied the browser policy (run beside the other steps)" (($timed['lock'] -match 'LOCKqz: LOCKED') -and -not ($timed['lock'] -match 'not applied|FAILED'))
 Check "the timed unlock put every policy back in one go (run beside the other steps)" (($timed['unlock'] -match 'LOCKqz: UNLOCKED') -and -not ($timed['unlock'] -match 'pending|incomplete'))
 Check "no LOCKqz policy mark left in the registry" ($null -eq (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Google\Chrome' -Name 'LOCKqzManaged' -ErrorAction SilentlyContinue))
-Start-ScheduledTask -TaskName 'LOCKqz' -ErrorAction SilentlyContinue; Start-Sleep -Seconds 5
+foreach ($t in 'LOCKqz','LOCKqz Agent') { Enable-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue | Out-Null; Start-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 5
 $hosts = Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw
 Check "hosts file clean after the timed unlock" (-not ($hosts -match 'LOCKqz START'))
 Check "firewall rules removed" (@(Get-NetFirewallRule -DisplayName 'LOCKqz-AI-*' -ErrorAction SilentlyContinue).Count -eq 0)
