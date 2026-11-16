@@ -75,6 +75,11 @@ curl -s -m 90 -X POST -H "$H" -H 'Content-Type: application/json' -d '{"quiz_id"
 echo "INFO  unlock after a 14 s quiz took $(python3 -c "import time; print(round(time.time()-$T0, 1))") s"
 check "second unlock accepted, hosts clean" "grep -q '\"unlocked\"' /tmp/unlock2.json && ! grep -q 'LOCKqz START' /etc/hosts"
 
+# Where a first lock, a repeat pass (every 5 s during a quiz) and an unlock spend their time: the engine's own steps.
+lq_laps() { sudo LOCKQZ_TIMING=1 bash "$DEST/lockqz.sh" "$1" 2>/dev/null | awk -v w="$2" '/^TIMING /{ if (p != "") printf "INFO  %s: %-9s %5.2f s\n", w, $2, $3 - p; else t0 = $3; p = $3 } END { if (p != "") printf "INFO  %s: in all    %5.2f s\n", w, p - t0 }'; }
+lq_laps lock "first lock"; lq_laps lock "repeat pass"; lq_laps unlock "unlock"
+check "hosts clean after the timed unlock" "! grep -q 'LOCKqz START' /etc/hosts"
+
 # Where a first lock and an unlock spend their seconds (the engine itself, traced; one line per second that passes).
 lq_trace() { sudo bash -c 'PS4="+T\${SECONDS} "; set -x; source "$0" "$1"' "$DEST/lockqz.sh" "$1" 2>&1 | awk -v w="$1" '/^\++T[0-9]+ / { t=$1; gsub(/\+/,"",t); if (t != p && p != "") print "INFO  " w " until " t ": " substr(last, 1, 170); p = t; last = $0 } END { print "INFO  " w " ended at " p }'; }
 lq_trace lock; lq_trace unlock

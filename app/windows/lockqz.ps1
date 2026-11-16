@@ -284,6 +284,24 @@ function Policy($verb) {
   if (-not (Test-Path $Policy)) { return "" }
   return ((& powershell -NoProfile -ExecutionPolicy Bypass -File $Policy $verb) -join "`n")
 }
+# The browser-policy step beside the rest of a first lock / an unlock: it is its own program and touches only the
+# registry policies and Firefox's files, nothing the other steps use, so the two halves take the time of the
+# longer one. Policy-Start starts it, Policy-Wait gives its output; if it cannot be started beside, it runs
+# when waited for, as before.
+function Policy-Start($verb) {
+  if (-not (Test-Path $Policy)) { return $null }
+  try {
+    $si = New-Object Diagnostics.ProcessStartInfo
+    $si.FileName = "powershell.exe"; $si.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$Policy`" $verb"
+    $si.UseShellExecute = $false; $si.RedirectStandardOutput = $true; $si.CreateNoWindow = $true
+    $p = [Diagnostics.Process]::Start($si)
+    return @{ p = $p; out = $p.StandardOutput.ReadToEndAsync() }
+  } catch { return $null }
+}
+function Policy-Wait($h, $verb) {
+  if (-not $h) { return (Policy $verb) }
+  try { $h.p.WaitForExit(); return (([string]$h.out.Result) -replace "`r", "").TrimEnd() } catch { return (Policy $verb) } finally { try { $h.p.Dispose() } catch { } }
+}
 $script:LqSw = [Diagnostics.Stopwatch]::StartNew()
 function Lap([string]$n) { if ($env:LOCKQZ_TIMING) { Write-Host ("TIMING {0,-10} {1,6:N1} s" -f $n, $script:LqSw.Elapsed.TotalSeconds) } }
 function Do-Lock {
@@ -294,16 +312,24 @@ function Do-Lock {
     if (-not $wrote) { "LOCKqz: LOCK FAILED (edited hosts block could not be rewritten)"; return }
   }
   if (Is-Locked) {
+    Lap "start"
     Kill-AiAndTools
+    Lap "apps"
     Ensure-FirewallRules   # rules removed mid-quiz come back (admin-only to remove, but cheap to re-check)
+    Lap "firewall"
     Wild-On; Warm-Apply
+    Lap "names+warm"
     # Policies removed by hand mid-quiz -> put them back (browser-policy keeps the first backup).
     if ((Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Google\Chrome").LOCKqzManaged -ne 1) { Policy "lock" | Out-Null }
+    Lap "policy"
     "LOCKqz: LOCKED (re-applied, apps re-closed)"; return
   }
   New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
   if (-not (Test-Path $Backup)) { Copy-Item $Hosts $Backup -Force }
   Lap "start"
+  # Browser AI + AI search answers + extensions off, Windows Copilot/Recall/Click to Do off (quiz only): started
+  # now, beside the steps below, and waited for before the AI apps are closed.
+  $polRun = Policy-Start "lock"
   $wrote = Write-Hosts ("`r`n" + ((Get-HostsLines (Get-Domains)) -join "`r`n") + "`r`n") $true
   Lap "hosts"
   ipconfig /flushdns | Out-Null
@@ -316,8 +342,7 @@ function Do-Lock {
   Wild-On; Warm-Apply
   Lap "names+warm"
 
-  # Browser AI + AI search answers + extensions off, Windows Copilot/Recall/Click to Do off (quiz only).
-  $pol = Policy "lock"
+  $pol = Policy-Wait $polRun "lock"
   if ($env:LOCKQZ_TIMING) { "$pol" -split "`n" | Where-Object { $_ -match '^TIMING' } | ForEach-Object { Write-Host $_ } }
   Lap "policy"
 
@@ -334,6 +359,9 @@ function Do-Unlock {
   # The professor's per-quiz assistive-tool allowance ends with the lock (every unlock path runs here).
   Remove-Item -LiteralPath "$StateDir\assist.json" -Force -ErrorAction SilentlyContinue
   Lap "start"
+  # Restores exactly the policy values that were there before the quiz (nothing if none were changed): started
+  # now, beside the steps below.
+  $polRun = Policy-Start "unlock"
   if (Is-Locked) {
     $wrote = Write-Hosts (Remove-Block (Read-Hosts)) $false
     ipconfig /flushdns | Out-Null
@@ -343,8 +371,7 @@ function Do-Unlock {
   Lap "firewall"
   Wild-Off; Warm-Clear
   Lap "names+warm"
-  # Restores exactly the policy values that were there before the quiz (nothing if none were changed).
-  $pol = Policy "unlock"
+  $pol = Policy-Wait $polRun "unlock"
   if ($env:LOCKQZ_TIMING) { "$pol" -split "`n" | Where-Object { $_ -match '^TIMING' } | ForEach-Object { Write-Host $_ } }
   Lap "policy"
   if ($pol -match "incomplete") { "LOCKqz: policy restore pending ($pol)" }

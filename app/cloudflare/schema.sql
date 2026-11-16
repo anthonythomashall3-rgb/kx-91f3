@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS usc_sections (
   PRIMARY KEY (term, section, last, first)
 );
 CREATE INDEX IF NOT EXISTS usc_sections_name ON usc_sections (last, first);
+CREATE INDEX IF NOT EXISTS idx_usc_sections_lname ON usc_sections(lower(last), lower(first));   -- name lookups ignore case
 CREATE TABLE IF NOT EXISTS paid_sections (
   teacher_id TEXT NOT NULL, term TEXT NOT NULL, section TEXT NOT NULL, course TEXT,
   first TEXT, last TEXT, until TEXT, paid_at TEXT, via TEXT,

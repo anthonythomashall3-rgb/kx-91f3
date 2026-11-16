@@ -104,6 +104,9 @@ close_ai_apps() {   # only the ones running now (running_named: one look at the 
   done
 }
 
+# LOCKQZ_TIMING=1: one line per step with the clock (the install test prints where a lock spends its time).
+lap() { [ -n "${LOCKQZ_TIMING:-}" ] || return 0; /usr/bin/perl -MTime::HiRes=time -e 'printf "TIMING %s %.2f\n", $ARGV[0], time' "$1" 2>/dev/null || true; }
+
 hosts_writable() { chflags nouchg,noschg "$HOSTS" 2>/dev/null || true; }   # a user immutable flag must not stop lock/unlock
 
 # Every layer is attempted even if another one fails (set -e would otherwise stop at the first
@@ -115,22 +118,33 @@ do_lock() {
     extra_lock
     build_block | sed 's/^/    /' | head -10 || true; echo "    ..."; return 0
   fi
-  local already=0 rc=0; is_locked && already=1
+  local already=0 rc=0 polpid=""; is_locked && already=1
+  lap start
   mkdir -p "$STATE"; [ -f "$BACKUP" ] || cp "$HOSTS" "$BACKUP" 2>/dev/null || true
   export LOCKQZ_PREFS_DIRTY="$STATE/prefs.dirty"   # settings changed below: the preferences service restarts once, last
+  # Browser policy (idempotent) beside the layers below: it is its own program and writes only the browsers'
+  # own policy files, so the pass takes the longer of the two, not their sum. Waited for before the
+  # preferences service restarts.
+  policy lock & polpid=$!
   hosts_writable
   hosts_add_block "$HOSTS" "$BLOCKLIST" || rc=1   # idempotent
   is_locked || rc=1
+  lap hosts
   load_pf || rc=1                                 # reasserts the anchor if it was cleared
-  policy lock || rc=1                             # idempotent; browser policy
   if [ "$already" = 0 ]; then
     dscacheutil -flushcache 2>/dev/null || true
     killall -HUP mDNSResponder 2>/dev/null || true
   fi
+  lap pf+dns
   close_ai_apps || true   # ALWAYS: close AI apps reopened mid-quiz
+  lap apps
   extra_lock || rc=1      # ALWAYS: re-close VPN/VM/remote/overlay/local-model, keep Apple Intelligence off
+  lap extra
+  wait "$polpid" || rc=1
+  lap policy
   write_status locked || true
   prefs_flush || true     # last: nothing in this pass reads settings after it
+  lap prefs
   [ "$already" = 1 ] || say "LOCKED. AI domains blackholed; firewall up (incl. local-model + VPN ports); browser AI off; AI apps, VPNs, VMs, remote-desktop and overlay tools closed; Apple Intelligence + AirPlay Receiver off."
   return $rc
 }
@@ -140,8 +154,10 @@ do_lock() {
 do_unlock() {
   need_root
   if [ "$DRYRUN" = "1" ]; then say "[dry-run] would strip LOCKqz block, flush pf, flush DNS, restore Apple Intelligence + AirPlay Receiver."; extra_unlock; return 0; fi
-  local rc=0
+  local rc=0 polpid=""
+  lap start
   mkdir -p "$STATE" 2>/dev/null || true; export LOCKQZ_PREFS_DIRTY="$STATE/prefs.dirty"
+  policy unlock & polpid=$!   # beside the layers below (its own files only); waited for before the preferences service restarts
   if is_locked; then
     hosts_writable
     hosts_remove_block "$HOSTS" || rc=1
@@ -149,12 +165,18 @@ do_unlock() {
     killall -HUP mDNSResponder 2>/dev/null || true
   fi
   is_locked && { say "hosts block could not be removed"; rc=1; }
+  lap hosts
   unload_pf || { say "firewall anchor could not be emptied"; rc=1; }
-  policy unlock || { say "browser policy could not be fully restored"; rc=1; }
+  lap pf
   extra_unlock || { say "Apple Intelligence / AirPlay Receiver / proxy settings could not be fully restored"; rc=1; }
+  lap extra
+  wait "$polpid" || { say "browser policy could not be fully restored"; rc=1; }
+  lap policy
   dns_back "$BLOCKLIST" || true   # AI names answer again before the unlock is reported done
+  lap dns_back
   write_status unlocked || true
   prefs_flush || true     # last: the preferences service restarts once
+  lap prefs
   if [ "$rc" = 0 ]; then say "UNLOCKED. AI access restored."; else say "UNLOCK INCOMPLETE - the helper will retry."; fi
   return $rc
 }

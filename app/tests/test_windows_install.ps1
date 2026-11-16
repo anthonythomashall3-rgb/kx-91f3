@@ -52,7 +52,10 @@ Check "Edge AI policy set" (Test-Path 'HKLM:\SOFTWARE\Policies\Microsoft\Edge')
 Check "status says locked" ((Invoke-RestMethod "$B/status" -Headers $H).engine_locked)
 # One lock pass of the kind that repeats every few seconds during a quiz (the engine itself, timed), and the
 # engine's own "is it locked" look that goes with it.
-$sw = [Diagnostics.Stopwatch]::StartNew(); & powershell -NoProfile -ExecutionPolicy Bypass -File "$Dest\lockqz.ps1" lock | Out-Null; $sw.Stop()
+$env:LOCKQZ_TIMING = "1"
+$sw = [Diagnostics.Stopwatch]::StartNew(); $rp = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Dest\lockqz.ps1" lock 2>&1; $sw.Stop()
+$env:LOCKQZ_TIMING = $null
+$rp | Where-Object { "$_" -match '^TIMING' } | ForEach-Object { Write-Host "INFO  repeat $_" }
 Write-Host ("INFO  repeat lock pass took {0:N1} s" -f $sw.Elapsed.TotalSeconds)
 $sw2 = [Diagnostics.Stopwatch]::StartNew(); & powershell -NoProfile -ExecutionPolicy Bypass -File "$Dest\lockqz.ps1" status | Out-Null; $sw2.Stop()
 Write-Host ("INFO  status look took {0:N1} s" -f $sw2.Elapsed.TotalSeconds)

@@ -362,13 +362,21 @@ function New-PolicyBackup($plan) {
   # Records the state of everything $plan touches BEFORE any change.
   $keys = New-Object System.Collections.ArrayList; $vals = New-Object System.Collections.ArrayList; $lists = New-Object System.Collections.ArrayList
   $seenK = @{}; $seenV = @{}
+  # Each key is read once for all its values (a plan holds about 40 values per browser key; value by value, each
+  # read opened the key again and listed its values).
+  $byKey = @{}
   foreach ($op in $plan) {
     foreach ($k in Get-Ancestors $op.path) { if (-not $seenK.ContainsKey($k)) { $seenK[$k] = 1; if (-not (RG-KeyExists $k)) { [void]$keys.Add($k) } } }
     if ($op.op -eq "list" -or $op.op -eq "rlist") { [void]$lists.Add(@{ path = $op.path; values = @(Snapshot $op.path) }); continue }
     $id = $op.path + "|" + $op.name
     if ($seenV.ContainsKey($id)) { continue }
     $seenV[$id] = 1
-    [void]$vals.Add(@{ path = $op.path; name = $op.name; prev = (RG-Read $op.path $op.name) })
+    if (-not $byKey.ContainsKey($op.path)) {
+      $t = @{}; foreach ($x in @(RG-ReadAll $op.path)) { if ($x) { $t[[string]$x.name] = @{ kind = $x.kind; value = $x.value } } }
+      $byKey[$op.path] = $t
+    }
+    $prev = $null; if ($byKey[$op.path].ContainsKey([string]$op.name)) { $prev = $byKey[$op.path][[string]$op.name] }
+    [void]$vals.Add(@{ path = $op.path; name = $op.name; prev = $prev })
   }
   return @{ version = 1; created_keys = @($keys); values = @($vals); lists = @($lists); keep_proxy = $false }
 }
@@ -541,7 +549,9 @@ function Do-Lock {
   $b = Load-Backup
   if (-not $b) {
     $keep = [bool](Test-KeepProxy)   # decided once per quiz, kept in the backup
+    Lap "keep"
     $plan = Get-PolicyPlan $keep
+    Lap "plan"
     if (Test-Path $BackupFile) { Remove-Item $BackupFile -Force }   # unreadable leftover
     $nb = New-PolicyBackup $plan; $nb.keep_proxy = $keep
     if (-not (Save-Backup $nb)) { "LOCKqz browser policy: FAILED (backup could not be written; nothing changed)"; return }
