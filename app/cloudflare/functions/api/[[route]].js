@@ -105,7 +105,11 @@ const AI_DOMAINS = [
   "tutorly.ai","studentai.app","inkey.ai","getconch.ai","writeless.ai","kunduz.com","aimath.com","scira.ai","devv.ai","thinkany.ai",
   "hika.fyi","toolbaz.com","chatboxai.app","web.chatboxai.app","lambda.chat","dify.ai","cloud.dify.ai","udify.app",
   "myninja.ai","ninjachat.ai","magai.co","galaxy.ai","nat.dev","typeset.io","sharly.ai","docanalyzer.ai","taskade.com","crushon.ai",
-  "spicychat.ai","chub.ai","heypi.com","mapify.so","nami.so","zhipuai.cn"
+  "spicychat.ai","chub.ai","heypi.com","mapify.so","nami.so","zhipuai.cn",
+  "manus.ai","ai21.com","sambanova.ai","baichuan-ai.com","lingyiwanwu.com","partyrock.aws","flowgpt.com","textsynth.com","perchance.org","heck.ai",
+  "hotbot.com","ithy.com","easy-peasy.ai","chat01.ai","luzia.com","fiscal.ai","finchat.io","fintool.com","rogo.ai","hebbia.com","hebbia.ai",
+  "formulabot.com","excelformulabot.com","gptexcel.uk","sheetai.app","ajelix.com","numerous.ai","tryshortcut.ai","shortcut.ai","endex.ai","lindy.ai",
+  "relevanceai.com","botpress.com","mem.ai","gauth.com","answersai.com","leetcodewizard.io","studio.nebius.com"
 ];
 const now = () => new Date().toISOString();
 // "Today" in America/Los_Angeles as YYYY-MM-DD, so a professor stays active through the end of their
@@ -1986,6 +1990,23 @@ export async function onRequest(context) {
       }
       const ok = !!(st.live && st.version && (cur === "dev" || atLeast(st.version, cur)));
       return json({ id: ok ? sid : null, store_version: st.version || null, current: cur });
+    }
+    // Outside watch (GitHub "Server watch", every 15 minutes): does the database answer and take a write, is LOCKqz's
+    // clock (the Gmail script: payments, exam emails, renewals) still calling, did the last email go out.
+    // Only yes / no leaves here. One read and one write per call.
+    if (p === "/watch" && request.method === "GET") {
+      const out = { ok: false, db: false, write: false, clock: false, mail: true };
+      try {
+        const c = Object.fromEntries(((await db.prepare("SELECT qi, at FROM sync_nudges WHERE ou='clock'").all()).results || []).map(r => [r.qi, r.at]));
+        out.db = true;
+        const age = k => c[k] ? Date.now() - Date.parse(c[k]) : Infinity;
+        out.clock = age("cron") < Math.max(15, Number(env.WATCH_CLOCK_MIN || 45)) * 60000;
+        // The last email failed and none has gone out since (20 minutes of room for a retry; forgotten after 3 days).
+        out.mail = !(c.mail_fail && (!c.mail_ok || c.mail_fail > c.mail_ok) && age("mail_fail") > 20 * 60000 && age("mail_fail") < 3 * 86400000);
+      } catch {}
+      try { await db.prepare("INSERT OR REPLACE INTO sync_nudges (ou,qi,at) VALUES ('clock','watch',?)").bind(now()).run(); out.write = true; } catch {}
+      out.ok = out.db && out.write && out.clock && out.mail;
+      return new Response(JSON.stringify(out), { status: 200, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...CORS } });
     }
     if (p === "/version") return json({ ...buildInfo(), codes_on: codesOn, strict, fee_on: feeOn(), stripe: stripeOn(), google: env.GOOGLE_CLIENT_ID || null, google_hd: env.GOOGLE_CLIENT_ID ? String(env.GOOGLE_HD ?? "usc.edu") : null });
 

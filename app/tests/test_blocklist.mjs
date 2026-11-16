@@ -238,7 +238,11 @@ console.log("T20b 11 Nov audit: quiz / homework answer tools, AI search, chat fr
 const need22 = ["transcript.study", "answer.ai", "cramly.ai", "studdy.ai", "tutoreva.com", "snapxam.com", "apexvision.ai", "scholarbot.ai", "unriddle.ai", "tutorly.ai", "studentai.app", "inkey.ai", "getconch.ai", "writeless.ai", "kunduz.com", "aimath.com", "scira.ai", "devv.ai", "thinkany.ai", "hika.fyi", "toolbaz.com", "chatboxai.app", "web.chatboxai.app", "lambda.chat", "dify.ai", "cloud.dify.ai", "udify.app", "myninja.ai", "ninjachat.ai", "magai.co", "galaxy.ai", "nat.dev", "typeset.io", "sharly.ai", "docanalyzer.ai", "taskade.com", "crushon.ai", "spicychat.ai", "chub.ai", "heypi.com", "mapify.so", "nami.so", "zhipuai.cn"];
 const miss22 = need22.filter(d => !(served || []).includes(d));
 miss22.length === 0 ? ok(`all ${need22.length} served (AI_DOMAINS)`) : bad("missing: " + miss22.join(", "));
-const stray = ahead.filter(d => !need22.includes(d));
+// 16 Nov: more chat, homework, finance and spreadsheet AIs, served ahead of the next app version.
+const need23 = ["manus.ai", "ai21.com", "sambanova.ai", "baichuan-ai.com", "lingyiwanwu.com", "partyrock.aws", "flowgpt.com", "textsynth.com", "perchance.org", "heck.ai", "hotbot.com", "ithy.com", "easy-peasy.ai", "chat01.ai", "luzia.com", "fiscal.ai", "finchat.io", "fintool.com", "rogo.ai", "hebbia.com", "hebbia.ai", "formulabot.com", "excelformulabot.com", "gptexcel.uk", "sheetai.app", "ajelix.com", "numerous.ai", "tryshortcut.ai", "shortcut.ai", "endex.ai", "lindy.ai", "relevanceai.com", "botpress.com", "mem.ai", "gauth.com", "answersai.com", "leetcodewizard.io", "studio.nebius.com"];
+const miss23 = need23.filter(d => !(served || []).includes(d));
+miss23.length === 0 ? ok(`all ${need23.length} 16-Nov entries served (AI_DOMAINS)`) : bad("missing: " + miss23.join(", "));
+const stray = ahead.filter(d => !need22.includes(d) && !need23.includes(d));
 stray.length === 0 ? ok("every entry served ahead of blocklist.txt is one of these") : bad("served but in no blocklist and not listed here: " + stray.join(", "));
 need22.every(d => mac.includes(d) === win.includes(d)) ? ok("both blocklists agree on them") : bad("the two blocklists differ on the 11 Nov entries");
 

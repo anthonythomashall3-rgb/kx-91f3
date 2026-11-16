@@ -1,5 +1,8 @@
-# Watches the plain server (app/server) every 15 minutes from outside. When it does not answer three times
-# in a row the run fails, and GitHub emails the repository owner. Free: a public repository's Actions minutes.
+# Watches LOCKqz from outside every 15 minutes. When something stops, the run fails and GitHub emails the
+# repository owner; the same trouble is reported again only every 6 hours. Free: a public repository's minutes.
+#   1. The live site (lockqz.com): the pages and the API answer, the database answers and takes a write,
+#      LOCKqz's clock (the Gmail script: payments, exam emails, renewals) is still calling, the last email went out.
+#   2. The plain server (app/server): answers.
 name: Server watch
 on:
   schedule:
@@ -10,15 +13,73 @@ concurrency: { group: server-watch, cancel-in-progress: true }
 jobs:
   watch:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
     steps:
-      - name: Ask the server
+      - name: What was reported last
+        uses: actions/cache/restore@v4
+        with:
+          path: watch-state
+          key: watch-state-${{ github.run_id }}
+          restore-keys: watch-state-
+      - name: Ask the live site and the server
+        id: ask
         run: |
-          url=https://server.lockqz.com/api/version
+          trouble=""
+          add() { trouble="${trouble:+$trouble; }$1"; }
+          # --- the live site: three tries, 30 s apart ---
+          live=""
+          for i in 1 2 3; do
+            live=""
+            page=$(curl -s -m 20 -o /dev/null -w '%{http_code}' https://lockqz.com/ || true)
+            prof=$(curl -s -m 20 -o /dev/null -w '%{http_code}' https://professor.lockqz.com/ || true)
+            code=$(curl -s -m 20 -o watch.json -w '%{http_code}' https://lockqz.com/api/watch || true)
+            [ "$page" = 200 ] || live="the student site does not open ($page)"
+            [ "$prof" = 200 ] || live="${live:+$live; }the professor site does not open ($prof)"
+            if [ "$code" != 200 ]; then live="${live:+$live; }the API does not answer ($code)"
+            else
+              for k in db write clock mail; do
+                grep -q "\"$k\":true" watch.json && continue
+                case $k in
+                  db)    live="${live:+$live; }the database does not answer" ;;
+                  write) live="${live:+$live; }the database refuses writes (daily limit?)" ;;
+                  clock) live="${live:+$live; }the Gmail payments script has stopped calling (payments by Zelle and Venmo, exam emails and renewals wait)" ;;
+                  mail)  live="${live:+$live; }the last LOCKqz email failed and none has gone out since" ;;
+                esac
+              done
+            fi
+            [ -z "$live" ] && break
+            echo "live try $i: $live"; [ "$i" = 3 ] || sleep 30
+          done
+          [ -z "$live" ] || add "$live"
+          # --- the plain server ---
+          url=https://server.lockqz.com/api/version; srv=bad
           for i in 1 2 3; do
             code=$(curl -s -m 20 -o body.txt -w '%{http_code}' "$url" || true)
             # 200 = serving. 503 "not_configured" = the machine and its connection are up, the API is not switched on yet.
-            if [ "$code" = 200 ] || { [ "$code" = 503 ] && grep -q not_configured body.txt; }; then echo "server answers ($code)"; exit 0; fi
-            echo "try $i: $code"; sleep 30
+            if [ "$code" = 200 ] || { [ "$code" = 503 ] && grep -q not_configured body.txt; }; then srv=ok; break; fi
+            echo "server try $i: $code"; [ "$i" = 3 ] || sleep 30
           done
-          echo "::error::The LOCKqz server did not answer three times in a row (last: $code)."; exit 1
+          [ "$srv" = ok ] || add "the plain server does not answer (last: $code)"
+          # --- report: at once when the trouble is new, then every 6 hours while it lasts ---
+          mkdir -p watch-state
+          last=$(sed -n 2p watch-state/last 2>/dev/null || true); at=$(sed -n 1p watch-state/last 2>/dev/null || true)
+          now=$(date +%s)
+          if [ -z "$trouble" ]; then
+            echo "all good"
+            if [ -n "$last" ]; then printf '%s\n\n' "$now" > watch-state/last; echo "save=1" >> "$GITHUB_OUTPUT"; fi
+            exit 0
+          fi
+          if [ "$trouble" = "$last" ] && [ $((now - ${at:-0})) -lt 21600 ]; then
+            echo "::warning::Still: $trouble (already reported)"; exit 0
+          fi
+          printf '%s\n%s\n' "$now" "$trouble" > watch-state/last; echo "save=1" >> "$GITHUB_OUTPUT"
+          echo "::error::LOCKqz: $trouble"; echo "fail=1" >> "$GITHUB_OUTPUT"
+      - name: Remember what was reported
+        if: steps.ask.outputs.save == '1'
+        uses: actions/cache/save@v4
+        with:
+          path: watch-state
+          key: watch-state-${{ github.run_id }}
+      - name: Report
+        if: steps.ask.outputs.fail == '1'
+        run: exit 1
