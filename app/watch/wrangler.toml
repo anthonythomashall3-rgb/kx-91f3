@@ -1,0 +1,24 @@
+# LOCKqz watch (see worker.js). Workers Free: a clock every 5 minutes, one KV key, Email Routing's send_email. $0.
+name = "lockqz-watch"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+account_id = "fafb20d4eb2dba712b17af2fd91310b5"
+workers_dev = true
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[[kv_namespaces]]
+binding = "STATE"
+id = "051bd5d414604e5780e2b72450f5546a"
+
+# Email Routing on lockqz.com: only its verified destination addresses can be written to.
+[[send_email]]
+name = "MAIL"
+
+[vars]
+SITE = "https://lockqz.com"
+PROF_SITE = "https://professor.lockqz.com"
+MAIL_FROM = "watch@lockqz.com"
+# One or more verified Email Routing destination addresses, comma-separated.
+MAIL_TO = "lockqz.app@gmail.com"

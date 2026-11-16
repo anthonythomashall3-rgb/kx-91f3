@@ -54,6 +54,7 @@ run "High-volume email: Amazon SES (SigV4 vs AWS test vector, codes/support via 
 run "Email From lockqz.com: Resend (request shape, test list, budget, codes switch, Gmail backup on/off, bulk Bcc, 429 retry)" node --no-warnings test_mail_resend.mjs
 run "Email From lockqz.com: SMTP2GO second sender (request shape, after Resend, failed-in-200, day + month budgets, codes, Bcc)" node --no-warnings test_mail_smtp2go.mjs
 run "Outside watch of the live site (GET /watch: database, clock, email; the Server watch workflow)" node --no-warnings test_watch.mjs
+run "5-minute watch Worker (looks, tells once, again after 6 h, fine again; by hand)" node --no-warnings test_watch_worker.mjs
 run "Gmail payment script parser (forged alerts refused)" node test_pay_script.mjs
 run "26 Oct fixes: one Stripe checkout per code, overpayments carried, unexpected local unlocks red, course password retired" node --no-warnings test_oct26_fixes.mjs
 run "Helper hardening: fast user switching, per-user tokens, Windows monotonic cap, local-model apps" bash test_helper_hardening.sh
