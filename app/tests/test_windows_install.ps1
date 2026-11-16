@@ -50,6 +50,19 @@ Check "firewall rules added" (@(Get-NetFirewallRule -DisplayName 'LOCKqz-AI-*' -
 Check "Chrome AI policy set" (Test-Path 'HKLM:\SOFTWARE\Policies\Google\Chrome')
 Check "Edge AI policy set" (Test-Path 'HKLM:\SOFTWARE\Policies\Microsoft\Edge')
 Check "status says locked" ((Invoke-RestMethod "$B/status" -Headers $H).engine_locked)
+# Every firewall rule the engine names exists exactly once, by the cmdlet and in the rules' registry key (the
+# quick look the engine takes on every pass).
+$fwWant = @([regex]::Matches((Get-Content "$Dest\lockqz.ps1" -Raw), '@\{ n = "\$FwTag-([A-Za-z0-9-]+)"') | ForEach-Object { "LOCKqz-AI-" + $_.Groups[1].Value })
+$fwHave = @(Get-NetFirewallRule -DisplayName 'LOCKqz-AI-*' -ErrorAction SilentlyContinue | ForEach-Object { $_.DisplayName })
+$fwReg = @(); $fwKey = Get-Item 'HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules'
+foreach ($vn in $fwKey.GetValueNames()) { $d = [string]$fwKey.GetValue($vn); if ($d -match 'LOCKqz-AI') { $m = [regex]::Match($d, '\|Name=([^|]*)\|'); $fwReg += $m.Groups[1].Value } }
+Write-Host ("INFO  firewall rules wanted: " + ($fwWant -join ', '))
+Write-Host ("INFO  firewall rules by the cmdlet: " + (($fwHave | Sort-Object) -join ', '))
+Write-Host ("INFO  firewall rules in the registry key: " + (($fwReg | Sort-Object) -join ', '))
+$fwSample = @($fwKey.GetValueNames() | ForEach-Object { [string]$fwKey.GetValue($_) } | Where-Object { $_ -match 'LOCKqz-AI' } | Select-Object -First 1)
+if ($fwSample.Count) { Write-Host ("INFO  one rule as stored: " + $fwSample[0].Substring(0, [math]::Min(170, $fwSample[0].Length))) }
+Check "every engine firewall rule exists once ($($fwWant.Count) rules)" (($fwWant.Count -ge 6) -and (@($fwWant | Where-Object { $w = $_; @($fwHave | Where-Object { $_ -eq $w }).Count -ne 1 }).Count -eq 0))
+Check "the registry key shows the same rules (the engine's quick look)" (@($fwWant | Where-Object { $w = $_; @($fwReg | Where-Object { $_ -eq $w }).Count -ne 1 }).Count -eq 0)
 # One lock pass of the kind that repeats every few seconds during a quiz (the engine itself, timed), and the
 # engine's own "is it locked" look that goes with it.
 $env:LOCKQZ_TIMING = "1"
