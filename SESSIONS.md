@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-16 05:10 PT — 01UUDg7YR3j2: a 5-minute watch on Cloudflare itself (new folder app/watch/, app/tests/test_watch_worker.mjs, run_all.sh; nothing else).
 
 ## Recently finished
 - 2026-11-16 05:30 PT — 01UUDg7YR3j2: server only. The Server watch workflow (every 15 minutes) now also asks the live site: both sites open, GET /api/watch (database answers and takes a write, the Gmail script's clock is calling, the last email went out; yes / no only; WATCH_CLOCK_MIN, default 45). A failed run emails the repository owner; the same trouble is reported again only every 6 hours. 38 more AI services served to the helpers (chat, homework, finance and spreadsheet AIs; they join blocklist.txt at the next app version). test_watch.mjs (24), test_blocklist T20b. run_all green (real Chromium).
