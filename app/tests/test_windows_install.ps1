@@ -67,13 +67,23 @@ Check "unlock accepted" ($r.state -eq 'unlocked')
 $hosts = Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw
 Check "hosts file clean" (-not ($hosts -match 'LOCKqz START'))
 # Where a first lock and an unlock spend their time (the engine itself, each step timed; printed for the record).
+# The helper is kept out of this hand-driven lock and unlock: it clears a block it did not start within seconds,
+# which would run a second unlock beside the timed one.
+Stop-ScheduledTask -TaskName 'LOCKqz' -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3
 $env:LOCKQZ_TIMING = "1"
+$timed = @{}
 foreach ($c in 'lock','unlock') {
   $sw = [Diagnostics.Stopwatch]::StartNew(); $out = & powershell -NoProfile -ExecutionPolicy Bypass -File "$Dest\lockqz.ps1" $c 2>&1; $sw.Stop()
   $out | Where-Object { "$_" -match '^TIMING' } | ForEach-Object { Write-Host "INFO  $c $_" }
+  $out | Where-Object { "$_" -match '^LOCKqz' } | ForEach-Object { Write-Host ("INFO  $c says: " + ("$_").Substring(0, [math]::Min(150, ("$_").Length))) }
   Write-Host ("INFO  engine {0} took {1:N1} s in all" -f $c, $sw.Elapsed.TotalSeconds)
+  $timed[$c] = ($out | ForEach-Object { "$_" }) -join "`n"
 }
 $env:LOCKQZ_TIMING = $null
+Check "the timed lock applied the browser policy (run beside the other steps)" (($timed['lock'] -match 'LOCKqz: LOCKED') -and -not ($timed['lock'] -match 'not applied|FAILED'))
+Check "the timed unlock put every policy back in one go (run beside the other steps)" (($timed['unlock'] -match 'LOCKqz: UNLOCKED') -and -not ($timed['unlock'] -match 'pending|incomplete'))
+Check "no LOCKqz policy mark left in the registry" ($null -eq (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Google\Chrome' -Name 'LOCKqzManaged' -ErrorAction SilentlyContinue))
+Start-ScheduledTask -TaskName 'LOCKqz' -ErrorAction SilentlyContinue; Start-Sleep -Seconds 5
 $hosts = Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw
 Check "hosts file clean after the timed unlock" (-not ($hosts -match 'LOCKqz START'))
 Check "firewall rules removed" (@(Get-NetFirewallRule -DisplayName 'LOCKqz-AI-*' -ErrorAction SilentlyContinue).Count -eq 0)
