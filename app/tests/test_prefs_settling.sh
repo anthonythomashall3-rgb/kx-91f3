@@ -43,5 +43,25 @@ echo "S6 outside the engine (no flag file named) nothing is skipped"
 check "read" '[ "$(n read)" = 1 ]'
 echo "S7 the engine prints its steps only when asked"
 check "lap is silent without LOCKQZ_TIMING and extra-block works without it" '( source "$APP/mac/extra-block.sh"; [ -z "$(xb_lap x 2>&1)" ] )'
+echo "S8 one pass of the extra layers: one look at the running programs for all lists, one for the model tools; the proxy look waits while the service comes back"
+TMP2="$(mktemp -d)"; mkdir -p "$TMP2/state" "$TMP2/bin"
+for c in ps pkill pgrep osascript scutil pfctl killall networksetup; do printf '#!/bin/bash\necho "%s $*" >> "%s/calls"\n[ "%s" = pgrep ] && exit 1\nexit 0\n' "$c" "$TMP2" "$c" > "$TMP2/bin/$c"; chmod +x "$TMP2/bin/$c"; done
+xl() { ( export PATH="$TMP2/bin:$PATH"; DRYRUN=0; STATE="$TMP2/state"; RESOLVER_DIR="$TMP2/resolver"; mkdir -p "$RESOLVER_DIR"
+  LOCKQZ_AIRPLAY_STATE="$TMP2/state/airplay.state"; LOCKQZ_AI_MDM="$TMP2/aa.plist"; LOCKQZ_AI_BACKUP="$TMP2/aa.bak"; export LOCKQZ_PREFS_DIRTY="$TMP2/state/prefs.dirty"
+  source "$APP/mac/lockqz-core.sh"; source "$APP/mac/extra-block.sh"
+  _cc_user() { echo stu; }; _cc_exists() { return 0; }; _cc_get() { echo 0; }; _cc_set() { :; }; _cc_restart() { :; }
+  "$@" ) >/dev/null 2>&1; }
+: > "$TMP2/calls"; xl extra_lock
+check "first pass: 2 process-table looks for the lists (names + command lines), not 12" '[ "$(grep -c "^ps -axww" "$TMP2/calls")" = 2 ]'
+check "the model tools: one pkill holding every pattern, each in its own group" '[ "$(grep -c "^pkill -f -- " "$TMP2/calls")" = 1 ] && grep -qF -- "pkill -f -- (/bin/mlx_lm[._][a-z_]+( |\$))|( -m mlx_lm([. ]|\$))|(/bin/vllm( |\$))|" "$TMP2/calls"'
+check "the combined pattern still matches each tool and nothing else" 'P="$(grep "^pkill -f -- " "$TMP2/calls" | sed "s/^pkill -f -- //")"; echo "/opt/x/bin/mlx_lm.server --port 1" | grep -Eq -- "$P" && echo "python3 -m vllm.entrypoints" | grep -Eq -- "$P" && echo "python -m llama_cpp.server" | grep -Eq -- "$P" && ! echo "/usr/bin/python3 /Library/Application Support/LOCKqz/lockqzd.py" | grep -Eq -- "$P" && ! echo "vim notes.txt" | grep -Eq -- "$P"'
+check "first pass looked at the proxies and left its mark" 'grep -q "^scutil --proxy" "$TMP2/calls" && [ -f "$TMP2/state/extra.applied" ]'
+: > "$TMP2/state/prefs.dirty.flushed"; : > "$TMP2/calls"; xl extra_lock
+check "repeat pass right after the restart: no proxy look" '! grep -q "^scutil" "$TMP2/calls"'
+touch -t "$(date -d '-20 seconds' +%Y%m%d%H%M.%S 2>/dev/null || date -v-20S +%Y%m%d%H%M.%S)" "$TMP2/state/prefs.dirty.flushed"; : > "$TMP2/calls"; xl extra_lock
+check "12 s later: the proxy look is back" 'grep -q "^scutil --proxy" "$TMP2/calls"'
+xl extra_unlock; : > "$TMP2/state/prefs.dirty.flushed"; : > "$TMP2/calls"; xl extra_lock
+check "a new quiz right after an unlock: its first pass always looks" 'grep -q "^scutil --proxy" "$TMP2/calls"'
+rm -rf "$TMP2"
 rm -rf "$TMP"
 echo; echo "RESULT: $PASS passed, $FAIL failed"; [ "$FAIL" = 0 ]

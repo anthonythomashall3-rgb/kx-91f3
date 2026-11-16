@@ -183,7 +183,7 @@ const pyPol2 = readFileSync(join(DIR, "../mac/browser-policy.py"), "utf8");
 pyPol2.includes('"bEnableGentech": False') && pyPol2.includes('"com.adobe.Acrobat.Pro", "com.adobe.Reader"') ? ok("mac: Acrobat/Reader FeatureLockdown bEnableGentech off during the quiz") : bad("mac Acrobat policy missing");
 psPol.includes('"bEnableGentech" 0') ? ok("windows: Acrobat/Reader FeatureLockDown bEnableGentech = 0") : bad("windows Acrobat policy missing");
 const macXb3 = readFileSync(join(DIR, "../mac/extra-block.sh"), "utf8");
-macXb3.includes("AirplayRecieverEnabled") && macXb3.includes('"allowAirPlayIncomingRequests": False') && macXb3.includes("airplay_receiver_restore || rc=1")
+macXb3.includes("AirplayRecieverEnabled") && macXb3.includes('"allowAirPlayIncomingRequests": False') && macXb3.includes("airplay_receiver_restore & ap=$!") && macXb3.includes("airplay_receiver_off & ap=$!") && (macXb3.match(/wait "\$ap" \|\| rc=1/g) || []).length === 2
   ? ok("mac: AirPlay Receiver off during the quiz and restored at unlock") : bad("mac AirPlay Receiver handling missing");
 
 console.log("T17 owner decision 28 Oct: Notion, Canva, Quizlet, Slack, Evernote, Goodnotes blocked during quizzes (their AI cannot be separated from the notes)");

@@ -92,6 +92,7 @@ prefs_settling() {
   [ "$(_warm_age "$f")" -lt 12 ]
 }
 xb_lap() { type lap >/dev/null 2>&1 && lap "$1"; return 0; }
+XB_APPLIED="${STATE:-/Library/Application Support/LOCKqz}/extra.applied"   # this quiz's first pass is done (removed at unlock)
 
 # Without lockqz-core.sh's running_named: the same answer, one look per name.
 type running_named >/dev/null 2>&1 || running_named() {
@@ -406,35 +407,39 @@ extra_lock() {
     echo "    [dry-run] pf already blocks local-model + VPN ports (com.lockqz.pf.conf)"
     return 0
   fi
-  _kill_list "VPN" "${VPN_APPS[@]}"
-  _kill_list "VM" "${VM_APPS[@]}"
-  _kill_list "remote-desktop" "${REMOTE_APPS[@]}"
-  _kill_list "overlay" "${OVERLAY_APPS[@]}"
-  _kill_list "local-model" "${LOCAL_MODEL_PROCS[@]}"
-  _kill_cmd_res "${LOCAL_MODEL_CMD_RES[@]}"
+  # One look at the running programs for all the lists together (this runs every 5 s during a quiz), and one
+  # for the python-run model tools.
+  _kill_list "blocked program" "${VPN_APPS[@]}" "${VM_APPS[@]}" "${REMOTE_APPS[@]}" "${OVERLAY_APPS[@]}" "${LOCAL_MODEL_PROCS[@]}" "${APPLE_AI_APPS[@]}"
+  local one="" re; for re in "${LOCAL_MODEL_CMD_RES[@]}"; do one="${one:+$one|}($re)"; done
+  _kill_cmd_res "$one"
   _kill_if_tunnel "${VPN_IF_TUNNEL[@]}"
-  _kill_list "Apple Intelligence" "${APPLE_AI_APPS[@]}"
   xb_lap x-kills
-  local rc=0
-  airplay_receiver_off || rc=1      # before the next step restarts the preferences service (reads after it wait)
-  xb_lap x-airplay
+  local rc=0 ap=""
+  # The AirPlay Receiver switch beside the steps below (it asks the signed-in user's settings, the slowest step
+  # of a first lock); waited for before this function returns, so before the preferences service restarts.
+  airplay_receiver_off & ap=$!
   apple_intelligence_off || rc=1
   xb_lap x-apple-ai
-  proxies_off || true
+  # A repeat pass in the seconds after this engine restarted the preferences service leaves the proxy look to
+  # the next pass (it waits for that service; the first pass of the quiz has already turned proxies off).
+  if [ -f "$XB_APPLIED" ] && prefs_settling; then :; else proxies_off || true; fi
   xb_lap x-proxies
   wild_block_on || rc=1
   xb_lap x-names
   warm_apply || rc=1
   xb_lap x-warm
+  wait "$ap" || rc=1
+  xb_lap x-airplay
+  : > "$XB_APPLIED" 2>/dev/null || true
   return $rc
 }
 
 extra_unlock() {
   # VPN/VM/remote/overlay/model apps are left for the student to reopen; only the
   # OS-level Apple Intelligence policy and the proxies must be actively restored.
-  local rc=0
-  airplay_receiver_restore || rc=1
-  xb_lap x-airplay
+  local rc=0 ap=""
+  rm -f "$XB_APPLIED" 2>/dev/null || true
+  airplay_receiver_restore & ap=$!   # beside the steps below; waited for before this function returns
   apple_intelligence_on || rc=1
   xb_lap x-apple-ai
   proxies_restore || true
@@ -442,6 +447,8 @@ extra_unlock() {
   wild_block_off || rc=1
   xb_lap x-names
   warm_clear
+  wait "$ap" || rc=1
+  xb_lap x-airplay
   rm -f "$PROXY_KEPT" 2>/dev/null || true
   return $rc
 }

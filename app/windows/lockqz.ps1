@@ -171,6 +171,27 @@ function Kill-AiAndTools {
 }
 function Ensure-FirewallRules {
   # One rule per name: creates missing ones, collapses duplicates left by an older version.
+  # First a quick look at the rules where Windows keeps them (one registry key): when every LOCKqz rule is there
+  # exactly once nothing more is asked. The firewall cmdlet below takes about a second, and this runs on every
+  # lock pass of a quiz. Anything else (a rule missing or doubled, the key unreadable) goes on to the cmdlet.
+  try {
+    $rk = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey("SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules", $false)
+    if ($rk) {
+      $cnt = @{}
+      try {
+        foreach ($vn in $rk.GetValueNames()) {
+          $m = [regex]::Match([string]$rk.GetValue($vn), '\|Name=([^|]*)\|')
+          if ($m.Success -and $m.Groups[1].Value.StartsWith("$FwTag-")) { $cnt[$m.Groups[1].Value] = 1 + [int]$cnt[$m.Groups[1].Value] }
+        }
+      } finally { $rk.Close() }
+      $all = $true
+      foreach ($r in $FwRules) {
+        if ($TestMode -and ($r.n -like "$FwTag-vpn-*")) { continue }
+        if ([int]$cnt[$r.n] -ne 1) { $all = $false; break }
+      }
+      if ($all) { return }
+    }
+  } catch { }
   $have = @(Get-NetFirewallRule -DisplayName "$FwTag-*" -ErrorAction SilentlyContinue)
   foreach ($r in $FwRules) {
     if ($TestMode -and ($r.n -like "$FwTag-vpn-*")) { continue }
