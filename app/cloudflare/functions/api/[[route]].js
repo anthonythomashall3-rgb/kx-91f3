@@ -109,7 +109,8 @@ const AI_DOMAINS = [
   "manus.ai","ai21.com","sambanova.ai","baichuan-ai.com","lingyiwanwu.com","partyrock.aws","flowgpt.com","textsynth.com","perchance.org","heck.ai",
   "hotbot.com","ithy.com","easy-peasy.ai","chat01.ai","luzia.com","fiscal.ai","finchat.io","fintool.com","rogo.ai","hebbia.com","hebbia.ai",
   "formulabot.com","excelformulabot.com","gptexcel.uk","sheetai.app","ajelix.com","numerous.ai","tryshortcut.ai","shortcut.ai","endex.ai","lindy.ai",
-  "relevanceai.com","botpress.com","mem.ai","gauth.com","answersai.com","leetcodewizard.io","studio.nebius.com"
+  "relevanceai.com","botpress.com","mem.ai","gauth.com","answersai.com","leetcodewizard.io","studio.nebius.com",
+  "arena.ai","ppq.ai","nanogpt.com","librechat.ai","kluster.ai","globe.engineer","hark.com","hume.ai","sesame.com","thea.study","scholar.0xpi.com","hkchat.app","hkchat.hk","hkgai.net","kortix.com","kortix.ai","suna.so","atoms.dev","mgx.dev","marscode.com","lingma.aliyun.com","qoder.com","codebuddy.ai","roomote.dev","orchids.app","tempo.new","heyboss.ai","heyboss.xyz","macaly.com","capacity.so","affine.pro","otter.ai","fireflies.ai","rows.com","napkin.ai","beautiful.ai"
 ];
 const now = () => new Date().toISOString();
 // "Today" in America/Los_Angeles as YYYY-MM-DD, so a professor stays active through the end of their
