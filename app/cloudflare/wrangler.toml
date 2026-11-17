@@ -37,12 +37,12 @@ MAIL_REPLY_TO = "support@lockqz.com"
 # Email From an address on lockqz.com, signed by lockqz.com (Resend; Pages secret RESEND_API_KEY turns it on; free 100 a day).
 RESEND_FROM = "support@lockqz.com"
 # First inbox checks: only email to these addresses goes through Resend. Empty = every LOCKqz email.
-RESEND_TEST_TO = "athall@usc.edu,lockqz.app@gmail.com"
+RESEND_TEST_TO = "athall@usc.edu,athall+check@usc.edu,lockqz.app@gmail.com"
 # Second sender From the same address (SMTP2GO; Pages secret SMTP2GO_API_KEY turns it on): free 200 a day,
 # 1,000 a month from the account's billing day. Used when Resend's day is full or Resend refuses.
 SMTP2GO_CYCLE_DAY = "15"
-# "1" = sign-in codes go through Resend / SMTP2GO too.
-RESEND_CODES = "0"
+# "1" = sign-in codes go through Resend / SMTP2GO too (while RESEND_TEST_TO lists addresses: only codes to those).
+RESEND_CODES = "1"
 # "0" = email that goes through Resend is never sent from the Gmail address instead (it waits when the day's allowance is used).
 GMAIL_BACKUP = "0"
 # Student fee per semester (USD) and the date it starts (YYYY-MM-DD; empty = off).
