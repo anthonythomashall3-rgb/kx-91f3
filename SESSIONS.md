@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-16 16:58 PT — 01UUDg7beZv5: app/cloudflare/wrangler.toml, the two mail switches RESEND_TEST_TO and RESEND_CODES only (a sign-in code From support@lockqz.com to the owner's own address).
 
 ## Recently finished
 - 2026-11-16 12:05 PT — 01UUDg7YR3j2: apps 0.6.31. Windows: the private-network rule for local-model ports names private networks only (Windows Firewall refuses a rule naming a loopback address; a model server on the PC itself is closed as a program), so all 8 engine rules exist and the repeat pass's quick look at the rules' registry key answers by itself. The install test checks every engine rule exists once, by the cmdlet and in the key. Measured with 0.6.30 on the Release machines: Mac first lock through the helper 2.8 s, repeat pass 0.8 s (engine 0.44 s), unlock after a quiz 1.4 s; Windows engine first lock 2.1 to 3.4 s, unlock 1.5 to 2.7 s. test_windows_lint T16. run_all green (real Chromium).
