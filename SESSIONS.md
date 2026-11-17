@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-17 05:20 PT — 01UUDg7bC9: server only: AI_DOMAINS in app/cloudflare/functions/api/[[route]].js (more AI services served to the helpers), app/tests/test_blocklist.mjs.
 
 ## Recently finished
 - 2026-11-16 17:25 PT — 01UUDg7beZv5: server settings only (wrangler.toml). Sign-in codes to the first-check addresses go From support@lockqz.com (RESEND_CODES = "1"; RESEND_TEST_TO still limits it to the owner's own addresses, one more of his added). Everyone else's codes and email are unchanged. run_all green (real Chromium).
