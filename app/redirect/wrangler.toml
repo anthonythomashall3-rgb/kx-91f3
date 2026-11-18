@@ -1,0 +1,11 @@
+# prof.lockqz.com -> professor.lockqz.com (see worker.js). Workers Free. $0.
+name = "lockqz-prof-redirect"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+account_id = "fafb20d4eb2dba712b17af2fd91310b5"
+workers_dev = false
+
+routes = [{ pattern = "prof.lockqz.com", custom_domain = true }]
+
+[vars]
+TO = "https://professor.lockqz.com"
