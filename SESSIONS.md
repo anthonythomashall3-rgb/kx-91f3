@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-18 07:10 PT — 01UUDg7cdAM9: fewer emails. app/cloudflare/functions/api/[[route]].js (welcome email sites, examMailTick reminder kind only), wrangler.toml, tests test_sweep9.mjs + test_prof_confirm.mjs.
 
 ## Recently finished
 - 2026-11-18 06:40 PT — 01UUDg7aHb4c: prof.lockqz.com is a short spelling of the professor site: a Worker (app/redirect/: worker.js, wrangler.toml; Workers Free, custom domain, no storage) sends every visit on to professor.lockqz.com with the same path and query. Deployed by hand from app/redirect (npx wrangler deploy); not part of the Release workflow. Checked live: 301, then 200 on professor.lockqz.com.
