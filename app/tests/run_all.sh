@@ -53,6 +53,7 @@ run "Stripe one-time setup script (fake Stripe + wrangler)" bash test_stripe_set
 run "High-volume email: Amazon SES (SigV4 vs AWS test vector, codes/support via SES, Gmail fallback, budgets, bulk Bcc)" node --no-warnings test_mail_ses.mjs
 run "Email From lockqz.com: Resend (request shape, test list, budget, codes switch, Gmail backup on/off, bulk Bcc, 429 retry)" node --no-warnings test_mail_resend.mjs
 run "Email From lockqz.com: SMTP2GO second sender (request shape, after Resend, failed-in-200, day + month budgets, codes, Bcc)" node --no-warnings test_mail_smtp2go.mjs
+run "Email From lockqz.com: Mailjet third sender (request shape, after Resend and SMTP2GO, error-in-200, day + month budgets, codes, lists)" node --no-warnings test_mail_mailjet.mjs
 run "Outside watch of the live site (GET /watch: database, clock, email; the Server watch workflow)" node --no-warnings test_watch.mjs
 run "5-minute watch Worker (looks, tells once, again after 6 h, fine again; by hand)" node --no-warnings test_watch_worker.mjs
 run "A laptop that slept catches up by the clock (list additions, update check; Mac/Linux helper, Windows rule)" python3 test_wake_catchup.py

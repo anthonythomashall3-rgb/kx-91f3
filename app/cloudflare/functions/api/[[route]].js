@@ -493,7 +493,7 @@ const resendOn = env => !!(env.RESEND_API_KEY && env.RESEND_FROM);
 const resendMax = env => Math.max(1, Number(env.RESEND_DAILY_MAX || 100));
 const resendTo = (env, to) => { const t = String(env.RESEND_TEST_TO || "").toLowerCase().split(",").map(x => x.trim()).filter(Boolean);
   return !t.length || (!Array.isArray(to) && t.includes(String(to || "").trim().toLowerCase())); };
-const resendCodes = env => (resendOn(env) || !!(env.SMTP2GO_API_KEY && env.RESEND_FROM)) && String(env.RESEND_CODES || "") === "1";
+const resendCodes = env => (resendOn(env) || !!(env.SMTP2GO_API_KEY && env.RESEND_FROM) || !!(env.MAILJET_API_KEY && env.MAILJET_SECRET_KEY && env.RESEND_FROM)) && String(env.RESEND_CODES || "") === "1";
 // Fewer emails (18 Nov 2026): WELCOME_MAIL = "0" sends no welcome email at sign-up (the dashboard shows the same steps);
 // EXAM_REMIND_3H = "0" sends one install reminder per exam (2 days before, or at once for an exam made later) instead of two.
 const welcomeMail = env => String(env.WELCOME_MAIL || "") !== "0";
@@ -551,7 +551,33 @@ async function smtp2goSend(env, to, subject, text, opts = {}) {
   }
   return true;
 }
-const ownOn = env => resendOn(env) || smtp2goOn(env);                   // any sender From lockqz.com
+// ---- Mailjet (18 Nov 2026): the third sender From lockqz.com, after Resend and SMTP2GO; same From and switches.
+// On when MAILJET_API_KEY + MAILJET_SECRET_KEY (Pages secrets) and RESEND_FROM exist. Free plan: 200 a day
+// (MAILJET_DAILY_MAX) and 6,000 a calendar month (MAILJET_MONTHLY_MAX). Send API v3.1: up to 50 messages per call;
+// every recipient of a list gets their own message (their address alone in To).
+const mailjetOn = env => !!(env.MAILJET_API_KEY && env.MAILJET_SECRET_KEY && env.RESEND_FROM);
+const mjDayMax = env => Math.max(1, Number(env.MAILJET_DAILY_MAX || 200));
+const mjMonthMax = env => Math.max(1, Number(env.MAILJET_MONTHLY_MAX || 6000));
+const mjMonth = (ms = Date.now()) => new Date(ms).toISOString().slice(0, 7) + "-01";
+const MJ_PER_CALL = 50;
+const mjCost = to => Array.isArray(to) ? to.length : 1;
+async function mailjetSend(env, to, subject, text, opts = {}) {
+  const from = String(env.RESEND_FROM), list = Array.isArray(to) ? to : [to];
+  const go = typeof env.MAILJET_FETCH === "function" ? env.MAILJET_FETCH : fetch;   // tests: fake Mailjet
+  const auth = "Basic " + btoa(String(env.MAILJET_API_KEY).trim() + ":" + String(env.MAILJET_SECRET_KEY).trim());
+  for (let i = 0; i < list.length; i += MJ_PER_CALL) {
+    const body = JSON.stringify({ Messages: list.slice(i, i + MJ_PER_CALL).map(a => ({ From: { Email: from, Name: env.MAIL_FROM_NAME || "LOCKqz" }, To: [{ Email: String(a) }],
+      Subject: subject, TextPart: String(text || ""), ...(opts.html ? { HTMLPart: opts.html } : {}), ...(opts.replyTo ? { ReplyTo: { Email: String(opts.replyTo) } } : {}) })) });
+    const r = await go("https://api.mailjet.com/v3.1/send", { method: "POST", headers: { "Content-Type": "application/json", Authorization: auth }, body });
+    let j = null, t = ""; try { t = await r.text(); j = JSON.parse(t); } catch {}
+    const ms = (j && Array.isArray(j.Messages)) ? j.Messages : [];
+    if (!r.ok || !ms.length || ms.some(m => m.Status !== "success")) {
+      const bad = ms.find(m => m.Status !== "success");
+      const e = new Error(`mailjet ${r.status} ${String((bad && bad.Errors && bad.Errors[0] && bad.Errors[0].ErrorMessage) || (j && j.ErrorMessage) || t).slice(0, 200)}`); e.mailjet = r.status; throw e; }
+  }
+  return true;
+}
+const ownOn = env => resendOn(env) || smtp2goOn(env) || mailjetOn(env);                   // any sender From lockqz.com
 const mailOn = env => sesOn(env) || ownOn(env) || typeof env.MAIL_SINK === "function" || !!(env.MAIL_USER && env.MAIL_APP_PASSWORD);
 const gmailOn = env => typeof env.MAIL_SINK === "function" || !!(env.MAIL_USER && env.MAIL_APP_PASSWORD);
 
@@ -942,7 +968,14 @@ export async function onRequest(context) {
     db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('_all','smtp2go',?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(hourKey(), n, now()),
     db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('_month','smtp2go',?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(s2gCycle(env), n, now())]);
   const s2gFail = e => db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("mail", null, null, "smtp2go_failed", String(e && e.message || e).slice(0, 200), now()).run().catch(() => {});
-  // -> "ses" | "resend" | "smtp2go" | "gmail"; throws { budget: true } when no channel has room, or the last channel's error.
+  const mjUsedDay = async () => Number((await db.prepare("SELECT COALESCE(SUM(n),0) AS n FROM mail_sent WHERE ou='_all' AND kind='mailjet' AND day>=?").bind(hourKey(Date.now() - 24 * 3600000)).first())?.n || 0);
+  const mjUsedMonth = async () => Number((await db.prepare("SELECT n FROM mail_sent WHERE ou='_month' AND kind='mailjet' AND day=?").bind(mjMonth()).first())?.n || 0);
+  const mjRoom = async (n, cls) => (await mjUsedDay()) + n <= (cls === "auto" ? Math.floor(mjDayMax(env) * 0.8) : mjDayMax(env)) && (await mjUsedMonth()) + n <= mjMonthMax(env);
+  const mjCount = n => db.batch([
+    db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('_all','mailjet',?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(hourKey(), n, now()),
+    db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('_month','mailjet',?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(mjMonth(), n, now())]);
+  const mjFail = e => db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("mail", null, null, "mailjet_failed", String(e && e.message || e).slice(0, 200), now()).run().catch(() => {});
+  // -> "ses" | "resend" | "smtp2go" | "mailjet" | "gmail"; throws { budget: true } when no channel has room, or the last channel's error.
   let mailOkMarked = false;
   async function sendVia(to, subject, text, opts, cls) {
     subject = String(subject == null ? "" : subject).replace(/\s+/g, " ").trim().slice(0, 250);   // a subject is one line, whatever an exam or class is called
@@ -970,6 +1003,12 @@ export async function onRequest(context) {
         if (!mailOkMarked) { mailOkMarked = true; await clockMark("mail_ok"); }
         return "smtp2go"; }
       catch (e) { ownErr = e; await s2gFail(e); }
+    }
+    if (viaOwn && mailjetOn(env) && await mjRoom(mjCost(to), cls)) {
+      try { await mailjetSend(env, to, subject, own.text, own.opts); try { await mjCount(mjCost(to)); } catch {}
+        if (!mailOkMarked) { mailOkMarked = true; await clockMark("mail_ok"); }
+        return "mailjet"; }
+      catch (e) { ownErr = e; await mjFail(e); }
     }
     if (ownErr && !backup) { await clockMark("mail_fail"); throw ownErr; }
     if (!backup || !gmailOn(env) || !(await mailRoom(k, cls))) { const e = new Error("mail_budget"); e.budget = true; throw e; }
@@ -1920,11 +1959,12 @@ export async function onRequest(context) {
     // Resend with RESEND_CODES = "1": its budget applies; Gmail is the fallback unless GMAIL_BACKUP = "0".
     // From lockqz.com with RESEND_CODES = "1": Resend's and SMTP2GO's budgets together (SMTP2GO also within its month).
     const ses = sesOn(env), rsd = !ses && resendCodes(env) && resendTo(env, email), gOk = gmailOn(env) && (!rsd || gmailBackup(env));
-    const rOn = rsd && resendOn(env), sOn = rsd && smtp2goOn(env);
+    const rOn = rsd && resendOn(env), sOn = rsd && smtp2goOn(env), mOn = rsd && mailjetOn(env);
+    const mUsed = mOn ? await mjUsedDay() : 0, mMonthOk = mOn && (await mjUsedMonth()) + 1 <= mjMonthMax(env), mFree = mOn && mMonthOk && mUsed + 1 <= mjDayMax(env);
     const rUsed = rOn ? await resendUsed() : 0, sUsed = sOn ? await s2gUsedDay() : 0, sMonthOk = sOn && (await s2gUsedMonth()) + 1 <= s2gMonthMax(env);
     const rFree = rOn && rUsed + 1 <= resendMax(env), sFree = sOn && sMonthOk && sUsed + 1 <= s2gDayMax(env);
-    const cap = ses ? sesMax(env) : rsd ? (rOn ? resendMax(env) : 0) + (sOn && sMonthOk ? s2gDayMax(env) : 0) : MAIL_HARD_MAX;
-    const used = ses ? await sesUsed() : rsd ? rUsed + (sOn && sMonthOk ? sUsed : 0) : await mailUsed(), half = Math.floor(cap / 2);
+    const cap = ses ? sesMax(env) : rsd ? (rOn ? resendMax(env) : 0) + (sOn && sMonthOk ? s2gDayMax(env) : 0) + (mOn && mMonthOk ? mjDayMax(env) : 0) : MAIL_HARD_MAX;
+    const used = ses ? await sesUsed() : rsd ? rUsed + (sOn && sMonthOk ? sUsed : 0) + (mOn && mMonthOk ? mUsed : 0) : await mailUsed(), half = Math.floor(cap / 2);
     if ((used + 1 > cap && !((ses || rsd) && gOk && (await mailUsed()) + 1 <= MAIL_HARD_MAX)) || (used >= half && !(await db.prepare("SELECT name FROM roster WHERE email=? AND name IS NOT NULL LIMIT 1").bind(email).first()))) return json({ error: "mail_busy" }, 503);
     const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, "0");
     let sent = false;
@@ -1934,6 +1974,8 @@ export async function onRequest(context) {
       try { await resendSend(env, email, cm.subject, cm.text, { html: cm.html }); sent = true; await clockMark("mail_ok"); try { await resendCount(1); } catch {} } catch (e) { await resendFail(e); } }
     if (!sent && sFree) { const cm = codeMail(env, email, code, web);
       try { await smtp2goSend(env, email, cm.subject, cm.text, { html: cm.html }); sent = true; await clockMark("mail_ok"); try { await s2gCount(1); } catch {} } catch (e) { await s2gFail(e); } }
+    if (!sent && mFree) { const cm = codeMail(env, email, code, web);
+      try { await mailjetSend(env, email, cm.subject, cm.text, { html: cm.html }); sent = true; await clockMark("mail_ok"); try { await mjCount(1); } catch {} } catch (e) { await mjFail(e); } }
     try { if (!sent) { if (!gOk) throw new Error("no mail channel"); await sendCode(env, email, code, web); await clockMark("mail_ok"); try { await mailCount(1); } catch {} } }
     catch (e) { await clockMark("mail_fail");   // the admin's home shows it until a send works again
       await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(dev, email, null, "code_send_failed", String(e).slice(0, 200), now()).run(); return json({ error: "send_failed" }, 502); }
