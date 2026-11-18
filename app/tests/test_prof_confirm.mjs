@@ -137,6 +137,11 @@ console.log("A the admin page");
     const d = await res.json();
     check("admin Payments shows what students actually pay ($200 Zelle, $210 card or Venmo), not only the $180 base", d.fee_paid?.zelle === 200 && d.fee_paid?.card === 210 && d.fee === 180, JSON.stringify(d.fee_paid)); }
 }
+console.log("C5 WELCOME_MAIL = 0: sign-up sends the code and nothing else");
+{ check("before: a sign-up got a welcome email", mail.some(m => m.to === "pat@usc.edu" && !m.code));
+  env.WELCOME_MAIL = "0"; const z = await signUp("zed@usc.edu", { name: "Zed Zane" }); delete env.WELCOME_MAIL;
+  check("account made", !!z?.token, JSON.stringify(z));
+  check("no email but the code", mail.filter(m => m.to === "zed@usc.edu" && !m.code).length === 0, JSON.stringify(mail.filter(m => m.to === "zed@usc.edu").map(m => m.subject))); }
 let chromium; try { ({ chromium } = createRequire(import.meta.url)("playwright")); } catch {}
 if (!chromium) try { ({ chromium } = createRequire("/opt/npm-tools/node_modules/")("playwright")); } catch {}
 if (!chromium) console.log("  skip: real-browser checks (no playwright)");

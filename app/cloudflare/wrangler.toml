@@ -45,6 +45,9 @@ SMTP2GO_CYCLE_DAY = "15"
 RESEND_CODES = "1"
 # "1" = when Resend and SMTP2GO are full or refuse, the email goes out from the Gmail address instead of waiting ("0" = it waits).
 GMAIL_BACKUP = "1"
+# Fewer emails (owner, 18 Nov 2026): no welcome email at professor sign-up; one install reminder per exam, not two.
+WELCOME_MAIL = "0"
+EXAM_REMIND_3H = "0"
 # Student fee per semester (USD) and the date it starts (YYYY-MM-DD; empty = off).
 STUDENT_FEE = "180"
 # The "One step left: pay for LOCKqz" email, hours after an install (0 = off). Off (Anthony, 13 Nov 2026): from 0.6.22 the

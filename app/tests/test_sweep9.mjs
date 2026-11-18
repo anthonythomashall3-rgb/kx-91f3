@@ -158,6 +158,27 @@ try {
     at(null);
   }
 
+  console.log("S6b EXAM_REMIND_3H = 0: one reminder per exam");
+  {
+    env.EXAM_REMIND_3H = "0";
+    const T0 = RealDate.parse("2026-12-04T20:00:00Z"), iso = t => new RealDate(t).toISOString();
+    const roster = [{ id: "8001", name: "Pat Prof", email: "prof9@usc.edu", role: "Instructor" }, { id: "9301", name: "Stu C", email: "rc@usc.edu", role: "Student" }];
+    at("2026-12-01T18:00:00Z");
+    await call("/sync", { courses: [{ ou: "601", name: "FBE 438", classlist: roster, quizzes: [] }] }, { teacher: ADMIN });
+    await call("/sync", { whoami: { id: "8001" }, courses: [{ ou: "601", name: "FBE 438", classlist: roster, quizzes: [{ qi: "1", name: "Final A", active: true, start: iso(T0), end: iso(T0 + 3600e3) }] }] }, { teacher: P });
+    const k = MAILS.length, rem = () => MAILS.slice(k).filter(m => /^Reminder: install LOCKqz/.test(m.subject)).map(m => m.subject);
+    for (let t = T0 - 50 * 3600e3; t <= T0 - 5 * 3600e3; t += 10 * 60e3) { fakeNow = t; await call("/cron", {}, { pay: true }); }
+    check("the 2-day reminder went out", rem().length === 1, rem().join(" | "));
+    for (let t = T0 - 5 * 3600e3; t <= T0 + 3600e3; t += 10 * 60e3) { fakeNow = t; await call("/cron", {}, { pay: true }); }
+    check("no second reminder 3 hours before", rem().length === 1 && !sqlite.prepare("SELECT 1 FROM mail_sent WHERE ou='601' AND kind LIKE 'r3:%'").get(), rem().join(" | "));
+    // an exam made 2 hours before it starts still gets its one reminder
+    const T1 = T0 + 30 * 3600e3; fakeNow = T1 - 2 * 3600e3;
+    await call("/sync", { whoami: { id: "8001" }, courses: [{ ou: "601", name: "FBE 438", classlist: roster, quizzes: [{ qi: "1", name: "Final A", active: true, start: iso(T0), end: iso(T0 + 3600e3) }, { qi: "2", name: "Final B", active: true, start: iso(T1), end: iso(T1 + 3600e3) }] }] }, { teacher: P });
+    for (let t = T1 - 2 * 3600e3; t <= T1; t += 10 * 60e3) { fakeNow = t; await call("/cron", {}, { pay: true }); }
+    check("an exam made 2 hours before its start: one reminder", rem().filter(x => /Final B/.test(x)).length === 1, rem().join(" | "));
+    delete env.EXAM_REMIND_3H; at(null);
+  }
+
   console.log("S8 an exam moved later after its reminder went out is reminded again for the new date");
   {
     sqlite.prepare("DELETE FROM mail_sent").run();

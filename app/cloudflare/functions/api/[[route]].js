@@ -494,6 +494,10 @@ const resendMax = env => Math.max(1, Number(env.RESEND_DAILY_MAX || 100));
 const resendTo = (env, to) => { const t = String(env.RESEND_TEST_TO || "").toLowerCase().split(",").map(x => x.trim()).filter(Boolean);
   return !t.length || (!Array.isArray(to) && t.includes(String(to || "").trim().toLowerCase())); };
 const resendCodes = env => (resendOn(env) || !!(env.SMTP2GO_API_KEY && env.RESEND_FROM)) && String(env.RESEND_CODES || "") === "1";
+// Fewer emails (18 Nov 2026): WELCOME_MAIL = "0" sends no welcome email at sign-up (the dashboard shows the same steps);
+// EXAM_REMIND_3H = "0" sends one install reminder per exam (2 days before, or at once for an exam made later) instead of two.
+const welcomeMail = env => String(env.WELCOME_MAIL || "") !== "0";
+const remind3h = env => String(env.EXAM_REMIND_3H || "") !== "0";
 const gmailBackup = env => String(env.GMAIL_BACKUP || "") !== "0";
 const RESEND_BCC = 49;                                                   // Resend: at most 50 recipients per message (To + Bcc)
 const resendCost = to => Array.isArray(to) ? to.length + Math.ceil(to.length / RESEND_BCC) : 1;   // every recipient counts, the To copy too
@@ -2496,7 +2500,7 @@ export async function onRequest(context) {
         db.prepare("INSERT INTO invites (code,email,active_until,created_at,used_at,used_by) VALUES (?,?,?,?,?,?)").bind("self-" + rid(10), email, null, now(), now(), email)]);   // the email is confirmed
       else if (inv) await db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE email=? AND used_at IS NULL").bind(now(), email, email).run();   // a second invite for this email is moot too
       // Welcome email (HTML): the two steps. Sent in the background; sign-up never waits for Gmail.
-      if (mailOn(env)) { const w = MAIL.welcome({ last: lastName(nm), free: isExempt(env, email), pay: !isExempt(env, email) && !(inv && inv.active_until && inv.active_until >= laToday()) && n !== 0 });
+      if (mailOn(env) && welcomeMail(env)) { const w = MAIL.welcome({ last: lastName(nm), free: isExempt(env, email), pay: !isExempt(env, email) && !(inv && inv.active_until && inv.active_until >= laToday()) && n !== 0 });
         const go = mailOut(email, w.subject, w.text, { html: w.html }, "auto").catch(() => {});
         if (typeof context.waitUntil === "function") context.waitUntil(go); else await go; }
       return json({ token, email, name: nm });
@@ -2551,7 +2555,7 @@ export async function onRequest(context) {
         await db.batch([db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + ip, null, null, "signup", "google", now()),
           db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE email=? AND used_at IS NULL").bind(now(), g.email, g.email),
           db.prepare("INSERT INTO invites (code,email,active_until,created_at,used_at,used_by) VALUES (?,?,?,?,?,?)").bind("self-" + rid(10), g.email, null, now(), now(), g.email)]);   // Google confirmed the email
-        if (mailOn(env)) { const w = MAIL.welcome({ last: lastName(name), free: isExempt(env, g.email), pay: !isExempt(env, g.email) && !(t && t.active_until && t.active_until >= laToday()) });
+        if (mailOn(env) && welcomeMail(env)) { const w = MAIL.welcome({ last: lastName(name), free: isExempt(env, g.email), pay: !isExempt(env, g.email) && !(t && t.active_until && t.active_until >= laToday()) });
           const go = mailOut(g.email, w.subject, w.text, { html: w.html }, "auto").catch(() => {});
           if (typeof context.waitUntil === "function") context.waitUntil(go); else await go; }
         return json({ token, email: g.email, name, created: true });
@@ -3083,7 +3087,7 @@ export async function onRequest(context) {
         }
         // Reminders to students who are not ready (2 days and 3 hours before), from the automatic budget:
         // not installed -> the install reminder; installed on a confirmed computer but fee unpaid -> the pay line.
-        const kind = lead <= 3 * 3600000 ? "r3:" + r.qi : lead <= 48 * 3600000 ? "r48:" + r.qi : null;
+        const kind = lead <= 3 * 3600000 && remind3h(env) ? "r3:" + r.qi : lead <= 48 * 3600000 ? "r48:" + r.qi : null;
         const ckey = kind ? r.ou + "|" + kind.split(":")[0] : "";
         // The exam was moved later after its reminder went out (2-day one: by 6 h or more; 3-hour one: by 1 h or
         // more): that reminder was for the old date, so the new date gets its own.
