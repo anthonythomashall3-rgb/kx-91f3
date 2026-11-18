@@ -217,7 +217,7 @@ async function sendCode(em){
   $("lerr").textContent = "";
   if(c.error){ $("lerr").textContent = CODEMSG[c.error] || c.message || c.error; return; }
   CODEFOR = em; $("sucode").value = ""; $("sucode").classList.remove("hide"); $("sucode").focus();
-  $("lmsg").textContent = "We emailed a 6-digit code to " + em + ". Type it above, then press Create account."; $("lmsg").classList.remove("hide");
+  $("lmsg").textContent = "We emailed a 6-digit code to " + em + ". It comes from support@lockqz.com; check Spam if you don't see it. Type it above, then press Create account."; $("lmsg").classList.remove("hide");
 }
 async function go(){
   if(signup && !INVITE){
@@ -239,7 +239,7 @@ function showForgot(){ $("forgot").classList.remove("hide"); $("femail").value=$
 async function requestReset(){ const email=$("femail").value.trim(); if(!email){ $("fmsg").textContent="Enter your email."; return; }
   const d = await post("/forgot",{email}); if(d.error){ $("fmsg").textContent = d.message || d.error; return; }
   ["fcode","fpw","fset"].forEach(i => $(i).classList.remove("hide")); $("fcode").focus();
-  $("fmsg").textContent = "If that account exists, we emailed it a 6-digit code. Type it here with your new password."; }
+  $("fmsg").textContent = "If that account exists, we emailed it a 6-digit code. It comes from support@lockqz.com; check Spam if you don't see it. Type it here with your new password."; }
 async function setNewPw(){ const email=$("femail").value.trim(), code=$("fcode").value.trim(), pw=$("fpw").value;
   if(pw.length<8){ $("fmsg").textContent="Password must be at least 8 characters."; return; }
   const d = await post("/forgot/reset",{email,code,password:pw}); if(d.error){ $("fmsg").textContent = d.message || d.error; return; }

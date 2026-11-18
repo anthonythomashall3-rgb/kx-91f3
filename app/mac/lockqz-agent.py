@@ -650,7 +650,7 @@ def setup_identity(call, ui, saved="", save=None, state=None):
             state["sent"] = (email, time.time())
         note = ""
         while True:
-            b, code = ui.ask(note + "We emailed a 6-digit code to\n%s\n\nType it here (check Junk/Spam if you don't see it):" % email,
+            b, code = ui.ask(note + "We emailed a 6-digit code to\n%s\nIt comes from support@lockqz.com.\n\nType it here (check Junk/Spam if you don't see it):" % email,
                              ["Change email", "Send new code", "OK"])
             if b is None: state["r"] = "closed"; return None
             if b == "Change email":

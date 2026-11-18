@@ -397,7 +397,7 @@ function Setup-Identity($saved, $state) {
     }
     $note = ""
     while ($true) {
-      $a = Ask-Box ($note + "We emailed a 6-digit code to`n" + $email + "`n`nType it here (check Junk/Spam if you don't see it):") @("Change email", "Send new code", "OK") "" $true
+      $a = Ask-Box ($note + "We emailed a 6-digit code to`n" + $email + "`nIt comes from support@lockqz.com.`n`nType it here (check Junk/Spam if you don't see it):") @("Change email", "Send new code", "OK") "" $true
       if (-not $a) { $state.r = "closed"; return $null }
       if ($a.b -eq "Change email") { $email = ""; $state.sent_email = ""; Save-Student $null $false; break }
       if ($a.b -eq "Send new code") {

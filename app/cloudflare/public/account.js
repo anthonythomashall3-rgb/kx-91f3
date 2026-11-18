@@ -72,7 +72,7 @@
       acc.appendChild(f);
     } else if (state.step === "code") {
       var g = el("form", { "class": "lqm-form", novalidate: true }, [
-        el("p", { "class": "lqm-small", text: "We emailed a 6-digit code to " + state.email + "." }),
+        el("p", { "class": "lqm-small", text: "We emailed a 6-digit code to " + state.email + ". It comes from support@lockqz.com; check Spam if you don't see it." }),
         el("label", { "for": "lqm-code", text: "Code" }),
         el("input", { id: "lqm-code", type: "text", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "6", pattern: "[0-9]*", required: true }),
         el("button", { type: "submit", "class": "lqm-btn lqm-prime", text: state.busy ? "Checking…" : "Sign in", disabled: state.busy }), msgEl(),
