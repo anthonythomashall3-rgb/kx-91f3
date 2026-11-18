@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-18 06:17 PT — 01UUDg7aHb4c: new folder app/redirect only (prof.lockqz.com sends visitors to professor.lockqz.com). No other file.
 
 ## Recently finished
 - 2026-11-18 06:30 PT — 01UUDg7cdAM9: apps 0.6.32 + server settings. Every LOCKqz email and sign-in code goes From support@lockqz.com (RESEND_TEST_TO empty: Resend, then SMTP2GO), and from the Gmail address when both are full or refuse (GMAIL_BACKUP = "1"). The code screens name the sender (web account sign-in, professor sign-up and password reset, Mac and Windows setup). run_all: every suite green except the Chromium policy suite, where the newest Playwright Chromium (159) does not know one policy name (same without this change).
