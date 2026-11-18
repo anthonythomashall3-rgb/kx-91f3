@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-18 05:55 PT — 01UUDg7cdAM9: mail switches in app/cloudflare/wrangler.toml; the code screens' wording (public/account.js, public/dashboard.html, app/mac/lockqz-agent.py, app/windows/lockqz-agent.ps1), app/VERSION + helper version lines.
 
 ## Recently finished
 - 2026-11-17 06:10 PT — 01UUDg7bC9: server only. 36 more AI services served to the helpers (chat front ends, voice and personal assistants, study AIs, coding and app-building agents, AI in notes, meeting notes and sheets; they join blocklist.txt at the next app version). test_blocklist T20b (62). run_all green (real Chromium).
