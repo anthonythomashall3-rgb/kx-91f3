@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-18 13:10 PT — 01UUDg7cdAM9: a third sender From lockqz.com (Mailjet). app/cloudflare/functions/api/[[route]].js (mail section, sendVia, /account send only), wrangler.toml, new test_mail_mailjet.mjs, run_all.sh (one line).
 
 ## Recently finished
 - 2026-11-18 07:40 PT — 01UUDg7cdAM9: server only, fewer emails (owner, 18 Nov). WELCOME_MAIL = "0": no welcome email at professor sign-up (the dashboard's first visit shows the steps). EXAM_REMIND_3H = "0": one install reminder per exam (2 days before, or at once for an exam made later), not two. Both are settings in wrangler.toml; without them the API behaves as before. test_sweep9 S6b (46), test_prof_confirm C5. run_all: every suite green except the Chromium policy suite (newest Playwright Chromium, same as before this change).
