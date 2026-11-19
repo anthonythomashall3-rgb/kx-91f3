@@ -7,9 +7,9 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-11-19 11:20 PT — thread LTC5XK: claim app/cloudflare/functions/api/[[route]].js (/invite only), new app/cloudflare/migrate_045_proof_backfill.sql, app/tests/test_prof_signup.mjs, app/tests/test_prof_zero_effort.mjs.
 
 ## Recently finished
+- 2026-11-19 11:35 PT — thread LTC5XK: server only (owner, 19 Nov). /invite asks for the professor's email (an invite always names who it is for, so their own Sync confirms them as the class's instructor). migrate_045_proof_backfill: professors who signed up with an emailed code or USC Google between 9 Nov 12:56 PT and the self- record get that record too. test_prof_signup (52), test_prof_zero_effort (99), test_google_signin (31). run_all here: every suite green except the real-Chromium suites (no browser download in this container); the Release test job runs them.
 - 2026-11-19 08:25 PT — 01UUDg7YM28i: settings only (owner, 19 Nov). FREE_FOREVER now also holds huutienn@usc.edu, jscohen@usc.edu (both moved from the trial list) and abbati@usc.edu (new); the trial list FEE_EXEMPT is empty. test_sweep4 holds all five addresses (33). run_all green (real Chromium).
 - 2026-11-19 07:05 PT — 01UUDg7YM28i: server + web (owner, 19 Nov). FREE_FOREVER in wrangler.toml: a list of its own beside the trial list FEE_EXEMPT; the people on it never pay (student or professor fee), with no trial and no end date, and emptying FEE_EXEMPT changes nothing for them. Professor Bristow's two addresses moved there from the trial list. /me answers forever; their welcome (dashboard box, code email) says "LOCKqz is free for you, forever." test_pay P13 (62), test_sweep4 (30: the production line is held by a check). run_all green (real Chromium).
 - 2026-11-18 20:45 PT — 01UUDg7cdAM9: Mailjet is on: its two Pages secrets exist, lockqz.com is validated and authenticated there (TXT mailjet._domainkey, Mailjet's include in the SPF record). One comment line in wrangler.toml so this deploy picks the secrets up; no code change.

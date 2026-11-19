@@ -195,5 +195,7 @@ check("expired invite does not vouch the sign-up", row("stale@usc.edu")?.vouched
 ec = await call("/invite-check?code=" + staleCode, null, { get: true, envx: { INVITE_TTL_DAYS: "0" } });
 check("INVITE_TTL_DAYS=0 disables expiry: expired invite valid again", ec.data?.ok === true, JSON.stringify(ec.data));
 
+r = await call("/invite", { email: "" }, { token: ADMIN });
+check("an invite with no professor email is refused (its account could never verify)", r.status === 400, JSON.stringify(r.data));
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

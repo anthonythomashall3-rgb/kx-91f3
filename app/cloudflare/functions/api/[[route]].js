@@ -2752,6 +2752,7 @@ export async function onRequest(context) {
     if (p === "/invite" && request.method === "POST") {
       if (!me?.admin) return json({ error:"admin only" }, 403);
       const email = String(body.email||"").trim().toLowerCase() || null;
+      if (!email) return json({ error:"Enter the professor's email. LOCKqz needs it to confirm they teach the class." }, 400);
       if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error:"enter a valid email" }, 400);
       // An existing account blocks a new invite -- unless nobody ever vouched for it (no invite) and it
       // never verified: that may be someone squatting the professor's email, and the invite reclaims it.

@@ -340,7 +340,7 @@ console.log("Z9 invite email: LOCKqz sends it, with buttons");
   check("plain-text part has every link too", m && m.text.includes("?invite=" + inv.data.code) && /chromewebstore/.test(m.text));
   check("professor can't send invites", (await api("/invite/send", { code: inv.data.code }, { "X-LOCKqz-Teacher": PROF })).status === 403);
   const anon = await api("/invite", {}, ADMIN);
-  check("invite without an email: refused (copy the link instead)", (await api("/invite/send", { code: anon.data.code }, ADMIN)).status === 400);
+  check("invite without an email: refused when made (10 Nov 2026: its account could never verify)", anon.status === 400 && !anon.data.code);
   check("unknown code: 404", (await api("/invite/send", { code: "nope" }, ADMIN)).status === 404);
 }
 console.log("Z10 invite: named greeting; fee-exempt professor is told it is free; welcome says so too");
