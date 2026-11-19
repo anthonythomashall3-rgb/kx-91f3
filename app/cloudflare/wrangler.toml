@@ -43,6 +43,7 @@ RESEND_TEST_TO = ""
 SMTP2GO_CYCLE_DAY = "15"
 # Third sender From the same address (Mailjet; Pages secrets MAILJET_API_KEY + MAILJET_SECRET_KEY turn it on): free 200 a day,
 # 6,000 a calendar month. Used when Resend and SMTP2GO are full or refuse.
+# On since 18 Nov 2026 (domain validated, SPF + DKIM records in place).
 # "1" = sign-in codes go through Resend / SMTP2GO too (while RESEND_TEST_TO lists addresses: only codes to those).
 RESEND_CODES = "1"
 # "1" = when Resend and SMTP2GO are full or refuse, the email goes out from the Gmail address instead of waiting ("0" = it waits).
