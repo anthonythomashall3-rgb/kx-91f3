@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-19 06:30 PT — 01UUDg7YM28i: free-forever list (FREE_FOREVER). Files: app/cloudflare/functions/api/[[route]].js (exemptSet, WELCOME, /me), wrangler.toml, public/lq.js (lqWelcome), dashboard.html (the two lqWelcome calls), test_pay.mjs, test_sweep4.mjs.
 
 ## Recently finished
 - 2026-11-18 20:45 PT — 01UUDg7cdAM9: Mailjet is on: its two Pages secrets exist, lockqz.com is validated and authenticated there (TXT mailjet._domainkey, Mailjet's include in the SPF record). One comment line in wrangler.toml so this deploy picks the secrets up; no code change.
