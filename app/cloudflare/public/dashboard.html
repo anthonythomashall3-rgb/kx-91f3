@@ -265,7 +265,7 @@ async function boot(){
   $("who").insertAdjacentHTML("afterbegin", esc(m.name||m.email));
   if(m.admin) $("m-admin").classList.remove("hide");
   applyAll(R); route();
-  if(m.trial && (m.admin || welcomed()) && typeof lqWelcome === "function") lqWelcome(m.email);
+  if(m.trial && (m.admin || welcomed()) && typeof lqWelcome === "function") lqWel(m);
   if(!AUTO) AUTO = setInterval(autoRefresh, 900000);
 }
 const loadAll = () => Promise.all([get("/me"), get("/bs"), get("/quizzes"), SYNCKEY?{key:SYNCKEY}:get("/synckey")]);
@@ -731,7 +731,10 @@ function viewConnect(){
 // ---- WELCOME (first visit after sign-up; "How LOCKqz works" in the menu) ----
 const WELKEY = () => "lockqz_welcome_" + String((ME && ME.email) || "").toLowerCase();
 const welcomed = () => { try { return !!localStorage.getItem(WELKEY()); } catch (e) { return true; } };
-function welcomeDone(){ try { localStorage.setItem(WELKEY(), "1"); } catch (e) {} nav(""); route(); if (ME && ME.trial && typeof lqWelcome === "function") lqWelcome(ME.email); }
+// The welcome of someone LOCKqz is free for, forever (the server's "forever"): same box, its own two lines.
+function lqWel(m){ lqWelcome(m.email); const d = m.forever && document.querySelector(".lqwel"); if (!d) return;
+  d.querySelector("h2").textContent = "Welcome to LOCKqz!"; d.querySelector("p").textContent = "LOCKqz is free for you, forever."; if (typeof lqBrand === "function") lqBrand(d); }
+function welcomeDone(){ try { localStorage.setItem(WELKEY(), "1"); } catch (e) {} nav(""); route(); if (ME && ME.trial && typeof lqWelcome === "function") lqWel(ME); }
 function viewWelcome(){
   return `<section class="card wel" aria-label="Welcome" style="display:flex;flex-direction:column;gap:18px;max-width:560px;margin-left:auto;margin-right:auto">
     <div><h1 style="margin:0;font-size:26px;font-weight:700;letter-spacing:-.015em">Welcome to LOCKqz</h1>

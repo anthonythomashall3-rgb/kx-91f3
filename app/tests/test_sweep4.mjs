@@ -128,7 +128,10 @@ check("professor: '$6,300 by Zelle, or $6,500 by bank transfer, card or Venmo', 
   check("extension popup name: 'Dr. Jane Smith, PhD' -> 'Jane Smith', 'Bristow, Duke' -> 'Duke Bristow' (so it greets 'Prof. Smith', 'Prof. Bristow')", JSON.stringify(got) === JSON.stringify(["Jane Smith", "Duke Bristow", "Duke Bristow"]), JSON.stringify(got)); }
 { // owner, 10 Nov: TA Joseph Cohen uses LOCKqz free (FEE_EXEMPT: never pays the student fee)
   const ex = (readFileSync(join(CF, "wrangler.toml"), "utf8").match(/^FEE_EXEMPT = "([^"]*)"/m) || [])[1] || "";
-  check("TA Joseph Cohen (jscohen@usc.edu) is fee-exempt in production (wrangler.toml FEE_EXEMPT)", ex.split(",").map(x => x.trim()).includes("jscohen@usc.edu"), ex); }
+  check("TA Joseph Cohen (jscohen@usc.edu) is fee-exempt in production (wrangler.toml FEE_EXEMPT)", ex.split(",").map(x => x.trim()).includes("jscohen@usc.edu"), ex);
+  // owner, 19 Nov: Professor Bristow uses LOCKqz free forever (FREE_FOREVER: its own list, not the trial list)
+  const fv = ((readFileSync(join(CF, "wrangler.toml"), "utf8").match(/^FREE_FOREVER = "([^"]*)"/m) || [])[1] || "").split(",").map(x => x.trim());
+  check("Professor Bristow is free forever in production (wrangler.toml FREE_FOREVER, both addresses)", fv.includes("dbristow@usc.edu") && fv.includes("dbristow@marshall.usc.edu"), fv.join(",")); }
 console.log("C LOCKqz's clock (the Gmail script) is watched");
 { const hdr = { "X-LOCKqz-Pay": SECRET };
   const before = (await call("/me", null, { token: ADMIN, get: true })).data?.clock || {};

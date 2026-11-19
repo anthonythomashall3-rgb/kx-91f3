@@ -349,8 +349,13 @@ const CODE_MS = 15 * 60000, CODE_TRIES = 5;
 const EMAIL_OK = e => /^[a-z0-9._%+'-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(e);   // ' is a real email character (o'brien@...)
 // Trial testers (FEE_EXEMPT in wrangler.toml, comma-separated): never pay (student fee or professor fee)
 // and get the test-run welcome. Everyone else pays.
-const exemptSet = env => new Set(String(env.FEE_EXEMPT || "").split(",").map(x => x.trim().toLowerCase()).filter(Boolean));
+// Free forever (FREE_FOREVER, same form; owner, 19 Nov 2026): never pay either, with no trial and no end date.
+// It is a list of its own so that ending the trial (emptying FEE_EXEMPT) changes nothing for them.
+const listSet = v => String(v || "").split(",").map(x => x.trim().toLowerCase()).filter(Boolean);
+const exemptSet = env => new Set([...listSet(env.FEE_EXEMPT), ...listSet(env.FREE_FOREVER)]);
 const isExempt = (env, e) => !!e && exemptSet(env).has(String(e).trim().toLowerCase());
+const isForever = (env, e) => !!e && listSet(env.FREE_FOREVER).includes(String(e).trim().toLowerCase());
+const WELCOME_FOREVER = "Welcome to LOCKqz! LOCKqz is free for you, forever.\n\nThank you for joining me on the USC students\u2019 edification journey.\n\nLocks keep honest people honest.";
 const WELCOME = "Welcome to the LOCKqz test run! You are exempt from paying during this trial period. Have fun testing!\n\nThank you for joining me on the USC students\u2019 edification journey.\n\nLocks keep honest people honest.";
 const b64 = s => btoa(String.fromCharCode(...enc.encode(s)));
 // Minimal SMTP client over a TLS socket. `open` returns { readable, writable } (cloudflare:sockets).
@@ -409,7 +414,7 @@ function codeText(env, to, code, web) {
   if (web === "reset") return `Your LOCKqz password reset code is ${code}\n\nType it on professor.lockqz.com with your new password. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email: your password stays the same.`;
   if (web === "prof") return `Your LOCKqz sign-up code is ${code}\n\nType it on professor.lockqz.com to create your professor account. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
   return web ? `Your LOCKqz sign-in code is ${code}\n\nType it on lockqz.com to open your account. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`
-    : (isExempt(env, to) ? WELCOME + "\n\n" : "") + `Your LOCKqz code is ${code}\n\nType it into the LOCKqz window on your computer. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
+    : (isForever(env, to) ? WELCOME_FOREVER + "\n\n" : isExempt(env, to) ? WELCOME + "\n\n" : "") + `Your LOCKqz code is ${code}\n\nType it into the LOCKqz window on your computer. It expires in 15 minutes.\n\nIf you did not ask for this, ignore this email.`;
 }
 function codeMail(env, to, code, web = false) {
   const subject = `Your LOCKqz code: ${code}`;
@@ -2674,7 +2679,7 @@ export async function onRequest(context) {
       if (!me.active && me.id !== "admin" && stripeOn()) { const pc = await db.prepare("SELECT code FROM pay_codes WHERE teacher_id=?").bind(me.id).first();
         if (pc && await stripeSettle(pc.code)) { const t2 = await db.prepare("SELECT active_until FROM teachers WHERE id=?").bind(me.id).first();
           me.active_until = t2?.active_until || null; me.active = !!me.active_until && me.active_until >= laToday(); } }
-      return json({ email: me.email, name: me.name, admin: me.admin, verified: !!me.verified, active: me.active, active_until: me.active_until, ...(me.trial ? { trial: true } : {}), ...(me.admin ? { clock: await clockState() } : {}) });
+      return json({ email: me.email, name: me.name, admin: me.admin, verified: !!me.verified, active: me.active, active_until: me.active_until, ...(me.trial ? { trial: true, ...(isForever(env, me.email) ? { forever: true } : {}) } : {}), ...(me.admin ? { clock: await clockState() } : {}) });
     }
     if (p === "/logout" && request.method === "POST") {
       // Every real account (admins included) loses its session token; only the master key has no row.

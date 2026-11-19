@@ -251,6 +251,18 @@ console.log("P13 trial testers (FEE_EXEMPT) never pay; only a vouched/verified t
   me = (await getc(T, "/me", { teacher: tt })).data;
   check("vouched tester professor: active + trial welcome, no payment", me.trial === true && me.active === true && !!me.active_until, JSON.stringify(me));
   me = (await getc(ON, "/me", { teacher: PT })).data;
-  check("a normal professor never gets the trial flag", !me.trial, JSON.stringify(me)); }
+  check("a normal professor never gets the trial flag", !me.trial, JSON.stringify(me));
+  // Free forever (FREE_FOREVER): a list of its own; ending the trial (empty FEE_EXEMPT) changes nothing for it.
+  const FV = { ...ON, STUDENT_FEE: "180", FEE_EXEMPT: "", FREE_FOREVER: "Tester@usc.edu, Fv@usc.edu" };
+  check("forever tester: flagged, the trial tester is not", me.forever === undefined && (await getc(T, "/me", { teacher: tt })).data.forever === undefined);
+  me = (await getc(FV, "/me", { teacher: tt })).data;
+  check("free forever professor with the trial list empty: active, no payment, forever", me.active === true && me.forever === true && !!me.active_until, JSON.stringify(me));
+  s = (await call(FV, "/pay/start", { email: "fv@usc.edu" })).data;
+  check("free forever as a student: paid without paying", s.paid === true, JSON.stringify(s));
+  s = (await call(FV, "/pay/start", { email: "huu@usc.edu" })).data;
+  check("trial ended: a former trial tester pays, the forever one does not", s.paid === false && s.amount === 180, JSON.stringify(s));
+  sqlite.prepare("UPDATE teachers SET active_until='2020-01-01' WHERE email='tester@usc.edu'").run();
+  me = (await getc(FV, "/me", { teacher: tt })).data;
+  check("free forever: an end date in the past does not end it", me.active === true && me.active_until >= new Date().toISOString().slice(0, 10), JSON.stringify(me)); }
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
