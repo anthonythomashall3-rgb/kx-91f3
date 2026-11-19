@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-19 11:20 PT — thread LTC5XK: claim app/cloudflare/functions/api/[[route]].js (/invite only), new app/cloudflare/migrate_045_proof_backfill.sql, app/tests/test_prof_signup.mjs, app/tests/test_prof_zero_effort.mjs.
 
 ## Recently finished
 - 2026-11-19 08:25 PT — 01UUDg7YM28i: settings only (owner, 19 Nov). FREE_FOREVER now also holds huutienn@usc.edu, jscohen@usc.edu (both moved from the trial list) and abbati@usc.edu (new); the trial list FEE_EXEMPT is empty. test_sweep4 holds all five addresses (33). run_all green (real Chromium).
