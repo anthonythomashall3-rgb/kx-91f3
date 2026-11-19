@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-19 07:55 PT — 01UUDg7YM28i: two more addresses on the free-forever list. Files: app/cloudflare/wrangler.toml, app/tests/test_sweep4.mjs.
 
 ## Recently finished
 - 2026-11-19 07:05 PT — 01UUDg7YM28i: server + web (owner, 19 Nov). FREE_FOREVER in wrangler.toml: a list of its own beside the trial list FEE_EXEMPT; the people on it never pay (student or professor fee), with no trial and no end date, and emptying FEE_EXEMPT changes nothing for them. Professor Bristow's two addresses moved there from the trial list. /me answers forever; their welcome (dashboard box, code email) says "LOCKqz is free for you, forever." test_pay P13 (62), test_sweep4 (31: the production line is held by a check). run_all green (real Chromium).
