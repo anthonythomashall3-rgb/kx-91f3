@@ -9,7 +9,7 @@ function Check($m, $c) { if ($c) { $script:pass++; Write-Host "  ok: $m" } else 
 # ======================================================================================
 Write-Host "A. agent: quiz page still open? (real Step-Locked / Clean-Title / Get-ActiveTab)"
 $agentAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $Win "lockqz-agent.ps1"), [ref]$null, [ref]$null)
-foreach ($f in @($agentAst.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.FunctionDefinitionAst] -and @("Url-Path","Url-Query","Is-QuizPath","Is-Quiz","Is-QuizByTitle","Is-Leaving","Lock-Id","Clean-Title","Get-ActiveTab","Test-TitlePresent","Step-Locked","Next-PwCheck","Handle-Pw","Add-Cap") -contains $_.Name })) {
+foreach ($f in @($agentAst.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.FunctionDefinitionAst] -and @("Url-Path","Url-Query","Is-QuizPath","Is-Quiz","Is-QuizByTitle","Is-Leaving","Lock-Id","Clean-Title","Get-ActiveTab","Test-TitlePresent","Step-Locked","Next-PwCheck","Handle-Pw","Step-Pw","Add-Cap") -contains $_.Name })) {
   . ([scriptblock]::Create($f.Extent.Text))
 }
 $ZW = [string][char]0x200B; $EM = [string][char]0x2014
@@ -356,8 +356,22 @@ Check "not started -> wait, next ask ~5 min later, told once" (($r -eq "wait") -
 Check "DST (1 Nov 2026): the password timer is on UTC, so the clock going back an hour never freezes it" ($PwNext.Kind -eq [DateTimeKind]::Utc)
 Handle-Pw ([pscustomobject]@{ reason = "not started"; start_in = 1000 }) $false "" | Out-Null
 Check "... the 'opens at' message is not repeated" (@($Msgs | Where-Object { $_ -match "opens at" }).Count -eq 1)
+$script:Fills = @(); $script:FillFinds = 0; $PwWait = 40
+function Fill-QuizPassword([string]$pw) { $script:Fills += $pw; return $script:FillFinds }
+$m0 = $Msgs.Count
 $r = Handle-Pw ([pscustomobject]@{ password = "PW9"; status = 200 }) $false ""
-Check "password arrives -> shown + clipboard" (($r -eq "pw") -and ($Clip -eq "PW9") -and ($LastPw -eq "PW9"))
+Check "password arrives -> LOCKqz tries to enter it; not shown, not copied" (($r -eq "pw") -and ($LastPw -eq "PW9") -and ($Fills -contains "PW9") -and ($null -eq $Clip) -and ($Msgs.Count -eq $m0))
+Step-Pw ([DateTime]::UtcNow.AddSeconds(20))
+Check "no password box yet, 20 s: still not shown" (($null -eq $Clip) -and ($Msgs.Count -eq $m0))
+Step-Pw ([DateTime]::UtcNow.AddSeconds(45))
+Check "no password box for 40 s -> shown and copied once (nobody is left without it)" (($Clip -eq "PW9") -and (@($Msgs | Where-Object { $_ -match "Quiz password:  PW9" }).Count -eq 1))
+Step-Pw ([DateTime]::UtcNow.AddSeconds(90))
+Check "... not shown a second time" (@($Msgs | Where-Object { $_ -match "Quiz password:  PW9" }).Count -eq 1)
+$script:Clip = $null; $script:FillFinds = 1; $LastPw = $null; $m1 = $Msgs.Count
+$r = Handle-Pw ([pscustomobject]@{ password = "PW10"; status = 200 }) $true ""
+Check "password box on the page -> entered by LOCKqz; the lock note never shows the password" (($r -eq "pw") -and ($null -eq $Clip) -and ($Msgs.Count -eq $m1 + 1) -and ($Msgs[-1] -match "enters the quiz password for you") -and ($Msgs[-1] -notmatch "PW10"))
+Step-Pw ([DateTime]::UtcNow.AddSeconds(300))
+Check "... and never shown or copied later" (($null -eq $Clip) -and (@($Msgs | Where-Object { $_ -match "PW10" }).Count -eq 0))
 $r = Handle-Pw ([pscustomobject]@{ reason = "other_school"; status = 403 }) $true ""
 Check "other school -> told, quiz remembered as released (never re-locked)" (($r -eq "other") -and $Capped.ContainsKey("123-456") -and (@($Msgs | Where-Object { $_ -match "not set up for this school" }).Count -eq 1))
 $r = Handle-Pw ([pscustomobject]@{ reason = "verify"; status = 402 }) $true ""

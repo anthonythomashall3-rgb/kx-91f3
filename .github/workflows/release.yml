@@ -206,6 +206,11 @@ jobs:
         run: |
           & .\app\tests\test_windows_content_move.ps1 -Out "$env:RUNNER_TEMP\lqz-move"
           if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Quiz password entered by LOCKqz in the quiz page - real Chrome, Edge, Firefox (PowerShell 5.1)
+        shell: powershell
+        run: |
+          & .\app\tests\test_windows_pw_fill.ps1 -Out "$env:RUNNER_TEMP\lqz-fill"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: Fresh local token for this build
         shell: pwsh
         run: |

@@ -4,7 +4,7 @@
 # Brave/Firefox window through Windows UI Automation (no browser permission needed) and:
 #   * on a Brightspace quiz attempt page -> tells the helper to LOCK, then asks the helper
 #     for the quiz password (the helper checks its block and signs the request with its
-#     SYSTEM-only device key), shows it and copies it to the clipboard
+#     SYSTEM-only device key) and enters it in the quiz page itself (shown and copied only if no password box is found)
 #   * while locked                       -> pings the backend (teacher's live monitor)
 #   * when the quiz tab is gone (submitted / left) -> tells the helper to UNLOCK
 # First run asks the student's school email ONCE (confirmed by an emailed code) so the
@@ -129,6 +129,37 @@ function Move-ToQuiz($edit, [string]$url) {
     Log "quiz opened from Content: moved to its own page ($(Lock-Id $url))"
     return $true
   } catch { return $false }
+}
+$script:PwFilled = @{}
+function Fill-QuizPassword([string]$pw) {
+  # Puts the quiz password into the password box of the quiz page itself (UI Automation), so the student
+  # never types or pastes it. Only in a browser window whose address bar shows the quiz, only in a password
+  # box, and each box once per password. -> how many boxes were filled now.
+  if (-not $pw) { return 0 }
+  $n = 0
+  if (-not $script:PwBox) { $script:PwBox = New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Edit) }
+  if (-not $script:AddressBar) { [void](Get-BrowserWindows) }
+  foreach ($w in $Root.FindAll($TS::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+    try {
+      if ($BrowserClasses -notcontains $w.Current.ClassName) { continue }
+      $bar = $w.FindFirst($TS::Descendants, $script:AddressBar); if (-not $bar) { continue }
+      $vp = $null; if (-not $bar.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { continue }
+      $u = Inner-Url ([string]$vp.Current.Value)
+      if ((-not (Is-Quiz $u)) -or ((Url-Path $u) -match "/attempt/")) { continue }   # never inside the attempt (its answer boxes)
+      foreach ($e in $w.FindAll($TS::Descendants, $script:PwBox)) {
+        # A password box, or a plain box the page labels as the password. Never the address bar.
+        if ([System.Windows.Automation.Automation]::Compare($e, $bar)) { continue }
+        if ((-not $e.Current.IsPassword) -and ([string]$e.Current.Name -notmatch '(?i)password')) { continue }
+        $id = ($e.GetRuntimeId() -join ".")
+        if ($script:PwFilled[$id] -eq $pw) { continue }
+        $ev = $null; if (-not $e.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$ev)) { continue }
+        if ($ev.Current.IsReadOnly) { continue }
+        $ev.SetValue($pw); $script:PwFilled[$id] = $pw; $n++
+      }
+    } catch { }
+  }
+  if ($n) { Log "quiz password entered in the quiz page ($n box)" }
+  return $n
 }
 function Get-BrowserWindows {
   # -> objects { Title, Url (active tab), Tabs (all tab titles) } for every browser window.
@@ -520,6 +551,18 @@ function Next-PwCheck([datetime]$now, $opens) {
   if ($now -lt $t) { if ($t -lt $now.AddSeconds(300)) { return $t } else { return $now.AddSeconds(300) } }
   return $now.AddSeconds(15)
 }
+$PwWait = 40
+function Step-Pw([datetime]$now) {
+  # Every look while a quiz is locked and has not started: enter the password wherever its box now is. No box
+  # for $PwWait seconds after the password arrived -> shown and copied once (the old way), and still entered
+  # by LOCKqz if the box turns up later.
+  if (-not $script:LastPw) { return }
+  if ((Fill-QuizPassword $script:LastPw) -gt 0) { $script:PwEntered = $true }
+  if ((-not $script:PwEntered) -and (-not $script:PwTold) -and $script:PwSince -and (($now - $script:PwSince).TotalSeconds -gt $PwWait)) {
+    $script:PwTold = $true; Set-Clipboard -Value $script:LastPw
+    Show-Message ("Quiz password:  " + $script:LastPw + "`n(copied to your clipboard - paste it into Brightspace)")
+  }
+}
 function Handle-Pw($pr, [bool]$first, [string]$note) {
   # Acts on the helper's /password answer -> "pw" | "pay" | "wait" | "other" | $null (nothing yet), and
   # sets when the next check may run ($PwNext).
@@ -528,10 +571,12 @@ function Handle-Pw($pr, [bool]$first, [string]$note) {
     $rc = 15; if ($null -ne $pr.recheck) { $rc = [Math]::Max(15, [Math]::Min(360, [int]$pr.recheck)) }   # gated: next code change
     $pw = [string]$pr.password; $script:PwNext = $now.AddSeconds($rc)
     if ($pw -ne $script:LastPw) {
-      $had = $script:LastPw; $script:LastPw = $pw; Set-Clipboard -Value $pw
-      if ($first) { Show-Message ("AI is locked for this quiz.`n`nQuiz password:  $pw`n(copied to your clipboard - paste it into Brightspace)" + $note) }
-      elseif ($had) { Show-Message ("The quiz password changed.`n`nNew password:  " + $pw + "`n(copied to your clipboard)") }
-      else { Show-Message ("Quiz password:  " + $pw + "`n(copied to your clipboard)") }
+      # LOCKqz enters the password in the quiz page itself (Fill-QuizPassword, now and on every look while the
+      # quiz has not started): nothing to type or paste. Only when no password box was found for $PwWait
+      # seconds is it shown and copied, as before (Step-Pw), so nobody is left without it.
+      $script:LastPw = $pw; $script:PwSince = $now; $script:PwTold = $false
+      $script:PwEntered = ((Fill-QuizPassword $pw) -gt 0)
+      if ($first) { Show-Message ("AI is locked for this quiz.`n`nLOCKqz enters the quiz password for you. Just start the quiz." + $note) }
     }
     return "pw"
   }
@@ -662,6 +707,7 @@ while ($true) {
           if (Close-Browsers @("brave") $QuizProc) { $closed += "Brave" }
           $note = if ($closed.Count -gt 1) { "`n`n" + (($closed[0..($closed.Count-2)]) -join ", ") + " and " + $closed[-1] + " were closed for the quiz so their AI stays off. You can reopen them; your tabs come back." } elseif ($closed.Count) { "`n`n" + $closed[0] + " was closed for the quiz so its AI stays off. You can reopen it; your tabs come back." } else { "" }
           $LastPw = $null; $StartTold = $null; $script:PayShown = $false; $script:PaySince = $null; $res = $null
+          $script:PwFilled = @{}; $script:PwEntered = $false; $script:PwTold = $false; $script:PwSince = $null
           for ($i = 0; ($i -lt 3) -and (-not $res); $i++) {
             try { $res = Handle-Pw (Helper "/password" @{ url = $quizWin.Url }) $true $note } catch { Log "password via helper failed: $_" }
             if (-not $res) { Start-Sleep -Seconds 2 }
@@ -698,6 +744,7 @@ while ($true) {
         # Gated quizzes change password every 5 min: until the attempt starts, re-check and hand over a new
         # one. A quiz that has not opened yet is asked on the slower C2 schedule ($PwNext).
         $pwRes = $null
+        if ($quizWin -and ((Url-Path $quizWin.Url) -notmatch "/attempt/")) { try { Step-Pw ([DateTime]::UtcNow) } catch { } }
         if ($quizWin -and $QuizUrl -and ((Url-Path $quizWin.Url) -notmatch "/attempt/") -and ([DateTime]::UtcNow -ge $PwNext)) {
           $PwNext = [DateTime]::UtcNow.AddSeconds(15)
           try { $pwRes = Handle-Pw (Helper "/password" @{ url = $QuizUrl }) $false "" } catch { Log "password refresh failed: $_" }
