@@ -402,6 +402,23 @@ def move_content_quizzes(tabs, now=None, setter=None):
 
 # ---------- browsers that cannot switch their AI off mid-session (G3/G4) ----------
 OPERA_APPS = ("Opera", "Opera GX", "Opera Air", "Opera Neon")   # no policy layer (Aria AI, built-in VPN)
+# The quiz password, entered by LOCKqz. During a quiz Google Chrome and Brave carry LOCKqz's own extension
+# (browser-policy.py adds it for the length of the quiz). The agent hands the password to the quiz tab in
+# its address (#lqz=...); the extension takes it out at once, puts it into the page's password box and
+# answers in the address: #lqz-got = it has the password, #lqz-in = it is in the box. No answer within
+# HAND_WAIT seconds (a browser without the extension), or no password box within HAND_FILL_WAIT: the
+# password is shown and copied once, as before. Every other browser: shown and copied at once, as before
+# (only browsers proven to add the extension by themselves on a student's Mac are listed here).
+HAND_APPS = frozenset(("Google Chrome", "Google Chrome Beta", "Google Chrome Dev", "Google Chrome Canary",
+                       "Brave Browser", "Brave Browser Beta", "Brave Browser Nightly"))
+HAND_WAIT, HAND_FILL_WAIT, HAND_EVERY = 30, 75, 3
+def hand_fragment(url):
+    try: f = urllib.parse.urlsplit(str(url or "")).fragment
+    except Exception: return ""
+    return f if f.startswith("lqz") else ""
+def strip_hand(url):
+    """The URL without LOCKqz's own #lqz... part (every other rule sees the page's real address)."""
+    return str(url or "").split("#", 1)[0] if hand_fragment(url) else url
 GECKO_BINS = tuple(GECKO_DIRS)                                   # read policies only when they start
 def no_policy_pids(procs, keep_app):
     """Main processes of the Opera family, except the browser the quiz is in."""
@@ -726,6 +743,7 @@ class Agent:
         self.tabs_seen = 0           # how many tabs were open while the quiz was open
         self.ready_told = os.path.exists(READY_FLAG)   # the one-time "LOCKqz is ready" notice (first Brightspace visit)
         self.last_check, self.lock_fail_shown = 0.0, {}
+        self.hand = None   # the password hand-over to the quiz tab (see HAND_APPS)
         self.pw, self.pw_next, self.start_told = None, 0.0, None   # next /password check; "opens at" shown for
         self.quiz_app, self.opera_warned = None, False             # browser holding the quiz
         self.bl, self.bl_mtime = (set(), []), None                 # AI blocklist (hosts, host/path)
@@ -860,7 +878,12 @@ class Agent:
             # Gated quiz: the server says when the code can next change (older servers: every 15 s).
             rc = r.get("recheck")
             self.pw, self.pw_next = pw, now + (max(15, min(360, rc)) if isinstance(rc, (int, float)) else 15)
-            if changed:
+            if changed and getattr(self, "quiz_app", None) in HAND_APPS and not developer_mode():
+                # LOCKqz enters it in the quiz page itself (hand_step): nothing shown, nothing copied.
+                self.hand = {"pw": pw, "since": now, "sent": 0.0, "got": False, "in": False, "told": False}
+                if first: dialog("AI is locked for this quiz.\n\nLOCKqz enters the quiz password for you. Just start the quiz." + note)
+            elif changed:
+                self.hand = None
                 clipboard(pw)
                 if first and developer_mode():
                     dialog("Developer mode: AI stays ON for you.\n\nQuiz password:  %s\n(copied to your clipboard)" % pw)
@@ -931,6 +954,36 @@ class Agent:
         self.pw_next = now + 15
         return None
 
+    def hand_step(self, tabs, now, setter=None):
+        """One look at the quiz tab while the password is being handed over (tabs = raw addresses)."""
+        h = getattr(self, "hand", None)
+        if not h or not self.locked or h["in"]: return
+        setter = setter or set_tab_url
+        mine = []
+        for (a, w, t, u) in tabs:
+            if w < 0 or a not in HAND_APPS: continue
+            base = strip_hand(u)
+            if is_quiz(base) and lock_id(base) == self.quiz and "/attempt/" not in url_parts(base)[0]: mine.append((a, w, t, u, base))
+        for (_, _, _, u, _) in mine:
+            f = hand_fragment(u)
+            if f == "lqz-in":
+                if not h["in"]: log("quiz password entered in the quiz page")
+                h["in"] = h["got"] = True
+            elif f == "lqz-got": h["got"] = True
+        if h["in"]: return
+        waited = now - h["since"]
+        if not h["got"] and mine and waited <= HAND_WAIT and now - h["sent"] >= HAND_EVERY:
+            h["sent"] = now
+            a, w, t, _, base = mine[0]
+            setter(a, w, t, base + "#lqz=" + urllib.parse.quote(h["pw"], safe=""))
+        if not h["told"] and ((not h["got"] and waited > HAND_WAIT) or (h["got"] and waited > HAND_FILL_WAIT)):
+            h["told"] = True
+            for (a, w, t, u, base) in mine:
+                if hand_fragment(u).startswith("lqz="): setter(a, w, t, base + "#")   # the password leaves the address
+            log("quiz password not entered by itself (%s) - shown" % ("no password box found" if h["got"] else "no answer from the browser"))
+            clipboard(h["pw"])
+            dialog("Quiz password:  %s\n(copied to your clipboard — paste it into Brightspace)" % h["pw"])
+
     def start(self, url, app=None):
         quiz = lock_id(url)
         if app in OPERA_APPS and not developer_mode():
@@ -957,7 +1010,7 @@ class Agent:
                 dialog("Another account on this Mac is taking a LOCKqz quiz right now. Switch back to it, or log it out, to take this quiz here."
                        if busy else "LOCKqz could not lock AI for this quiz. Is the LOCKqz app installed and running?")
             return
-        self.quiz, self.url, self.quiz_app, self.opera_warned = quiz, url, app, False
+        self.quiz, self.url, self.quiz_app, self.opera_warned, self.hand = quiz, url, app, False, None
         self.locked, self.missing_since, self.last_beat, self.pending = True, None, time.time(), None
         self.start_told = None
         log("LOCKED %s" % self.quiz)
@@ -1105,6 +1158,8 @@ class Agent:
         # bar shows every quiz page, including "submitted", and AI comes back the moment it is turned in.
         move_content_quizzes(tabs)
         tabs = [(a, w, t, inner_url(u)) for (a, w, t, u) in tabs]   # quizzes opened from Content/Lessons
+        raw = tabs                                                   # with LOCKqz's own #lqz... answers (hand_step)
+        tabs = [(a, w, t, strip_hand(u)) for (a, w, t, u) in tabs]
         now = time.time()
         urls = [u for (_, _, _, u) in tabs]
         self.ready_notice(urls)
@@ -1160,6 +1215,9 @@ class Agent:
         # start page, no "/attempt/" in the URL), re-check and hand over a new one if it changed. A quiz
         # that has not opened yet is asked on the slower C2 schedule (pw_next).
         cur = present.get(self.quiz)
+        if cur and "/attempt/" not in url_parts(cur)[0]:
+            try: self.hand_step(raw, now)
+            except Exception as e: log("password hand-over failed: %s" % e)
         if cur and "/attempt/" not in url_parts(cur)[0] and now >= self.pw_next:
             self.pw_next = now + 15
             try:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""LOCKqz browser policy (macOS). No extension, no Web Store, no MDM profile.
+"""LOCKqz browser policy (macOS). No MDM profile, nothing for the student to add.
 
 Writes managed-preference plists that Chrome, Edge, Brave, Chromium, Vivaldi and
 Firefox honour on an unmanaged Mac (same files a configuration profile would
@@ -16,6 +16,10 @@ While locked, per browser:
   * every blocklist host is also blocked inside the browser (URLBlocklist / WebsiteFilter), so a
     browser-level bypass of /etc/hosts (--host-resolver-rules, a proxy add-on, Tor/VPN windows)
     still cannot open an AI site; Brave Tor windows + Brave VPN and Firefox's built-in VPN off
+  * LOCKqz's own extension is added to Google Chrome and Brave for the length of the quiz (the browser's
+    managed list; it comes out again at unlock): it enters the quiz password in the quiz page, so the
+    student never types or pastes it. A browser that does not add it changes nothing: LOCKqz then shows
+    the password as before.
 Also Microsoft Office: "connected experiences that analyze content" off (Microsoft: Copilot is then
 unavailable in Word, Excel, PowerPoint, OneNote, Outlook) - Office reads it when an app starts.
 And Adobe Acrobat / Reader: AI Assistant off (FeatureLockdown bEnableGentech = false in the machine-level
@@ -156,6 +160,10 @@ CHROMIUM_AI_OFF = {
     "ExtensionDeveloperModeSettings": 1, "BlockExternalExtensions": True,
 }
 
+# LOCKqz's own extension (Chrome Web Store). Added while a quiz is locked; a student's or an MDM's own
+# managed extensions stay as they are (merge_chromium).
+PW_EXT = "bidlfpkdggdpmfbfkpjcnbjhfkfligkk"
+PW_EXT_FORCE = PW_EXT + ";https://clients2.google.com/service/update2/crx"
 def chromium_policy(domain):
     p = {MARK: True,
          "GenAiDefaultSettings": 2, "GeminiSettings": 1, "BuiltInAIAPIsEnabled": False,
@@ -165,6 +173,7 @@ def chromium_policy(domain):
          "DefaultSearchProviderSearchURL": WEB_SEARCH,
          "DefaultSearchProviderSuggestURL": "https://www.google.com/complete/search?output=chrome&q={searchTerms}",
          "ExtensionInstallBlocklist": ["*"], "ExtensionInstallAllowlist": list(SAFE_EXTENSIONS) + [i for i in assist_extensions() if i not in SAFE_EXTENSIONS]}
+    if domain.startswith(("com.google.Chrome", "com.brave.Browser")): p["ExtensionInstallForcelist"] = [PW_EXT_FORCE]
     p.update(CHROMIUM_AI_OFF)
     if keep_proxy(): p.pop("ProxyMode")
     if domain.startswith("com.microsoft.Edge"):
@@ -271,6 +280,8 @@ def merge_chromium(base, ours):
     out.pop("ExtensionInstallAllowlist", None)
     out.update(ours)
     out["URLBlocklist"] = _union((base or {}).get("URLBlocklist"), ours["URLBlocklist"])
+    if (base or {}).get("ExtensionInstallForcelist") or ours.get("ExtensionInstallForcelist"):
+        out["ExtensionInstallForcelist"] = _union((base or {}).get("ExtensionInstallForcelist"), ours.get("ExtensionInstallForcelist") or [])
     return out
 
 def merge_plain(base, ours):
