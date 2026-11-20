@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-19 17:25 PT — 01UUDg7K: professor extension, sync on Brightspace's quiz pages. Touching app/extension-prof (background.js, content-bs.js, manifest, dist), tests/test_prof_extension.mjs.
 
 ## Recently finished
 - 2026-11-19 16:50 PT — 01UUDg7K: one password per quiz (owner, 19 Nov). REQUIRE_GATE = "0": each protected quiz keeps one LOCKqz password for the whole quiz, written at Sync and given only to a computer LOCKqz is locking; nothing has to stay open on the professor's side on exam day. With the setting off: no "keep Chrome open" line in the invite, welcome and add-to-Chrome emails, no check-in email an hour before an exam, none of the three exam-day notes on the dashboard (/bs answers auto_gate), and the extension popup hides its exam-day line (extension 1.0.10). "1" brings all of it back. test_status_truth T4b (51), test_server, test_prof_zero_effort (runs with the setting on). run_all green (real Chromium).
