@@ -44,10 +44,16 @@ const tabAlive = async id => { if (id == null) return null; try { return await a
 const badge = t => { try { api.action.setBadgeText({ text: t }); api.action.setBadgeBackgroundColor({ color: "#990000" }); } catch {} };
 
 function startAlarm() { api.alarms.create("tick", { periodInMinutes: 1 }); }
-api.runtime.onInstalled.addListener(d => {
+// On a student's computer the LOCKqz app adds this extension for the length of an exam (the browser's
+// managed list). There it only enters the exam's password (content-quiz.js): no dashboard, no sync.
+const byApp = async () => { try { return (await api.management.getSelf()).installType === "admin"; } catch { return false; } };
+const QUIZ_PAGES = ["https://brightspace.usc.edu/d2l/lms/quizzing/user/*", "https://usc.brightspace.com/d2l/lms/quizzing/user/*"];
+api.runtime.onInstalled.addListener(async d => {
   startAlarm(); schoolScript();
-  // First install: open the dashboard once, so it hands this extension the professor's Sync key.
-  if (d && d.reason === "install") api.tabs.create({ url: BASES[0] + "/" });
+  // An exam page that was open before the extension arrived gets the password script now.
+  try { for (const t of await api.tabs.query({ url: QUIZ_PAGES })) api.scripting.executeScript({ target: { tabId: t.id }, files: ["content-quiz.js"] }).catch(() => {}); } catch {}
+  // First install by a professor: open the dashboard once, so it hands this extension the Sync key.
+  if (d && d.reason === "install" && !(await byApp())) api.tabs.create({ url: BASES[0] + "/" });
 });
 api.runtime.onStartup.addListener(async () => {
   startAlarm(); schoolScript();
@@ -150,9 +156,24 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   serial(() => handle(msg, sender)).then(r => sendResponse(r), () => sendResponse(undefined));
   return true;
 });
+// The exam password the LOCKqz app handed to an exam page (content-quiz.js): kept for that exam's later
+// pages in the browser's session memory (never on disk; gone when the browser closes), 3 hours at most.
+const mem = api.storage.session || null; let memPw = null;
 async function handle(msg, sender) {
   if (!msg || typeof msg !== "object") return;
   const now = Date.now(), tab = sender && sender.tab ? sender.tab.id : null;
+  if (msg.t === "spw" || msg.t === "gpw") {
+    const from = String((sender && sender.url) || "");
+    if (!/^https:\/\/[^/]+\/d2l\/lms\/quizzing\/user\//i.test(from) && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/d2l\/lms\/quizzing\/user\//i.test(from)) return {};
+    if (msg.t === "spw") {
+      if (typeof msg.pw !== "string" || !/^[\x21-\x7e]{4,64}$/.test(msg.pw)) return {};
+      memPw = { pw: msg.pw, qi: String(msg.qi || ""), at: now };
+      try { if (mem) await mem.set({ quizPw: memPw }); } catch {}
+      return { ok: true };
+    }
+    let p = memPw; try { if (mem) p = (await mem.get(["quizPw"])).quizPw || p; } catch {}
+    return p && now - Number(p.at || 0) < 3 * 60 * MIN && (!p.qi || !msg.qi || String(p.qi) === String(msg.qi)) ? { pw: p.pw } : {};
+  }
   if (msg.t === "key") {
     if (typeof msg.key !== "string" || !/^lqs_[0-9a-f]{40}$/.test(msg.key) || !BASES.includes(norm(msg.base))) return;
     const st = await get(["key", "lastSync"]);

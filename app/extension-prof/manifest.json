@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "LOCKqz for Professors",
-  "version": "1.0.12",
-  "description": "Keeps your LOCKqz classes, rosters and exams in sync with Brightspace by itself. No bookmark, no tab to keep open.",
+  "version": "1.0.13",
+  "description": "Syncs your LOCKqz classes and exams with Brightspace by itself. On a student's computer, enters the exam's LOCKqz password.",
   "homepage_url": "https://professor.lockqz.com",
   "icons": {
     "16": "icon16.png",
@@ -50,6 +50,16 @@
         "content-dash.js"
       ],
       "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://brightspace.usc.edu/d2l/lms/quizzing/user/*",
+        "https://usc.brightspace.com/d2l/lms/quizzing/user/*"
+      ],
+      "js": [
+        "content-quiz.js"
+      ],
+      "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
