@@ -112,6 +112,23 @@ check("subject: Exam One starts in about an hour — open Chrome", ck && ck.subj
 check("body: students wait until Chrome is open (never 'can still open it either way'); Respectfully, The LOCKqz Team", ck && /students wait at the start of the exam until you open it/.test(ck.text) && !/either way/.test(ck.text) && /Respectfully,\nThe LOCKqz Team/.test(ck.text), ck && JSON.stringify(ck.text));
 check("no 'can still open the exam either way' under the gate", ck && !/either way/.test(ck.text + ck.html));
 
+console.log("T4b REQUIRE_GATE=0: one password for the whole quiz, nothing to keep open on exam day");
+{
+  const cron = async () => { sqlite.prepare("DELETE FROM mail_sent WHERE kind LIKE 'ck:%'").run(); MAILS.length = 0; await api("/cron", {}, { "X-LOCKqz-Pay": env.PAY_SECRET }); return MAILS.filter(m => /open Chrome/.test(m.subject)).length; };
+  env.REQUIRE_GATE = "0";
+  check("gate off: no 'open Chrome' email before the exam", (await cron()) === 0);
+  check("gate off: /bs tells the dashboard (auto_gate false)", (await api("/bs", undefined, T)).data.auto_gate === false);
+  env.REQUIRE_GATE = "1";
+  check("gate on: the same exam does get the email (the check above is real)", (await cron()) === 1);
+  check("gate on: /bs says auto_gate true", (await api("/bs", undefined, T)).data.auto_gate === true);
+  const D = readFileSync(join(CF, "public", "dashboard.html"), "utf8");
+  check("dashboard: the three 'keep the browser open' lines show only under the gate", D.includes("const GATE = () => BS.auto_gate !== false;") && D.includes("if (soon && GATE())") && (D.match(/\$\{GATE\(\) \? `/g) || []).length === 2);
+  const R = readFileSync(join(CF, "functions", "api", "[[route]].js"), "utf8");
+  check("emails: invite, welcome and install drop the exam-day line when the gate is off", (R.match(/const live = gate !== false;/g) || []).length === 3 && (R.match(/[^_]gate: gateRequired\(\)/g) || []).length === 4);
+  const PJ = readFileSync(join(CF, "..", "extension-prof", "popup.js"), "utf8"), PH = readFileSync(join(CF, "..", "extension-prof", "popup.html"), "utf8");
+  check("extension popup: the exam-day line hides when the gate is off", PJ.includes('$("examday").hidden = st.autoGate === false;') && PH.includes('id="examday"'));
+}
+
 console.log("T5 lq_password:false is believed (not sticky)");
 sqlite.prepare("UPDATE bs_quizzes SET start_date=?, end_date=? WHERE ou=? AND qi='501'").run(inH(240), inH(242), String(OU));
 const row = () => sqlite.prepare("SELECT bs_password_is_ours AS ours, prot_at, unprot_at FROM bs_quizzes WHERE ou=? AND qi='501'").get(String(OU));

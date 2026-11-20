@@ -38,7 +38,7 @@ const sqlite = new DatabaseSync(":memory:");
 sqlite.exec(readFileSync(join(CF, "schema.sql"), "utf8"));
 for (const m of readdirSync(CF).filter(f => /^migrate_\d+.*\.sql$/.test(f)).sort()) { try { sqlite.exec(readFileSync(join(CF, m), "utf8")); } catch (e) { if (!/duplicate column|already exists|table .* already/.test(e.message)) throw e; } }
 const MAILS = [];
-const env = { DB: d1(sqlite), TEACHER_KEY: "admin-key", REQUIRE_SIGNED: "1", LIVE_CACHE_MS: "0", PAY_SECRET: "x".repeat(24), MAIL_SINK: async m => { MAILS.push(m); return true; }, FEE_EXEMPT: "dbristow@usc.edu" };
+const env = { DB: d1(sqlite), TEACHER_KEY: "admin-key", REQUIRE_SIGNED: "1", REQUIRE_GATE: "1", LIVE_CACHE_MS: "0", PAY_SECRET: "x".repeat(24), MAIL_SINK: async m => { MAILS.push(m); return true; }, FEE_EXEMPT: "dbristow@usc.edu" };
 const API = "https://lockqz.pages.dev/api";
 let lqCalls = [];
 async function api(path, body, headers = {}, e = env) {

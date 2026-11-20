@@ -659,12 +659,13 @@ const FREE_HTML = `<p style="margin:0 0 14px"><span style="display:inline-block;
 const MAIL0 = {
   // To a professor you invite (admin page, Email it). link = the one-time sign-up link.
   // last = the professor's last name ("Hi Professor Bristow,"); free = fee-exempt (FEE_EXEMPT) -> "free for you".
-  invite({ link, storeUrl, last, free }) {
+  invite({ link, storeUrl, last, free, gate }) {
+    const live = gate !== false;   // REQUIRE_GATE off: nothing has to stay open on exam day
     const store = storeUrl || EXT_STORE_URL || (SITE_URL + "/download/lockqz-prof-chromium.zip");
     const hi = last ? `Hi Professor ${last},` : "Hi,";
     const subject = last ? `Professor ${last}, your LOCKqz account is ready` : "Your LOCKqz professor account";
     const FREE = "LOCKqz is free for you.";
-    const text = `${hi}\n\n${free ? FREE + " It" : "LOCKqz"} blocks AI on students' computers during your Brightspace exams and turns it back on when they submit.\n\n1. Create your account (this link works once): ${link}\n2. Add LOCKqz to Chrome: ${store} \u2014 click Add to Chrome, then Add extension. If Chrome says Proceed with caution, click Continue to install.\n3. Open Brightspace: ${BS_CUR} \u2014 sign in as usual. Every exam is protected automatically.\n\nOn exam day, keep Chrome open until the exam ends.\n\nRespectfully,\nThe LOCKqz Team`;
+    const text = `${hi}\n\n${free ? FREE + " It" : "LOCKqz"} blocks AI on students' computers during your Brightspace exams and turns it back on when they submit.\n\n1. Create your account (this link works once): ${link}\n2. Add LOCKqz to Chrome: ${store} \u2014 click Add to Chrome, then Add extension. If Chrome says Proceed with caution, click Continue to install.\n3. Open Brightspace: ${BS_CUR} \u2014 sign in as usual. Every exam is protected automatically.${live ? "\n\nOn exam day, keep Chrome open until the exam ends." : ""}\n\nRespectfully,\nThe LOCKqz Team`;
     const row = (n, btn, rest) => `<tr><td style="padding:6px 0;font-size:15px"><b>${n}.</b> ${btn} <span style="color:#5c5952">${rest}</span></td></tr>`;
     const html = mailWrap(P(hesc(hi)) + (free ? FREE_HTML : "") +
       P("LOCKqz blocks AI on students' computers during your Brightspace exams and turns it back on when they submit.") +
@@ -672,22 +673,23 @@ const MAIL0 = {
       row(1, mailBtn(link, "Create your account"), "\u2014 this link works once.") +
       row(2, mailBtn(store, "Add LOCKqz to Chrome"), "\u2014 click <b>Add to Chrome</b>, then <b>Add extension</b>. If Chrome says <b>Proceed with caution</b>, click <b>Continue to install</b>.") +
       row(3, mailBtn(BS_CUR, "Open Brightspace"), "and sign in as usual. Every exam is protected automatically.") + `</table>` +
-      P("<b>On exam day, keep Chrome open</b> until the exam ends.") +
+      (live ? P("<b>On exam day, keep Chrome open</b> until the exam ends.") : "") +
       P("Respectfully,<br>The LOCKqz Team"));
     return { subject, text, html };
   },
   // To the professor, right after sign-up.
-  welcome({ last, storeUrl, free, pay }) {
+  welcome({ last, storeUrl, free, pay, gate }) {
+    const live = gate !== false;
     const store = storeUrl || EXT_STORE_URL || (SITE_URL + "/download/lockqz-prof-chromium.zip");
     // pay: the account is not active yet (no invite date, not fee-exempt): activating comes first.
     const n0 = pay ? 1 : 0;
     const subject = `Welcome to LOCKqz \u2014 ${pay ? 3 : 2} steps and you're done`;
-    const text = `${last ? `Hi Professor ${last},` : "Hi,"}\n\nYour LOCKqz account is ready.${free ? " LOCKqz is free for you." : ""} ${pay ? "Three steps:" : "Two steps, about one minute:"}\n\n${pay ? `1. Activate LOCKqz on your dashboard: ${DASH_URL}\n` : ""}${1 + n0}. Add LOCKqz to Chrome: ${store} \u2014 click Add to Chrome, then Add extension. If Chrome says Proceed with caution, click Continue to install.\n${2 + n0}. Open Brightspace: ${BS_CUR} \u2014 and sign in as usual. Your classes appear on your LOCKqz dashboard within a minute.\n\nFrom then on LOCKqz protects every exam in every class automatically. You never set a password.\n\nOn exam day: keep Chrome open and signed in to Brightspace on a computer that's on, until the exam ends. If Chrome is closed, students wait at the start of the exam until you open it.\n\nWhen your classes appear, click Email students on each class so students install LOCKqz before the first exam.\n\nDashboard: ${DASH_URL}\n\nRespectfully,\nThe LOCKqz Team`;
+    const text = `${last ? `Hi Professor ${last},` : "Hi,"}\n\nYour LOCKqz account is ready.${free ? " LOCKqz is free for you." : ""} ${pay ? "Three steps:" : "Two steps, about one minute:"}\n\n${pay ? `1. Activate LOCKqz on your dashboard: ${DASH_URL}\n` : ""}${1 + n0}. Add LOCKqz to Chrome: ${store} \u2014 click Add to Chrome, then Add extension. If Chrome says Proceed with caution, click Continue to install.\n${2 + n0}. Open Brightspace: ${BS_CUR} \u2014 and sign in as usual. Your classes appear on your LOCKqz dashboard within a minute.\n\nFrom then on LOCKqz protects every exam in every class automatically. You never set a password.\n\n${live ? "On exam day: keep Chrome open and signed in to Brightspace on a computer that's on, until the exam ends. If Chrome is closed, students wait at the start of the exam until you open it.\n\n" : ""}When your classes appear, click Email students on each class so students install LOCKqz before the first exam.\n\nDashboard: ${DASH_URL}\n\nRespectfully,\nThe LOCKqz Team`;
     const html = mailWrap(P(last ? `Hi Professor ${hesc(last)},` : "Hi,") + (free ? FREE_HTML : "") + P(`Your LOCKqz account is ready. ${pay ? "Three steps:" : "Two steps, about one minute:"}`) +
       `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 16px">${pay ? `<tr><td style="padding:6px 0;font-size:15px"><b>1.</b> ${mailBtn(DASH_URL, "Activate LOCKqz")} <span style="color:#5c5952">on your dashboard.</span></td></tr>` : ""}<tr><td style="padding:6px 0;font-size:15px"><b>${1 + n0}.</b> ${mailBtn(store, "Add LOCKqz to Chrome")} <span style="color:#5c5952">\u2014 click <b>Add to Chrome</b>, then <b>Add extension</b>. If Chrome says <b>Proceed with caution</b>, click <b>Continue to install</b>.</span></td></tr>
 <tr><td style="padding:6px 0;font-size:15px"><b>${2 + n0}.</b> ${mailBtn(BS_CUR, "Open Brightspace")} <span style="color:#5c5952">and sign in as usual. Your classes appear on your LOCKqz dashboard within a minute.</span></td></tr></table>` +
       P("From then on LOCKqz protects every exam in every class automatically. You never set a password.") +
-      P("<b>On exam day: keep Chrome open and signed in to Brightspace</b> on a computer that's on, until the exam ends. If Chrome is closed, students wait at the start of the exam until you open it.") +
+      (live ? P("<b>On exam day: keep Chrome open and signed in to Brightspace</b> on a computer that's on, until the exam ends. If Chrome is closed, students wait at the start of the exam until you open it.") : "") +
       P("When your classes appear, click <b>Email students</b> on each class so students install LOCKqz before the first exam.") +
       P(`Dashboard: <a href="${DASH_URL}" style="color:#990000">professor.lockqz.com</a>`) + P("Respectfully,<br>The LOCKqz Team"));
     return { subject, text, html };
@@ -719,14 +721,15 @@ const MAIL0 = {
     return { subject, text, html };
   },
   // To a professor who never added the LOCKqz extension, once, when a protected exam is within a day.
-  install({ exam, when, storeUrl }) {
+  install({ exam, when, storeUrl, gate }) {
+    const live = gate !== false;
     const store = storeUrl || EXT_STORE_URL || (SITE_URL + "/download/lockqz-prof-chromium.zip");
     const subject = `${exam} is ${when} \u2014 add LOCKqz to Chrome`;
-    const text = `${exam} is ${when} and protected by LOCKqz, but LOCKqz isn't in your Chrome yet.\n\n1. Add LOCKqz to Chrome: ${store}\n   Click Add to Chrome, then Add extension. If Chrome says Proceed with caution, click Continue to install.\n2. Open Brightspace in Chrome and sign in.\n3. On exam day, keep Chrome open until the exam ends.\n\nWithout it, students wait at the start of the exam.\n\nRespectfully,\nThe LOCKqz Team`;
+    const text = `${exam} is ${when} and protected by LOCKqz, but LOCKqz isn't in your Chrome yet.\n\n1. Add LOCKqz to Chrome: ${store}\n   Click Add to Chrome, then Add extension. If Chrome says Proceed with caution, click Continue to install.\n2. Open Brightspace in Chrome and sign in.${live ? "\n3. On exam day, keep Chrome open until the exam ends.\n\nWithout it, students wait at the start of the exam." : ""}\n\nRespectfully,\nThe LOCKqz Team`;
     const html = mailWrap(P(`<b>${hesc(exam)}</b> is ${hesc(when)} and protected by LOCKqz, but LOCKqz isn't in your Chrome yet.`) +
       `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 16px"><tr><td style="padding:6px 0;font-size:15px"><b>1.</b> ${mailBtn(store, "Add LOCKqz to Chrome")} <span style="color:#5c5952">\u2014 click <b>Add to Chrome</b>, then <b>Add extension</b>. If Chrome says <b>Proceed with caution</b>, click <b>Continue to install</b>.</span></td></tr>
-<tr><td style="padding:6px 0;font-size:15px"><b>2.</b> Open Brightspace in Chrome and sign in.</td></tr><tr><td style="padding:6px 0;font-size:15px"><b>3.</b> On exam day, keep Chrome open until the exam ends.</td></tr></table>` +
-      P("Without it, students wait at the start of the exam.") + P("Respectfully,<br>The LOCKqz Team"));
+<tr><td style="padding:6px 0;font-size:15px"><b>2.</b> Open Brightspace in Chrome and sign in.</td></tr>${live ? `<tr><td style="padding:6px 0;font-size:15px"><b>3.</b> On exam day, keep Chrome open until the exam ends.</td></tr>` : ""}</table>` +
+      (live ? P("Without it, students wait at the start of the exam.") : "") + P("Respectfully,<br>The LOCKqz Team"));
     return { subject, text, html };
   },
   // To the professor, ~70 min before an exam, when the extension has not checked in for 6 h.
@@ -2547,7 +2550,7 @@ export async function onRequest(context) {
         db.prepare("INSERT INTO invites (code,email,active_until,created_at,used_at,used_by) VALUES (?,?,?,?,?,?)").bind("self-" + rid(10), email, null, now(), now(), email)]);   // the email is confirmed
       else if (inv) await db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE email=? AND used_at IS NULL").bind(now(), email, email).run();   // a second invite for this email is moot too
       // Welcome email (HTML): the two steps. Sent in the background; sign-up never waits for Gmail.
-      if (mailOn(env) && welcomeMail(env)) { const w = MAIL.welcome({ last: lastName(nm), free: isExempt(env, email), pay: !isExempt(env, email) && !(inv && inv.active_until && inv.active_until >= laToday()) && n !== 0 });
+      if (mailOn(env) && welcomeMail(env)) { const w = MAIL.welcome({ last: lastName(nm), free: isExempt(env, email), pay: !isExempt(env, email) && !(inv && inv.active_until && inv.active_until >= laToday()) && n !== 0, gate: gateRequired() });
         const go = mailOut(email, w.subject, w.text, { html: w.html }, "auto").catch(() => {});
         if (typeof context.waitUntil === "function") context.waitUntil(go); else await go; }
       return json({ token, email, name: nm });
@@ -2602,7 +2605,7 @@ export async function onRequest(context) {
         await db.batch([db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + ip, null, null, "signup", "google", now()),
           db.prepare("UPDATE invites SET used_at=?, used_by=? WHERE email=? AND used_at IS NULL").bind(now(), g.email, g.email),
           db.prepare("INSERT INTO invites (code,email,active_until,created_at,used_at,used_by) VALUES (?,?,?,?,?,?)").bind("self-" + rid(10), g.email, null, now(), now(), g.email)]);   // Google confirmed the email
-        if (mailOn(env) && welcomeMail(env)) { const w = MAIL.welcome({ last: lastName(name), free: isExempt(env, g.email), pay: !isExempt(env, g.email) && !(t && t.active_until && t.active_until >= laToday()) });
+        if (mailOn(env) && welcomeMail(env)) { const w = MAIL.welcome({ last: lastName(name), free: isExempt(env, g.email), pay: !isExempt(env, g.email) && !(t && t.active_until && t.active_until >= laToday()), gate: gateRequired() });
           const go = mailOut(g.email, w.subject, w.text, { html: w.html }, "auto").catch(() => {});
           if (typeof context.waitUntil === "function") context.waitUntil(go); else await go; }
         return json({ token, email: g.email, name, created: true });
@@ -2745,7 +2748,7 @@ export async function onRequest(context) {
       let nm = String(body.name || "").trim();
       if (!nm) { const r = await db.prepare("SELECT name FROM roster WHERE email=? AND name IS NOT NULL LIMIT 1").bind(inv.email).first().catch(() => null); nm = r && r.name || ""; }
       const last = lastName(nm);   // "Bristow, Duke", "Dr. Duke Bristow, PhD" -> "Bristow"
-      const m = MAIL.invite({ link: DASH_URL + "/?invite=" + inv.code, last, free: isExempt(env, inv.email) });
+      const m = MAIL.invite({ link: DASH_URL + "/?invite=" + inv.code, last, free: isExempt(env, inv.email), gate: gateRequired() });
       try { await mailOut(inv.email, m.subject, m.text, { html: m.html }, "essential"); } catch { return json({ error:"Could not send the email. Try again in a minute." }, 502); }
       return json({ ok:true, sent:inv.email });
     }
@@ -3123,12 +3126,13 @@ export async function onRequest(context) {
         const ix = "ix:" + r.tid;
         if (!r.ext_seen && r.email && lead <= 24 * 3600000 && !sent.has("_prof|" + ix)) {
           sent.add("_prof|" + ix);
-          const m = MAIL.install({ exam, when: inWords(lead) });
+          const m = MAIL.install({ exam, when: inWords(lead), gate: gateRequired() });
           try { await send(r.email, m.subject, m.text, { html: m.html }, "auto"); sends++; out.installs++; await record("_prof", ix, 1); } catch { out.skipped++; }
         }
         // T-70: the extension has checked in before but not for 6 h (Chrome closed / computer asleep).
+        // Only with REQUIRE_GATE: without it the exam needs nothing open on the professor's side.
         const ck = "ck:" + r.qi;
-        if (lead <= 70 * 60000 && !sent.has(r.ou + "|" + ck) && r.email && r.ext_seen && nowMs - Date.parse(r.ext_seen) > 6 * 3600000) {
+        if (gateRequired() && lead <= 70 * 60000 && !sent.has(r.ou + "|" + ck) && r.email && r.ext_seen && nowMs - Date.parse(r.ext_seen) > 6 * 3600000) {
           sent.add(r.ou + "|" + ck);
           const m = MAIL.checkin({ exam });
           try { await send(r.email, m.subject, m.text, { html: m.html }, "auto"); sends++; out.checkins++; await record(String(r.ou), ck, 1); } catch { out.skipped++; }
@@ -3981,7 +3985,7 @@ export async function onRequest(context) {
       // Installed but this term's fee not paid -> "Installed · not paid", never counted ready (the gate's rule).
       const paidSet = feeOn() ? await paidEmails([...new Set(devs.map(d => String(d.who || "").toLowerCase()))]) : null;
       const adminEmails = new Set(((await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin'").all()).results).map(x => x.e));
-      return json({ mail_on: mailOn(env), courses: cs.map(c => ({ ...c, roster_hidden: !own.has(String(c.ou)), off: offOus.has(String(c.ou)), mailed_at: mailedAt.get(String(c.ou)) || null, reminders: !remOff.has(String(c.ou)),
+      return json({ mail_on: mailOn(env), auto_gate: gateRequired(), courses: cs.map(c => ({ ...c, roster_hidden: !own.has(String(c.ou)), off: offOus.has(String(c.ou)), mailed_at: mailedAt.get(String(c.ou)) || null, reminders: !remOff.has(String(c.ou)),
         // Everyone LOCKqz locks: Learners AND TAs (any non-instructor role). The admin is the one
         // exempt person (developer mode), so he is never listed as someone who must install.
         students: roster.filter(r => r.ou === c.ou && takesQuizzes(r.role) && !adminEmails.has((r.email||"").toLowerCase())).map(r => {

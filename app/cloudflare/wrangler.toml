@@ -108,7 +108,9 @@ FREE_FOREVER = "dbristow@usc.edu,dbristow@marshall.usc.edu,huutienn@usc.edu,jsco
 # Every LOCKqz-protected quiz is gated: the professor's Sync tab hides it and admits only students LOCKqz is
 # locking (it starts the gate by itself from 1 h before the start), and no password is given for an
 # ungated protected quiz until it ends (the professor is emailed to open the Sync tab). "0" = off.
-REQUIRE_GATE = "1"
+# Off (owner, 19 Nov 2026): one LOCKqz password per quiz for the whole quiz, written at Sync and given only to a
+# computer LOCKqz is locking. Nothing has to stay open on the professor's side on exam day.
+REQUIRE_GATE = "0"
 
 # Exam emails (27 Oct 2026): reminders 48 h / 3 h before each protected exam to students without LOCKqz, and
 # the professor's T-70 check-in, run by POST /api/cron (X-LOCKqz-Pay). Cloudflare Pages Functions have no

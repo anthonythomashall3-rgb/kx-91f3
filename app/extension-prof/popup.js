@@ -12,7 +12,8 @@
   const base = () => { const b = OLD[st.base] || st.base; return BASES.includes(b) ? b : BASES[0]; };
   const setStatus = (t, cls) => { $("status").textContent = t; $("status").className = "st " + (cls || ""); };
   async function draw() {
-    st = await api.storage.local.get(["key", "base", "lastSync", "signin", "status", "statusAt"]);
+    st = await api.storage.local.get(["key", "base", "lastSync", "signin", "status", "statusAt", "autoGate"]);
+    $("examday").hidden = st.autoGate === false;   // the exam needs this browser only when LOCKqz gates it
     if (!st.key) {
       setStatus("Not connected", "warn"); $("synced").textContent = "Open your LOCKqz dashboard once: it connects this extension by itself.";
       $("counts").textContent = ""; $("next").hidden = true; $("sync").disabled = true; return;

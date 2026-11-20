@@ -73,7 +73,7 @@ try {
   const fe = readEnvFile(join(tmp, "lockqz.env"));
   check("KEY=value lines are read, quotes removed, comments and junk skipped", fe.TEACHER_KEY === "abc" && fe.PW_PEPPER === "p p" && !("BAD" in fe));
   const wv = readWranglerVars(join(CF, "wrangler.toml"));
-  check("the public settings of wrangler.toml are read", wv.ADMIN_EMAIL === "athall@usc.edu" && wv.REQUIRE_GATE === "1" && !("database_id" in wv));
+  check("the public settings of wrangler.toml are read", wv.ADMIN_EMAIL === "athall@usc.edu" && wv.REQUIRE_GATE === "0" && !("database_id" in wv));
   const mc = memoryCache();
   await mc.put("https://x/k", new Response("v", { headers: { "Cache-Control": "max-age=60" } }));
   check("cache: kept for max-age, gone after delete", (await (await mc.match("https://x/k")).text()) === "v" && (await mc.delete("https://x/k")) && (await mc.match("https://x/k")) === undefined);
