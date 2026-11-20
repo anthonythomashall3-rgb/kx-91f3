@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-20 04:40 PT — 01UUDg7K: payments with no memo and the Gmail payment reader. Touching app/cloudflare/functions/api/[[route]].js (applyPayments, payInfo, forget), wrangler.toml (PAY_NAME_MATCH), schema.sql + migrate_046, app/payments/LOCKqz-payments.gs, tests/test_pay_name.mjs, test_pay_script.mjs, run_all.sh.
 - 2026-11-19 22:25 PT — 01UUDg7K: professor extension 1.0.13 (app/extension-prof: background.js, content-quiz.js, manifest, build.sh, dist; tests/test_student_fill.mjs, run_all.sh), then the Mac student app (app/mac/lockqz-agent.py, browser-policy.py, versions, tests/test_agent.py).
 
 ## Recently finished
