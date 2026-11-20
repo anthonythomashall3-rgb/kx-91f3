@@ -197,12 +197,37 @@ async function handle(msg, sender) {
     await set({ lastRun: now });
     return { run: true };
   }
+  // The professor pressed "Protect with LOCKqz" on a Brightspace quiz page: exams that carry their own
+  // password. LOCKqz takes them on (the page then syncs, which saves that password and sets LOCKqz's).
+  if (msg.t === "protect") {
+    const st = await get(["key", "gateTab", "tmpTab"]);
+    if (!st.key || tab == null || tab === st.gateTab || tab === st.tmpTab) return { ok: false };
+    const items = (Array.isArray(msg.items) ? msg.items : []).filter(q => q && /^\d+$/.test(String(q.ou)) && /^\d+$/.test(String(q.qi))).slice(0, 20);
+    let done = 0, error = "";
+    for (const q of items) {
+      try {
+        const r = await fetch(API + "/protect", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Sync": st.key }, body: JSON.stringify({ ou: String(q.ou), qi: String(q.qi), on: true }) });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok && j && j.on) done++; else error = String((j && j.error) || "LOCKqz could not do that just now.").slice(0, 200);
+      } catch { error = "LOCKqz could not be reached. Try again in a moment."; }
+    }
+    if (done) await set({ lastRun: now });
+    return { ok: done > 0, done, error };
+  }
+  // "Not now" on that notice: never asked again for those exams.
+  if (msg.t === "own-no") {
+    const st = await get(["ownNo"]), no = Object.assign({}, st.ownNo || {});
+    for (const q of (Array.isArray(msg.items) ? msg.items : []).slice(0, 200)) if (q && /^\d+$/.test(String(q.ou)) && /^\d+$/.test(String(q.qi))) no[String(q.ou) + "-" + String(q.qi)] = 1;
+    const keys = Object.keys(no); await set({ ownNo: Object.fromEntries(keys.slice(-500).map(k => [k, 1])) });
+    return { ok: true };
+  }
   if (msg.t === "from-sync") {
     const m = msg.m || {};
     const st = await get(["gateTab", "tmpTab"]);
     if (tab != null && tab === st.gateTab) await set({ gateSeen: now, gates: Number(m.gates) || 0 });
     if (m.lqz === "schedule") {
-      await set({ schedule: Array.isArray(m.quizzes) ? m.quizzes.slice(0, 500) : [], autoGate: !!m.auto_gate });
+      await set({ schedule: Array.isArray(m.quizzes) ? m.quizzes.slice(0, 500) : [], autoGate: !!m.auto_gate,
+        own: Array.isArray(m.own) ? m.own.filter(q => q && /^\d+$/.test(String(q.ou)) && /^\d+$/.test(String(q.qi))).slice(0, 200) : [] });
       setTimeout(() => serial(tick), 0);   // after this message is answered (one event at a time)
       return;
     }

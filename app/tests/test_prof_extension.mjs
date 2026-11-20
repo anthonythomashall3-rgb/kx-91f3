@@ -224,6 +224,37 @@ console.log("E4b quiz pages do not wait 15 minutes");
   await qPage.close();
 }
 
+console.log("E4c an exam with the professor's own password: one click on the quiz page");
+{
+  const later = new Date(Date.now() + 5 * 86400e3).toISOString();
+  const prot = qi => !!sqlite.prepare("SELECT 1 AS x FROM quizzes WHERE ou=? AND qi=?").get(String(OU), String(qi));
+  const pwOf = qi => String((BS.quizzes.find(x => x.QuizId === qi) || {}).Password || "");
+  BS.quizzes.push(Object.assign(quiz(781, "Own Password Exam"), { StartDate: later, Password: "prof-own-1" }));
+  BS.quizzes.push(Object.assign(quiz(782, "Kept As Is"), { StartDate: later, Password: "prof-own-2" }));
+  await new Promise(r => setTimeout(r, 5500));
+  const oPage = await context.newPage();
+  await oPage.goto("https://brightspace.usc.edu/d2l/lms/quizzing/admin/quizzes_manage.d2l?ou=" + OU);
+  const box = () => oPage.evaluate(() => { const b = document.getElementById("lqz-own"); return b ? b.textContent : ""; });
+  check("LOCKqz leaves both alone (their own passwords stay)", await waitFor(async () => /2 exams have their own password/.test(await box()), 20000) && !prot(781) && !prot(782) && pwOf(781) === "prof-own-1", await box());
+  check("the notice names them and offers one button", /Own Password Exam/.test(await box()) && /Kept As Is/.test(await box()) && await oPage.evaluate(() => !!document.getElementById("lqz-own-yes") && !!document.getElementById("lqz-own-no")));
+  // On one exam's own page: only that exam. "Not now" there is remembered.
+  await oPage.goto("https://brightspace.usc.edu/d2l/lms/quizzing/admin/modify/quizzes_manage_edit.d2l?ou=" + OU + "&qi=782");
+  check("on an exam's own page the notice is about that exam", await waitFor(async () => /Kept As Is has its own password/.test(await box()), 15000) && !/Own Password Exam/.test(await box()), await box());
+  await oPage.click("#lqz-own-no");
+  check("Not now: the notice goes", await waitFor(async () => (await box()) === "", 5000));
+  await oPage.goto("https://brightspace.usc.edu/d2l/lms/quizzing/admin/quizzes_manage.d2l?ou=" + OU);
+  check("back on the list: only the other exam is asked about", await waitFor(async () => /Own Password Exam has its own password/.test(await box()), 15000) && !/Kept As Is/.test(await box()), await box());
+  const s0 = syncs();
+  await oPage.click("#lqz-own-yes");
+  check("Protect with LOCKqz: LOCKqz takes it on and its password is in Brightspace", await waitFor(() => prot(781) && /^LQ-/.test(pwOf(781)), 25000), pwOf(781) + " " + lqCalls.slice(-6).join(","));
+  check("the page says Protected", await waitFor(async () => /Protected\./.test(await box()), 15000), await box());
+  const orig = sqlite.prepare("SELECT * FROM bs_quizzes WHERE ou=? AND qi='781'").get(String(OU));
+  check("the professor's own password was saved first", JSON.stringify(orig).includes("prof-own-1"), JSON.stringify(orig));
+  check("the exam left as is still has the professor's password and is not protected", pwOf(782) === "prof-own-2" && !prot(782));
+  check("one sync did it", syncs() === s0 + 1, lqCalls.slice(-8).join(","));
+  await oPage.close();
+}
+
 console.log("E5 an exam within the hour");
 BS.quizzes[0].StartDate = new Date(Date.now() + 30 * 60000).toISOString();
 BS.quizzes[0].EndDate = new Date(Date.now() + 90 * 60000).toISOString();

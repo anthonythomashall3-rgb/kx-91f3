@@ -6,7 +6,9 @@
 // there, and every 2 minutes while the page stays open (an unchanged Brightspace costs LOCKqz no request).
 // Also: (1) the one-time "Syncing your classes" card on the professor's first visit after install;
 // (2) on the quiz edit / restrictions / special-access pages of an exam LOCKqz protects, the password
-// LOCKqz shows one notice (nothing is disabled: special access / extra time must keep working).
+// LOCKqz shows one notice (nothing is disabled: special access / extra time must keep working);
+// (3) on the quiz pages, exams that carry the professor's own password (LOCKqz leaves those alone): one
+// notice with one button, "Protect with LOCKqz".
 (() => {
   if (window.top !== window) return;
   const api = globalThis.browser ?? chrome;
@@ -63,6 +65,7 @@
     const d = e.data;
     if (!d || typeof d !== "object" || d.lqzExt !== 1 || typeof d.lqz !== "string") return;
     if (d.lqz === "synced" || d.lqz === "failed") busy = 0;
+    if (ownWait && (d.lqz === "synced" || d.lqz === "failed")) ownDone(d);
     if (firstWaiting && (d.lqz === "synced" || d.lqz === "failed")) {
       firstWaiting = false;
       if (d.lqz === "synced" && d.ok === false) { const n = Number(d.errors) || 0;
@@ -120,4 +123,49 @@
     showNotice();
   }
   maybeLock();
+
+  // ---- (3) exams with the professor's own password: say so, one click to protect ----
+  // Which exams: from the last sync (storage "own"). On an exam's own page: that exam. On the quiz list of a
+  // class: that class's exams. Nothing on the page is changed; "Not now" is remembered for those exams.
+  const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => "&#" + c.charCodeAt(0) + ";");
+  let ownWait = null, ownBox = null, ownShown = "", ownHold = 0;   // ownHold: the result stays on the page this long
+  const ouHere = () => { try { return new URL(location.href).searchParams.get("ou") || ""; } catch { return ""; } };
+  function ownDraw(html, buttons) {
+    if (!ownBox) {
+      ownBox = document.createElement("div"); ownBox.id = "lqz-own"; ownBox.setAttribute("role", "note");
+      ownBox.style.cssText = `position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:2147483646;max-width:560px;width:calc(100% - 32px);box-sizing:border-box;padding:12px 14px;border:1px solid ${RED};border-radius:10px;background:#fff;box-shadow:0 6px 24px rgba(0,0,0,.18);font:13px/1.45 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1a1a1a`;
+      (document.body || document.documentElement).appendChild(ownBox);
+    }
+    ownBox.innerHTML = `<span style="display:flex;gap:8px;align-items:flex-start">${SHIELD(RED, 18)}<span>${html}</span></span>` +
+      (buttons ? `<span style="display:flex;gap:8px;margin-top:10px;padding-left:26px"><button type="button" id="lqz-own-yes" style="border:0;border-radius:8px;background:${RED};color:#fff;font:inherit;font-weight:700;padding:8px 14px;cursor:pointer">Protect with LOCKqz</button><button type="button" id="lqz-own-no" style="border:1px solid #cfccc4;border-radius:8px;background:#fff;color:#1a1a1a;font:inherit;padding:8px 14px;cursor:pointer">Not now</button></span>` : "");
+  }
+  const ownHide = () => { if (ownBox) ownBox.remove(); ownBox = null; };
+  function ownDone(d) {
+    const n = ownWait.length; ownWait = null; ownShown = ""; ownHold = Date.now() + 12000;
+    setTimeout(() => { ownHide(); maybeOwn(); }, 12100);
+    if (d.lqz === "synced" && d.ok !== false) ownDraw(`<b>Protected.</b> ${n === 1 ? "This exam now opens" : "These exams now open"} only for students with LOCKqz on. Your own password is saved and comes back if you turn LOCKqz off.`, false);
+    else ownDraw("LOCKqz took " + (n === 1 ? "this exam" : "these exams") + " on, but Brightspace has not been updated yet. Reload this page in a moment.", false);
+  }
+  async function maybeOwn() {
+    if (!QADMIN || ownWait || Date.now() < ownHold || !me || me.role !== "browse") return;
+    let st = {}; try { st = await api.storage.local.get(["own", "ownNo"]); } catch {}
+    const no = st.ownNo || {}, qi = qiHere(), ou = ouHere();
+    const list = (st.own || []).filter(q => q && !no[q.ou + "-" + q.qi] && (qi ? String(q.qi) === String(qi) : ou && String(q.ou) === String(ou)));
+    const sig = list.map(q => q.ou + "-" + q.qi).join(",");
+    if (!list.length) { if (ownShown) { ownHide(); ownShown = ""; } return; }
+    if (sig === ownShown) return;
+    ownShown = sig;
+    const names = list.slice(0, 4).map(q => "<b>" + esc(q.name || "Exam") + "</b>").join(", ") + (list.length > 4 ? " and " + (list.length - 4) + " more" : "");
+    ownDraw(list.length === 1 ? `${names} has its own password, so LOCKqz is not protecting it.` : `${list.length} exams have their own password, so LOCKqz is not protecting them: ${names}.`, true);
+    ownBox.querySelector("#lqz-own-no").onclick = () => { api.runtime.sendMessage({ t: "own-no", items: list }).catch(() => {}); ownHide(); };
+    ownBox.querySelector("#lqz-own-yes").onclick = async () => {
+      ownDraw("Protecting\u2026", false);
+      let r = null; try { r = await api.runtime.sendMessage({ t: "protect", items: list }); } catch {}
+      if (!r || !r.ok) { ownShown = ""; ownDraw(esc((r && r.error) || "LOCKqz could not do that just now. Try again in a moment."), false); setTimeout(() => { ownHide(); maybeOwn(); }, 8000); return; }
+      ownWait = list; inject(me, true, false);   // a full sync now: saves the professor's password, sets LOCKqz's
+      setTimeout(() => { if (ownWait) ownDone({ lqz: "failed" }); }, 60000);
+    };
+  }
+  // After this page's own sync has told the extension what it found, and whenever that changes.
+  if (QADMIN) { try { api.storage.onChanged.addListener((ch, area) => { if (area === "local" && (ch.own || ch.ownNo)) maybeOwn(); }); } catch {} setTimeout(maybeOwn, 1500); }
 })();
