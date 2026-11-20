@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-19 22:25 PT — 01UUDg7K: professor extension 1.0.13 (app/extension-prof: background.js, content-quiz.js, manifest, build.sh, dist; tests/test_student_fill.mjs, run_all.sh), then the Mac student app (app/mac/lockqz-agent.py, browser-policy.py, versions, tests/test_agent.py).
 
 ## Recently finished
 - 2026-11-19 19:35 PT — 01UUDg7K: apps 0.6.33, Windows. LOCKqz enters the quiz password in the quiz page itself (UI Automation: the page's password box, or a plain box the page labels Password; only in a browser window showing the quiz, never inside the attempt, each box once per password), so the student types and pastes nothing; the lock note says so and never shows the password. No password box found for 40 s: the password is shown and copied once, as before, and still entered if the box turns up later. Mac and Linux unchanged. test_windows_pw_fill.ps1 (real Chrome, Edge and Firefox on the Windows runner, a new Release step), test_windows_logic (133). run_all green.
