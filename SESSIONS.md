@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-19 19:20 PT — 01UUDg7K: Windows student app 0.6.33 (the quiz password). Touching app/windows/lockqz-agent.ps1, app/VERSION + the two version lines, app/tests (test_windows_pw_fill.ps1, test_windows_logic.ps1, fake_content_server.py), .github/workflows/release.yml (one test step).
 
 ## Recently finished
 - 2026-11-19 18:10 PT — 01UUDg7K: professor extension 1.0.12. An exam that carries the professor's own password (LOCKqz leaves those alone) now gets one notice on Brightspace's quiz pages: on the exam's own page for that exam, on a class's quiz list for that class's exams, with one button, Protect with LOCKqz (LOCKqz takes the exam on, the page syncs, the professor's password is saved first and comes back if LOCKqz is turned off) and Not now (remembered for those exams). sync.js tells the extension which exams these are (own, with the schedule). test_prof_extension E4c (57, real Chromium with the built package). run_all green.
