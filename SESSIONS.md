@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-19 16:25 PT — 01UUDg7K: REQUIRE_GATE setting + its wording. Touching app/cloudflare/wrangler.toml, functions/api/[[route]].js (MAIL invite/welcome/install, examMailTick check-in, /bs), public/dashboard.html, app/extension-prof (popup, manifest, dist), tests/test_status_truth.mjs, tests/test_server.mjs.
 
 ## Recently finished
 - 2026-11-19 11:35 PT — thread LTC5XK: server only (owner, 19 Nov). /invite asks for the professor's email (an invite always names who it is for, so their own Sync confirms them as the class's instructor). migrate_045_proof_backfill: professors who signed up with an emailed code or USC Google between 9 Nov 12:56 PT and the self- record get that record too. test_prof_signup (52), test_prof_zero_effort (99), test_google_signin (31). run_all here: every suite green except the real-Chromium suites (no browser download in this container); the Release test job runs them.
