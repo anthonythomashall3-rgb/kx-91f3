@@ -194,6 +194,36 @@ check("after 15 min: a quiet re-check with an unchanged Brightspace sends LOCKqz
 check("its panel is hidden", await bsPage.evaluate(() => { const b = document.getElementById("lqz-sync"); return !b || b.style.display === "none"; }));
 await bsPage.close();
 
+console.log("E4b quiz pages do not wait 15 minutes");
+{
+  const later = new Date(Date.now() + 5 * 86400e3).toISOString();
+  const prot = qi => !!sqlite.prepare("SELECT 1 AS x FROM quizzes WHERE ou=? AND qi=?").get(String(OU), String(qi));
+  const pwIn = qi => { const q = BS.quizzes.find(x => x.QuizId === qi); return !!(q && /^LQ-/.test(String(q.Password || ""))); };
+  await new Promise(r => setTimeout(r, 5500));
+  // The professor makes an exam and lands on the quiz list: seconds after the last sync.
+  BS.quizzes.push(Object.assign(quiz(778, "New Exam"), { StartDate: later }));
+  const q0 = syncs(), qPage = await context.newPage();
+  await qPage.goto("https://brightspace.usc.edu/d2l/lms/quizzing/admin/quizzes_manage.d2l?ou=" + OU);
+  check("opening the quiz list: the exam made a moment ago is synced at once", await waitFor(() => syncs() > q0 && prot(778), 20000), lqCalls.slice(-6).join(","));
+  check("and LOCKqz's password is on it in Brightspace", await waitFor(() => pwIn(778), 15000));
+  check("nothing is shown on the page", await qPage.evaluate(() => { const b = document.getElementById("lqz-sync"); return !b || b.style.display === "none"; }));
+  // Still on a quiz page: another exam is saved there (Save pressed, the page stays).
+  await qPage.waitForTimeout(6000);
+  BS.quizzes.push(Object.assign(quiz(779, "Second Exam"), { StartDate: later }));
+  const q1 = syncs();
+  await qPage.evaluate(() => { const b = document.createElement("button"); b.textContent = "Save and Close"; b.addEventListener("click", e => e.preventDefault()); document.body.appendChild(b); b.click(); });
+  check("Save pressed on a quiz page: synced within seconds, password set", await waitFor(() => syncs() > q1 && prot(779) && pwIn(779), 25000), lqCalls.slice(-6).join(","));
+  check("still nothing shown on the page", await qPage.evaluate(() => { const b = document.getElementById("lqz-sync"); return !b || b.style.display === "none"; }));
+  const q2 = syncs(); await qPage.waitForTimeout(17000);
+  check("the second look after a Save sends LOCKqz nothing when Brightspace is unchanged", syncs() === q2, lqCalls.slice(-6).join(","));
+  // An ordinary Brightspace page keeps the 15-minute rule.
+  const q3 = syncs(); BS.quizzes.push(Object.assign(quiz(780, "Third Exam"), { StartDate: later }));
+  await qPage.goto("https://brightspace.usc.edu/d2l/home"); await qPage.waitForTimeout(4000);
+  check("an ordinary page still waits (15-min rule)", syncs() === q3 && !prot(780));
+  BS.quizzes.pop();
+  await qPage.close();
+}
+
 console.log("E5 an exam within the hour");
 BS.quizzes[0].StartDate = new Date(Date.now() + 30 * 60000).toISOString();
 BS.quizzes[0].EndDate = new Date(Date.now() + 90 * 60000).toISOString();

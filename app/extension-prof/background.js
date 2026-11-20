@@ -1,6 +1,8 @@
 // LOCKqz professor extension: background.
 // 1. Syncs by itself: whenever the professor uses Brightspace (at most every 15 min), and every 6 h in a
 //    background tab while the browser is open. An unchanged Brightspace costs LOCKqz no request.
+//    On Brightspace's quiz pages it does not wait: opening one, or pressing Save on one, syncs right then,
+//    so an exam made or changed a moment ago is protected before the professor leaves.
 // 2. Exams: from 65 min before each LOCKqz-protected exam until it ends (and its gate has stopped), keeps
 //    its own pinned Brightspace tab open, where LOCKqz Sync gates the exam (no tab for the professor to keep).
 // 3. Dashboard "Sync now": runs in an open Brightspace tab, or a background one it opens and closes.
@@ -28,6 +30,7 @@ async function schoolScript() {
 }
 const DASH_URLS = ["https://professor.lockqz.com/*"];
 const MIN = 60000;
+const QUIZ_MS = 5000, QUIZ_POLL_MS = 100000;   // quiz pages: a page load or a Save syncs after 5 s; an open quiz page re-checks every 2 min
 const QUIET_MS = 15 * MIN, BG_MS = 6 * 60 * MIN, LEAD_MS = 65 * MIN, AFTER_MS = 10 * MIN;
 const NO_ANSWER_MS = 3 * MIN, TMP_MAX_MS = 4 * MIN, NOTE_EVERY_MS = 60 * MIN;
 const BASES = ["https://professor.lockqz.com", "https://lockqz.com"];
@@ -182,9 +185,17 @@ async function handle(msg, sender) {
     const first = role === "browse" && !st.welcomed;
     if (first) await set({ welcomed: now });
     const extra = first ? { first: true, synced: !!st.lastSync } : {};
-    if (role === "browse" && now - Number(st.lastRun || 0) < QUIET_MS) return { key: st.key, base: norm(st.base), role, run: false, ...extra };
+    if (role === "browse" && now - Number(st.lastRun || 0) < (msg.quiz === true ? QUIZ_MS : QUIET_MS)) return { key: st.key, base: norm(st.base), role, run: false, ...extra };
     await set({ lastRun: now });
     return { key: st.key, base: norm(st.base), role, run: true, force: role === "tmp", ...extra };
+  }
+  // A quiz page in an ordinary tab asks again: after a Save there (saved), and every 2 min while it stays open.
+  if (msg.t === "quiz") {
+    const st = await get(["key", "gateTab", "tmpTab", "lastRun"]);
+    if (!st.key || tab == null || tab === st.gateTab || tab === st.tmpTab) return { run: false };
+    if (now - Number(st.lastRun || 0) < (msg.saved === true ? QUIZ_MS : QUIZ_POLL_MS)) return { run: false };
+    await set({ lastRun: now });
+    return { run: true };
   }
   if (msg.t === "from-sync") {
     const m = msg.m || {};

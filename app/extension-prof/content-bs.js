@@ -2,6 +2,8 @@
 // Runs the same LOCKqz Sync the bookmark runs, from the extension's own copy of sync.js, on the
 // professor's own Brightspace login. In an ordinary tab it syncs quietly (hidden panel, never a gate); in
 // the tab the extension opened for an exam it runs the full panel, which gates the exam.
+// On a quiz page it syncs without the 15-minute wait: when the page opens, a few seconds after a Save
+// there, and every 2 minutes while the page stays open (an unchanged Brightspace costs LOCKqz no request).
 // Also: (1) the one-time "Syncing your classes" card on the professor's first visit after install;
 // (2) on the quiz edit / restrictions / special-access pages of an exam LOCKqz protects, the password
 // LOCKqz shows one notice (nothing is disabled: special access / extra time must keep working).
@@ -11,11 +13,17 @@
   const RED = "#990000";
   const SHIELD = (c, s) => `<svg aria-hidden="true" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 11V7a4 4 0 0 1 8 0v4"/><rect x="5" y="11" width="14" height="10" rx="2" fill="${c}"/><circle cx="12" cy="16" r="1.4" fill="#fff" stroke="none"/></svg>`;
   let me = null;   // { key, base, role: "gate" | "tmp" | "browse" }
+  // Brightspace's quiz pages (the quiz list, the quiz editor and its settings pages).
+  const QUIZ = /\/d2l\/lms\/quizzing\/admin\//i.test(location.pathname) || /\/d2l\/le\/activities\//i.test(location.pathname);
+  let busy = 0;   // a sync this page started and has not heard back from (never two at once)
   const inject = (r, force, visible) => {
     const u = new URL(api.runtime.getURL("sync.js"));
     u.searchParams.set("k", r.key); u.searchParams.set("base", r.base); u.searchParams.set("ext", "1");
     if (r.role !== "gate") { u.searchParams.set("nogate", "1"); if (!visible) u.searchParams.set("quiet", "1"); }
     if (force) u.searchParams.set("force", "1");
+    // A panel from an earlier sync is still on this page (hidden): re-check through it, never show it.
+    else if (r.role === "browse" && document.getElementById("lqz-sync")) u.searchParams.set("auto", "1");
+    busy = Date.now();
     u.searchParams.set("v", String(Date.now()));
     const s = document.createElement("script"); s.charset = "utf-8"; s.src = u.href;
     (document.body || document.documentElement).appendChild(s);
@@ -40,7 +48,7 @@
   let firstWaiting = false;
   const doneCard = n => showCard(`Done${n ? ` \u2014 ${n} class${n === 1 ? "" : "es"} synced` : " \u2014 your classes are synced"}. <a id="lqz-first-dash" href="${dashUrl()}" style="color:${RED};font-weight:700;white-space:nowrap">Open dashboard</a>`, 12000);
 
-  api.runtime.sendMessage({ t: "loaded" }).then(r => {
+  api.runtime.sendMessage({ t: "loaded", quiz: QUIZ }).then(r => {
     if (!r || !r.key) return;
     me = r;
     if (r.first) {
@@ -54,6 +62,7 @@
     if (e.source !== window || e.origin !== location.origin) return;
     const d = e.data;
     if (!d || typeof d !== "object" || d.lqzExt !== 1 || typeof d.lqz !== "string") return;
+    if (d.lqz === "synced" || d.lqz === "failed") busy = 0;
     if (firstWaiting && (d.lqz === "synced" || d.lqz === "failed")) {
       firstWaiting = false;
       if (d.lqz === "synced" && d.ok === false) { const n = Number(d.errors) || 0;
@@ -71,6 +80,22 @@
       if (b) b.style.display = ""; else inject(me, true, true);
     }
   });
+
+  // ---- quiz pages: an exam saved a moment ago reaches LOCKqz now, not at the next visit ----
+  if (QUIZ) {
+    const ask = saved => {
+      if (!me || me.role !== "browse" || document.hidden || (busy && Date.now() - busy < 90000)) return;
+      api.runtime.sendMessage({ t: "quiz", saved }).then(r => { if (r && r.run) inject(me, false, false); }).catch(() => {});
+    };
+    // Any button on the page whose label starts with Save (Save, Save and Close...), also inside Brightspace's
+    // own components. Brightspace needs a moment to store it, so LOCKqz looks twice.
+    document.addEventListener("click", e => {
+      const hit = (e.composedPath ? e.composedPath() : [e.target]).slice(0, 6).some(n => n && n.nodeType === 1 &&
+        /^(BUTTON|D2L-BUTTON|INPUT|A)$/.test(n.tagName) && /^\s*save\b/i.test(String(n.getAttribute("text") || n.value || n.textContent || "").slice(0, 40)));
+      if (hit) { setTimeout(() => ask(true), 4000); setTimeout(() => ask(true), 15000); }
+    }, true);
+    setInterval(() => ask(false), 60000);
+  }
 
   // ---- (2) Brightspace quiz settings of a protected exam: a notice, never a lock ----
   // Nothing on the page is disabled or changed: special access (OSAS extra time) must keep working, and a
