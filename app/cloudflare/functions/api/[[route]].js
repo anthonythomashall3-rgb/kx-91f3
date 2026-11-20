@@ -1542,6 +1542,35 @@ export async function onRequest(context) {
     }
     return null;   // all taken: the memo is needed
   }
+  // A payment with no memo (PAY_NAME_MATCH = "1"): the payer's name as the bank or Venmo gives it. It counts
+  // for a student only when it is exactly the student price by that way, and the payer's first and last
+  // name are the first and last name Brightspace has for exactly ONE student who has a pay code and has paid
+  // nothing this term (middle names are left out on both sides). A parent's name, two such students, any
+  // other amount, an alert held for review: not guessed, it waits in Admin -> Payments as before.
+  // pay_names (migrate_046) holds each such student's "first|last", written the first time their pay page
+  // is asked for (one indexed read; one row once per student), so a payment is matched by index.
+  const nameMatch = () => String(env.PAY_NAME_MATCH || "0") === "1";
+  const nameToks = s => String(s || "").normalize("NFKD").toLowerCase().replace(/[^a-z\s'-]/g, " ").split(/\s+/).map(t => t.replace(/^['-]+|['-]+$/g, "")).filter(t => t.length > 1);
+  const nameKey = s => {   // "First Middle Last" or "Last, First Middle" -> "first|last"
+    s = String(s || "");
+    if (s.includes(",")) { const i = s.indexOf(","), l = nameToks(s.slice(0, i)), f = nameToks(s.slice(i + 1)); return f.length && l.length ? f[0] + "|" + l[l.length - 1] : ""; }
+    const t = nameToks(s); return t.length >= 2 && t.length <= 6 ? t[0] + "|" + t[t.length - 1] : "";
+  };
+  async function rememberName(email) {
+    if (!nameMatch() || !email) return;
+    if (await db.prepare("SELECT 1 AS x FROM pay_names WHERE email=?").bind(email).first()) return;
+    const r = await db.prepare("SELECT name FROM roster WHERE email=? AND name IS NOT NULL AND name<>'' LIMIT 1").bind(email).first();
+    const k = r ? nameKey(r.name) : "";
+    if (k) await db.prepare("INSERT OR REPLACE INTO pay_names (email,nkey) VALUES (?,?)").bind(email, k).run().catch(e => { if (!WRITE_CAP(e)) throw e; });
+  }
+  async function nameOwner(payer) {
+    const k = nameKey(payer); if (!k) return null;
+    const rows = (await db.prepare("SELECT n.email, s.code FROM pay_names n JOIN pay_codes_students s ON s.email = n.email WHERE n.nkey=? LIMIT 6").bind(k).all()).results;
+    if (!rows.length || rows.length > 5) return null;
+    const open = [];
+    for (const r of rows) { const st = await studentStatus(r.email); if (!st.paid && !(st.received > 0)) open.push(r.code); }
+    return open.length === 1 ? open[0] : null;
+  }
   // Apps older than 0.6.5 only open LOCKqz pages on lockqz.pages.dev (the address before lockqz.com):
   // they get that address, which still serves the same site.
   const OLD_SITE = "https://lockqz.pages.dev";
@@ -1554,6 +1583,7 @@ export async function onRequest(context) {
     if (code && typeof code === "object") return code;   // { limited: true }
     let zelle_amount = null;
     if (slot && zelleUnique() && feeOn() && stuZelle() && email) { const st = await studentStatus(email); if (!st.paid && !(st.received > 0)) zelle_amount = await zelleAmount(code, st.term); }
+    if (email && typeof code === "string" && feeOn() && !(await studentStatus(email)).paid) await rememberName(String(email).trim().toLowerCase());
     const got = email ? (await studentStatus(email)).received : 0;
     const due = Math.round(STUDENT_FEE * 100) - Math.round(got * 100);
     const cardOnly = String(env.STUDENT_CARD_ONLY||"") === "1" && stripeOn();   // students: card only, once Stripe is configured
@@ -1606,6 +1636,17 @@ export async function onRequest(context) {
       for (const r of (await db.prepare(`SELECT cents, code FROM pay_slots WHERE term IN (?,?) AND cents IN (${placeholders(want.length)})`).bind(cur0, nxt0, ...want).all()).results)
         byC.set(Number(r.cents), byC.has(Number(r.cents)) && byC.get(Number(r.cents)) !== r.code ? null : r.code);   // same cents in both terms = ambiguous
       fresh.forEach(x => { const c = slotC(x); if (c && byC.get(c)) { x.code = byC.get(c); x.note = `${x.note} [amount match]`.trim().slice(0, 300); } });
+    }
+    // Still no code: the payer's name (see nameOwner). One payment per name per call.
+    if (nameMatch() && feeOn()) {
+      const usedNames = new Set();
+      for (const x of fresh) {
+        if (x.code || x.review || !x.payer || (x.via !== "zelle" && x.via !== "venmo")) continue;
+        if (Math.abs(x.amount - totalOf("student", x.via)) > 0.005) continue;
+        const k = nameKey(x.payer); if (!k || usedNames.has(k)) continue;
+        const c = await nameOwner(x.payer);
+        if (c) { usedNames.add(k); x.code = c; x.note = `${x.note} [name match: ${x.payer}]`.trim().slice(0, 300); }
+      }
     }
     // What each code already paid this term, next and the one after (for the term each new payment counts for).
     const [cur, nxt] = curTerms(), nn = nextTerm(nxt), codes = [...new Set(fresh.map(x => x.code).filter(Boolean))], sums = new Map();
@@ -3260,6 +3301,7 @@ export async function onRequest(context) {
       const fOus = [...new Set(ros.map(r => String(r.ou)))];
       if (fOus.length) st.push(db.prepare("DELETE FROM roster_snap WHERE ou IN (SELECT value FROM json_each(?))").bind(JSON.stringify(fOus)));
       if (pc) st.push(db.prepare("UPDATE payments SET payer=NULL, note=NULL WHERE code=?").bind(pc.code), db.prepare("DELETE FROM pay_codes_students WHERE email=?").bind(email));
+      st.push(db.prepare("DELETE FROM pay_names WHERE email=?").bind(email));
       // Everything else kept per email: the saved card and its semester renewals (never charged again),
       // renewal / pay reminder records, a professor's assistive-tool allowance or let-in, Google set-up links.
       // ... and an unused invitation sent to that address.

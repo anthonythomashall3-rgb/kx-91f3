@@ -36,6 +36,9 @@ const SENDERS = {
 // Signed, but not known to be a RECEIVING alert for this account: posted for the admin's review only.
 const REVIEW_SENDERS = { "zellepay.com": "zelle" };
 const WORDS = '("paid you" OR "sent you" OR "received" OR "deposited" OR "deposit")';
+// A bank writes about many things (statements, rewards, a low balance). Only money that came IN counts:
+// the bank's text must say so in one of these ways (and name Zelle, unless it is a transfer with a LOCKqz memo).
+const CAME_IN = /\b(?:sent|paid)\s+you\b|\byou(?:'ve|\u2019ve| have)?\s+(?:just\s+)?received\b|\breceived\s+(?:a\s+)?(?:zelle|payment|money|\$)|\b(?:payment|money)\s+(?:received\s+)?from\b|\b(?:payment|money)\s+received\b|\bhas\s+been\s+deposited\b|\bwe(?:'ve|\u2019ve| have)?\s+deposited\b/i;
 const ASKED = "LOCKqz/bank-answered";
 // Emails about LOCKqz asking how to pay by bank transfer (not from banks / payment services, not from this
 // mailbox). "lockqz" must appear, so a personal Gmail's other mail is never answered.
@@ -72,7 +75,9 @@ function run() {
   // Only mail since the last successful run (10 minutes of overlap), never the same alert twice.
   const last = Number(props.getProperty("LAST_RUN") || 0) || (started - 3 * 86400);
   const since = last - 600;
-  const query = "after:" + since + " -label:" + DONE.replace(/\//g, "-") + " (zelle OR " + Object.keys(SENDERS).map(d => "from:" + d).join(" OR ") + ") " + WORDS;
+  // in:anywhere: an alert already moved to Trash (a filter, or an inbox cleared within the minute) is read
+  // too. Spam is left out.
+  const query = "in:anywhere -in:spam after:" + since + " -label:" + DONE.replace(/\//g, "-") + " (zelle OR " + Object.keys(SENDERS).map(d => "from:" + d).join(" OR ") + ") " + WORDS;
   const threads = GmailApp.search(query, 0, 50);
   const own = owners_(props), opts = { owners: own, zellepayOk: props.getProperty("ZELLEPAY_OK") === "1",
     accountMarks: String(props.getProperty("ACCOUNT_MARKS") || "").split(",").map(s => s.trim()).filter(Boolean) };
@@ -155,6 +160,8 @@ function parse(m, opts) {
   // (bank deposit alerts do not prove who sent it); any other transfer / deposit is not a payment.
   const bankIn = /\btransfer(?:red)?\b|deposit|ach\b/i.test(subject) && !/zelle|paid you|sent you/i.test(subject);
   if (bankIn && (/withdraw|cash ?out|to your bank|from your/i.test(subject) || !/(?:^|[^A-Za-z0-9])LQ[\s-]?S?[\s-]?[A-Za-z0-9]{5}(?![A-Za-z0-9])/i.test(body))) return null;
+  // Any other bank email (a statement, a rewards notice, a low balance, an offer): not a payment.
+  if (via === "zelle" && !bankIn && !(/zelle/i.test(subject + "\n" + body) && CAME_IN.test(subject + "\n" + body))) return null;
   const reasons = [];
   if (bankIn) via = "bank";            // ACH / wire the payer sent: matched by its memo like a Zelle
   if (revDom && !opts.zellepayOk) reasons.push("sender " + revDom + " not confirmed as a receiving alert");
@@ -193,7 +200,13 @@ function parse(m, opts) {
   // Memo codes as people type them: "LQS4M8TX", "lqs-4m8tx", "LQ S 4M8TX", professor "LQ7K3PXA".
   const code = (body.match(/(?:^|[^A-Za-z0-9])(LQ[\s-]?S?[\s-]?[A-Za-z0-9]{5})(?![A-Za-z0-9])/i) || [])[1];
   const memo = code ? code.toUpperCase().replace(/[\s-]/g, "") : (body.match(/(?:memo|note|message)[:\s]+(.{1,140})/i) || ["", ""])[1];
-  const payer = (subject.match(/^(.+?)\s+(?:paid|sent)\s+you/i) || body.match(/^(.+?)\s+(?:paid|sent)\s+you/im) || ["", ""])[1];
+  // Who paid, as the bank or Venmo names them: "<name> sent you $20", "You received $20 from <name>",
+  // "payment from <name>", or a "From: <name>" line.
+  const both = subject + "\n" + body;
+  const payer = ((subject.match(/^(.+?)\s+(?:paid|sent)\s+you/i) || body.match(/^(.+?)\s+(?:paid|sent)\s+you/im)
+    || both.match(/received\s+\$\s?[0-9][0-9,.]*\s+from\s+([^\n]{2,80}?)(?=\s+(?:with|via|using|through|on|for|has|was|is|to|into)\b|[.!\n]|$)/i)
+    || both.match(/(?:payment|money)\s+(?:of\s+\$\s?[0-9][0-9,.]*\s+)?from\s+([^\n$]{2,80}?)(?=\s+(?:with|via|using|through|on|for|of|has|was|is|to|into)\b|[.!\n]|$)/i)
+    || body.match(/^[ \t]*(?:from|sender|sent by)[ \t]*:[ \t]*([^\n]{2,80})$/im) || ["", ""])[1] || "").replace(/\s+/g, " ").trim().slice(0, 120);
   // The provider's own transaction id makes a re-sent or forwarded copy of the same alert a duplicate.
   const pid = (body.match(/(?:transaction|payment)\s*(?:id|#|number)\s*[:#]?\s*([A-Za-z0-9-]{4,40})/i)
             || body.match(/(?:confirmation|reference)\s*(?:number|code|#|id)?\s*[:#]?\s*([A-Za-z0-9-]{4,40})/i) || [])[1];

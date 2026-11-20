@@ -41,6 +41,30 @@ p = parse(msg("dkim=pass header.i=@alerts.bankofamerica.com", "Zelle payment rec
 check("memo saying $180 on a $1 payment counts as $1", p && p.amount === 1, JSON.stringify(p));
 p = parse(msg("dkim=pass header.i=@alerts.bankofamerica.com", "Zelle payment received", "Memo: LQS4M8TX paid $180\nAmount: $1.00"));
 check("memo before the amount: still the real $1", p && p.amount === 1, JSON.stringify(p));
+// Ordinary bank emails are not payments (20 Nov 2026: the live reader had taken in a rewards notice, a
+// data-sharing consent and a low-balance warning from the bank).
+for (const [subj, body] of [
+  ["Your redemption request is confirmed", "Deposit icon. Your redemption request is confirmed. Credit Card: ending in 1074. Congratulations! You'll soon receive your cash rewards of $488.00."],
+  ["We received your consent to share your account info with Plaid", "We're confirming that we received your consent to share your account information with Plaid."],
+  ["Your account may have insufficient funds", "On November 12, 2026, you didn't have enough money. If it's negative, make a deposit right away to bring it above $0."],
+  ["Anthony, see the rewards you've earned and more", "Rewards tiers are based on each customer's combined average balance in qualifying deposit accounts. You received $12.00 in rewards."],
+  ["Your statement is available", "Your statement is available. Send and receive money with Zelle in our app."],
+  ["Your available account balance is low", "Your balance is $4.10. Make a deposit."]]) {
+  p = parse(msg("dkim=pass header.i=@ealerts.bankofamerica.com", subj, body));
+  check("a bank email that is not a payment is not read as one: " + subj.slice(0, 40), p === null, JSON.stringify(p));
+}
+// Who paid, in the ways banks and Venmo write it.
+p = parse(msg("dkim=pass header.d=chase.com header.s=x", "You received money with Zelle", "Duke Bristow sent you $2,500.00\nMemo: LQ7K3PX"));
+check("payer: '<name> sent you' in the body", p && p.payer === "Duke Bristow", JSON.stringify(p));
+p = parse(msg("dkim=pass header.i=@ealerts.bankofamerica.com", "MARIA GARCIA LOPEZ sent you $200.00", "MARIA GARCIA LOPEZ sent you $200.00 with Zelle. It is in your account ending in 1234."));
+check("payer: '<name> sent you' in the subject", p && p.payer === "MARIA GARCIA LOPEZ" && p.amount === 200 && p.note === "", JSON.stringify(p));
+p = parse(msg("dkim=pass header.i=@ealerts.bankofamerica.com", "Zelle payment received", "You received $200.00 from JOHN Q SMITH with Zelle. Deposited to the account ending in 1234."));
+check("payer: 'You received $200.00 from <name> with Zelle'", p && p.payer === "JOHN Q SMITH" && p.amount === 200, JSON.stringify(p));
+p = parse(msg("dkim=pass header.i=@ealerts.bankofamerica.com", "You've received a Zelle payment", "Amount: $200.00\nFrom: Priya Natarajan\nAccount ending in 1234"));
+check("payer: a 'From: <name>' line", p && p.payer === "Priya Natarajan" && p.amount === 200, JSON.stringify(p));
+p = parse(msg("dkim=pass header.i=@ealerts.bankofamerica.com", "Zelle payment received", "A Zelle payment of $200.00 from Wei Chen has been deposited. Account ending in 1234."));
+check("payer: 'payment of $200.00 from <name>'", p && p.payer === "Wei Chen" && p.amount === 200, JSON.stringify(p));
+check("the Gmail search reads Trash too, never Spam", /"in:anywhere -in:spam after:"/.test(src));
 p = parse(msg("dkim=pass header.i=@alerts.bankofamerica.com", "You received a deposit", "ACH deposit $180.00 from JOHN DOE to account ending 1234\nLQS4M8TX"));
 check("bank transfer with memo -> counted automatically (via bank)", p && !p.needs_review && p.via === "bank" && p.note === "LQS4M8TX" && p.amount === 180, JSON.stringify(p));
 p = parse(msg("dkim=pass header.i=@alerts.bankofamerica.com", "You received a deposit", "Payroll deposit $2,000.00"));

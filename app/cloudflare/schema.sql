@@ -180,6 +180,9 @@ CREATE INDEX IF NOT EXISTS idx_mail_sent_day ON mail_sent(day);
 -- A class the professor turned automatic reminders off for (migrate_034); no row = on.
 CREATE TABLE IF NOT EXISTS class_mail (ou TEXT PRIMARY KEY, reminders INTEGER DEFAULT 1, teacher_id TEXT, at TEXT);
 -- unique Zelle amount per unpaid student per term (no memo needed)
+-- A student's "first|last" as Brightspace names them, for payments with no memo (migrate_046).
+CREATE TABLE IF NOT EXISTS pay_names (email TEXT PRIMARY KEY, nkey TEXT) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_pay_names_nkey ON pay_names(nkey);
 CREATE TABLE IF NOT EXISTS pay_slots (term TEXT NOT NULL, cents INTEGER NOT NULL, code TEXT NOT NULL, at TEXT, PRIMARY KEY (term, cents), UNIQUE (term, code));
 
 -- Assistive tools a professor allows one student during locked quizzes (OSAS accommodation), per
