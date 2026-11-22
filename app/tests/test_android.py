@@ -84,4 +84,12 @@ check("(10 Nov) unpaid notice: every way at its own price + the memo for Zelle /
 check("(10 Nov) Android apps learn of a new release: /api/version at most once a day, one notification per version (never during a quiz), tap downloads the APK",
       'fun latestVersion(c: Context): String?' in _a and '"$BASE/version"' in _a and "fun newer(a: String, b: String): Boolean" in _a
       and "private fun checkUpdate()" in q and 'Api.newer(v, BuildConfig.VERSION_NAME)' in q and '"update_told"' in q and "download/lockqz-android.apk" in q and "if (quiz == null && now - lastVerCheck > 6 * 3600_000L)" in q)
+import glob as _glob
+_bad = []
+for _f in _glob.glob(os.path.join(APP, "android", "app", "src", "main", "res", "values*", "*.xml")):
+    for _n, _v in re.findall(r'<string name="([^"]+)"[^>]*>(.*?)</string>', open(_f, encoding="utf-8").read(), re.S):
+        _q = _v.startswith('"') and _v.endswith('"')
+        if (not _q and re.search(r"(?<!\\)'", _v)) or re.search(r"\\u(?![0-9A-Fa-f]{4})", _v):
+            _bad.append(_n)
+check("Android string resources build (every apostrophe escaped, no broken \\u escape)", not _bad, ", ".join(_bad))
 print("\nRESULT: %d passed, %d failed" % (PASS, FAIL)); sys.exit(1 if FAIL else 0)
