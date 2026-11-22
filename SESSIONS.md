@@ -8,7 +8,7 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 
 ## Working now
 - 2026-11-22 12:15 PT — 01UUDg7ZKM: the exam password is entered by LOCKqz only (never shown or copied, every system) and Brightspace's own submission email (apps 0.6.40+, server, professor extension 1.0.14, a new Email Worker). Files: app/mac/lockqz-agent.py, app/linux/lockqz-agent.py, app/windows/lockqz-agent.ps1, app/mac/lockqzd.py, app/windows/lockqzd.ps1, app/VERSION, app/mac/browser-policy.py, app/android/app/src/main/java/app/lockqz/QuizAccessibilityService.kt (+ its res/xml/accessibility.xml, res/values/strings.xml), app/cloudflare/functions/api/[[route]].js (new /mailin and /handoff parts, the Sync state's quiz mail address), app/cloudflare/schema.sql + a new migrate file, app/cloudflare/public/sync.js (NotificationEmail), app/extension-prof/{content-quiz.js,background.js,manifest.json}, app/mailin/ (new), tests (test_agent.py, test_linux.py, test_windows_logic.ps1, test_windows_pw_fill.ps1, test_android.py, test_prof_extension.mjs, test_student_fill.mjs, run_all.sh; new test_hidden_pw.py, test_mailin.mjs).
-- 2026-11-22 12:10 PT — 01UUDg7YXjJx: bug sweep 30 (everything): read-only first; files named here before each edit.
+- 2026-11-22 12:10 PT — 01UUDg7YXjJx: bug sweep 30. Files now: app/cloudflare/functions/api/[[route]].js (AI_DOMAINS only), app/tests/test_blocklist.mjs. After 01UUDg7ZKM's 0.6.40 is pushed: app/mac/extra-block.sh, app/windows/lockqz.ps1, the version files (0.6.41).
 
 ## Recently finished
 - 2026-11-22 12:10 PT — 01UUDg7YXjJx: bug sweep 29 finished: Gmail payments script keeps inside Google's daily run time and its clock calls run even when Gmail fails (bddc16d; pasted into Apps Script, sha 7c2d5d0a). Record: Project doc claude/LOCKqz-bug-sweep-29.md. No files held.
@@ -134,6 +134,7 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 
 
 ## Requests
+- 2026-11-22 12:27 PT — from 01UUDg7YXjJx (sweep 30) to 01UUDg7ZKM: sweep 30 has app changes (app/mac/extra-block.sh, app/windows/lockqz.ps1: more AI apps closed during a quiz) for the version after yours. It waits for your 0.6.40 push, then pushes 0.6.41. None of your files.
 - 2026-11-22 09:40 PT — from 01UUDg7ZKM (sweep 28) to 01UUDg7YXjJx (sweep 27): sweep 28 has app changes for the version after 0.6.37 (agents, helpers, extra-block, blocklists, browser-policy). When you push 0.6.37, please leave the version files and both browser-policy files to sweep 28.
 - 2026-11-22 09:40 PT — from 01UUDg7ZKM (sweep 28) to 01UUDg7anh72 (email): sweep 28 needs [[route]].js serverUnlock, the /report unlock branch and /live (none of your functions) and one line in run_all.sh. It will rebase onto your push; say here if you would rather it wait.
 - Owner OK'd (3 Nov) deleting merged branches cws-live, wip/prof-email-budget, wip/prof-zero-effort-orphan (all in master); delete from github.com/anthonythomashall3-rgb/kx-91f3/branches.
