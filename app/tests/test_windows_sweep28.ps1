@@ -45,6 +45,18 @@ Step-Evidence @((W $ATT 101)) $Q $true $t0
 Step-Evidence @((W $SUBM 101)) $Q $false $t0.AddSeconds(40)
 Check "the turned-in page long after the attempt was last seen -> not sub" (-not (Seen-For $Q).sub)
 $script:Seen = @{}; $script:AttWin = @{}
+$CONF = "$B/d2l/lms/quizzing/user/quiz_confirm_finish.d2l?qi=12345&ou=98765"
+Step-Evidence @((W $ATT 101)) $Q $true $t0
+Step-Evidence @((W $CONF 101)) $Q $true $t0.AddSeconds(60)
+Step-Evidence @((W $SUBM 101)) $Q $false $t0.AddSeconds(70)
+Check "attempt, a minute on the 'submit?' page, then the turned-in page in that window -> sub" ((Seen-For $Q).sub -eq $true)
+$script:Seen = @{}; $script:AttWin = @{}
+$SUMQ = "$B/d2l/lms/quizzing/user/quiz_summary.d2l?qi=12345&ou=98765"
+Step-Evidence @((W $ATT 101)) $Q $true $t0
+Step-Evidence @((W $SUMQ 101)) $Q $true $t0.AddSeconds(3)
+Step-Evidence @((W $SUBM 101)) $Q $false $t0.AddSeconds(6)
+Check "attempt, its start page (attempt left), then a turned-in page in that window -> not sub" ((Seen-For $Q).sub -eq $false)
+$script:Seen = @{}; $script:AttWin = @{}
 Step-Evidence @((W "" 101 "Quiz 3 - ECON 203 - USC Brightspace")) $Q $true $t0
 Check "the exam seen by its window title only (F11 / app window) -> attempt unknown, never 'none'" ($null -eq (Seen-For $Q).attempt)
 $script:Seen = @{}; $script:Seen[$Q] = @{ attempt = $false; sub = $false; rt = $true; at = $t0; adopted = $true }

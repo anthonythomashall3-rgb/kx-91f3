@@ -125,6 +125,10 @@ function Step-Evidence($wins, [string]$quiz, [bool]$present, [datetime]$now) {
         $ev.sub = $true
       }
     }
+    elseif ($script:AttWin[$k] -and ($script:AttWin[$k].host -eq (Url-Host $u))) {
+      if ((Url-Path $u) -match 'quiz_summary') { $script:AttWin.Remove($k) }   # back on its start page: that attempt was left, not turned in
+      else { $script:AttWin[$k] = @{ host = (Url-Host $u); at = $now } }   # another page of the exam after its attempt (the "submit?" page): same window
+    }
   }
   if ($present -and -not $byUrl) { $ev.rt = $false }   # seen by its window title only (F11 / app window): not watched live
 }

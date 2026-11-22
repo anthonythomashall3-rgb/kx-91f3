@@ -76,6 +76,7 @@ QUIZ_RE = QUIZ_PATH_RE   # old name, kept for anything that still imports it
 # A quiz's "turned in" pages (every leaving page except the quiz list): the attempt ends on this computer only
 # when one of these takes the place of the exam's attempt page in the same tab, on the same Brightspace host.
 SUBMIT_PATH_RE = re.compile(r"quiz_submissions|submission|feedback|results", re.I)
+SUMMARY_PATH_RE = re.compile(r"quiz_summary", re.I)   # an exam's start page
 ATT_SUB_S, ATT_SUB_SLOW = 15, 45   # s since that tab last showed the attempt page (live tabs / session files)
 WEB_OK_UDM = {"14", "2", "12", "7", "36"}
 WEB_OK_TBM = {"isch", "nws", "vid", "bks"}
@@ -1132,6 +1133,9 @@ class Agent:
                 if prev and prev[0] == host and 0 <= now - prev[1] <= (ATT_SUB_S if w >= 0 else ATT_SUB_SLOW):
                     if not ev.get("sub"): log("%s turned in (its submitted page replaced the attempt page)" % q)
                     ev["sub"] = True
+            elif key in self.att_tabs and self.att_tabs[key][0] == host:
+                if SUMMARY_PATH_RE.search(path): self.att_tabs.pop(key, None)   # back on its start page: that attempt was left, not turned in
+                else: self.att_tabs[key] = (host, now)   # another page of the exam after its attempt (Brightspace's "submit?" page): same tab
     def send_unlock(self, quiz, reason):
         """True only when the helper confirms AI is back. 202 pending = the server has not vouched for the
         quiz end yet (held): told to the student once per quiz, retried quietly."""

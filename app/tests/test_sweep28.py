@@ -54,6 +54,7 @@ ATT = B + "/d2l/lms/quizzing/user/attempt/quiz_start_frame_auto.d2l?ou=123&isprv
 SUBM = B + "/d2l/lms/quizzing/user/quiz_submissions_attempt.d2l?qi=456&ou=123&ai=9"
 LIST = B + "/d2l/lms/quizzing/user/quizzes_list.d2l?ou=123"
 GC = "Google Chrome"
+NOTES = "https://docs.google.com/document/d/n"
 
 print("E what the agent saw of the attempt goes with its unlock")
 g, h = agent()
@@ -90,6 +91,23 @@ check("set-up: an existing helper lock is adopted", g.locked and g.quiz == "123-
 g.missing_since = time.time() - A.GRACE - 1; T(g, [(GC, 0, 0, "https://example.com/")])
 u = unlocks(h)
 check("an adopted lock never says 'no attempt' (it did not watch the whole lock)", u and u[-1]["seen"]["attempt"] is None, str(u[-1:]))
+
+CONF = B + "/d2l/lms/quizzing/user/quiz_confirm_finish.d2l?qi=456&ou=123&isprv=0"
+g, h = agent()
+T(g, [(GC, 0, 0, ATT)]); T(g, [(GC, 0, 0, CONF)])
+g.att_tabs = {k: (v[0], v[1] - 60) for k, v in g.att_tabs.items()}   # the attempt page was last seen a minute ago
+T(g, [(GC, 0, 0, CONF)]); T(g, [(GC, 0, 0, SUBM)])
+u = unlocks(h)
+check("attempt, Brightspace's 'submit?' page for a minute, then the turned-in page in that tab -> sub", u and u[-1]["seen"]["sub"] is True, str(u[-1:]))
+g, h = agent()
+T(g, [(GC, 0, 0, ATT)]); T(g, [(GC, 0, 0, SUMM)]); T(g, [(GC, 0, 0, NOTES)])
+g.missing_since = time.time() - A.GRACE - 1; T(g, [(GC, 0, 0, NOTES)])
+u = unlocks(h)
+check("attempt, then its start page, then the tab sent elsewhere (never a turned-in page) -> not sub", u and u[-1]["seen"]["sub"] is False and u[-1]["seen"]["attempt"] is True, str(u[-1:]))
+g, h = agent()
+T(g, [(GC, 0, 0, ATT)]); T(g, [(GC, 0, 0, SUMM)]); T(g, [(GC, 0, 0, SUBM)])
+u = unlocks(h)
+check("attempt, its start page (attempt left), then a turned-in page typed into that tab -> not sub", u and u[-1]["seen"]["sub"] is False, str(u[-1:]))
 
 print("E2 a student who steps out of the exam and comes back")
 g, h = agent(); h.hold = True; MSGS.clear()

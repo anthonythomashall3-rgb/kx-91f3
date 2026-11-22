@@ -224,6 +224,16 @@ cb=m._union(c['URLBlocklist'], x+h)
 fb=m._union(f['WebsiteFilter']['Block'], [p for e in x for p in ("*://%s*" % e, "*://*.%s*" % e)] + ["*://*.%s/*" % k for k in h])
 print(json.dumps([len(cb), len(fb), len(f['WebsiteFilter']['Exceptions'])]))`, join(DIR, "../mac/browser-policy.py")], { env: { ...process.env, LOCKQZ_BLOCKLIST: macF } }).toString());
   n[0] <= 1000 && n[1] <= 1000 && n[2] <= 1000 ? ok(`filter lists fit the 1000-entry cap (Chromium ${n[0]}, Firefox block ${n[1]}, exceptions ${n[2]})`) : bad(`a filter list is over 1000 entries (Chromium ${n[0]}, Firefox ${n[1]}): later entries would be ignored`);
+  // what installed computers actually use: the served list (blocklist.txt plus entries served ahead of the next app version)
+  const { writeFileSync, mkdtempSync } = await import("node:fs"), { tmpdir } = await import("node:os");
+  const servedF = join(mkdtempSync(join(tmpdir(), "lq-served-")), "blocklist.txt");
+  writeFileSync(servedF, (served || mac).join("\n") + "\n");
+  const r = JSON.parse(execFileSync("python3", ["-c", `
+import importlib.util,json,sys
+spec=importlib.util.spec_from_file_location('bp',sys.argv[1]); m=importlib.util.module_from_spec(spec); sys.argv=['x']; spec.loader.exec_module(m)
+c=m.chromium_policy('com.google.Chrome'); f=m.firefox_policy(); x=m.path_entries(); h=m.host_entries()
+print(json.dumps([len(m._union(c['URLBlocklist'], x+h)), len(m._union(f['WebsiteFilter']['Block'], [p for e in x for p in ("*://%s*" % e, "*://*.%s*" % e)] + ["*://*.%s/*" % k for k in h]))]))`, join(DIR, "../mac/browser-policy.py")], { env: { ...process.env, LOCKQZ_BLOCKLIST: servedF } }).toString());
+  r[0] <= 1000 && r[1] <= 1000 ? ok(`the served list fits too (Chromium ${r[0]}, Firefox block ${r[1]})`) : bad(`the served list is over 1000 entries (Chromium ${r[0]}, Firefox ${r[1]}): computers would ignore its last entries`);
 }
 
 console.log("T20 3 Nov AI audit 3: new chat AIs, study/quiz solvers, humanizers, AI browsers, free model APIs");

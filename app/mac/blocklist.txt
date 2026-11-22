@@ -932,3 +932,37 @@ gradio.live
 val.run
 val.town
 streamlit.app
+# 22 Nov 2026 (sweep 28, part 2): Cloudflare's AI (its model playground, its AI gateway, the API and dashboard
+# that run its models), chatbot and agent builders whose bots get a public page, voice agents, a homework solver
+ai.cloudflare.com
+playground.ai.cloudflare.com
+gateway.ai.cloudflare.com
+api.cloudflare.com
+dash.cloudflare.com
+chatbase.co
+www.chatbase.co
+docsbot.ai
+chatling.ai
+voiceflow.com
+creator.voiceflow.com
+general-runtime.voiceflow.com
+stack-ai.com
+www.stack-ai.com
+mindstudio.ai
+app.mindstudio.ai
+agent.ai
+gumloop.com
+typebot.co
+typebot.io
+landbot.io
+zapier.app
+chatbots.zapier.com
+agents.zapier.com
+app.n8n.cloud
+customgpt.ai
+app.customgpt.ai
+botsonic.com
+elevenlabs.io
+11.ai
+question.ai
+www.question.ai

@@ -104,6 +104,15 @@ sys.exit(0 if l==mac else 1)
 PY'
 check "never pages.dev (LOCKqz itself)" '! grep -q "pages.dev" "$TMP/lists"'
 
+echo "B Cloudflare's AI, chatbot builders' public pages, voice agents: listed on every computer and served"
+for h in playground.ai.cloudflare.com gateway.ai.cloudflare.com api.cloudflare.com dash.cloudflare.com chatbase.co docsbot.ai \
+         chatling.ai voiceflow.com general-runtime.voiceflow.com stack-ai.com mindstudio.ai agent.ai gumloop.com typebot.co \
+         landbot.io zapier.app agents.zapier.com app.n8n.cloud customgpt.ai botsonic.com elevenlabs.io question.ai; do
+  grep -qx "$h" "$MAC/blocklist.txt" && grep -qx "$h" "$WIN/blocklist.txt" && grep -qF "\"$h\"" "$HERE/../cloudflare/functions/api/[[route]].js" || { bad "$h missing"; MISS=1; }
+done
+[ -z "${MISS:-}" ] && ok "all 22 in both blocklist.txt and AI_DOMAINS (the rest of their pages: the browsers' filters cover every subdomain)"
+check "Cloudflare itself (its sign-in check pages, its own site) stays open" '! grep -qxE "cloudflare.com|www.cloudflare.com|challenges.cloudflare.com" "$MAC/blocklist.txt"'
+
 echo ""
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
