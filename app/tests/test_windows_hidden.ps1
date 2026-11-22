@@ -54,3 +54,4 @@ foreach ($p in @($s, $k)) { try { if (-not $p.HasExited) { $p.Kill() } } catch {
 Write-Host ""
 Write-Host "RESULT: $pass passed, $fail failed"
 if ($fail) { exit 1 }
+exit 0
