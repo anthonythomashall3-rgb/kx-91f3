@@ -2328,11 +2328,29 @@ export async function onRequest(context) {
         // Brightspace's submission (Sync tab) or the quiz end. While the gate is running the professor is
         // proctoring and the Sync tab reports submissions within a round, so an unlock the server cannot
         // explain is held (the helper keeps beating; a later submission releases it through serverUnlock).
-        // Gate not running (never gated / stopped): nobody is proctoring -> the local unlock stands, flagged.
+        // 22 Nov 2026 (LOCAL_HOLD, on unless "0"): gated or not, a quiz attempt is over only when Brightspace says so,
+        // the quiz has ended, or the student's own computer saw the attempt end. Leaving the exam page (a closed tab,
+        // the quiz list, another page) is not an end: AI stays off until one of those (the helper's failsafe cap
+        // at the latest), so a student who steps out of an attempt and comes back never has AI in between.
+        // The student's computer may still end it at once when its agent saw (seen, from 0.6.38 agents):
+        //   sub: the exam's own submitted page replaced its attempt page in the same tab, or
+        //   attempt: false: no attempt page of this exam at all during this lock.
+        // An agent too old to say (no seen) keeps its "submitted" as before. A computer that was never given this
+        // exam's LOCKqz password could not have started an attempt protected by it.
         if (!why && detail.ask === true) {
           const [ou, qi] = quiz_id.split("-");
-          const g = await db.prepare("SELECT gated FROM quizzes WHERE ou=? AND qi=?").bind(ou, qi).first();
-          if (g && Number(g.gated) === 1) {
+          const g = await db.prepare("SELECT gated, password FROM quizzes WHERE ou=? AND qi=?").bind(ou, qi).first();
+          let keep = g && Number(g.gated) === 1;
+          if (!keep && String(env.LOCAL_HOLD ?? "1") !== "0") {
+            const seen = detail.seen && typeof detail.seen === "object" ? detail.seen : null;
+            const ends = detail.reason === "quiz_submitted" && (seen ? seen.sub === true : true) ? "agent_submit"
+              : seen && seen.attempt === false ? "no_attempt" : null;
+            if (ends) detailObj = { ...detailObj, ended: ends };
+            else if (g && g.password && !(await db.prepare("SELECT 1 FROM events WHERE device_id=? AND quiz_id=? AND event='password_released' LIMIT 1").bind(v.id, quiz_id).first()))
+              detailObj = { ...detailObj, ended: "no_password" };
+            else keep = true;
+          }
+          if (keep) {
             hold = true; detailObj = { ...detailObj, held: true };
             // A held helper asks again every 30 s: one 'unlock_held' row per 10 minutes is enough (free plan).
             if (!skipLog && await db.prepare("SELECT 1 FROM events WHERE device_id=? AND quiz_id=? AND event='unlock_held' AND ts>? LIMIT 1").bind(v.id, quiz_id, new Date(Date.now() - 600000).toISOString()).first()) skipLog = true;
@@ -4173,7 +4191,7 @@ export async function onRequest(context) {
       const lc = qc("l.quiz_id"), ec = qc("e.quiz_id");
       // Lock rows only: each carries its device's student/platform/student_verified (migrate_029). A row
       // written before that copy existed (sv NULL) reads its device row instead, as before.
-      const locks = (await db.prepare(`SELECT l.device_id,l.quiz_id,l.last_lock,l.helper_seen,l.ext_seen,l.signed,l.ip,l.student,l.platform,l.sv AS student_verified,(l.sv IS NULL) AS nocopy FROM locks l WHERE ${lc.sql}`).bind(...lc.args).all()).results;
+      const locks = (await db.prepare(`SELECT l.device_id,l.quiz_id,l.last_lock,l.locked_at,l.helper_seen,l.ext_seen,l.signed,l.ip,l.student,l.platform,l.sv AS student_verified,(l.sv IS NULL) AS nocopy FROM locks l WHERE ${lc.sql}`).bind(...lc.args).all()).results;
       const noCopy = [...new Set(locks.filter(l => Number(l.nocopy) === 1).map(l => l.device_id))];
       if (noCopy.length) {
         const dm = new Map((noCopy.length <= 100
@@ -4195,7 +4213,7 @@ export async function onRequest(context) {
       // from any other device is a modified client -> tamper (never admitted).
       const adminEm = new Set(((await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin'").all()).results).map(x => x.e));
       // Quiz windows (Brightspace start/end) for this course.
-      const win = new Map(((await db.prepare(`SELECT qi,start_date,end_date FROM bs_quizzes WHERE ou=?${exact ? " AND qi=?" : ""}`).bind(_ou0, ...(exact ? [quiz.split("-")[1]] : [])).all()).results).map(w => [String(w.qi), w]));
+      const win = new Map(((await db.prepare(`SELECT qi,start_date,end_date,prot_at,unprot_at FROM bs_quizzes WHERE ou=?${exact ? " AND qi=?" : ""}`).bind(_ou0, ...(exact ? [quiz.split("-")[1]] : [])).all()).results).map(w => [String(w.qi), w]));
       const ms0 = v => { const x = v ? Date.parse(v) : NaN; return isNaN(x) ? null : x; };
       win.forEach(w => { w._s = ms0(w.start_date); w._e = ms0(w.end_date); });   // parsed once (CPU: 10 ms on Workers Free)
       const startOf = qi => { const w = win.get(qi); return w ? w._s : null; };
@@ -4218,7 +4236,7 @@ export async function onRequest(context) {
           status = helperDown && agentAfterHelper ? "helper_killed" : (extDown && !helperDown ? "browser_closed" : "dark");
         }
         else if (dev) status = "developer";
-        rows.push({ device_id:l.device_id, student:l.student||null, platform:l.platform||null, status, last_lock:l.last_lock, age_ms:a, verified: Number(l.signed) === 1, ip: l.ip||null, sv: Number(l.student_verified) === 1, _q: l.quiz_id });
+        rows.push({ device_id:l.device_id, student:l.student||null, platform:l.platform||null, status, last_lock:l.last_lock, age_ms:a, verified: Number(l.signed) === 1, ip: l.ip||null, sv: Number(l.student_verified) === 1, _q: l.quiz_id, _at: l.locked_at || null });
       }
       // Devices that unlocked and hold no lock now.
       for (const [k, list] of incidents) {
@@ -4304,6 +4322,14 @@ export async function onRequest(context) {
         // helper was stopped (not a wifi drop). Red, even with no unlock event.
         if (submitted && !isNaN(doneAt) && (r.status === "dark" || r.status === "helper_killed") && r.last_lock && Date.parse(r.last_lock) + STALE < doneAt) {
           r.status = "left_early"; r.reason = "went_dark"; r.flagged_at = r.last_lock; return; }
+        // Opened again after its own computer reported the attempt submitted (and Brightspace has no completion
+        // at or before that report): the "submitted" was not a submission. Red from the new lock on.
+        if (r._at && r.status !== "tamper" && r.status !== "vm") {
+          const at = Date.parse(r._at);
+          const claim = (incidents.get(r.device_id + "|" + r._q) || []).filter(e => e.event === "unlock" && reasonOf(e) === "quiz_submitted" && Date.parse(e.ts) < at && overlaps(e, qi)).pop();
+          if (claim && !(submitted && !isNaN(doneAt) && doneAt <= Date.parse(claim.ts) + 60000)) {
+            r.status = "left_early"; r.reason = "reopened"; r.flagged_at = r._at; r.submitted = submitted; return; }
+        }
         if (!inc.length) return;
         if (r.status === "locked" || r.status === "done" || r.status === "browser_closed") {
           const last = inc[inc.length - 1];
@@ -4312,11 +4338,29 @@ export async function onRequest(context) {
           r.flagged_at = whenOf(last);
         }
       });
-      rows.forEach(r => { delete r._q; });
       // Students the professor let in without LOCKqz: the gate grants them access like an accommodation.
       // Never fails the gate: before migrate_038 is applied the table is simply absent.
       let letin = [];
       if (exact) try { letin = (await db.prepare("SELECT email, user_id FROM letin WHERE ou=? AND qi=? LIMIT 500").bind(_ou0, quiz.split("-")[1]).all()).results; } catch { letin = []; }
+      // Brightspace shows a completed attempt, made while LOCKqz's password was on the exam (prot_at .. unprot_at),
+      // by a student LOCKqz never locked for it and the professor did not let in: they entered it on a computer
+      // LOCKqz was not locking. Red ("no_lqz"), with Brightspace's completion time.
+      if (exact) {
+        const qi0 = quiz.split("-")[1], w0 = win.get(qi0), on = w0 && w0.prot_at ? Date.parse(w0.prot_at) : NaN, off = w0 && w0.unprot_at ? Date.parse(w0.unprot_at) : NaN;
+        const done0 = [...subs].filter(([k, at]) => k.split(":")[0] === qi0 && at && !isNaN(on) && Date.parse(at) >= on && (isNaN(off) || Date.parse(at) <= off));
+        if (done0.length) {
+          const haveU = new Set(rows.map(r => String(r.user_id || "")).filter(Boolean)), haveS = new Set(rows.flatMap(r => [r.student, r.email]).filter(Boolean).map(x => String(x).toLowerCase()));
+          letin.forEach(x => { if (x.user_id) haveU.add(String(x.user_id)); if (x.email) haveS.add(String(x.email).toLowerCase()); });
+          const ros = (await rosterSnaps([_ou0])).get(_ou0) || (await db.prepare("SELECT user_id, name, email, username, role FROM roster WHERE ou=? AND user_id IN (SELECT value FROM json_each(?))").bind(_ou0, JSON.stringify(done0.map(([k]) => k.split(":")[1]))).all()).results;
+          const byU = new Map(ros.map(x => [String(x.user_id), x]));
+          for (const [k, at] of done0) {
+            const u = k.split(":")[1], x = byU.get(u);
+            if (!x || haveU.has(u) || [x.email, x.name, x.username].some(y => y && haveS.has(String(y).toLowerCase()))) continue;
+            rows.push({ device_id: null, student: x.name || x.email || u, email: x.email || null, user_id: u, platform: null, status: "no_lqz", submitted: true, flagged_at: at, eligible: false, _q: quiz });
+          }
+        }
+      }
+      rows.forEach(r => { delete r._q; delete r._at; });
       return { quiz, now: now(), stale_ms: STALE, rows, letin: letin.map(x => String(x.user_id || "")).filter(Boolean), letin_emails: letin.map(x => x.email) };
       })();
       const bodyStr = JSON.stringify(liveOut);

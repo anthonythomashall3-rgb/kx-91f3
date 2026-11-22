@@ -649,10 +649,10 @@ async function setAssist(cb){
 }
 
 // ---- LIVE ----
-const WHY = {went_dark:"lost contact",cap:"safety timer ended the lock",local_request:"student turned LOCKqz off",unverified:"AI turned back on, no Brightspace submission on record",quiz_tab_closed:"exam tab closed",unlock:"unlocked"};
+const WHY = {went_dark:"lost contact",cap:"safety timer ended the lock",local_request:"student turned LOCKqz off",unverified:"AI turned back on, no Brightspace submission on record",quiz_tab_closed:"exam tab closed",unlock:"unlocked",reopened:"opened the exam again after it was reported submitted"};
 const devCell = id => ME && ME.admin && id ? ` <span class="st" style="font-size:12px">${esc(id)}</span> <button class="btn" style="min-height:28px;padding:2px 8px;font-size:12px" data-dev="${esc(id)}" onclick="revokeDev(this.dataset.dev)">Revoke</button>` : "";
 async function revokeDev(id){ if(!confirm("Revoke device "+id+"? Its LOCKqz stops working until reinstalled.")) return; const d=await post("/revoke-device",{device_id:id}); alert(d.error||"Revoked."); }
-const LBL = {locked:["ok","Locked · working"],tamper:["red","Tampering detected — AI may be open"],helper_killed:["red","LOCKqz was stopped — AI may be open"],dark:["red","Lost contact — AI may be open"],browser_closed:["warn","Browser closed"],done:["","Unlocked · no submission on record"],left_early:["red","AI unblocked before submitting — verify"],vm:["red","Virtual machine — not let in"],developer:["","Admin (developer mode)"]};
+const LBL = {locked:["ok","Locked · working"],tamper:["red","Tampering detected — AI may be open"],helper_killed:["red","LOCKqz was stopped — AI may be open"],dark:["red","Lost contact — AI may be open"],browser_closed:["warn","Browser closed"],done:["","Unlocked · no submission on record"],left_early:["red","AI unblocked before submitting — verify"],vm:["red","Virtual machine — not let in"],no_lqz:["red","Took the exam without LOCKqz"],developer:["","Admin (developer mode)"]};
 function viewLive(id){
   const [ou,qi] = id.split("-"); const c = BS.courses.find(x=>x.ou===ou); const q = c && c.quizzes.find(x=>String(x.qi)===qi);
   const title = q ? q.name : (LEGACY.find(x=>(x.lock_id||x.quiz_id)===id)||{}).title || id;
@@ -693,7 +693,7 @@ async function loadLive(id){
     <div class="count"><span class="k">${c?"No lock seen":"Finished"}</span><span class="v">${c?notStarted.length:done.length}</span><span class="n">${c?"no LOCKqz lock seen":"submitted and unlocked"}</span></div>`;
   const order = r => r.status==="done"?3:LBL[r.status]&&LBL[r.status][0]==="red"?0:r.status==="browser_closed"?1:2;
   const list = rows.sort((a,b)=>order(a)-order(b)).map(r=>{ const [k,l0]=lbl(r); const t=(r.age_ms==null||r.status==="done")?"":Math.round(r.age_ms/1000)+" s";
-    const l = r.status==="left_early" && r.reason ? `${l0} · ${WHY[r.reason]||r.reason}${r.flagged_at?" "+new Date(r.flagged_at).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}):""}` : l0;
+    const l = r.status==="left_early" && r.reason ? `${l0} · ${WHY[r.reason]||r.reason}${r.flagged_at?" "+new Date(r.flagged_at).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}):""}` : r.status==="no_lqz" && r.flagged_at ? `${l0} · submitted ${new Date(r.flagged_at).toLocaleString([], {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}` : l0;
     return `<li class="${k==='red'?'flag':''}"><span class="dot ${k}"></span><span class="grow"><span style="font-size:15px;font-weight:${k==='red'?700:500}">${esc(nameOf(r))}${devCell(r.device_id)}</span></span><span class="st ${k}">${esc(l)}</span><span class="st" style="min-width:48px;text-align:right">${t}</span></li>`; })
     .concat(notStarted.map(s=>{ const inn = letin.has((s.email||"").toLowerCase());
       return `<li><span class="dot ${inn?'ok':''}"></span><span class="grow"><span style="font-size:15px">${esc(s.name)}</span></span><span class="st">${inn?"Let in · no LOCKqz":"No LOCKqz lock seen"}</span><span class="st" style="min-width:64px;text-align:right">${letBtn(s, !inn)}</span></li>`; }));

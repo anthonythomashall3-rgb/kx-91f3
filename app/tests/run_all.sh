@@ -63,6 +63,7 @@ run "A professor's sections are found by name through an index (no whole-table r
 run "Mac: a pass right after the preferences service restarted does not wait for it (AirPlay switch look)" bash test_prefs_settling.sh
 run "Gmail payment script parser (forged alerts refused)" node test_pay_script.mjs
 run "A payment with no memo: counted by the payer's name only when it is certain" node --no-warnings test_pay_name.mjs
+run "Sweep 28: an exam attempt ends only when Brightspace or its own computer says so; live view: reopened after submit, taken without LOCKqz" node --no-warnings test_sweep28.mjs
 run "26 Oct fixes: one Stripe checkout per code, overpayments carried, unexpected local unlocks red, course password retired" node --no-warnings test_oct26_fixes.mjs
 run "Helper hardening: fast user switching, per-user tokens, Windows monotonic cap, local-model apps" bash test_helper_hardening.sh
 run "Scale guard: no API query reads a whole big table (every statement planned against the real schema)" node --no-warnings test_scale_indexes.mjs
