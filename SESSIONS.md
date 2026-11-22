@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-11-22 10:05 PT — 01UUDg7ZKM: sweep 28, apps 0.6.38 (server part pushed: e2bd2ea). Files: app/mac/lockqz-agent.py, app/windows/lockqz-agent.ps1, app/mac/lockqzd.py, app/windows/lockqzd.ps1, app/mac/extra-block.sh, app/mac/com.lockqz.pf.conf, app/windows/lockqz.ps1, app/linux/lockqz.sh, both blocklist.txt, app/cloudflare/functions/api/[[route]].js (AI_DOMAINS only), app/android/.../DnsVpnService.kt (WILD_DOMAINS only), both browser-policy files, the version files, tests (test_sweep28.py, test_sweep28_apps.sh, test_windows_sweep28.ps1 new; test_chrome_policy_real.mjs, test_android.py, run_all.sh).
+- 2026-11-22 10:50 PT — 01UUDg7ZKM: sweep 28, apps 0.6.38 live (5b5cb24); now 0.6.39 (same files, plus app/tests/test_blocklist.mjs). Files: app/mac/lockqz-agent.py, app/windows/lockqz-agent.ps1, app/mac/lockqzd.py, app/windows/lockqzd.ps1, app/mac/extra-block.sh, app/mac/com.lockqz.pf.conf, app/windows/lockqz.ps1, app/linux/lockqz.sh, both blocklist.txt, app/cloudflare/functions/api/[[route]].js (AI_DOMAINS only), app/android/.../DnsVpnService.kt (WILD_DOMAINS only), both browser-policy files, the version files, tests (test_sweep28.py, test_sweep28_apps.sh, test_windows_sweep28.ps1 new; test_chrome_policy_real.mjs, test_android.py, run_all.sh).
 
 ## Recently finished
 - 2026-11-22 10:45 PT — 01UUDg7YXjJx: failure-mode review (sweep 27) finished: apps 0.6.37 live (924ebec, Release 45050675528 green), USC sections run 45050675507 green with the new builder. Record: Project doc claude/LOCKqz-failure-review-27.md. No files held.
