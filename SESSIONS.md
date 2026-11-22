@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-11-22 10:58 PT — 01UUDg7YXjJx: bug sweep 29 (server, web pages, professor extension, Gmail script, watch, workflows; not the apps or AI_DOMAINS): read-only first; files named here before each edit.
+- 2026-11-22 10:58 PT — 01UUDg7YXjJx: bug sweep 29 (server, web pages, professor extension, Gmail script, watch, workflows; not the apps or AI_DOMAINS). Files: app/payments/LOCKqz-payments.gs, app/tests/test_pay_script.mjs.
 
 ## Recently finished
 - 2026-11-22 11:20 PT — 01UUDg7ZKM: sweep 28 finished: server e2bd2ea, apps 0.6.38 (5b5cb24) and 0.6.39 (77c7f19, Release 45058031101 green on every job). An exam ends only when Brightspace, its end, or its own computer says so (LOCAL_HOLD; the agent's evidence: the turned-in page took the attempt page's place in the same tab, Brightspace's submit? page between them included); offline, AI stays off until LOCKqz answers; live view: reopened after submit, took the exam without LOCKqz. During a quiz: Firefox restarted so its policies apply, developer tools and javascript: / view-source: off, Siri off, a local model under any program name closed by its files, more VMs, remote desktops, SSH clients, proxies and tunnels closed, the SSH port dropped; web proxies, browser-tab computers and code environments, cloud PCs, Cloudflare's AI, chatbot builders' public pages and voice agents blocked (9 more whole domains, the same on every system). test_blocklist checks the served list fits the browsers' filter lists. Record: Project doc claude/LOCKqz-bug-sweep-28.md. No files held.
