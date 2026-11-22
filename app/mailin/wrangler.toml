@@ -1,0 +1,12 @@
+# LOCKqz mail-in (see worker.js): an Email Worker, Workers Free, no storage. $0.
+# Email Routing on lockqz.com: rule quiz@lockqz.com -> this Worker, Subaddressing on (Email Routing settings). An email
+# that is not a quiz's goes on to FORWARD_TO (a verified destination address).
+name = "lockqz-mailin"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+account_id = "fafb20d4eb2dba712b17af2fd91310b5"
+workers_dev = false
+
+[vars]
+API = "https://lockqz.pages.dev/api"
+FORWARD_TO = "lockqz.app@gmail.com"

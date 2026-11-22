@@ -66,6 +66,9 @@ run "A payment with no memo: counted by the payer's name only when it is certain
 run "Sweep 28: an exam attempt ends only when Brightspace or its own computer says so; live view: reopened after submit, taken without LOCKqz" node --no-warnings test_sweep28.mjs
 run "Sweep 28 (apps): what the agent saw of the attempt goes with its unlock; the exam's Firefox restarted for the quiz; offline never counts" python3 test_sweep28.py
 run "Sweep 28 (engines): VMs, remote shells, proxies and tunnels, local models by their files, Siri, more whole domains" bash test_sweep28_apps.sh
+run "Brightspace's own submission email (server): each quiz's address, the one student it is about, AI back for a held computer, the professor told of a submit without LOCKqz" node --no-warnings test_mailin.mjs
+run "Brightspace's own submission email (Sync): LOCKqz's address beside the professor's own in Notification Email, only it taken away" node --no-warnings test_mailin_sync.mjs
+run "Brightspace's own submission email (Email Worker): the email read (multipart, quoted-printable, its links) and handed to the API" node --no-warnings test_mailin_worker.mjs
 run "26 Oct fixes: one Stripe checkout per code, overpayments carried, unexpected local unlocks red, course password retired" node --no-warnings test_oct26_fixes.mjs
 run "Helper hardening: fast user switching, per-user tokens, Windows monotonic cap, local-model apps" bash test_helper_hardening.sh
 run "Scale guard: no API query reads a whole big table (every statement planned against the real schema)" node --no-warnings test_scale_indexes.mjs

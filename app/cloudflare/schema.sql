@@ -151,6 +151,11 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 CREATE INDEX IF NOT EXISTS payments_code ON payments (code, term);
 
+-- Brightspace's own quiz-submission emails (22 Nov 2026, migrate_047): LOCKqz's Email Worker hands each one to POST
+-- /mailin; mailinRun reads it into submissions. The text stays only when no student was found in it, 14 days at most.
+CREATE TABLE IF NOT EXISTS mailin (id INTEGER PRIMARY KEY AUTOINCREMENT, ou TEXT, qi TEXT, at TEXT NOT NULL, sender TEXT, subject TEXT, body TEXT, state TEXT NOT NULL DEFAULT 'new', user_id TEXT);
+CREATE INDEX IF NOT EXISTS idx_mailin_new ON mailin(state, ou, qi) WHERE state='new';
+
 -- One row (one password) per Brightspace quiz. Kept LAST: on an existing database with duplicate rows
 -- this statement fails until migrate_021 removes the duplicates (deploy.sh runs it right after).
 CREATE UNIQUE INDEX IF NOT EXISTS idx_quizzes_ou_qi ON quizzes(ou, qi);

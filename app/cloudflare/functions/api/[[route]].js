@@ -917,6 +917,7 @@ export async function onRequest(context) {
     // retention (events are written in time order): 2 rows read when there is nothing to delete, instead
     // of 900 on every Sync.
     return [db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE event IN ('login_fail','pay_code_new','pay_start','pay_stripe','pay_bank','signup','stripe_sess','code_sent','code_send_failed') AND " + RL_EV + " AND ts<? LIMIT 300)").bind(ago(2)),
+      db.prepare("DELETE FROM mailin WHERE id IN (SELECT id FROM mailin WHERE at<? LIMIT 300)").bind(ago(14)),
       db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE event='reset_request' AND " + RL_EV + " AND ts<? LIMIT 100)").bind(ago(30)),
       db.prepare("DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id LIMIT (CASE WHEN (SELECT ts FROM events ORDER BY id LIMIT 1) < ? THEN 300 ELSE 0 END)) AND ts<?").bind(ago(EVENT_DAYS), ago(EVENT_DAYS)),
       db.prepare("DELETE FROM email_codes WHERE expires<?").bind(Date.now() - 86400000),
@@ -1116,6 +1117,84 @@ export async function onRequest(context) {
       return true;
     } catch { return false; }
   };
+  // ---- Brightspace's own "turned in" email (22 Nov 2026) ----
+  // Each protected quiz's Notification Email (Brightspace quiz settings, Attempts & Completion) carries LOCKqz's
+  // address for that quiz beside the professor's own, set by the professor's Sync (sync.js): quiz+<ou>-<qi>-<tok>@
+  // lockqz.com, tok = an HMAC of the quiz, so nobody can make up an address for a quiz. Brightspace emails it the
+  // moment an attempt is submitted; LOCKqz's Email Worker (app/mailin) hands each email to POST /mailin. mailinRun
+  // finds the student on the class list, records the submission (the same row the Sync writes, so a computer that
+  // holds AI off gets it back at once), and tells the professor once when none of that student's computers locked
+  // for the quiz. MAILIN_ON = "1" turns it on (the Sync then sets the address).
+  const mailinOn = () => String(env.MAILIN_ON || "") === "1";
+  const mailTok = async (ou, qi) => (await hmacHex(String(env.ROT_SECRET || env.TEACHER_KEY || "lqz-fallback"), "lqz-quiz-mail:" + ou + "-" + qi)).slice(0, 12);
+  const quizMail = async (ou, qi) => `${String(env.MAILIN_USER || "quiz")}+${ou}-${qi}-${await mailTok(ou, qi)}@${String(env.MAILIN_DOMAIN || "lockqz.com")}`;
+  // The one student an email is about: their email, user name, org id or Brightspace id in it beats their name; two
+  // students alike (the same name and nothing else) = nobody, never a wrong student. Instructors are never it.
+  function mailStudent(text, ros) {
+    const low = String(text || "").toLowerCase(), words = " " + nameToks(text).join(" ") + " ";
+    const esc = x => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const has = x => !!x && x.length >= 3 && new RegExp("(^|[^a-z0-9._@-])" + esc(x) + "($|[^a-z0-9._@-])").test(low);
+    let best = 0, who = [];
+    for (const r of ros) {
+      if (INSTR_RE.test(String(r.role || ""))) continue;
+      const em = String(r.email || "").toLowerCase(), un = String(r.username || "").toLowerCase(), oid = String(r.org_id || "").toLowerCase(), uid = String(r.user_id || "");
+      let sc = 0;
+      if (em.includes("@") && has(em)) sc = 4;
+      else if (has(un) || (oid.length >= 4 && has(oid)) || (/^\d{3,}$/.test(uid) && new RegExp("(uid|userid|user_?id|ui)(=|%3d|:)\\s*" + uid + "(?!\\d)").test(low))) sc = 3;
+      else {
+        const t = nameToks(r.name);
+        if (t.length >= 2 && [t.join(" "), t[0] + " " + t[t.length - 1], t[t.length - 1] + " " + t[0]].some(n => words.includes(" " + n + " "))) sc = 2;
+      }
+      if (sc > best) { best = sc; who = [r]; } else if (sc && sc === best) who.push(r);
+    }
+    return who.length === 1 ? who[0] : null;
+  }
+  // A submission Brightspace reported for a student none of whose computers locked for that quiz, whom the professor
+  // did not let in without LOCKqz: the class's professors are told once per student and quiz (the live view shows it
+  // red too: /live's no_lqz rows come from the same submission row).
+  async function mailinNoLqz(ou, qi, s, at) {
+    const em = String(s.email || "").toLowerCase(), qid = ou + "-" + qi;
+    if (!em.includes("@") || await examNotOurs(ou, qi)) return false;
+    if (await db.prepare("SELECT 1 AS x FROM events e WHERE e.quiz_id=? AND e.event IN ('lock','password_released') AND (lower(e.student)=? OR e.device_id IN (SELECT device_id FROM devices WHERE lower(student)=?)) LIMIT 1").bind(qid, em, em).first()) return false;
+    if (await db.prepare("SELECT 1 AS x FROM letin WHERE ou=? AND qi=? AND lower(email)=?").bind(ou, qi, em).first()) return false;
+    const ins = await db.prepare("INSERT OR IGNORE INTO sync_nudges (ou,qi,at) VALUES (?,?,?)").bind("nolqz:" + ou, qi + ":" + String(s.user_id), now()).run();
+    if (!ins.meta.changes) return false;
+    await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (NULL,?,?,'no_lqz_submit',?,?)").bind(em, qid, JSON.stringify({ via: "brightspace_email", at }), now()).run().catch(() => {});
+    if (!codesOn) return true;
+    const ts = (await db.prepare("SELECT DISTINCT t.email AS email, t.role AS role FROM teacher_courses tc JOIN teachers t ON t.id=tc.teacher_id WHERE tc.ou=? AND (t.verified=1 OR t.role='admin') AND t.email IS NOT NULL").bind(ou).all()).results || [];
+    const to = ts.filter(t => t.role !== "admin").length ? ts.filter(t => t.role !== "admin") : ts.slice(0, 1);
+    const q = await db.prepare("SELECT (SELECT name FROM bs_quizzes WHERE ou=? AND qi=?) AS quiz, (SELECT name FROM teacher_courses WHERE ou=? LIMIT 1) AS course").bind(ou, qi, ou).first();
+    const qn = String(q?.quiz || "a quiz").slice(0, 120), cn = String(q?.course || "your class").replace(/^\d+_\d+\s*/, "").slice(0, 120), who = String(s.name || em).slice(0, 80);
+    const text = `Brightspace reports that ${who} submitted ${qn} in ${cn}${mailWhen(at) ? " at " + mailWhen(at) : ""}, and none of their computers was locked by LOCKqz for it, so AI was not blocked during that attempt.\n\nIt is marked red on your LOCKqz page.\n\nLOCKqz`;
+    for (const t of to) {
+      const go = mailOut(t.email, `LOCKqz: ${who} took ${qn} without LOCKqz`, text, {}, "auto").catch(() => {});
+      if (typeof context.waitUntil === "function") context.waitUntil(go); else await go;
+    }
+    return true;
+  }
+  // Reads the emails not read yet (one by its id, one quiz's, or the oldest 20). The text is kept only when no student
+  // was found in it (so Brightspace's wording can be learned), at most 14 days (purgeStmts).
+  async function mailinRun(f = {}) {
+    if (!mailinOn()) return 0;
+    const q = f.id ? db.prepare("SELECT * FROM mailin WHERE id=? AND state='new'").bind(Number(f.id))
+      : f.ou ? db.prepare("SELECT * FROM mailin WHERE state='new' AND ou=? AND qi=? ORDER BY id LIMIT 20").bind(String(f.ou), String(f.qi))
+      : db.prepare("SELECT * FROM mailin WHERE state='new' ORDER BY id LIMIT 20");
+    let n = 0;
+    for (const m of ((await q.all()).results || [])) {
+      const ou = String(m.ou || ""), qi = String(m.qi || "");
+      let state = "unmatched", uid = null;
+      const ros = (await db.prepare("SELECT user_id,name,email,username,org_id,role FROM roster WHERE ou=?").bind(ou).all()).results || [];
+      const st = mailStudent(`${m.subject || ""}\n${m.body || ""}`, ros);
+      if (st) {
+        state = "done"; uid = String(st.user_id); n++;
+        const at = m.at || now();
+        await db.prepare("INSERT INTO submissions (ou,qi,user_id,at) VALUES (?,?,?,?) ON CONFLICT(ou,qi,user_id) DO UPDATE SET at=excluded.at WHERE submissions.at IS NULL OR submissions.at < excluded.at").bind(ou, qi, uid, at).run();
+        try { await mailinNoLqz(ou, qi, st, at); } catch {}
+      }
+      await db.prepare("UPDATE mailin SET state=?, user_id=?, body=CASE WHEN ?='done' THEN NULL ELSE body END WHERE id=?").bind(state, uid, state, m.id).run();
+    }
+    return n;
+  }
   // ---- per-section billing ($1,000 per section per semester) ----
   // A Brightspace course (ou) is paid when the professor paid for the USC section(s) it holds.
   // Admin and an account-wide activation (active_until) count as paid for everything.
@@ -2051,6 +2130,9 @@ export async function onRequest(context) {
     const og = new Map((await db.prepare(`SELECT ou,qi,orig FROM bs_quizzes WHERE ou IN (${ph}) AND orig IS NOT NULL`).bind(...ous).all()).results.map(b => [String(b.ou) + "\u0000" + String(b.qi), b.orig]));
     const ogOf = r => og.get(String(r.ou) + "\u0000" + String(r.qi)) ?? null;
     const protect = (await db.prepare(`SELECT q.ou,q.qi,q.password,q.title,q.gated FROM quizzes q WHERE q.ou IN (${ph}) AND q.qi IS NOT NULL`).bind(...ous).all()).results.map(r => withOrig({ ...r, orig: ogOf(r) }));
+    // Brightspace's submission email for each protected quiz goes to LOCKqz too (sync.js adds this address to the
+    // quiz's Notification Email, beside the professor's own, and takes only it away when the quiz is released).
+    if (mailinOn()) for (const r of protect) r.mail = await quizMail(String(r.ou), String(r.qi));
     const clear = (await db.prepare(`SELECT c.ou,c.qi,c.password FROM pending_clear c WHERE c.ou IN (${ph})`).bind(...ous).all()).results.map(r => withOrig({ ...r, orig: ogOf(r) }));
     return { protect, clear };
   }
@@ -2171,7 +2253,20 @@ export async function onRequest(context) {
           .bind(new Date(Date.now() - 21 * 86400000).toISOString(), ...prices, ...prices).first())?.n || 0);
       } catch { out.pay = true; }
       out.ok = out.db && out.write && out.clock && out.mail && out.pay;
+      try { await mailinRun(); } catch {}   // a submission email a blip left unread (every 5 minutes)
       return new Response(JSON.stringify(out), { status: 200, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...CORS } });
+    }
+    // Brightspace's submission email, handed over by LOCKqz's Email Worker (app/mailin): kept only when it went to a real
+    // quiz address (its tok), then read at once. Open: the address itself is the proof, and nothing is kept otherwise.
+    if (p === "/mailin" && request.method === "POST") {
+      if (!mailinOn()) return json({ ok: false, off: true });
+      const m = /^(?:lqz-|[^+@\s]+\+)(\d{1,12})-(\d{1,12})-([0-9a-f]{12})@/i.exec(String(body.to || "").trim());
+      if (!m || !sameHex(m[3].toLowerCase(), await mailTok(m[1], m[2]))) return json({ error: "not a quiz address" }, 404);
+      // The time it arrived (always after the lock that began before the submission; the email's own date has whole seconds).
+      const r = await db.prepare("INSERT INTO mailin (ou,qi,at,sender,subject,body,state) VALUES (?,?,?,?,?,?,'new')").bind(m[1], m[2], now(),
+        str(body.from, 200), str(body.subject, 300), String(body.text || "").slice(0, 8000)).run();
+      const n = await mailinRun({ id: r.meta.last_row_id });
+      return json({ ok: true, found: n > 0 });
     }
     if (p === "/version") return json({ ...buildInfo(), codes_on: codesOn, strict, fee_on: feeOn(), stripe: stripeOn(), google: env.GOOGLE_CLIENT_ID || null, google_hd: env.GOOGLE_CLIENT_ID ? String(env.GOOGLE_HD ?? "usc.edu") : null });
 
@@ -2324,6 +2419,7 @@ export async function onRequest(context) {
       // proves the student had submitted. One read, only on signed local unlocks (rare).
       let hold = false;
       if (ev === "unlock" && v.ok && detail && typeof detail === "object" && typeof quiz_id === "string" && /^\d+-\d+$/.test(quiz_id) && detail.reason !== "cap" && detail.reason !== "quiz_submitted_server" && detail.reason !== "quiz_ended") {
+        if (detail.ask === true) { try { const [o0, q0] = quiz_id.split("-"); await mailinRun({ ou: o0, qi: q0 }); } catch {} }   // a submission email not read yet
         const why = await serverUnlock(v.dev, v.id, quiz_id, true);
         detailObj = { ...detail, ...(why ? { expected: why } : { unexpected: true }) };
         // 29 Oct 2026: a helper that ASKS (detail.ask) keeps the block until the server can vouch for the end:

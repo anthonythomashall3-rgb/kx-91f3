@@ -322,10 +322,21 @@
       ORIG[qi] = { password: k.pwSaved ? k.password : o.password, hidden: k.hiddenSaved ? !!k.hidden : o.hidden,
                    pwSaved: !!k.pwSaved || "orig_password" in item, hiddenSaved: !!k.hiddenSaved || "orig_hidden" in item };
     }
-    async function protect(ou, qi, pw) {          // put LOCKqz's password on the quiz
+    // Brightspace's submission email: LOCKqz's own address for the quiz (from the server) is added to the quiz's
+    // Notification Email, beside the professor's own (a list separated by commas), and only it is taken away again.
+    // A Brightspace that refuses the list leaves the professor's own setting as it was (the password still goes on).
+    var OURMAIL = /^(?:lqz-|[^+@\s]+\+)\d+-\d+-[0-9a-f]{12}@(?:[a-z0-9-]+\.)*lockqz\.com$/i;
+    var mailsOf = function (v) { return String(v || "").split(/[,;]/).map(function (x) { return x.trim(); }).filter(Boolean); };
+    var withMail = function (v, mail) { var a = mailsOf(v).filter(function (x) { return !OURMAIL.test(x); }); if (mail) a.push(mail); return a.length ? a.join(", ") : null; };
+    async function protect(ou, qi, pw, mail) {    // put LOCKqz's password (and its submission address) on the quiz
       var cur = await get(quizUrl(ou, qi));
-      if (cur.Password === pw) return "already";
+      var ne = mail ? withMail(cur.NotificationEmail, mail) : (cur.NotificationEmail || null);
+      if (cur.Password === pw && ne === (cur.NotificationEmail || null)) return "already";
       await saveOrig(ou, qi, cur);
+      if (ne !== (cur.NotificationEmail || null)) {
+        try { await writePw(ou, qi, pw, { NotificationEmail: ne }); return "set"; } catch (e) { if (e.expired) throw e; }
+        if (cur.Password === pw) return "already";
+      }
       await writePw(ou, qi, pw); return "set";
     }
     async function release(ou, qi, oldPw, orig) {      // remove ONLY our password; put the professor's own settings back
@@ -336,7 +347,9 @@
         var extra = {};
         if (o) extra.AllowOnlyUsersWithSpecialAccess = !!o.hidden;
         else if (isGate(cur.Password, qi)) extra.AllowOnlyUsersWithSpecialAccess = false;   // our gate hid it
-        await writePw(ou, qi, o ? o.password : null, extra);
+        if (mailsOf(cur.NotificationEmail).some(function (x) { return OURMAIL.test(x); })) extra.NotificationEmail = withMail(cur.NotificationEmail, null);
+        try { await writePw(ou, qi, o ? o.password : null, extra); }
+        catch (e) { if (e.expired || !("NotificationEmail" in extra)) throw e; delete extra.NotificationEmail; await writePw(ou, qi, o ? o.password : null, extra); }
       }
       delete GPW[qi]; delete ORIG[qi];
       return "cleared";
@@ -349,7 +362,7 @@
     for (var i = 0; i < (state.protect || []).length; i++) {
       var x = state.protect[i]; say("Setting LOCKqz passwords in Brightspace... " + (++done) + "/" + todo);
       if (Number(x.gated) === 1) continue;   // gate on: the gate owns this quiz's password (resumed below)
-      try { results.push({ ou: x.ou, qi: x.qi, status: await protect(x.ou, x.qi, x.password) }); }
+      try { results.push({ ou: x.ou, qi: x.qi, status: await protect(x.ou, x.qi, x.password, x.mail) }); }
       catch (e) { if (e.expired) throw e; results.push({ ou: x.ou, qi: x.qi, status: "error", msg: e.message }); errors.push((x.title || x.qi) + ": " + e.message); }
     }
     for (var k = 0; k < (state.clear || []).length; k++) {
