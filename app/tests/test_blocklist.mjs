@@ -256,7 +256,11 @@ miss23.length === 0 ? ok(`all ${need23.length} 16-Nov entries served (AI_DOMAINS
 const need24 = ["arena.ai", "ppq.ai", "nanogpt.com", "librechat.ai", "kluster.ai", "globe.engineer", "hark.com", "hume.ai", "sesame.com", "thea.study", "scholar.0xpi.com", "hkchat.app", "hkchat.hk", "hkgai.net", "kortix.com", "kortix.ai", "suna.so", "atoms.dev", "mgx.dev", "marscode.com", "lingma.aliyun.com", "qoder.com", "codebuddy.ai", "roomote.dev", "orchids.app", "tempo.new", "heyboss.ai", "heyboss.xyz", "macaly.com", "capacity.so", "affine.pro", "otter.ai", "fireflies.ai", "rows.com", "napkin.ai", "beautiful.ai"];
 const miss24 = need24.filter(d => !(served || []).includes(d));
 miss24.length === 0 ? ok(`all ${need24.length} 17-Nov entries served (AI_DOMAINS)`) : bad("missing: " + miss24.join(", "));
-const stray = ahead.filter(d => !need22.includes(d) && !need23.includes(d) && !need24.includes(d));
+// 22 Nov: desktop AI assistants for calls and tests (screen and audio overlays) and more model APIs, served ahead of the next app version.
+const need25 = ["subcue.ai", "accounts.subcue.ai", "ctrlpotato.com", "clapassist.com", "offerinai.com", "lastroundai.com", "app.lastroundai.com", "linkjob.ai", "craqly.com", "sigmeet.ai", "aissence.ai", "camcue.app", "ghostpilotai.com", "pluely.com", "wittro.com", "api.minimax.chat", "api.hunyuan.cloud.tencent.com", "upstage.ai", "api.upstage.ai", "friendli.ai", "api.friendli.ai", "api.studio.nebius.ai", "api.chatanywhere.tech", "api.chatanywhere.org"];
+const miss25 = need25.filter(d => !(served || []).includes(d));
+miss25.length === 0 ? ok(`all ${need25.length} 22-Nov entries served (AI_DOMAINS)`) : bad("missing: " + miss25.join(", "));
+const stray = ahead.filter(d => !need22.includes(d) && !need23.includes(d) && !need24.includes(d) && !need25.includes(d));
 stray.length === 0 ? ok("every entry served ahead of blocklist.txt is one of these") : bad("served but in no blocklist and not listed here: " + stray.join(", "));
 need22.every(d => mac.includes(d) === win.includes(d)) ? ok("both blocklists agree on them") : bad("the two blocklists differ on the 11 Nov entries");
 
