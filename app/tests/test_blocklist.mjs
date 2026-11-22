@@ -125,6 +125,19 @@ macXb.includes('"iPhone Mirroring"') ? ok("mac closes iPhone Mirroring during a 
 winEng.includes('"PhoneExperienceHost"') ? ok("windows closes Phone Link during a quiz") : bad("windows: PhoneExperienceHost not in RemoteApps");
 const macAi = readFileSync(join(DIR, "../mac/lockqz.sh"), "utf8");
 ['"Grok"','"Kimi"','"Qwen"','"Microsoft 365 Copilot"'].every(a => macAi.includes(a)) ? ok("mac closes the Grok / Kimi / Qwen / M365 Copilot apps") : bad("mac AI_APPS missing a 27-Oct app");
+{ // 22 Nov: desktop AI assistants that sit over the screen (calls, tests) are closed on both systems
+  const macX = readFileSync(join(DIR, "../mac/extra-block.sh"), "utf8");
+  const macOv = (macX.match(/^OVERLAY_APPS=\(([^)]*)\)/m) || [, ""])[1], winOv = (winEng.match(/^\$OverlayApps\s*=\s*@\(([^)]*)\)/m) || [, ""])[1];
+  const names = ["SubcueAI","CTRLpotato","LastRound","Linkjob","Craqly","CamCue","GhostPilot","Glimp","GhostDesk","Wittro","KlewAI","Ofradr","Pluely","Natively","OpenCluely","Cheating Daddy","PhantomDesk","Interview Copilot"];
+  const missO = names.filter(n => !macOv.includes(`"${n}"`) || !winOv.includes(`"${n}"`));
+  missO.length === 0 ? ok(`mac and windows close the ${names.length} 22-Nov screen assistants`) : bad("not closed on both: " + missO.join(", "));
+  const set = l => [...l.matchAll(/"([^"]+)"/g)].map(m => m[1].toLowerCase()).sort().join("|");
+  const macOnly = ["leetcode wizard","examshield helper","lockedin ai","final round"], strip = l => l.split("|").filter(n => !macOnly.includes(n)).join("|");
+  strip(set(macOv)) === set(winOv) ? ok("mac and windows overlay lists name the same apps") : bad("overlay lists differ");
+  const linOv = (readFileSync(join(DIR, "../linux/lockqz.sh"), "utf8").match(/^OVERLAY_APPS=\(([^)]*)\)/m) || [, ""])[1].split(/\s+/);
+  ["pluely","opencluely","cheating-daddy","ghostpilot","juxano","glimp","ghostdesk","subcue"].every(n => linOv.includes(n)) && linOv.every(n => n.length <= 15)
+    ? ok("linux closes them too (names fit the 15-letter process name)") : bad("linux OVERLAY_APPS missing a 22-Nov app or has a name pkill -x cannot match");
+}
 
 console.log("T12 browser filters stay under their 1000-entry limits (Chromium URLBlocklist, Firefox WebsiteFilter)");
 const est = hostsE.length + 2 * pathsE.length + 20;

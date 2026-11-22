@@ -49,7 +49,8 @@ REMOTE_APPS=(teamviewer TeamViewer teamviewerd anydesk AnyDesk rustdesk RustDesk
              remoting_host chrome-remote-desktop parsec parsecd moonlight splashtop nomachine nxserver nxnode zohoassist scrcpy
              remmina gnome-connections krdc vinagre xfreerdp wlfreerdp sdl-freerdp rdesktop vncviewer xtigervncviewer remote-viewer virt-viewer
              ssh mosh-client autossh termius)   # ssh / mosh / Termius = a shell on another computer
-OVERLAY_APPS=(cluely Cluely interview-coder InterviewCoder lockedin-ai FinalRound ohmni sensei ultracode pieces verve-ai parakeet-ai beyz-ai)
+OVERLAY_APPS=(cluely Cluely interview-coder InterviewCoder lockedin-ai FinalRound ohmni sensei ultracode pieces verve-ai parakeet-ai beyz-ai \
+             subcue subcueai ctrlpotato clapassist offerin lastround linkjob craqly sigmeet aissence camcue ghostpilot ghostpilot-ai GhostPilot glimp ghostdesk wittro klewai ghostinterview ofradr pluely Pluely natively opencluely OpenCluely cheating-daddy xexamai mindwhisper hackysack juxano Juxano offerbull coadeo extrabrain cuebird techscreen shadecoder intrvw invisibleai phantomdesk interviewbee ghostcoder)
 
 _kill_list() {   # _kill_list label name...
   local label="$1"; shift

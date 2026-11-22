@@ -26,7 +26,13 @@ REMOTE_APPS=("TeamViewer" "AnyDesk" "RustDesk" "remoting_host" "chrome_remote_de
              "ssh" "mosh-client" "autossh" "Termius")   # iPhone Mirroring = the phone's apps (and its network) on the Mac screen; ssh/mosh/Termius = a shell on another computer
 OVERLAY_APPS=("Cluely" "Interview Coder" "InterviewCoder" "LockedIn AI" "LockedInAI" "Final Round" \
               "FinalRound" "Ohmni" "Sensei" "Leetcode Wizard" "UltraCode" "ExamShield helper" "Pieces" \
-              "Verve AI" "Parakeet AI" "Beyz AI" "Interview Solver")
+              "Verve AI" "Parakeet AI" "Beyz AI" "Interview Solver" \
+              "SubcueAI" "Subcue" "CTRLpotato" "ClapAssist" "Offerin" "LastRound" "LastRound AI" "Linkjob" "Linkjob AI" \
+              "Craqly" "SigMeet" "Aissence" "CamCue" "GhostPilot" "GhostPilot AI" "Glimp" "GhostDesk" "Wittro" \
+              "KlewAI" "GhostInterview" "Ofradr" "Pluely" "Natively" "OpenCluely" "Cheating Daddy" "cheating-daddy" \
+              "xexamai" "MindWhisper" "MindWhisper AI" "HackySack" "Juxano" "OfferBull" "Coadeo" "ExtraBrain" "Cuebird" \
+              "TechScreen" "Shadecoder" "Intrvw" "InvisibleAI" "PhantomDesk" "PhantomDesk AI" "InterviewBee" "Ghostcoder" \
+              "Interview Copilot")
 LOCAL_MODEL_PROCS=("ollama" "llama-server" "llama-cli" "llama-run" "llama_cpp" "llamafile" "koboldcpp" \
                    "text-generation" "localai" "local-ai" "lm-studio-server" "jan-server" "gpt4all" "mlx_lm" "vllm" \
                    "lms" "ollama_llama_server" "llama-mtmd-cli" "cortex" "cortex-server" "open-webui" "mlc_llm" "lmdeploy" "sglang" "lemonade-server" "lemonade-app")

@@ -46,7 +46,12 @@ $RemoteApps = @("TeamViewer","AnyDesk","RustDesk","remoting_host","ScreenConnect
                 "scrcpy","escrcpy","QtScrcpy","Vysor","AirDroid","ApowerMirror","LetsView","AirServer","AnyViewer",
                 "Moonlight","vncviewer","RealVNC","Shadow","wfica32","CDViewer","SelfService","vmware-view","workspaces","RDCMan","RemoteDesktopManager","mRemoteNG","RoyalTS",
                 "ssh","putty","kitty","MobaXterm","Termius","SecureCRT","mosh-client")   # Phone Link = the phone's apps (and its network) on the PC screen; NoMachine; Zoho Assist; ssh / PuTTY / Termius = a shell on another computer
-$OverlayApps= @("Cluely","InterviewCoder","Interview Coder","LockedInAI","FinalRound","Ohmni","Sensei","UltraCode","Pieces","Verve AI","Parakeet AI","Beyz AI","Interview Solver")
+$OverlayApps= @("Cluely","InterviewCoder","Interview Coder","LockedInAI","FinalRound","Ohmni","Sensei","UltraCode","Pieces","Verve AI","Parakeet AI","Beyz AI","Interview Solver",
+                "SubcueAI","Subcue","CTRLpotato","ClapAssist","Offerin","LastRound","LastRound AI","Linkjob","Linkjob AI","Craqly",
+                "SigMeet","Aissence","CamCue","GhostPilot","GhostPilot AI","Glimp","GhostDesk","Wittro","KlewAI","GhostInterview",
+                "Ofradr","Pluely","Natively","OpenCluely","Cheating Daddy","cheating-daddy","xexamai","MindWhisper","MindWhisper AI",
+                "HackySack","Juxano","OfferBull","Coadeo","ExtraBrain","Cuebird","TechScreen","Shadecoder","Intrvw","InvisibleAI",
+                "PhantomDesk","PhantomDesk AI","InterviewBee","Ghostcoder","Interview Copilot")
 $ModelProcs = @("ollama","llama-server","llama-cli","llama-run","llamafile","koboldcpp","localai","local-ai","jan","gpt4all","text-generation-webui","vllm",
                 "ollama_llama_server","lms","llama-mtmd-cli","koboldcpp_cu12","koboldcpp_nocuda","cortex","cortex-server","open-webui","lmdeploy","text-generation-launcher","lemonade-server","lemonade-app")
 # tor = the Tor Browser's network daemon (Tor resolves names remotely, past the hosts block).
