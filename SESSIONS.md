@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-11-22 09:20 PT — 01UUDg7ZKM: sweep 28 (exam integrity review): read-only first; files named here before each edit. Will need, after the claims above end: app/cloudflare/functions/api/[[route]].js (serverUnlock, /report unlock, /live), app/cloudflare/public/dashboard.html (live labels), app/mac/lockqzd.py + app/windows/lockqzd.ps1 (unlock ask), both browser-policy files, the version files.
+- 2026-11-22 09:50 PT — 01UUDg7ZKM: sweep 28 (exam integrity review). Server now: app/cloudflare/functions/api/[[route]].js (serverUnlock, the /report unlock branch, /live), app/cloudflare/public/dashboard.html (live labels), app/cloudflare/wrangler.toml (one setting), app/tests/test_sweep28.mjs (new), app/tests/run_all.sh (one line). After sweep 27: app/mac/lockqz-agent.py, app/windows/lockqz-agent.ps1, app/mac/lockqzd.py, app/windows/lockqzd.ps1, app/mac/extra-block.sh, app/windows/lockqz.ps1, app/linux/lockqz.sh, both blocklist.txt, both browser-policy files, the version files.
 - 2026-11-22 08:55 PT — 01UUDg7YXjJx: failure-mode review (sweep 27), apps 0.6.37. Files: app/mac/browser-policy.py, app/windows/browser-policy.ps1, .github/workflows/usc-sections.yml, app/usc/build_sections.py, versions (app/VERSION, lockqzd.py, lockqzd.ps1), tests (test_chrome_policy_real.mjs, test_agent.py, test_sections_lookup.mjs; not run_all.sh).
 
 ## Recently finished
