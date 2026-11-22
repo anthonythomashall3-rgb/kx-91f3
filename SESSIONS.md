@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-22 12:10 PT — 01UUDg7YXjJx: bug sweep 30 (everything): read-only first; files named here before each edit.
 
 ## Recently finished
 - 2026-11-22 12:10 PT — 01UUDg7YXjJx: bug sweep 29 finished: Gmail payments script keeps inside Google's daily run time and its clock calls run even when Gmail fails (bddc16d; pasted into Apps Script, sha 7c2d5d0a). Record: Project doc claude/LOCKqz-bug-sweep-29.md. No files held.
