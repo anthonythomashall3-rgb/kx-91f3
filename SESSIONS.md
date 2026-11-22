@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-22 09:20 PT — 01UUDg7ZKM: sweep 28 (exam integrity review): read-only first; files named here before each edit. Will need, after the claims above end: app/cloudflare/functions/api/[[route]].js (serverUnlock, /report unlock, /live), app/cloudflare/public/dashboard.html (live labels), app/mac/lockqzd.py + app/windows/lockqzd.ps1 (unlock ask), both browser-policy files, the version files.
 - 2026-11-22 09:04 PT — 01UUDg7anh72: student email (owner, 22 Nov): no automatic email to a student unless LOCKqz is on for their class; Professor Bristow's classes wait until he emails his students himself; the admin's clock note reads the clock fresh. Files: app/cloudflare/functions/api/[[route]].js (examMailTick, renewalTick, payNudgeTick, cardRenewTick, /email/students, clockState), app/cloudflare/public/dashboard.html (CLOCK, autoRefresh), app/cloudflare/wrangler.toml (two settings), app/tests/test_mail_on.mjs (new), app/tests/run_all.sh.
 - 2026-11-22 08:55 PT — 01UUDg7YXjJx: failure-mode review (sweep 27), apps 0.6.37. Files: app/mac/browser-policy.py, app/windows/browser-policy.ps1, .github/workflows/usc-sections.yml, app/usc/build_sections.py, versions (app/VERSION, lockqzd.py, lockqzd.ps1), tests (test_chrome_policy_real.mjs, test_agent.py, test_sections_lookup.mjs; not run_all.sh).
 
