@@ -121,10 +121,11 @@ $wd = $env:WINDIR; $env:WINDIR = "C:\Windows"
 Check "Windows' own programs stay (the Windows folder, Microsoft's Store apps); an unreadable (elevated) program is left alone" ((Keep-Hidden "x" "C:\Windows\System32\x.exe" $kk) -and (Keep-Hidden "ms-teams" "C:\Program Files\WindowsApps\MSTeams_25.1.0.0_x64__8wekyb3d8bbwe\ms-teams.exe" $kk) -and (Keep-Hidden "evil" "" $kk))
 Check "another publisher's Store app, a program in AppData or a folder named like Windows is closed unless its name is listed" ((-not (Keep-Hidden "evil" "C:\Program Files\WindowsApps\Evil_1.0_x64__abcdefghjkmnp\evil.exe" $kk)) -and (-not (Keep-Hidden "Cluely" "C:\Users\s\AppData\Local\Programs\cluely\Cluely.exe" $kk)) -and (-not (Keep-Hidden "x" "C:\WindowsEvil\x.exe" $kk)) -and (Keep-Hidden "Zoom" "C:\Users\s\AppData\Roaming\Zoom\bin\Zoom.exe" $kk))
 $env:WINDIR = $wd
-$sleepExe = @(Get-Command sleep -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 | ForEach-Object { $_.Source })[0]
-if ($sleepExe -and -not $IsWindows) {
+# A real program under each name: a tiny script (a renamed copy of a system tool may not start: coreutils is one
+# program for every tool on some systems).
+if (-not $IsWindows) {
   $procs = [ordered]@{}
-  foreach ($n in @("Glimp", "Zoom", "KeptByServer", "bitwarden")) { $f = Join-Path $tmpH $n; Copy-Item $sleepExe $f; & chmod +x $f; $procs[$n] = Start-Process -FilePath $f -ArgumentList "30" -PassThru }
+  foreach ($n in @("Glimp", "Zoom", "KeptByServer", "bitwarden")) { $f = Join-Path $tmpH $n; [IO.File]::WriteAllText($f, "#!/bin/sh`nwhile :; do sleep 1; done`n"); & chmod +x $f; $procs[$n] = Start-Process -FilePath $f -PassThru }
   Start-Sleep -Milliseconds 300
   function Get-HiddenPids { @($procs.Values | ForEach-Object { $_.Id }) }
   $closed = @(Close-HiddenApps $kk)
