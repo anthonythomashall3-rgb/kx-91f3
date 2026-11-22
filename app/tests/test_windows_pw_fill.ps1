@@ -89,10 +89,15 @@ foreach ($b in $browsers) {
   Check ($n0 -eq 0 -and -not ((Get-Content $hits -Raw) -match '/pwlog')) "$($b.Name): a page that is not a quiz gets nothing entered"
   Get-Process $b.Proc -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Seconds 2
 
-  # 2) The quiz's start page: the password is entered, in the password box only, once.
+  # 2) The quiz's start page: the password is entered, in the password box only, once -- and only while
+  #    this is the quiz LOCKqz locked (another quiz's start page open beside it gets nothing).
   Set-Content -Path $hits -Value ""; $script:PwFilled = @{}
   Start-Process -FilePath $b.Exe -ArgumentList ($common + @($nw, "`"$startPage`""))
   for ($i = 0; $i -lt 30; $i++) { Start-Sleep -Seconds 1; if ((Get-Content $hits -Raw) -match 'document /d2l/lms/quizzing/user/quiz_start') { break } }
+  $script:Quiz = "123-78"
+  $n0 = 0; for ($i = 0; $i -lt 4; $i++) { Start-Sleep -Seconds 1; $n0 += (Fill-QuizPassword $PW) }
+  Check ($n0 -eq 0 -and -not ((Get-Content $hits -Raw) -match '/pwlog')) "$($b.Name): another quiz's start page gets nothing entered"
+  $script:Quiz = "123-77"
   $n1 = 0; $t0 = Get-Date
   for ($i = 0; $i -lt 25 -and $n1 -eq 0; $i++) { Start-Sleep -Seconds 1; $n1 += (Fill-QuizPassword $PW) }
   $took = [int]((Get-Date) - $t0).TotalSeconds
@@ -125,6 +130,7 @@ foreach ($b in $browsers) {
   Check ($n5 -eq 0 -and -not ((Get-Content $hits -Raw) -match '/pwlog')) "$($b.Name): nothing is entered inside the attempt"
   if ($fail) { Dump-Tree $b.Proc; Write-Host (Get-Content $hits -Raw) }
   Get-Process $b.Proc -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Seconds 2
+  $script:Quiz = $null
 }
 Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue
 if ($fail) { Write-Host "$fail check(s) FAILED"; exit 1 }

@@ -301,7 +301,7 @@ print("T12h the quiz password is handed to the quiz page (Chromium browsers), ne
 import urllib.parse as _up
 msgs = []; clips = []; sets = []
 A.dialog = lambda m, *a, **k: msgs.append(m); A.clipboard = lambda t, *a, **k: clips.append(t)
-A.set_tab_url = lambda app, wi, ti, url: sets.append((app, wi, ti, url))
+A.set_tab_url = lambda app, wi, ti, url, *k: sets.append((app, wi, ti, url))
 class HP(FakeHelper):
     def __call__(self, path, body=None, timeout=90):
         if path == "/password": self.calls.append((path, body)); return {"password": "LQ-AB12CD34"}
@@ -366,6 +366,46 @@ msgs[:] = []; clips[:] = []; sets[:] = []
 g, h = hagent(); T(g, [("Brave Browser", 0, 0, SUMM)]); T(g, [("Brave Browser", 0, 0, SUMM)])
 ok("Brave: handed to the quiz tab like Chrome") if g.hand and not clips and sets and sets[-1][0] == "Brave Browser" else bad("hand %r sets %r" % (g.hand, sets))
 ok("a browser with no managed extensions gets no empty list") if "ExtensionInstallForcelist" not in _P.merge_chromium({}, _P.chromium_policy("com.microsoft.Edge")) and _P.merge_chromium({"ExtensionInstallForcelist": ["x;y"]}, _P.chromium_policy("com.microsoft.Edge"))["ExtensionInstallForcelist"] == ["x;y"] else bad("merge forcelist")
+print("T12i the hand-over reaches every open start page of the quiz, and only the tab it was read from")
+msgs[:] = []; clips[:] = []; sets[:] = []; exps = []
+A.set_tab_url = lambda app, wi, ti, url, *k: (sets.append((app, wi, ti, url)), exps.append(k[0] if k else None))
+two = lambda f0="", f1="": [("Google Chrome", 0, 0, SUMM + f0), ("Google Chrome", 1, 3, SUMM + f1)]
+g, h = hagent(); T(g, two()); T(g, two())
+ok("the quiz open in two tabs: both are handed the password") if ("Google Chrome", 0, 0, want) in sets and ("Google Chrome", 1, 3, want) in sets else bad("sets %r" % (sets,))
+ok("... each tab only if it still shows the address that was read") if exps and all(e == SUMM for e in exps) else bad("expect %r" % (exps,))
+T(g, two("#lqz-in", want[len(SUMM):]))
+ok("one tab answered #lqz-in, the other has not: not entered yet") if not g.hand["in"] and g.hand["got"] else bad("hand %r" % (g.hand,))
+n = len(sets); g.hand["sent"] = 0; T(g, two("#lqz-in", want[len(SUMM):]))
+ok("... the other tab is handed it again, the first one is left alone") if sets[n:] == [("Google Chrome", 1, 3, want)] else bad("sets %r" % (sets[n:],))
+T(g, two("#lqz-in", "#lqz-in"))
+ok("both tabs answered #lqz-in: entered, nothing shown or copied") if g.hand["in"] and not clips and len(msgs) == 1 else bad("hand %r msgs %r" % (g.hand, msgs))
+msgs[:] = []; clips[:] = []; sets[:] = []
+g, h = hagent(); T(g, two()); T(g, two("#lqz-in", ""))
+g.hand["since"] -= A.HAND_FILL_WAIT + 1; T(g, two("#lqz-in", ""))
+ok("a second tab that never takes it: after 75 s the password is shown and copied once") if clips == ["LQ-AB12CD34"] and sum("Quiz password:  LQ-AB12CD34" in m for m in msgs) == 1 else bad("clips %r msgs %r" % (clips, msgs))
+msgs[:] = []; clips[:] = []; sets[:] = []
+g, h = hagent(); T(g, [tab(SUMM + "#d2l_content")]); T(g, [tab(SUMM + "#d2l_content")])
+ok("a quiz address with its own # part (Skip to main content) is handed the password without it") if sets and sets[-1] == ("Google Chrome", 0, 0, want) else bad("sets %r" % (sets,))
+import shutil as _sh, subprocess as _sp, json as _js
+if _sh.which("node"):
+    import importlib.util as _iu2   # a fresh copy of the agent: this section has put a stand-in in A.set_tab_url
+    _sp2 = _iu2.spec_from_file_location("lqz_agent_fresh", A.__file__); A2 = _iu2.module_from_spec(_sp2); _sp2.loader.exec_module(A2)
+    _q = []; A2.osa = lambda js, *a, **k: (_q.append(js), "ok")[1]
+    A2.set_tab_url("Google Chrome", 1, 0, SUMM + "#lqz=X", SUMM + "#lqz-got"); A2.set_tab_url("Google Chrome", 1, 0, "about:blank")
+    # The script that would go to osascript, run against a stand-in browser: windows()[1].tabs()[0].
+    fake = ("function Application(n){return{windows:function(){return W.map(function(w){return{tabs:function(){return w.map(function(c){"
+            "var o={};Object.defineProperty(o,'url',{get:function(){return function(){return c.u;};},set:function(v){c.u=v;c.set=true;}});return o;});}};});}};}")
+    def jx(code, wins):
+        r = _sp.run(["node", "-e", "var W=%s;%s;var r=%s;console.log(JSON.stringify({r:r,W:W}))" % (_js.dumps(wins), fake, code)], capture_output=True, text=True, timeout=30)
+        return _js.loads(r.stdout or "{}")
+    a = jx(_q[0], [[{"u": "https://x/notes"}], [{"u": SUMM + "#lqz-got"}]])
+    ok("set_tab_url: the tab that still shows the quiz is sent on") if a.get("r") == "ok" and a["W"][1][0]["u"] == SUMM + "#lqz=X" else bad("jxa %r" % (a,))
+    b = jx(_q[0], [[{"u": SUMM}], [{"u": "https://docs.google.com/notes"}]])
+    ok("set_tab_url: windows reordered since the read -> the tab now at that place is left alone") if b.get("r") == "moved" and not b["W"][1][0].get("set") and b["W"][1][0]["u"] == "https://docs.google.com/notes" else bad("jxa %r" % (b,))
+    c = jx(_q[1], [[{"u": "x"}], [{"u": "https://chatgpt.com/"}]])
+    ok("set_tab_url without an address to check: sent as before") if c.get("r") == "ok" and c["W"][1][0]["u"] == "about:blank" else bad("jxa %r" % (c,))
+else:
+    print("  skipped: node not installed (set_tab_url's script check)")
 A.dialog = lambda *a, **k: None; A.clipboard = lambda *a, **k: None; A.set_tab_url = lambda *a, **k: None
 ''')
 
@@ -514,12 +554,13 @@ ok("chatgpt.com and its subdomains") if bt("https://chatgpt.com/c/1") and bt("ht
 ok("path entries (bing.com/chat, huggingface.co/chat, x.com/i/grok)") if bt("https://www.bing.com/chat?q=1") and bt("https://huggingface.co/chat/") and bt("https://x.com/i/grok") else bad("path entry kept")
 ok("not: Brightspace, bing search, huggingface models, x.com, Google search, notchatgpt.com") if not any(bt(u) for u in [B + "/d2l/home/1", "https://www.bing.com/search?q=1", "https://huggingface.co/models", "https://x.com/home", "https://www.google.com/search?q=1", "https://notchatgpt.com/"]) else bad("over-blank")
 g, h = agent()
-sets = []; A.set_tab_url = lambda app, wi, ti, url: sets.append((ti, url))
+sets = []; exp18 = []; A.set_tab_url = lambda app, wi, ti, url, *k: (sets.append((ti, url)), exp18.append(k[0] if k else None))
 g.blocklist = lambda: (hosts, paths)
 A.ps_procs = lambda: []
 T(g, [tab(ATT), ("Google Chrome", 0, 1, "https://chatgpt.com/c/1"), ("Google Chrome", 0, 2, "https://docs.google.com/x"), ("Firefox", -1, -1, "https://claude.ai/")])
 T(g, [tab(ATT), ("Google Chrome", 0, 1, "https://chatgpt.com/c/1"), ("Google Chrome", 0, 2, "https://docs.google.com/x")])
 ok("locked: the ChatGPT tab is blanked, notes and the quiz are not") if (1, "about:blank") in sets and not any(t in (0, 2) for (t, _) in sets) else bad("sets %r" % sets)
+ok("... only if that tab still shows the AI page that was read") if exp18 and all(e == "https://chatgpt.com/c/1" for e in exp18) else bad("expect %r" % exp18)
 """)
 _section(r"""
 print("T19 C2 / C10 / verify: the password answer drives what the agent does next")
@@ -616,24 +657,25 @@ g.last_check = 0; T(g, [])
 ok("a later release of the same quiz is honored again") if "123-456" in g.capped else bad("new release ignored")
 print("T23 a quiz opened from Brightspace Content (quiz in a frame) is moved to its own page, so submitting shows")
 CV = B + "/d2l/le/content/123/fullscreen/77/ViewLocation?title=Q&location=%2fd2l%2flms%2fquizzing%2fuser%2fquiz_summary.d2l%3fqi%3d456%26ou%3d123"
-moved = []; _st = A.set_tab_url; A.set_tab_url = lambda a, w, t, u: moved.append((a, w, t, u))
+moved = []; mexp = []; _st = A.set_tab_url; A.set_tab_url = lambda a, w, t, u, *k: (moved.append((a, w, t, u)), mexp.append(k[0] if k else None))
 try:
     g, h = agent(); T(g, [tab(CV)])
 finally: A.set_tab_url = _st
 ok("Content view tab -> its tab is sent to the quiz's own page") if any(u == SUMM for (_, _, _, u) in moved) else bad("not moved: %r" % moved)
+ok("... only if it still shows the Content page that was read") if CV in mexp else bad("expect %r" % mexp)
 ok("... and the quiz locks at once (same lock id)") if g.locked and any(p == "/lock" and b.get("quiz_id") == "123-456" for (p, b) in h.calls) else bad("not locked: %r" % h.calls)
-moved = []; A.set_tab_url = lambda a, w, t, u: moved.append(u)
+moved = []; A.set_tab_url = lambda a, w, t, u, *k: moved.append(u)
 try: g, h = agent(); T(g, [tab(B + "/d2l/le/content/123/fullscreen/77/ViewLocation?location=%2fcontent%2fnotes.pdf")])
 finally: A.set_tab_url = _st
 ok("a Content view of a file is left alone") if not moved and not g.locked else bad("moved/locked a file view: %r" % moved)
 fx = {"windows": [{"tabs": [{"index": 1, "entries": [{"url": CV, "children": [{"url": SUBM}]}]}]}]}
 A._moved.clear(); got = []; tb = [("Safari", 0, 0, CV)]
-A.move_content_quizzes(tb, now=1000.0, setter=lambda a, w, t, u: got.append(u))
-A.move_content_quizzes(tb, now=1005.0, setter=lambda a, w, t, u: got.append(u))
+A.move_content_quizzes(tb, now=1000.0, setter=lambda a, w, t, u, *k: got.append(u))
+A.move_content_quizzes(tb, now=1005.0, setter=lambda a, w, t, u, *k: got.append(u))
 ok("a page still loading is not sent there again within 10 s (no reload loop)") if got == [SUMM] else bad("moves: %r" % got)
-A.move_content_quizzes(tb, now=1011.0, setter=lambda a, w, t, u: got.append(u))
+A.move_content_quizzes(tb, now=1011.0, setter=lambda a, w, t, u, *k: got.append(u))
 ok("... but is retried after 10 s if the move did not take") if got == [SUMM, SUMM] else bad("moves: %r" % got)
-A.move_content_quizzes([("Firefox", -1, -1, CV)], now=2000.0, setter=lambda a, w, t, u: got.append(u))
+A.move_content_quizzes([("Firefox", -1, -1, CV)], now=2000.0, setter=lambda a, w, t, u, *k: got.append(u))
 ok("a tab read from Firefox's session file is never moved (no address to set)") if len(got) == 2 else bad("moves: %r" % got)
 A._moved.clear()
 ok("Firefox: the frame's current page (submitted) is read from the session store") if A.firefox_urls(fx) == [SUBM] else bad("firefox: %r" % A.firefox_urls(fx))

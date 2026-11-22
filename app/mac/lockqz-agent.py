@@ -377,9 +377,16 @@ def browser_tabs():
         except Exception: pass
     return tabs
 
-def set_tab_url(app, wi, ti, url):
-    try: osa('Application(%s).windows()[%d].tabs()[%d].url = %s' % (json.dumps(app), wi, ti, json.dumps(url)))
-    except Exception: pass
+def set_tab_url(app, wi, ti, url, expect=None):
+    """Sends one tab to url. expect: the address that tab showed when the tabs were read. Windows are listed
+    front to back, so a click on another window between that read and this call shifts the indexes: the
+    tab is changed only if it still shows that address (its # part aside), never some other tab."""
+    js = "(function(){var t=Application(%s).windows()[%d].tabs()[%d];" % (json.dumps(app), wi, ti)
+    if expect is not None:
+        js += "if(String(t.url()||\"\").split(\"#\")[0]!==%s)return \"moved\";" % json.dumps(str(expect).split("#", 1)[0])
+    js += "t.url=%s;return \"ok\";})()" % json.dumps(url)
+    try: return osa(js) == "ok"
+    except Exception: return False
 
 _moved = {}
 def move_content_quizzes(tabs, now=None, setter=None):
@@ -396,7 +403,7 @@ def move_content_quizzes(tabs, now=None, setter=None):
         if now - _moved.get(inner, 0) < 10: continue
         _moved[inner] = now
         log("quiz opened from Content: moved to its own page (%s)" % lock_id(inner))
-        setter(a, w, t, inner)
+        setter(a, w, t, inner, u)
         done.append(inner)
     return done
 
@@ -955,7 +962,9 @@ class Agent:
         return None
 
     def hand_step(self, tabs, now, setter=None):
-        """One look at the quiz tab while the password is being handed over (tabs = raw addresses)."""
+        """One look at the quiz tabs while the password is being handed over (tabs = raw addresses). Every open
+        start page of this quiz is handed it: the extension fills only the tab it was handed to, and a
+        student may have the quiz open in two tabs. Entered = every one of them answered #lqz-in."""
         h = getattr(self, "hand", None)
         if not h or not self.locked or h["in"]: return
         setter = setter or set_tab_url
@@ -963,23 +972,22 @@ class Agent:
         for (a, w, t, u) in tabs:
             if w < 0 or a not in HAND_APPS: continue
             base = strip_hand(u)
-            if is_quiz(base) and lock_id(base) == self.quiz and "/attempt/" not in url_parts(base)[0]: mine.append((a, w, t, u, base))
-        for (_, _, _, u, _) in mine:
-            f = hand_fragment(u)
-            if f == "lqz-in":
-                if not h["in"]: log("quiz password entered in the quiz page")
-                h["in"] = h["got"] = True
-            elif f == "lqz-got": h["got"] = True
-        if h["in"]: return
+            if is_quiz(base) and lock_id(base) == self.quiz and "/attempt/" not in url_parts(base)[0]:
+                mine.append((a, w, t, u, base.split("#", 1)[0], hand_fragment(u)))
+        if any(f == "lqz-in" for (*_, f) in mine) and not h.get("said"):
+            h["said"] = True; log("quiz password entered in the quiz page")
+        if any(f in ("lqz-in", "lqz-got") for (*_, f) in mine): h["got"] = True
+        if mine and all(f == "lqz-in" for (*_, f) in mine):
+            h["in"] = True; return
         waited = now - h["since"]
-        if not h["got"] and mine and waited <= HAND_WAIT and now - h["sent"] >= HAND_EVERY:
+        todo = [m for m in mine if m[5] not in ("lqz-in", "lqz-got")]
+        if todo and waited <= HAND_WAIT and now - h["sent"] >= HAND_EVERY:
             h["sent"] = now
-            a, w, t, _, base = mine[0]
-            setter(a, w, t, base + "#lqz=" + urllib.parse.quote(h["pw"], safe=""))
+            for (a, w, t, u, page, _) in todo: setter(a, w, t, page + "#lqz=" + urllib.parse.quote(h["pw"], safe=""), u)
         if not h["told"] and ((not h["got"] and waited > HAND_WAIT) or (h["got"] and waited > HAND_FILL_WAIT)):
             h["told"] = True
-            for (a, w, t, u, base) in mine:
-                if hand_fragment(u).startswith("lqz="): setter(a, w, t, base + "#")   # the password leaves the address
+            for (a, w, t, u, page, f) in mine:
+                if f.startswith("lqz="): setter(a, w, t, page + "#", u)   # the password leaves the address
             log("quiz password not entered by itself (%s) - shown" % ("no password box found" if h["got"] else "no answer from the browser"))
             clipboard(h["pw"])
             dialog("Quiz password:  %s\n(copied to your clipboard — paste it into Brightspace)" % h["pw"])
@@ -1252,7 +1260,7 @@ class Agent:
             for (app, wi, ti, u) in tabs:
                 if wi < 0: continue
                 new = "about:blank" if blocked_tab(u, hosts, paths) else rewrite_search(u)
-                if new: set_tab_url(app, wi, ti, new)
+                if new: set_tab_url(app, wi, ti, new, u)
             # Opera reopened during the quiz (no policy layer, built-in VPN) -> closed again.
             if now - getattr(self, "opera_check", 0) >= 5:
                 self.opera_check = now

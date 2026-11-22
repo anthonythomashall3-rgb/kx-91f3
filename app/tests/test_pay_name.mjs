@@ -31,7 +31,9 @@ const call = async (env, path, body) => { const res = await onRequest({ request:
 const notify = (env, payments) => onRequest({ request: new Request(BASE + "/api/pay/notify", { method: "POST", headers: { "Content-Type": "application/json", "X-LOCKqz-Pay": SECRET }, body: JSON.stringify({ payments }) }), env }).then(r => r.json());
 const paid = async email => (await call(ON, "/pay/start", { email })).data.paid === true;
 const roster = (email, name, ou = "500") => sqlite.prepare("INSERT OR REPLACE INTO roster (ou,user_id,name,email,role,synced_at) VALUES (?,?,?,?,?,?)").run(ou, email, name, email, "Learner", new Date().toISOString());
-const students = { "maria@usc.edu": "Maria Garcia Lopez", "john@usc.edu": "Smith, John", "john2@usc.edu": "John Smith", "wei@usc.edu": "Wei Chen", "priya@usc.edu": "Priya Natarajan", "sam@usc.edu": "Samuel O'Neil-Diaz", "nocode@usc.edu": "Noah Code" };
+const students = { "maria@usc.edu": "Maria Garcia Lopez", "john@usc.edu": "Smith, John", "john2@usc.edu": "John Smith", "wei@usc.edu": "Wei Chen", "priya@usc.edu": "Priya Natarajan", "sam@usc.edu": "Samuel O'Neil-Diaz", "nocode@usc.edu": "Noah Code",
+  // Brightspace spells accents, the bank does not; a suffix is not the last name.
+  "jose@usc.edu": "José Muñoz", "lukasz@usc.edu": "Łukasz Wiśniewski", "thanh@usc.edu": "Nguyễn Thị Thanh", "robert@usc.edu": "Robert King Jr." };
 for (const [e, n] of Object.entries(students)) roster(e, n);
 const codes = {};
 for (const e of Object.keys(students)) if (e !== "nocode@usc.edu") codes[e] = (await call(ON, "/pay/start", { email: e })).data.code;
@@ -83,6 +85,17 @@ check("now only one John Smith is unpaid: his name is enough", n.results?.[0]?.e
 sqlite.prepare("DELETE FROM payments WHERE code=?").run(codes["sam@usc.edu"]);
 n = await notify(ON, [z("Samuel O'Neil-Diaz"), z("Samuel O'Neil-Diaz")]);
 check("two payments under one name in one batch: the first counts, the second waits", n.results?.[0]?.email === "sam@usc.edu" && n.results?.[1]?.matched === null, JSON.stringify(n));
+console.log("N5 accents and suffixes: Brightspace's spelling and the bank's are one name");
+n = await notify(ON, [z("JOSE MUNOZ")]);
+check("José Muñoz in Brightspace, JOSE MUNOZ from the bank: matched", n.results?.[0]?.email === "jose@usc.edu" && await paid("jose@usc.edu"), JSON.stringify(n));
+n = await notify(ON, [{ txn: "venmo:v2", amount: 210, note: "", via: "venmo", payer: "Lukasz Wisniewski" }]);
+check("letters with no plain form (Ł): matched", n.results?.[0]?.email === "lukasz@usc.edu" && await paid("lukasz@usc.edu"), JSON.stringify(n));
+n = await notify(ON, [z("NGUYEN THI THANH")]);
+check("Vietnamese marks (ễ, ị): matched", n.results?.[0]?.email === "thanh@usc.edu" && await paid("thanh@usc.edu"), JSON.stringify(n));
+n = await notify(ON, [z("ROBERT KING")]);
+check("Robert King Jr. in Brightspace, ROBERT KING from the bank: matched", n.results?.[0]?.email === "robert@usc.edu" && await paid("robert@usc.edu"), JSON.stringify(n));
+const keys = Object.fromEntries(sqlite.prepare("SELECT email, nkey FROM pay_names").all().map(r => [r.email, r.nkey]));
+check("the names kept are plain letters", keys["jose@usc.edu"] === "jose|munoz" && keys["lukasz@usc.edu"] === "lukasz|wisniewski" && keys["robert@usc.edu"] === "robert|king", JSON.stringify(keys));
 const wt = readFileSync(join(CF, "wrangler.toml"), "utf8");
 check("the live setting is on", /^PAY_NAME_MATCH = "1"$/m.test(wt));
 console.log(`RESULT: ${pass} passed, ${fail} failed`);

@@ -1550,11 +1550,19 @@ export async function onRequest(context) {
   // pay_names (migrate_046) holds each such student's "first|last", written the first time their pay page
   // is asked for (one indexed read; one row once per student), so a payment is matched by index.
   const nameMatch = () => String(env.PAY_NAME_MATCH || "0") === "1";
-  const nameToks = s => String(s || "").normalize("NFKD").toLowerCase().replace(/[^a-z\s'-]/g, " ").split(/\s+/).map(t => t.replace(/^['-]+|['-]+$/g, "")).filter(t => t.length > 1);
-  const nameKey = s => {   // "First Middle Last" or "Last, First Middle" -> "first|last"
+  // Accents are dropped and letters with no plain form spelled out, so Brightspace's "José Muñoz" and the
+  // bank's "JOSE MUNOZ" are one name; a Jr / Sr / II / III / IV at the end is not the last name.
+  const NAME_PLAIN = { "\u0142": "l", "\u00f8": "o", "\u00e6": "ae", "\u0153": "oe", "\u00df": "ss", "\u0111": "d", "\u00f0": "d", "\u00fe": "th", "\u0131": "i" };
+  const nameToks = s => String(s || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[\u0142\u00f8\u00e6\u0153\u00df\u0111\u00f0\u00fe\u0131]/g, c => NAME_PLAIN[c])
+    .replace(/[^a-z\s'-]/g, " ").split(/\s+/).map(t => t.replace(/^['-]+|['-]+$/g, "")).filter(t => t.length > 1);
+  const NAME_SUFFIX = /^(jr|sr|ii|iii|iv)$/;
+  const noSuffix = (t, keep) => { t = t.slice(); while (t.length > keep && NAME_SUFFIX.test(t[t.length - 1])) t.pop(); return t; };
+  const nameKey = s => {   // "First Middle Last", "Last, First Middle" or "First Last, Jr." -> "first|last"
     s = String(s || "");
-    if (s.includes(",")) { const i = s.indexOf(","), l = nameToks(s.slice(0, i)), f = nameToks(s.slice(i + 1)); return f.length && l.length ? f[0] + "|" + l[l.length - 1] : ""; }
-    const t = nameToks(s); return t.length >= 2 && t.length <= 6 ? t[0] + "|" + t[t.length - 1] : "";
+    const i = s.indexOf(",");
+    if (i >= 0 && nameToks(s.slice(i + 1)).some(t => !NAME_SUFFIX.test(t))) {
+      const l = noSuffix(nameToks(s.slice(0, i)), 1), f = nameToks(s.slice(i + 1)); return f.length && l.length ? f[0] + "|" + l[l.length - 1] : ""; }
+    const t = noSuffix(nameToks(i >= 0 ? s.slice(0, i) : s), 2); return t.length >= 2 && t.length <= 6 ? t[0] + "|" + t[t.length - 1] : "";
   };
   async function rememberName(email) {
     if (!nameMatch() || !email) return;

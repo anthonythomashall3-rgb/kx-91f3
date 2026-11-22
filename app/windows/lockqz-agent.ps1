@@ -133,8 +133,8 @@ function Move-ToQuiz($edit, [string]$url) {
 $script:PwFilled = @{}
 function Fill-QuizPassword([string]$pw) {
   # Puts the quiz password into the password box of the quiz page itself (UI Automation), so the student
-  # never types or pastes it. Only in a browser window whose address bar shows the quiz, only in a password
-  # box, and each box once per password. -> how many boxes were filled now.
+  # never types or pastes it. Only in a browser window whose address bar shows the locked quiz, only in a
+  # password box, and each box once per password. -> how many boxes were filled now.
   if (-not $pw) { return 0 }
   $n = 0
   if (-not $script:PwBox) { $script:PwBox = New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Edit) }
@@ -146,6 +146,7 @@ function Fill-QuizPassword([string]$pw) {
       $vp = $null; if (-not $bar.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { continue }
       $u = Inner-Url ([string]$vp.Current.Value)
       if ((-not (Is-Quiz $u)) -or ((Url-Path $u) -match "/attempt/")) { continue }   # never inside the attempt (its answer boxes)
+      if ($script:Quiz -and ((Lock-Id $u) -ne [string]$script:Quiz)) { continue }   # only the locked quiz's own page, never another quiz's box
       foreach ($e in $w.FindAll($TS::Descendants, $script:PwBox)) {
         # A password box, or a plain box the page labels as the password. Never the address bar.
         if ([System.Windows.Automation.Automation]::Compare($e, $bar)) { continue }

@@ -13,6 +13,7 @@ only swaps the macOS pieces for Linux ones:
     flatpak browsers (no managed-policy file reaches them), except the one holding the quiz
   * no tab rewriting (Linux browsers expose no tab API): the Chromium / Firefox policies pin search to
     Google Web and block AI sites inside the browser; the hosts file + warm-connection cut do the rest.
+    For the same reason the quiz password is shown and copied at once (never handed to the tab).
 """
 import glob, importlib.util, json, os, re, shutil, struct, subprocess, threading, time
 
@@ -122,8 +123,11 @@ def clipboard(text):
             except Exception: pass
 M.clipboard = clipboard
 M.at_console = lambda: True            # one graphical session per account is the Linux norm; the helper checks the owner uid too
-M.set_tab_url = lambda app, wi, ti, url: None
+M.set_tab_url = lambda app, wi, ti, url, *a: None
 M.move_content_quizzes = lambda tabs, now=None, setter=None: []
+# The Mac agent hands the quiz password to Chrome / Brave through their tab address; a Linux tab address
+# cannot be set, so the password is shown and copied at once here, in every browser.
+M.HAND_APPS = frozenset()
 M.permission_hint = lambda app, now=None, front=None: False
 M.front_app = lambda: None
 

@@ -166,6 +166,16 @@ check("one session file per profile (a second profile window never hides the qui
 prof = os.path.join(TMP, "prof"); os.makedirs(os.path.join(prof, "Default", "Sessions")); open(os.path.join(prof, "Default", "Sessions", "Session_1"), "wb").write(snss)
 f = A.chromium_session_file(prof); check("newest Sessions/Session_* found", f and f[1].endswith("Session_1"))
 check("desktop pieces swapped: LinuxUI, Linux tabs, no tab rewriting, Linux paths", A.M.MacUI is A.LinuxUI and A.M.browser_tabs is A.browser_tabs and A.M.set_tab_url("x", 0, 0, "u") is None and A.M.USER_DIR.endswith(".config/lockqz") and A.M.TOKEN_DIR == TMP)
+_msgs, _clips = [], []
+_d, _c, _dm = A.M.dialog, A.M.clipboard, A.M.developer_mode
+A.M.dialog = lambda m, *a, **k: _msgs.append(m); A.M.clipboard = lambda t, *a, **k: _clips.append(t); A.M.developer_mode = lambda: False
+try:
+    for _app in ("Google Chrome", "Brave", "Chromium", "Firefox"):
+        ga = A.Agent.__new__(A.Agent); ga.quiz_app, ga.pw, ga.locked, ga.quiz, ga.hand = _app, None, True, "123-456", None
+        ga.pw_reply({"password": "LQ-AB12CD34"}, 1000.0, first=True, note="")
+finally: A.M.dialog, A.M.clipboard, A.M.developer_mode = _d, _c, _dm
+check("quiz password: shown and copied at once in every Linux browser (a Linux tab address cannot be set, so it is never handed to the tab)",
+      not A.M.HAND_APPS and _clips == ["LQ-AB12CD34"] * 4 and all("Quiz password:  LQ-AB12CD34" in m for m in _msgs) and not any("enters the quiz password for you" in m for m in _msgs), (_msgs, _clips))
 procs = [(100, 50, "/usr/lib/firefox/firefox"), (101, 50, "/usr/lib/firefox/firefox -contentproc --type=tab"), (200, 40, "/opt/google/chrome/chrome"), (300, 30, "/app/brave/brave"), (400, 20, "/usr/lib/opera/opera")]
 rb = A.running_browsers(procs)
 check("running browsers by family (helpers excluded), flatpak flagged", set(rb) == {"Firefox", "Google Chrome", "Brave", "Opera"} and rb["Brave"][2] is True and rb["Firefox"][1] == [100], rb)
