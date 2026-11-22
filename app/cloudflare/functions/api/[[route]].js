@@ -954,6 +954,50 @@ export async function onRequest(context) {
       .bind(o, o, o, d, d, ...ex).first();
     return !!r;
   };
+  // Automatic email to students (owner, 22 Nov 2026): none unless LOCKqz is on for their class, and none for the
+  // classes of a professor on MAIL_HOLD until that professor emails the class himself (Email students).
+  // openSql(col) = the SQL test that class `col` may get automatic student email, with its arguments:
+  //  * STUDENT_MAIL_ON = "1": the class is not turned off and LOCKqz covers it (courseCovered's rule);
+  //  * MAIL_HOLD (professors' emails): a class whose class list names one of them, or that one of them synced,
+  //    waits until a professor (never the admin) has pressed Email students for it (mail_sent ou / 'prof' / 'first').
+  // null when neither is set: every class may, as before.
+  const mailHold = () => [...new Set(String(env.MAIL_HOLD || "").split(",").map(x => x.trim().toLowerCase()).filter(x => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x)))];
+  const openSql = col => {
+    const on = String(env.STUDENT_MAIL_ON || "") === "1", hold = mailHold();
+    if (!on && !hold.length) return null;
+    const parts = [], args = [];
+    if (on) {
+      const d = laToday(), ex = [...exemptSet(env)];
+      parts.push(`NOT EXISTS (SELECT 1 FROM course_off mo WHERE mo.ou=${col})
+        AND (EXISTS (SELECT 1 FROM quizzes mq WHERE mq.ou=${col})
+             OR EXISTS (SELECT 1 FROM teacher_courses mc LEFT JOIN teachers mt ON mt.id=mc.teacher_id
+                  WHERE mc.ou=${col} AND COALESCE(mc.in_sync,1)<>0
+                    AND (mc.teacher_id='admin' OR mt.role='admin'
+                         OR ((mt.verified=1 OR mt.vouched=1) AND (COALESCE(mt.active_until,'')>=? OR EXISTS (SELECT 1 FROM paid_sections mp WHERE mp.teacher_id=mt.id AND mp.until>=?)${ex.length ? ` OR lower(mt.email) IN (${placeholders(ex.length)})` : ""})))))`);
+      args.push(d, d, ...ex);
+    }
+    if (hold.length) {
+      const ph = placeholders(hold.length);
+      parts.push(`(NOT (EXISTS (SELECT 1 FROM roster mh WHERE mh.email IN (${ph}) AND mh.ou=${col})
+              OR EXISTS (SELECT 1 FROM teacher_courses mhc JOIN teachers mht ON mht.id=mhc.teacher_id WHERE mhc.ou=${col} AND lower(mht.email) IN (${ph})))
+            OR EXISTS (SELECT 1 FROM mail_sent mm WHERE mm.ou=${col} AND mm.kind='prof' AND mm.day='first'))`);
+      args.push(...hold, ...hold);
+    }
+    return { sql: "(" + parts.join(" AND ") + ")", args };
+  };
+  // The classes among `list` that may get automatic student email (all of them when openSql is null).
+  async function openOus(list) {
+    const ous = [...new Set(list.map(String))].filter(o => /^\d+$/.test(o)), op = openSql("o.value");
+    if (!op) return new Set(ous);
+    const out = new Set();
+    for (const part of chunk(ous, 90))
+      (await db.prepare(`SELECT o.value AS ou FROM json_each(?) o WHERE ${op.sql}`).bind(JSON.stringify(part), ...op.args).all()).results.forEach(r => out.add(String(r.ou)));
+    return out;
+  }
+  // A student may get automatic email when the class list of such a class names them (emailCol: SQL giving their
+  // lowercase email). Nothing to add when openSql is null.
+  const studentOpen = emailCol => { const op = openSql("ms.ou");
+    return op ? { sql: ` AND EXISTS (SELECT 1 FROM roster ms WHERE ms.email=${emailCol} AND ${op.sql})`, args: op.args } : { sql: "", args: [] }; };
   // ---- the one Gmail budget (see MAIL_HARD_MAX above) ----
   const hourKey = (ms = Date.now()) => new Date(ms).toISOString().slice(0, 13);
   const mailUsed = async () => Number((await db.prepare("SELECT COALESCE(SUM(n),0) AS n FROM mail_sent WHERE ou='_all' AND kind='total' AND day>=?").bind(hourKey(Date.now() - 24 * 3600000)).first())?.n || 0);
@@ -1436,7 +1480,9 @@ export async function onRequest(context) {
   // /pay/tick about hourly (renewals, card renewals, pay reminders). Each call is kept (one row each, sync_nudges
   // 'clock'/<job>) so the admin sees at once when the script stops.
   const clockMark = job => db.prepare("INSERT OR REPLACE INTO sync_nudges (ou,qi,at) VALUES ('clock',?,?)").bind(job, now()).run().catch(() => {});
-  const clockState = async () => Object.fromEntries(((await db.prepare("SELECT qi, at FROM sync_nudges WHERE ou='clock'").all().catch(() => ({ results: [] }))).results || []).map(r => [r.qi, r.at]));
+  // now: the server's time of the reading. The admin's page judges the clock as of the reading, so a page left open for
+  // hours never calls a running clock stopped.
+  const clockState = async () => ({ ...Object.fromEntries(((await db.prepare("SELECT qi, at FROM sync_nudges WHERE ou='clock'").all().catch(() => ({ results: [] }))).results || []).map(r => [r.qi, r.at])), now: now() });
   const paySecret = async () => env.PAY_SECRET ? String(env.PAY_SECRET) : ((env.ROT_SECRET || env.TEACHER_KEY) ? "lqp_" + (await hmacHex(String(env.ROT_SECRET || env.TEACHER_KEY), "lockqz-pay-notify")).slice(0, 40) : "");
   // limitIp: the public /pay/start passes the caller's IP, so random emails cannot write unlimited rows.
   async function studentCode(email, limitIp = null) {
@@ -1704,12 +1750,13 @@ export async function onRequest(context) {
     // Window: from 7 days before the term starts to 14 days after.
     const ms = d => Date.parse(d + "T12:00:00Z"), dd = (ms(day) - ms(start)) / 864e5;
     if (dd < -7 || dd > 14) return { sent: 0, why: "not renewal time", term: cur };
+    const so = studentOpen("lower(s.email)");   // a student only from a class LOCKqz is on for (owner, 22 Nov 2026)
     const due = (await db.prepare(`SELECT DISTINCT s.email AS email, 'student' AS kind, s.code AS code FROM payments p JOIN pay_codes_students s ON s.code=p.code
         WHERE p.term=? AND s.email NOT IN (SELECT email FROM renew_optout) AND s.email NOT IN (SELECT email FROM renew_sent WHERE term=?)
-        AND s.code NOT IN (SELECT code FROM payments WHERE term=? AND code IS NOT NULL)
+        AND s.code NOT IN (SELECT code FROM payments WHERE term=? AND code IS NOT NULL)${so.sql}
       UNION SELECT DISTINCT t.email, 'professor', c.code FROM payments p JOIN pay_codes c ON c.code=p.code JOIN teachers t ON t.id=c.teacher_id
         WHERE p.term=? AND lower(t.email) NOT IN (SELECT email FROM renew_optout) AND lower(t.email) NOT IN (SELECT email FROM renew_sent WHERE term=?)
-        AND (t.active_until IS NULL OR t.active_until < ?) LIMIT 8`).bind(prev, cur, cur, prev, cur, termEndOf(cur)).all()).results;   // 8 an hour: one call stays inside Workers Free's 50 database calls
+        AND (t.active_until IS NULL OR t.active_until < ?) LIMIT 8`).bind(prev, cur, cur, ...so.args, prev, cur, termEndOf(cur)).all()).results;   // 8 an hour: one call stays inside Workers Free's 50 database calls
     let sent = 0;
     for (const r of due) {
       const email = String(r.email).toLowerCase(), kind = r.kind === "student" ? "student" : "professor";
@@ -1785,8 +1832,9 @@ export async function onRequest(context) {
     if (!mailOn(env)) return { sent: 0, why: "mail off" };
     const hrs = Number(env.PAY_NUDGE_HOURS ?? 2); if (!(hrs > 0)) return { sent: 0, why: "off" };
     const t = Date.now(), upto = new Date(t - hrs * 3600000).toISOString(), from = new Date(t - 7 * 86400000).toISOString();
+    const so = studentOpen("lower(d.student)");   // only from a class LOCKqz is on for (owner, 22 Nov 2026)
     const rows = (await db.prepare(`SELECT DISTINCT lower(d.student) AS email FROM devices d WHERE d.student_verified=1 AND d.student IS NOT NULL
-        AND COALESCE(d.revoked,0)=0 AND d.installed_at>=? AND d.installed_at<=? AND lower(d.student) NOT IN (SELECT email FROM pay_nudge) LIMIT 8`).bind(from, upto).all()).results
+        AND COALESCE(d.revoked,0)=0 AND d.installed_at>=? AND d.installed_at<=? AND lower(d.student) NOT IN (SELECT email FROM pay_nudge)${so.sql} LIMIT 8`).bind(from, upto, ...so.args).all()).results
       .map(r => r.email).filter(e => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e || ""));
     if (!rows.length) return { sent: 0 };
     const paid = await paidEmails(rows);
@@ -1838,8 +1886,11 @@ export async function onRequest(context) {
       await runBatches(db, acts.splice(0));
     }
     // 2) Charges that are due (at most once a day after a failure).
-    const due = (await db.prepare("SELECT c.email AS email, c.customer AS customer, c.pm AS pm, c.brand AS brand, c.last4 AS last4, c.tries AS tries, c.state AS state, c.pi AS pi, s.code AS code FROM card_renew c JOIN pay_codes_students s ON s.email=c.email WHERE c.autorenew=1 AND c.rterm=? AND c.state IN ('reminded','failed','charged') AND c.charge_on<=? AND (c.fail_day IS NULL OR c.fail_day<?) AND COALESCE(c.tries,0)<? AND c.pm IS NOT NULL AND c.customer IS NOT NULL LIMIT 5")
-      .bind(R, day, day, RENEW_TRIES).all()).results;
+    // No charge, and so no renewal email, for a student LOCKqz is not on for (owner, 22 Nov 2026); a card already
+    // charged is still written down.
+    const so = studentOpen("c.email"), soCharge = so.sql ? ` AND (c.state='charged' OR${so.sql.replace(/^ AND/, "")})` : "";
+    const due = (await db.prepare(`SELECT c.email AS email, c.customer AS customer, c.pm AS pm, c.brand AS brand, c.last4 AS last4, c.tries AS tries, c.state AS state, c.pi AS pi, s.code AS code FROM card_renew c JOIN pay_codes_students s ON s.email=c.email WHERE c.autorenew=1 AND c.rterm=? AND c.state IN ('reminded','failed','charged') AND c.charge_on<=? AND (c.fail_day IS NULL OR c.fail_day<?) AND COALESCE(c.tries,0)<? AND c.pm IS NOT NULL AND c.customer IS NOT NULL${soCharge} LIMIT 5`)
+      .bind(R, day, day, RENEW_TRIES, ...so.args).all()).results;
     // 5 cards an hour: one call stays inside Workers Free's 50 subrequests / database calls. Each card goes
     // 'reminded' -> 'charged' (Stripe took the money; the one "renewed" email) -> 'paid' (the payment is written,
     // at the end of the call). A call that stops in between leaves 'charged': the next hour asks Stripe again with
@@ -3158,6 +3209,9 @@ export async function onRequest(context) {
       // exam first. Exams with nothing due cost no call: a professor's name and a class's recipients are read once
       // per tick and only when an email is really going out.
       let work = 0; const WORK_MAX = 16;
+      // Reminders go only to the students of a class LOCKqz is on for, and never to a held professor's class before he
+      // has emailed it himself (openSql; owner, 22 Nov 2026). One read for all of this tick's classes.
+      const openSet = rows.length ? (work++, await openOus(rows.map(r => r.ou))) : new Set();
       const record = (ou, kind, n) => { work++; return db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, kind, day, n, now()).run(); };
       const names = new Map(), recips = new Map();
       const nameOf = async r => { if (!names.has(r.tid)) { work += String(r.tname || "").trim() ? 0 : 1; names.set(r.tid, await profName(r.tname, r.email)); } return names.get(r.tid); };
@@ -3188,7 +3242,7 @@ export async function onRequest(context) {
         }
         // Reminders to students who are not ready (2 days and 3 hours before), from the automatic budget:
         // not installed -> the install reminder; installed on a confirmed computer but fee unpaid -> the pay line.
-        const kind = lead <= 3 * 3600000 && remind3h(env) ? "r3:" + r.qi : lead <= 48 * 3600000 ? "r48:" + r.qi : null;
+        const kind = !openSet.has(String(r.ou)) ? null : lead <= 3 * 3600000 && remind3h(env) ? "r3:" + r.qi : lead <= 48 * 3600000 ? "r48:" + r.qi : null;
         const ckey = kind ? r.ou + "|" + kind.split(":")[0] : "";
         // The exam was moved later after its reminder went out (2-day one: by 6 h or more; 3-hour one: by 1 h or
         // more): that reminder was for the old date, so the new date gets its own.
@@ -3797,6 +3851,7 @@ export async function onRequest(context) {
           const list = await classRecipients(ou, "all"); if (!list.length) continue;
           list.forEach(e => to.add(e)); const nm = courseCode(c) || courseLabel(c); if (!names.includes(nm)) names.push(nm);   // two sections of one course: named once
           marks.push(db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, "all", laToday(), list.length, now()));
+          if (!me.admin) marks.push(db.prepare("INSERT OR IGNORE INTO mail_sent (ou,kind,day,n,at) VALUES (?,'prof','first',1,?)").bind(ou, now()));   // emailed by its professor (openSql)
         }
         await runBatches(db, marks);
         if (!to.size) return json({ to: [], kind: "all", none: true });
@@ -3825,7 +3880,10 @@ export async function onRequest(context) {
           .replace("Without it the exam will not open.", `Without it the exam will not open.\n\nAlready installed LOCKqz? Then your semester fee is not paid \u2014 pay at ${SITE_URL}/pay before the exam.`) }; }
       // The professor sends it themselves: drop LOCKqz's "sent on behalf of" footer from the draft.
       const text = String(m.text).replace(/\n\n--\nSent by LOCKqz on behalf of[^\n]*$/, "");
-      await db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, kind, laToday(), list.length, now()).run();
+      const mk = [db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+excluded.n, at=excluded.at").bind(ou, kind, laToday(), list.length, now())];
+      // The class's own professor (never the admin) emailed it: a held class's automatic student email may start (openSql).
+      if (!me.admin) mk.push(db.prepare("INSERT OR IGNORE INTO mail_sent (ou,kind,day,n,at) VALUES (?,'prof','first',1,?)").bind(ou, now()));
+      await db.batch(mk);
       return json({ to: list, kind, subject: m.subject, text });
     }
     if (p === "/class" && request.method === "POST") {

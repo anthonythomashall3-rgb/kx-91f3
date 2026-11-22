@@ -55,6 +55,12 @@ GMAIL_BACKUP = "1"
 # Fewer emails (owner, 18 Nov 2026): no welcome email at professor sign-up; one install reminder per exam, not two.
 WELCOME_MAIL = "0"
 EXAM_REMIND_3H = "0"
+# Automatic email to students (exam reminders, renewal and pay reminders, card renewals) only from a class LOCKqz is
+# on for (owner, 22 Nov 2026). "0" or absent = as before.
+STUDENT_MAIL_ON = "1"
+# Professors whose classes get no automatic student email until the professor emails the class himself (Email students
+# on the dashboard; owner, 22 Nov 2026). Comma-separated. test_mail_on holds these two lines.
+MAIL_HOLD = "dbristow@usc.edu,dbristow@marshall.usc.edu"
 # Student fee per semester (USD) and the date it starts (YYYY-MM-DD; empty = off).
 STUDENT_FEE = "180"
 # The "One step left: pay for LOCKqz" email, hours after an install (0 = off). Off (Anthony, 13 Nov 2026): from 0.6.22 the

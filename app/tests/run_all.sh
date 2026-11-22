@@ -45,6 +45,7 @@ run "Sweep 24 (apps): unpaid at the exam - the password is asked for every few s
 run "Sweep 25: lockqz.com answers API calls itself (one request, each visitor's own address); dashboard opens in one round" node --no-warnings test_sweep25.mjs
 run "Sweep 25 (apps): the lock pass looks at the running programs once for all its lists; open AI connections cut several at a time" bash test_sweep25_apps.sh
 run "Pay reminder email (one, 2 h after install, unpaid only)" node --no-warnings test_pay_nudge.mjs
+run "Automatic student email only where LOCKqz is on; a held professor's classes wait for his own email; clock note as of its reading" node --no-warnings test_mail_on.mjs
 run "Pay page after setup (server): the status check carries the pay page while unpaid; the pay email is off on the live site" node --no-warnings test_pay_after_setup.mjs
 run "Pay page after setup (apps): opens once right after setup on Mac, Linux, Windows; never for a paid student" python3 test_pay_after_setup.py
 run "Student card auto-renew (reminder, off-session charge, failures, refunds) + /account API" node --no-warnings test_autorenew.mjs

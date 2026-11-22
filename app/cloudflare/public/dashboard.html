@@ -287,8 +287,8 @@ function busy(){ const a=$("app"), f=document.activeElement;
 const shown = () => document.visibilityState !== "hidden";
 let LAST = Date.now();
 async function autoRefresh(){ if(!shown() || !["","class","connect"].includes(viewName())) return;
-  LAST = Date.now(); const [b,m] = await Promise.all([get("/bs"), ME.verified||ME.admin ? {} : get("/me")]); LOADERR = b.error || "";
-  if(m.email) ME = m;   // an unverified professor's banner clears once their Sync verifies them
+  LAST = Date.now(); const [b,m] = await Promise.all([get("/bs"), ME.verified && !ME.admin ? {} : get("/me")]); LOADERR = b.error || "";
+  if(m.email) ME = m;   // an unverified professor's banner clears once their Sync verifies them; the admin's clock note stays current
   if(!b.error) BS = b.courses ? b : { courses: [] };
   if(!busy()) route(); }
 document.addEventListener("visibilitychange", ()=>{ if(!shown() || !ME) return; const h=location.hash.replace(/^#/,"").split("/");
@@ -790,8 +790,9 @@ async function forget(){ const email=$("fgemail").value.trim().toLowerCase(); if
   if(!confirm("Delete everything LOCKqz stores about "+email+"? This cannot be undone.")) return;
   const d=await post("/forget",{email}); alert(d.error||("Deleted "+email+": "+(d.devices??0)+" device(s), "+(d.roster_rows??0)+" class-list row(s).")); if(!d.error) $("fgemail").value=""; }
 // LOCKqz's clock is the Gmail script "LOCKqz payments" (Pages has no cron): exam emails about every 10 min,
-// renewals about hourly. Stale = no exam-email run for 30 min, or no renewal run for 3 h.
-const CLOCK = c => { const age = t => t ? (Date.now() - Date.parse(t)) / 60000 : Infinity, a = age(c && c.cron), b = age(c && c.tick);
+// renewals about hourly. Stale = no exam-email run for 30 min, or no renewal run for 3 h, as of the reading (c.now,
+// the server's time when it was read): a page left open never calls a running clock stopped.
+const CLOCK = c => { const ref = c && c.now ? Date.parse(c.now) : Date.now(), age = t => t ? (ref - Date.parse(t)) / 60000 : Infinity, a = age(c && c.cron), b = age(c && c.tick);
   const m = x => x === Infinity ? "never" : x < 1 ? "just now" : x < 90 ? Math.round(x) + " min ago" : Math.round(x / 60) + " h ago";
   return { stale: a > 30 || (b !== Infinity && b > 180), text: `LOCKqz clock (Gmail script "LOCKqz payments"): exam emails ran ${m(a)} · renewals ran ${m(b)}` }; };
 const CLOCK_FIX = "Open script.google.com, project LOCKqz payments, Triggers: the run trigger must fire every minute (re-authorize it if Google asks).";
