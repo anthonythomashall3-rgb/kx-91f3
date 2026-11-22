@@ -251,14 +251,16 @@ function Get-PolicyPlan([bool]$KeepProxy = $false) {
     V $root "GenAiDefaultSettings" 2
     V $root "GeminiSettings" 1
     V $root "BuiltInAIAPIsEnabled" 0
-    # Every Chrome AI feature off one by one too (chromium policy_definitions/GenerativeAI), plus no
-    # developer-mode (unpacked) or externally installed extensions.
+    # Every Chrome AI feature off one by one (chromium policy_definitions/GenerativeAI): Chrome takes
+    # GenAiDefaultSettings only from a cloud source and ignores it here. Plus no developer-mode (unpacked)
+    # or externally installed extensions.
     foreach ($kv in @(@("AIModeSettings",1),@("GeminiActOnWebSettings",1),@("GeminiSparkSettings",1),
         @("GeminiChromeFileUploadSettings",1),@("HelpMeWriteSettings",2),@("HistorySearchSettings",2),
         @("TabCompareSettings",2),@("TabOrganizerSettings",2),@("CreateThemesSettings",2),
         @("DevToolsGenAiSettings",2),@("AutofillGenAiSettings",2),@("AutofillPredictionSettings",2),
         @("SearchContentSharingSettings",1),@("SmartTabSharingSettings",1),@("ThirdPartyAiChatSettings",1),
         @("TryOnYouSettings",2),@("ChromeSuggestionsSettings",1),@("GenAILocalFoundationalModelSettings",1),
+        @("VoiceTypingSettings",2),@("FindAndFillWithGeminiSettings",2),@("Indigo",2),
         @("LensOverlaySettings",1),@("LensRegionSearchEnabled",0),@("LensDesktopNTPSearchEnabled",0),
         @("GoogleSearchSidePanelEnabled",0),@("ExtensionDeveloperModeSettings",1),@("BlockExternalExtensions",1))) {
       V $root $kv[0] $kv[1]
@@ -277,9 +279,15 @@ function Get-PolicyPlan([bool]$KeepProxy = $false) {
     # extension): replaced for the quiz, put back exactly at unlock.
     RL "$root\ExtensionInstallAllowlist" (@($SafeExtensions) + @(Get-AssistExtensions))
     if ($Chromium[$root] -eq "edge") {
-      V $root "HubsSidebarEnabled" 0; V $root "CopilotCDPPageContext" 0
-      V $root "EdgeEntraCopilotPageContext" 0; V $root "ComposeInlineEnabled" 0
-      V $root "Microsoft365CopilotChatIconEnabled" 0
+      # Edge's own AI switches (same list as browser-policy.py EDGE_AI_OFF).
+      foreach ($n in @("HubsSidebarEnabled","StandaloneHubsSidebarEnabled","CopilotCDPPageContext","CopilotPageContext",
+          "EdgeEntraCopilotPageContext","ComposeInlineEnabled","Microsoft365CopilotChatIconEnabled",
+          "CopilotCoworkToolActionsEnabled","AllowBrowsingWithCopilot","CopilotNewTabPageEnabled",
+          "NewTabPageBingChatEnabled","CopilotAddressBarSuggestionsEnabled","M365LinksAutoOpenCopilotEnabled",
+          "ShareBrowsingHistoryWithCopilotSearchAllowed","EdgeHistoryAISearchEnabled","AIGenThemesEnabled","RemixAvailability")) {
+        V $root $n 0
+      }
+      L "$root\CopilotBrowserUseBlockList" @("*")
     }
     # Brave: Leo AI off; Tor windows and Brave VPN off (both look names up remotely, past hosts).
     if ($Chromium[$root] -eq "brave") { V $root "BraveAIChatEnabled" 0; V $root "TorDisabled" 1; V $root "BraveVPNDisabled" 1 }

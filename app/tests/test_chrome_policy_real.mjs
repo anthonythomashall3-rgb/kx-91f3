@@ -41,9 +41,12 @@ try {
   const tolerated = /^(GenAiDefaultSettings|AutofillGenAiSettings|TabOrganizerSettings|TryOnYouSettings|LensOverlaySettings|LensRegionSearchEnabled|LensDesktopNTPSearchEnabled|GeminiSparkSettings|GeminiChromeFileUploadSettings|ChromeSuggestionsSettings|SmartTabSharingSettings|ThirdPartyAiChatSettings|AutofillPredictionSettings|AIModeSettings|SearchContentSharingSettings|GeminiActOnWebSettings|ExtensionDeveloperModeSettings)$/;
   const errs = set.filter(r => /Error Error/.test(r) && !tolerated.test(name(r)));
   errs.length === 0 ? ok(`every policy accepted (${set.length} set)`) : bad("rejected: " + errs.map(r => r.slice(0, 120)).join(" | "));
-  const must = ["GeminiSettings", "HelpMeWriteSettings", "HistorySearchSettings", "DevToolsGenAiSettings", "CreateThemesSettings", "TabCompareSettings", "BuiltInAIAPIsEnabled", "ExtensionInstallBlocklist", "URLBlocklist", "URLAllowlist", "BlockExternalExtensions"];
+  const must = ["GeminiSettings", "HelpMeWriteSettings", "HistorySearchSettings", "DevToolsGenAiSettings", "CreateThemesSettings", "TabCompareSettings", "BuiltInAIAPIsEnabled", "VoiceTypingSettings", "FindAndFillWithGeminiSettings", "Indigo", "ExtensionInstallBlocklist", "URLBlocklist", "URLAllowlist", "BlockExternalExtensions"];
   const okRow = n => set.some(r => name(r) === n && /Status (OK|Restart required)/.test(r));
   const missing = must.filter(n => !okRow(n)); missing.length === 0 ? ok("core AI-off policies applied with status OK") : bad("not OK: " + missing.map(n => (set.find(r => name(r) === n) || n + " (not set)").slice(0, 200)).join(" | "));
+  // Chrome ignores GenAiDefaultSettings written on the computer (cloud source only): the per-feature policies above carry the quiz.
+  const gd = set.find(r => name(r) === "GenAiDefaultSettings");
+  !gd || /Status OK/.test(gd) || /cloud source/.test(gd) ? ok("GenAiDefaultSettings is either applied or cloud-only (the per-feature switches do the work)") : bad("GenAiDefaultSettings: " + gd.slice(0, 200));
   console.log("T2 what a student can and cannot open (blocked = refused by the browser itself, before any network)");
   const blocked = async u => { const q = await ctx.newPage(); const r = await q.goto(u, { timeout: 8000 }).then(() => false).catch(e => /ERR_BLOCKED_BY_ADMINISTRATOR/.test(e.message)); await q.close(); return r; };
   for (const u of ["https://chatgpt.com/", "https://gemini.google.com/app", "https://claude.ai/", "https://www.google.com/search?q=derivative+of+x2", "https://www.google.com/search?udm=50&q=x", "https://www.google.com/search?q=x&udm=50", "https://www.bing.com/chat", "https://copilot.microsoft.com/", "https://www.perplexity.ai/", "https://www.gauthmath.com/", "https://x.com/i/grok", "https://www.google.com/ai",

@@ -248,6 +248,10 @@ $ua = @(RG-ValueNames "$C\URLAllowlist" | ForEach-Object { (RG-Read "$C\URLAllow
 Check "DuckDuckGo no-AI site allowed" ($ua -contains "noai.duckduckgo.com")
 $Bv = "HKLM:\SOFTWARE\Policies\BraveSoftware\Brave"
 Check "Brave: Leo + Tor windows + Brave VPN off" (((RG-Read $Bv "BraveAIChatEnabled").value -eq 0) -and ((RG-Read $Bv "TorDisabled").value -eq 1) -and ((RG-Read $Bv "BraveVPNDisabled").value -eq 1))
+$E = "HKLM:\SOFTWARE\Policies\Microsoft\Edge"
+$ebu = @(RG-ValueNames "$E\CopilotBrowserUseBlockList" | ForEach-Object { (RG-Read "$E\CopilotBrowserUseBlockList" $_).value })
+Check "Edge: Copilot actions, browsing with Copilot, Web Remix, AI history search off; Copilot browser use blocked everywhere" (((RG-Read $E "CopilotCoworkToolActionsEnabled").value -eq 0) -and ((RG-Read $E "AllowBrowsingWithCopilot").value -eq 0) -and ((RG-Read $E "RemixAvailability").value -eq 0) -and ((RG-Read $E "EdgeHistoryAISearchEnabled").value -eq 0) -and ($ebu -contains "*"))
+Check "Chrome: talk to type, Find and Fill with Gemini, Indigo off (2); no Edge-only switches in Chrome" (((RG-Read $C "VoiceTypingSettings").value -eq 2) -and ((RG-Read $C "FindAndFillWithGeminiSettings").value -eq 2) -and ((RG-Read $C "Indigo").value -eq 2) -and -not (RG-Read $C "RemixAvailability") -and -not (RG-KeyExists "$C\CopilotBrowserUseBlockList"))
 Check "Firefox AIControls: SidebarChatbot + SmartWindow blocked, no Default" (((RG-Read "$F\AIControls\SmartWindow" "Value").value -eq "blocked") -and ((RG-Read "$F\AIControls\SidebarChatbot" "Value").value -eq "blocked") -and -not (RG-KeyExists "$F\AIControls\Default"))
 Check "Firefox: GenerativeAI SmartWindow off + built-in VPN off" (((RG-Read "$F\GenerativeAI" "SmartWindow").value -eq 0) -and ((RG-Read $F "IPProtectionAvailable").value -eq 0))
 $ffb = @(RG-ValueNames "$F\WebsiteFilter\Block" | ForEach-Object { (RG-Read "$F\WebsiteFilter\Block" $_).value })

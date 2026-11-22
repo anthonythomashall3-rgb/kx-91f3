@@ -366,6 +366,9 @@ msgs[:] = []; clips[:] = []; sets[:] = []
 g, h = hagent(); T(g, [("Brave Browser", 0, 0, SUMM)]); T(g, [("Brave Browser", 0, 0, SUMM)])
 ok("Brave: handed to the quiz tab like Chrome") if g.hand and not clips and sets and sets[-1][0] == "Brave Browser" else bad("hand %r sets %r" % (g.hand, sets))
 ok("a browser with no managed extensions gets no empty list") if "ExtensionInstallForcelist" not in _P.merge_chromium({}, _P.chromium_policy("com.microsoft.Edge")) and _P.merge_chromium({"ExtensionInstallForcelist": ["x;y"]}, _P.chromium_policy("com.microsoft.Edge"))["ExtensionInstallForcelist"] == ["x;y"] else bad("merge forcelist")
+_pe, _pc = _P.chromium_policy("com.microsoft.Edge"), _P.chromium_policy("com.google.Chrome")
+ok("Edge: Copilot actions + browsing with Copilot + Web Remix + AI history search off, Copilot browser use blocked everywhere (own list copy)") if _pe.get("CopilotCoworkToolActionsEnabled") is False and _pe.get("AllowBrowsingWithCopilot") is False and _pe.get("RemixAvailability") == 0 and _pe.get("EdgeHistoryAISearchEnabled") is False and _pe.get("CopilotBrowserUseBlockList") == ["*"] and _pe["CopilotBrowserUseBlockList"] is not _P.EDGE_AI_OFF["CopilotBrowserUseBlockList"] else bad("edge ai switches")
+ok("Chrome: talk to type, Find and Fill with Gemini, Indigo off; no Edge-only switches") if _pc.get("VoiceTypingSettings") == 2 and _pc.get("FindAndFillWithGeminiSettings") == 2 and _pc.get("Indigo") == 2 and "RemixAvailability" not in _pc and "CopilotBrowserUseBlockList" not in _pc else bad("chrome per-feature")
 print("T12i the hand-over reaches every open start page of the quiz, and only the tab it was read from")
 msgs[:] = []; clips[:] = []; sets[:] = []; exps = []
 A.set_tab_url = lambda app, wi, ti, url, *k: (sets.append((app, wi, ti, url)), exps.append(k[0] if k else None))

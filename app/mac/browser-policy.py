@@ -144,9 +144,10 @@ FF_OK_PARAMS = ["udm=14", "udm=2", "udm=12", "udm=7", "udm=36", "tbm=isch", "tbm
 def keep_proxy():
     return os.path.exists(PROXY_KEPT)
 
-# Every Chrome AI feature switched off one by one as well (GenAiDefaultSettings=2 covers most, but a
-# feature newer than that default, or a browser that reads only the per-feature policy, still obeys
-# these). Values from chromium policy_definitions/GenerativeAI (2 / 1 / false = do not allow).
+# Every Chrome AI feature switched off one by one. Chrome takes GenAiDefaultSettings only from a cloud
+# source (Google Admin console): written on the computer it is ignored ("not set by a cloud source"), so a
+# feature with no policy of its own here stays on. Values from chromium policy_definitions/GenerativeAI
+# (2 / 1 / false = do not allow); policies newer than a browser are ignored by it.
 CHROMIUM_AI_OFF = {
     "AIModeSettings": 1, "GeminiActOnWebSettings": 1, "GeminiSparkSettings": 1,
     "GeminiChromeFileUploadSettings": 1, "HelpMeWriteSettings": 2, "HistorySearchSettings": 2,
@@ -154,10 +155,28 @@ CHROMIUM_AI_OFF = {
     "DevToolsGenAiSettings": 2, "AutofillGenAiSettings": 2, "AutofillPredictionSettings": 2,
     "SearchContentSharingSettings": 1, "SmartTabSharingSettings": 1, "ThirdPartyAiChatSettings": 1,
     "TryOnYouSettings": 2, "ChromeSuggestionsSettings": 1, "GenAILocalFoundationalModelSettings": 1,
+    # Talk to type (AI dictation and editing, Chrome 151+), Find and Fill with Gemini, Indigo (AI image changes).
+    "VoiceTypingSettings": 2, "FindAndFillWithGeminiSettings": 2, "Indigo": 2,
     "LensOverlaySettings": 1, "LensRegionSearchEnabled": False, "LensDesktopNTPSearchEnabled": False,
     "GoogleSearchSidePanelEnabled": False,
     # Extensions: no developer-mode (unpacked) extensions and no externally installed ones either.
     "ExtensionDeveloperModeSettings": 1, "BlockExternalExtensions": True,
+}
+
+# Edge's own AI switches (Microsoft Edge policy list): the sidebar, Copilot reading the page, Copilot
+# taking actions in the browser (Cowork 152+, browsing with Copilot 148+, browser use 158+), the Copilot
+# new tab page, Bing chat on the new tab page and Copilot answers in the address bar, Web Remix (AI page
+# rewrites, 156+), AI history search, DALL-E themes, Copilot opening by itself from Outlook links.
+EDGE_AI_OFF = {
+    "HubsSidebarEnabled": False, "StandaloneHubsSidebarEnabled": False,
+    "CopilotCDPPageContext": False, "CopilotPageContext": False, "EdgeEntraCopilotPageContext": False,
+    "ComposeInlineEnabled": False, "Microsoft365CopilotChatIconEnabled": False,
+    "CopilotCoworkToolActionsEnabled": False, "AllowBrowsingWithCopilot": False,
+    "CopilotBrowserUseBlockList": ["*"], "CopilotNewTabPageEnabled": False,
+    "NewTabPageBingChatEnabled": False, "CopilotAddressBarSuggestionsEnabled": False,
+    "M365LinksAutoOpenCopilotEnabled": False, "ShareBrowsingHistoryWithCopilotSearchAllowed": False,
+    "EdgeHistoryAISearchEnabled": False, "AIGenThemesEnabled": False, "RemixAvailability": 0,
+    "GenAILocalFoundationalModelSettings": 1,
 }
 
 # LOCKqz's own extension (Chrome Web Store). Added while a quiz is locked; a student's or an MDM's own
@@ -177,10 +196,7 @@ def chromium_policy(domain):
     p.update(CHROMIUM_AI_OFF)
     if keep_proxy(): p.pop("ProxyMode")
     if domain.startswith("com.microsoft.Edge"):
-        p.update({"HubsSidebarEnabled": False, "CopilotCDPPageContext": False,
-                  "EdgeEntraCopilotPageContext": False, "ComposeInlineEnabled": False,
-                  "Microsoft365CopilotChatIconEnabled": False,
-                  "GenAILocalFoundationalModelSettings": 1})
+        p.update({k: list(v) if isinstance(v, list) else v for k, v in EDGE_AI_OFF.items()})
     if domain.startswith("com.brave.Browser"):
         # Tor windows and Brave VPN look names up remotely, past /etc/hosts.
         p.update({"BraveAIChatEnabled": False, "TorDisabled": True, "BraveVPNDisabled": True})
