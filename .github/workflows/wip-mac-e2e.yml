@@ -1,0 +1,17 @@
+name: wip mac e2e
+on:
+  push:
+    branches: ["wip/sweep26-mac"]
+jobs:
+  e2e:
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: the real thing - Chrome, the store extension by managed list, the agent's own hand-over
+        run: |
+          set -u
+          DB="$HOME/Library/Application Support/com.apple.TCC/TCC.db"
+          # Let the same programs talk to Chrome (a student is asked once by macOS; a runner cannot click).
+          sqlite3 "$DB" "create temp table t as select * from access where service='kTCCServiceAppleEvents' and indirect_object_identifier='com.apple.systemevents'; update t set indirect_object_identifier='com.google.Chrome', indirect_object_code_identity=NULL; insert or replace into access select * from t;" && echo "rows added" || echo "could not add rows"
+          python3 app/tests/test_mac_handover_real.py

@@ -92,6 +92,49 @@ try:
         check(not clips and not any(PW in m for m in msgs), "nothing was shown or copied", repr((msgs, clips)))
         check("#lqz=" not in "".join(u for (_, _, _, u) in A.browser_tabs()), "the password is no longer in the address", repr(A.browser_tabs())[:300])
         check(not any("professor.lockqz.com" in u for (_, _, _, u) in A.browser_tabs()), "no dashboard tab was opened on the student's browser", repr(A.browser_tabs())[:300])
+        # The quiz open in a second tab, and a new password (the old tab still says #lqz-in for the first one):
+        # both tabs are handed the new password and each answers for it.
+        subprocess.Popen([CHROME, "--user-data-dir=" + prof, START], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        t0 = time.time()
+        while time.time() - t0 < 30 and len([t for t in A.browser_tabs() if "quiz_start_frame_auto" in t[3]]) < 2: time.sleep(1)
+        qt = [t for t in A.browser_tabs() if "quiz_start_frame_auto" in t[3]]
+        check(len(qt) == 2, "the quiz is open in two tabs", repr(qt)[:300])
+        PW2 = "LQ-ZZ99YY88"
+        g.hand = {"pw": PW2, "since": time.time(), "sent": 0.0, "got": False, "in": False, "told": False}
+        t0 = time.time()
+        while time.time() - t0 < 60 and not g.hand["in"] and not g.hand["told"]:
+            g.hand_step([(a, w, t, A.inner_url(u)) for (a, w, t, u) in A.browser_tabs()], time.time()); time.sleep(1)
+        qt = [t for t in A.browser_tabs() if "quiz_start_frame_auto" in t[3]]
+        time.sleep(3); h = hits()
+        check(g.hand["in"] and len(qt) == 2 and all(u.endswith("#lqz-in") for (_, _, _, u) in qt), "a new password reaches both tabs, each answers #lqz-in for it (%d s)" % int(time.time() - t0), repr((g.hand, qt))[:400])
+        check(("/pwlog?pw=" + PW2) in h or ("/pwlog?poll=" + PW2) in h, "the pages hold the new password", h[-300:])
+        check(not clips and not any(PW2 in m for m in msgs), "still nothing shown or copied", repr((msgs, clips)))
+        # A tab is changed only while it still shows the page that was read: another window comes to the front
+        # between the read and the change, and the tab now at that place is left alone.
+        OTHER = "https://brightspace.usc.edu/d2l/lms/quizzing/admin/other.d2l"
+        subprocess.Popen([CHROME, "--user-data-dir=" + prof, "--new-window", OTHER], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        t0 = time.time()
+        while time.time() - t0 < 30 and not any(u.startswith(OTHER) for (_, _, _, u) in A.browser_tabs()): time.sleep(1)
+        time.sleep(1)
+        before = A.browser_tabs(); oth = [x for x in before if x[3].startswith(OTHER)]
+        check(len(oth) == 1, "a second window shows another page", repr(before)[:300])
+        if oth:
+            _, ow, ot, ou = oth[0]
+            try: A.osa('var c=Application("Google Chrome"); var w=c.windows(); for (var i=0;i<w.length;i++){ if (w[i].tabs().some(function(t){return String(t.url()).indexOf("quiz_start_frame_auto")>=0;})) { w[i].index = 1; break; } } "ok"')
+            except Exception as e: print("  could not reorder the windows: %s" % e, flush=True)
+            time.sleep(1); after = A.browser_tabs()
+            at = [x for x in after if x[1] == ow and x[2] == ot]
+            if at and not at[0][3].startswith(OTHER):
+                r = A.set_tab_url("Google Chrome", ow, ot, "about:blank", ou)
+                now_tabs = A.browser_tabs()
+                check(r is False and not any(u == "about:blank" for (_, _, _, u) in now_tabs) and any(u.startswith(OTHER) for (_, _, _, u) in now_tabs),
+                      "windows reordered since the read: the tab now at that place is left alone", repr((r, now_tabs))[:400])
+                nw = [x for x in now_tabs if x[3].startswith(OTHER)][0]
+                r2 = A.set_tab_url("Google Chrome", nw[1], nw[2], "about:blank", ou)
+                time.sleep(1)
+                check(r2 is True and any(u == "about:blank" for (_, _, _, u) in A.browser_tabs()), "... and the page that was read is changed at its own place", repr((r2, A.browser_tabs()))[:400])
+            else:
+                print("  NOTE: the window order did not change here (%r) -- the reorder check is skipped" % (after,), flush=True)
 finally:
     chrome.terminate(); srv.terminate()
     subprocess.run(["sudo", "rm", "-f", MP], capture_output=True); subprocess.run(["sudo", "killall", "cfprefsd"], capture_output=True)

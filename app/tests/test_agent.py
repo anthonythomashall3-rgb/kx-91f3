@@ -386,6 +386,29 @@ ok("a second tab that never takes it: after 75 s the password is shown and copie
 msgs[:] = []; clips[:] = []; sets[:] = []
 g, h = hagent(); T(g, [tab(SUMM + "#d2l_content")]); T(g, [tab(SUMM + "#d2l_content")])
 ok("a quiz address with its own # part (Skip to main content) is handed the password without it") if sets and sets[-1] == ("Google Chrome", 0, 0, want) else bad("sets %r" % (sets,))
+msgs[:] = []; clips[:] = []; sets[:] = []
+g, h = hagent(); T(g, [tab(SUMM + "#lqz-in")]); T(g, [tab(SUMM + "#lqz-in")])
+ok("a tab still showing #lqz-in from before (Chrome restarted, its tabs restored): handed the password anyway") if sets and sets[-1] == ("Google Chrome", 0, 0, want) and not g.hand["in"] else bad("hand %r sets %r" % (g.hand, sets))
+T(g, [tab(SUMM + "#lqz-in")])
+ok("... and it counts once this password was handed to it") if g.hand["in"] and not clips else bad("hand %r" % (g.hand,))
+msgs[:] = []; clips[:] = []; sets[:] = []
+g, h = hagent(); T(g, [tab(SUMM)]); T(g, [tab(SUMM)]); T(g, [tab(SUMM + "#lqz-in")])
+first_in = g.hand["in"]
+g.pw_reply({"password": "LQ-ZZ99YY88"}, _t.time()); T(g, [tab(SUMM + "#lqz-in")])
+want2 = SUMM + "#lqz=" + _up.quote("LQ-ZZ99YY88", safe="")
+ok("a changed password is handed over again, though the tab still says #lqz-in for the old one") if first_in and sets[-1] == ("Google Chrome", 0, 0, want2) and not g.hand["in"] else bad("hand %r sets %r" % (g.hand, sets[-2:]))
+T(g, [tab(SUMM + "#lqz-in")])
+ok("... entered once the tab answers for the new one; still nothing shown") if g.hand["in"] and g.hand["pw"] == "LQ-ZZ99YY88" and not clips else bad("hand %r clips %r" % (g.hand, clips))
+msgs[:] = []; clips[:] = []; sets[:] = []
+g, h = hagent(); T(g, [tab(SUMM)]); T(g, [tab(SUMM)]); T(g, [tab(SUMM + "#lqz-got")])
+g.hand["since"] -= A.HAND_WAIT + 10; g.hand["sent"] = 0
+T(g, [tab(SUMM + "#lqz-got"), ("Google Chrome", 0, 1, SUMM)])
+ok("the extension has answered: a tab opened after 30 s is still handed the password") if sets[-1] == ("Google Chrome", 0, 1, want) and not clips else bad("sets %r clips %r" % (sets[-2:], clips))
+msgs[:] = []; clips[:] = []; sets[:] = []
+A.set_tab_url = lambda app, wi, ti, url, *k: (sets.append((app, wi, ti, url)), False)[1]   # the tab moved: nothing was set
+g, h = hagent(); T(g, [tab(SUMM)]); T(g, [tab(SUMM)])
+ok("a hand-over that did not reach the tab (it moved) is not counted as handed") if sets and not g.hand.get("handed") else bad("hand %r" % (g.hand,))
+A.set_tab_url = lambda app, wi, ti, url, *k: (sets.append((app, wi, ti, url)), exps.append(k[0] if k else None))
 import shutil as _sh, subprocess as _sp, json as _js
 if _sh.which("node"):
     import importlib.util as _iu2   # a fresh copy of the agent: this section has put a stand-in in A.set_tab_url
