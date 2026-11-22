@@ -36,16 +36,24 @@ $AiApps = @("chatgpt","claude","copilot","perplexity","ollama","lmstudio","LM St
             "WhatsApp","Telegram","Discord","Messenger")   # messaging apps whose AI bots cannot be separated (Meta AI, Telegram/Discord bots; owner, 28 Oct). OpenAI Codex, Doubao, QuillBot, Highlight AI, AI browsers, Raycast AI
 # Non-browser routes to AI or a human helper, all closed during the quiz:
 $VmApps     = @("Parallels","prl_vm_app","vmware","vmware-vmx","VirtualBox","VirtualBoxVM","VBoxHeadless","qemu-system-x86_64","qemu-system-aarch64","vmwp","vmms","Docker Desktop","com.docker.backend",
-                "WindowsSandbox","WindowsSandboxClient","WindowsSandboxServer","WindowsSandboxRemoteSession","wsl","wslhost","wslrelay")
+                "WindowsSandbox","WindowsSandboxClient","WindowsSandboxServer","WindowsSandboxRemoteSession","wsl","wslhost","wslrelay",
+                "multipassd","podman","Podman Desktop","Rancher Desktop",
+                # Android emulators (an Android AI app with its own network on the PC screen)
+                "HD-Player","Bluestacks","BlueStacksX","Nox","NoxVMHandle","dnplayer","LdVBoxHeadless","MEmu","MEmuHeadless","MuMuPlayer","MuMuVMMHeadless","genymotion")
 $RemoteApps = @("TeamViewer","AnyDesk","RustDesk","remoting_host","ScreenConnect","ConnectWiseControl","LogMeIn","Splashtop","SRServer","vncserver","winvnc","tvnserver","Parsec","GoToMyPC",
                 "mstsc","msrdc","QuickAssist",
                 "PhoneExperienceHost","nxplayer","ZohoAssist",
-                "scrcpy","escrcpy","QtScrcpy","Vysor","AirDroid","ApowerMirror","LetsView","AirServer","AnyViewer")   # Phone Link = the phone's apps (and its network) on the PC screen; NoMachine; Zoho Assist
+                "scrcpy","escrcpy","QtScrcpy","Vysor","AirDroid","ApowerMirror","LetsView","AirServer","AnyViewer",
+                "Moonlight","vncviewer","RealVNC","Shadow","wfica32","CDViewer","SelfService","vmware-view","workspaces","RDCMan","RemoteDesktopManager","mRemoteNG","RoyalTS",
+                "ssh","putty","kitty","MobaXterm","Termius","SecureCRT","mosh-client")   # Phone Link = the phone's apps (and its network) on the PC screen; NoMachine; Zoho Assist; ssh / PuTTY / Termius = a shell on another computer
 $OverlayApps= @("Cluely","InterviewCoder","Interview Coder","LockedInAI","FinalRound","Ohmni","Sensei","UltraCode","Pieces","Verve AI","Parakeet AI","Beyz AI","Interview Solver")
 $ModelProcs = @("ollama","llama-server","llama-cli","llama-run","llamafile","koboldcpp","localai","local-ai","jan","gpt4all","text-generation-webui","vllm",
                 "ollama_llama_server","lms","llama-mtmd-cli","koboldcpp_cu12","koboldcpp_nocuda","cortex","cortex-server","open-webui","lmdeploy","text-generation-launcher","lemonade-server","lemonade-app")
 # tor = the Tor Browser's network daemon (Tor resolves names remotely, past the hosts block).
-$VpnApps    = @("nordvpn","expressvpn","surfshark","protonvpn","mullvad","pia","piaservice","Cloudflare WARP","warp-svc","openvpn","wireguard","windscribe","tunnelbear","hssvpn","cyberghost","tor")
+$VpnApps    = @("nordvpn","expressvpn","surfshark","protonvpn","mullvad","pia","piaservice","Cloudflare WARP","warp-svc","openvpn","wireguard","windscribe","tunnelbear","hssvpn","cyberghost","tor",
+                # proxies and tunnels that look names up remotely (past the hosts block), Tailscale / ZeroTier networks
+                "Proxifier","psiphon3","lantern","hiddify","nekoray","v2rayN","v2ray","xray","sing-box","clash-verge","Clash for Windows","mihomo","hysteria","naive","sslocal","ss-local","Shadowsocks",
+                "cloudflared","ngrok","frpc","chisel","tailscale-ipn","tailscaled","zerotier_desktop_ui","zerotier-one_x64","obfs4proxy","lyrebird","snowflake-client")
 $ModelPorts = @(11434,1234,4891,1337,7860)
 # 8080/8000/5000 are also ordinary web ports: blocked only to private networks (where a llama.cpp / vLLM
 # server would run), never to the internet. No loopback address in the list: Windows Firewall refuses a rule
@@ -79,7 +87,8 @@ $FwRules = @(
   @{ n = "$FwTag-models";  p = @{ Protocol = "TCP"; RemotePort = $ModelPorts } },
   @{ n = "$FwTag-models-local"; p = @{ Protocol = "TCP"; RemotePort = $LocalModelPorts; RemoteAddress = $LocalNets } },
   @{ n = "$FwTag-vpn-udp"; p = @{ Protocol = "UDP"; RemotePort = $VpnPorts } },
-  @{ n = "$FwTag-vpn-tcp"; p = @{ Protocol = "TCP"; RemotePort = 1194 } }
+  @{ n = "$FwTag-vpn-tcp"; p = @{ Protocol = "TCP"; RemotePort = 1194 } },
+  @{ n = "$FwTag-vpn-ssh"; p = @{ Protocol = "TCP"; RemotePort = 22 } }   # a shell on another computer (SSH under any program name)
 )
 # Wildcard AI domains (28 Oct 2026): the hosts file cannot block a whole domain, so a per-customer AI
 # endpoint (<name>.openai.azure.com, a chat proxy on *.workers.dev / *.hf.space / *.vercel.app, a
@@ -90,7 +99,8 @@ $FwRules = @(
 $WildDomains = @("openai.azure.com","cognitiveservices.azure.com","services.ai.azure.com","inference.ai.azure.com","ai.azure.com",
                  "workers.dev","hf.space","modal.run","vercel.app","fly.dev","replit.dev","replit.app","repl.co",
                  "ngrok.io","ngrok-free.app","ngrok.app","ngrok.dev","ngrok-free.dev","trycloudflare.com","loca.lt","serveo.net",
-                 "localhost.run","pinggy.link","pinggy.io","zrok.io","learnwise.ai","forethought.ai")
+                 "localhost.run","pinggy.link","pinggy.io","zrok.io","learnwise.ai","forethought.ai",
+                 "translate.goog","github.dev","gitpod.io","csb.app","mybinder.org","devtunnels.ms","gradio.live","val.run","streamlit.app")
 $WildTag = "LOCKqz-wild"
 # Warm connections (28 Oct 2026): an app LOCKqz does not close (Office, a PDF reader ...) that already
 # held an open keep-alive connection to an AI host when the quiz opened could keep using it: the hosts
@@ -168,9 +178,21 @@ function Kill-AiAndTools {
   foreach ($p in @(Get-Process -ErrorAction SilentlyContinue)) {
     $n = [string]$p.ProcessName; $hit = $want.Contains($n)
     if (-not $hit) { foreach ($w in $wild) { if ($n -like $w) { $hit = $true; break } } }
-    if ($hit) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+    if ($hit) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; continue }
+    # A local model under any program name: a big program (over 1 GB in memory, not a browser or Office) whose
+    # command line names a model file (llama.cpp -m x.gguf, MLX / transformers weights) or whose program file is
+    # itself over 1.5 GB (a llamafile).
+    try {
+      if ($p.WorkingSet64 -gt 1GB -and $p.Path -and ($p.Path -notlike "$env:WINDIR\*") -and ($NoModelCheck -notcontains $n)) {
+        $big = $false; try { $big = ((Get-Item -LiteralPath $p.Path -ErrorAction Stop).Length -gt 1.5GB) } catch { }
+        $cl = ""; if (-not $big) { $cl = [string](Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$p.Id) -ErrorAction Stop).CommandLine }
+        if ($big -or ($cl -match $ModelFileRe)) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+      }
+    } catch { }
   }
 }
+$ModelFileRe = '[.](gguf|ggml|safetensors|llamafile)([^A-Za-z0-9]|$)|\\[.]ollama\\models\\|\\[.]lmstudio\\models\\|\\[.]cache\\lm-studio\\|\\huggingface\\hub\\model[s]--'
+$NoModelCheck = @("chrome","msedge","firefox","brave","opera","vivaldi","explorer","dwm","svchost","MsMpEng","Memory Compression","OUTLOOK","WINWORD","EXCEL","POWERPNT","ONENOTE","ms-teams","Teams","Zoom","Code","devenv","Acrobat","AcroRd32","Photoshop")
 function Ensure-FirewallRules {
   # One rule per name: creates missing ones, collapses duplicates left by an older version.
   # First a quick look at the rules where Windows keeps them (one registry key): when every LOCKqz rule is there

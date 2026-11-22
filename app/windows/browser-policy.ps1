@@ -240,7 +240,7 @@ function Get-PolicyPlan([bool]$KeepProxy = $false) {
   # | @{ op = "rlist"; path; items } (list REPLACED for the quiz, restored after) | @{ op = "ffprefs"; path; name; prefs }.
   $paths = Get-PathEntries
   $hosts = Get-HostEntries
-  $cBlock = @($SearchBlock + $paths + $hosts | Select-Object -Unique)
+  $cBlock = @($SearchBlock + @("javascript://*", "view-source:*") + $paths + $hosts | Select-Object -Unique)
   $fBlock = @($FfBlock + @($paths | ForEach-Object { "*://*." + $_ + "*" }) + @($hosts | ForEach-Object { "*://*." + $_ + "/*" }) | Select-Object -Unique)
   $plan = New-Object System.Collections.ArrayList
   function V($p, $n, $v, $k = "DWord") { [void]$plan.Add(@{ op = "v"; path = $p; name = $n; value = $v; kind = $k }) }
@@ -267,6 +267,9 @@ function Get-PolicyPlan([bool]$KeepProxy = $false) {
     }
     V $root "DnsOverHttpsMode" "off" "String"
     if (-not $KeepProxy) { V $root "ProxyMode" "direct" "String" }   # a proxy would resolve AI sites remotely, past the hosts block
+    # No developer tools, page-source view or javascript: addresses (bookmarklets) during the quiz: the exam page and
+    # the password LOCKqz entered stay as Brightspace made them.
+    V $root "DeveloperToolsAvailability" 2
     V $root "DefaultSearchProviderEnabled" 1
     V $root "DefaultSearchProviderName" "Google (Web)" "String"
     V $root "DefaultSearchProviderSearchURL" "https://www.google.com/search?udm=14&q={searchTerms}" "String"
@@ -297,6 +300,7 @@ function Get-PolicyPlan([bool]$KeepProxy = $false) {
   V "$Firefox\DNSOverHTTPS" "Locked" 1
   if (-not $KeepProxy) { V "$Firefox\Proxy" "Mode" "none" "String"; V "$Firefox\Proxy" "Locked" 1 }
   V $Firefox "IPProtectionAvailable" 0   # Firefox's built-in VPN (149+)
+  V $Firefox "DisableDeveloperTools" 1
   L "$Firefox\WebsiteFilter\Block" $fBlock
   L "$Firefox\WebsiteFilter\Exceptions" $FfAllow
   # GenerativeAI (Firefox 144+): chatbot, link previews, smart tab groups, Smart Window off.

@@ -41,10 +41,14 @@ LOCAL_MODEL_CMD_RES=('/bin/mlx_lm[._][a-z_]+( |$)' ' -m mlx_lm([. ]|$)' '/bin/vl
                      '/bin/open-webui( |$)' ' -m open_webui( |$)' ' -m sglang\.launch_server' '/bin/text-generation-launcher( |$)' 'ollama serve')
 VPN_APPS=(openvpn openvpn-gui nordvpn nordvpnd expressvpn expressvpnd surfshark protonvpn protonvpn-app protonvpn-cli mullvad mullvad-daemon mullvad-gui
           windscribe windscribe-cli tunnelbear hotspotshield cyberghost tailscale tailscaled zerotier-one warp-svc warp-cli psiphon hiddify
-          v2ray xray clash clash-verge Clash.Meta sing-box shadowsocks ss-local tor Tor "Tor Browser" wg wg-quick)
-VM_APPS=(VirtualBox VirtualBoxVM VBoxHeadless vboxmanage qemu-system-x86_64 qemu-system-aarch64 qemu-kvm virt-manager gnome-boxes vmware vmware-vmx vmplayer dockerd containerd "Docker Desktop" limactl)
+          v2ray xray clash clash-verge Clash.Meta sing-box shadowsocks ss-local tor Tor "Tor Browser" wg wg-quick
+          cloudflared ngrok frpc chisel zrok sshuttle mihomo hysteria naive gost brook sslocal obfs4proxy lyrebird snowflake-client lantern)
+VM_APPS=(VirtualBox VirtualBoxVM VBoxHeadless vboxmanage qemu-system-x86_64 qemu-system-aarch64 qemu-kvm virt-manager gnome-boxes vmware vmware-vmx vmplayer dockerd containerd "Docker Desktop" limactl
+         multipassd podman "Rancher Desktop" waydroid anbox genymotion)
 REMOTE_APPS=(teamviewer TeamViewer teamviewerd anydesk AnyDesk rustdesk RustDesk x11vnc vncserver Xvnc tigervncserver vino-server gnome-remote-desktop-daemon
-             remoting_host chrome-remote-desktop parsec parsecd moonlight splashtop nomachine nxserver nxnode zohoassist scrcpy)
+             remoting_host chrome-remote-desktop parsec parsecd moonlight splashtop nomachine nxserver nxnode zohoassist scrcpy
+             remmina gnome-connections krdc vinagre xfreerdp wlfreerdp sdl-freerdp rdesktop vncviewer xtigervncviewer remote-viewer virt-viewer
+             ssh mosh-client autossh termius)   # ssh / mosh / Termius = a shell on another computer
 OVERLAY_APPS=(cluely Cluely interview-coder InterviewCoder lockedin-ai FinalRound ohmni sensei ultracode pieces verve-ai parakeet-ai beyz-ai)
 
 _kill_list() {   # _kill_list label name...
@@ -83,8 +87,26 @@ start_services() {   # at unlock: only names from the list above, only the ones 
   rm -f "$STOPPED"
   return 0
 }
+# A local model under any program name: a model file named on its command line (llama.cpp -m x.gguf, a renamed
+# llamafile, MLX / transformers weights), or a big program (over 1 GB in memory) with one mapped. [.] keeps this
+# pattern from matching the grep that uses it.
+MODEL_FILE_RE='[.](gguf|ggml|safetensors|llamafile)([^A-Za-z0-9]|$)|/[.]ollama/models/|/[.]lmstudio/models/|/[.]cache/lm-studio/|/huggingface/hub/model[s]--'
+models_by_file() {
+  local pid hit
+  hit="$( { ps -eww -o pid=,args= 2>/dev/null | grep -E -- "$MODEL_FILE_RE" | awk '{print $1}'
+            ps -e -o pid=,rss= 2>/dev/null | awk '$2 > 1048576 {print $1}' | while read -r pid; do
+              grep -qE -- "$MODEL_FILE_RE" "${LOCKQZ_PROC:-/proc}/$pid/maps" 2>/dev/null && echo "$pid"
+            done; } | sort -u)"
+  for pid in $hit; do
+    case "$pid" in ''|*[!0-9]*) continue ;; esac
+    [ "$pid" = "$$" ] && continue
+    if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would close (local model by its files): $pid"; continue; fi
+    kill -9 "$pid" 2>/dev/null || true
+  done
+}
 close_apps() {
   [ "${LOCKQZ_NO_KILL:-0}" = 1 ] && return 0   # tests on a shared machine: never signal real processes
+  models_by_file
   _kill_list "AI app" "${AI_APPS[@]}"
   _kill_list "local-model" "${LOCAL_MODEL_PROCS[@]}"; _kill_cmd_res "${LOCAL_MODEL_CMD_RES[@]}"
   _kill_list "VPN" "${VPN_APPS[@]}"; _kill_list "VM" "${VM_APPS[@]}"
@@ -138,6 +160,7 @@ $dns53
     ip6 daddr { ::1, fc00::/7, fe80::/10 } tcp dport { $LOCAL_MODEL_PORTS } drop
     udp dport { $VPN_UDP } drop
     tcp dport 1194 drop
+    tcp dport 22 drop
     ip daddr @lq_warm4 udp dport 443 drop
     ip6 daddr @lq_warm6 udp dport 443 drop
     ip daddr @lq_api4 tcp dport 443 drop
@@ -162,7 +185,7 @@ fw_on() {
     for a in "${DOH_V4[@]}"; do iptables -A LOCKQZ -d "$a" -p tcp --dport 443 -j DROP; iptables -A LOCKQZ -d "$a" -p udp --dport 443 -j DROP; done
     iptables -A LOCKQZ -p tcp -m multiport --dports "${MODEL_PORTS// /}" -j DROP
     for a in 127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16; do iptables -A LOCKQZ -d "$a" -p tcp -m multiport --dports "${LOCAL_MODEL_PORTS// /}" -j DROP; done
-    iptables -A LOCKQZ -p udp -m multiport --dports "${VPN_UDP// /}" -j DROP; iptables -A LOCKQZ -p tcp --dport 1194 -j DROP
+    iptables -A LOCKQZ -p udp -m multiport --dports "${VPN_UDP// /}" -j DROP; iptables -A LOCKQZ -p tcp --dport 1194 -j DROP; iptables -A LOCKQZ -p tcp --dport 22 -j DROP
     if command -v ip6tables >/dev/null 2>&1; then
       ip6tables -N LOCKQZ 2>/dev/null || ip6tables -F LOCKQZ
       ip6tables -C OUTPUT -j LOCKQZ 2>/dev/null || ip6tables -I OUTPUT -j LOCKQZ
@@ -170,7 +193,7 @@ fw_on() {
       for a in "${DOH_V6[@]}"; do ip6tables -A LOCKQZ -d "$a" -p tcp --dport 443 -j DROP; ip6tables -A LOCKQZ -d "$a" -p udp --dport 443 -j DROP; done
       ip6tables -A LOCKQZ -p tcp -m multiport --dports "${MODEL_PORTS// /}" -j DROP
       for a in ::1/128 fc00::/7 fe80::/10; do ip6tables -A LOCKQZ -d "$a" -p tcp -m multiport --dports "${LOCAL_MODEL_PORTS// /}" -j DROP; done
-      ip6tables -A LOCKQZ -p udp -m multiport --dports "${VPN_UDP// /}" -j DROP; ip6tables -A LOCKQZ -p tcp --dport 1194 -j DROP
+      ip6tables -A LOCKQZ -p udp -m multiport --dports "${VPN_UDP// /}" -j DROP; ip6tables -A LOCKQZ -p tcp --dport 1194 -j DROP; ip6tables -A LOCKQZ -p tcp --dport 22 -j DROP
     fi
     return 0
   fi
@@ -244,7 +267,8 @@ write_status() { mkdir -p "$STATE"; printf '{"state":"%s","at":"%s","host":"%s"}
 WILD_DOMAINS=(openai.azure.com cognitiveservices.azure.com services.ai.azure.com inference.ai.azure.com ai.azure.com \
               workers.dev hf.space modal.run vercel.app fly.dev replit.dev replit.app repl.co \
               ngrok.io ngrok-free.app ngrok.app ngrok.dev ngrok-free.dev trycloudflare.com loca.lt serveo.net \
-              localhost.run pinggy.link pinggy.io zrok.io learnwise.ai forethought.ai)
+              localhost.run pinggy.link pinggy.io zrok.io learnwise.ai forethought.ai \
+              translate.goog github.dev gitpod.io csb.app mybinder.org devtunnels.ms gradio.live val.run streamlit.app)
 WILD_IF="${LOCKQZ_WILD_IF:-lockqz0}"
 # The same domains on every Linux, with or without systemd-resolved: a DNS question (port 53, any server, the
 # local one included) that asks for a name under one of them is refused by the firewall, so it fails at once.

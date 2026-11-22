@@ -102,6 +102,39 @@ function Step-Locked($wins, $quizWin, [string]$tab, [string]$title, $missingSinc
   }
   return $r
 }
+function Url-Host([string]$u) { if ($u -match '^(?:[A-Za-z][A-Za-z0-9+.-]*://)?([^/?#:]*)') { return $Matches[1].ToLowerInvariant() }; return "" }
+# A quiz's "turned in" pages (every leaving page except the quiz list): the attempt ends on this PC only when one
+# of these takes the place of the exam's attempt page in the same browser window, on the same Brightspace host.
+function Is-SubmitPath([string]$u) { (Url-Path $u) -match 'quiz_submissions|submission|feedback|results' }
+$script:Seen = @{}; $script:AttWin = @{}; $script:RestartWait = [DateTime]::MinValue
+function Step-Evidence($wins, [string]$quiz, [bool]$present, [datetime]$now) {
+  # What this PC saw of the locked exam's attempt (sent with an unlock, see Seen-For).
+  if (-not $quiz) { return }
+  if (-not $script:Seen.ContainsKey($quiz)) { $script:Seen[$quiz] = @{ attempt = $false; sub = $false; rt = $true; at = $now } }
+  $ev = $script:Seen[$quiz]; $byUrl = $false
+  foreach ($w in @($wins)) {
+    $u = [string]$w.Url
+    if (-not $u -or -not (Is-QuizPath $u) -or ((Lock-Id $u) -ne $quiz)) { continue }
+    $byUrl = $true
+    $k = [string]$w.Hwnd
+    if ((Url-Path $u) -match '/attempt/') { $ev.attempt = $true; $script:AttWin[$k] = @{ host = (Url-Host $u); at = $now } }
+    elseif (Is-SubmitPath $u) {
+      $p = $script:AttWin[$k]
+      if ($p -and ($p.host -eq (Url-Host $u)) -and (($now - [datetime]$p.at).TotalSeconds -le 15)) {
+        if (-not $ev.sub) { Log "$quiz turned in (its submitted page replaced the attempt page)" }
+        $ev.sub = $true
+      }
+    }
+  }
+  if ($present -and -not $byUrl) { $ev.rt = $false }   # seen by its window title only (F11 / app window): not watched live
+}
+function Seen-For([string]$quiz) {
+  $ev = $script:Seen[$quiz]
+  if (-not $ev) { return @{ sub = $false; attempt = $null } }
+  $att = $null
+  if ($ev.attempt) { $att = $true } elseif ($ev.rt -and -not $ev.adopted) { $att = $false }
+  return @{ sub = [bool]$ev.sub; attempt = $att }
+}
 function Lock-Id($u) {
   $qi = [regex]::Match([string]$u, '[?&]qi=(\d+)'); $ou = [regex]::Match([string]$u, '[?&]ou=(\d+)')
   "$(if ($ou.Success) { $ou.Groups[1].Value } else { 'x' })-$(if ($qi.Success) { $qi.Groups[1].Value } else { 'x' })"
@@ -187,7 +220,7 @@ function Get-BrowserWindows {
     $url = $inner
     $tabs = @()
     foreach ($t in $w.FindAll($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::TabItem)))) { $tabs += $t.Current.Name }
-    $out += [pscustomobject]@{ Title = $w.Current.Name; Url = $url; Tabs = $tabs; Proc = $names[$wpid] }
+    $out += [pscustomobject]@{ Title = $w.Current.Name; Url = $url; Tabs = $tabs; Proc = $names[$wpid]; Hwnd = $w.Current.NativeWindowHandle }
   }
   $out
 }
@@ -274,6 +307,19 @@ function Show-Message($text) {
 # A closed Firefox reopens with its tabs (it restores the session after a forced close).
 $FirefoxFamily = @("firefox","librewolf","waterfox","floorp","zen","mullvadbrowser")
 $NoPolicy = @("opera","opera_gx","opera_crashreporter")
+function Restart-QuizFirefox([string]$name, [datetime]$lockedAt) {
+  # The exam is open in a Firefox (or fork) that was already running when this lock began: it reads the quiz policies
+  # (its AI, encrypted DNS and built-in VPN off, AI sites blocked) only when it starts, so it is restarted once, now
+  # (a forced close: it comes back with its tabs). -> $true when restarted.
+  $ps = @(Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object { try { $_.StartTime.ToUniversalTime() -lt $lockedAt.AddSeconds(-1) } catch { $true } })
+  if ($ps.Count -eq 0) { return $false }
+  $exe = (@($ps | Where-Object { $_.Path }) | Select-Object -First 1).Path
+  foreach ($p in $ps) { try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch { } }
+  $script:RestartWait = [DateTime]::UtcNow.AddSeconds(120)   # its exam page is gone until it is back (not "the exam was closed")
+  if ($exe) { Start-Sleep -Seconds 2; try { Start-Process -FilePath $exe } catch { Log "reopen $name failed: $_" } }
+  Log "$name restarted for the quiz (quiz policies are read when it starts)"
+  return $true
+}
 function Close-Browsers($names, [string]$keep) {
   # -> $true when something was closed. Asks politely first (CloseMainWindow), then forces.
   $ps = @(Get-Process -Name $names -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -ne $keep })
@@ -647,12 +693,12 @@ function Handle-Pw($pr, [bool]$first, [string]$note) {
 }
 function Clear-Quiz { $script:Locked = $false; $script:Quiz = $null; $script:QuizTab = $null; $script:QuizTitle = $null; $script:QuizUrl = $null; $script:QuizProc = ""; $script:MissingSince = $null; $script:OperaWarned = $false }
 $script:HoldTold = $null
-$HoldText = "The quiz page is gone but Brightspace has not recorded your submission yet, so AI stays off.`n`nIt comes back by itself within about a minute of your submission reaching your professor's Brightspace, or at the quiz end. If you did submit, nothing to do."
+$HoldText = "AI stays off: this exam was not turned in on this computer.`n`nGo back to the exam and submit it. AI comes back the moment it is submitted. If you did submit, AI comes back by itself once Brightspace shows it, or when the exam ends."
 function Send-Unlock($quiz, $reason) {
   # -> $true only when the helper confirmed it is unlocked. 202 pending = the server has not vouched for the
   # quiz end yet (held): told to the student once per quiz, retried quietly.
   try {
-    $r = Helper "/unlock" @{ quiz_id = $quiz; reason = $reason }
+    $r = Helper "/unlock" @{ quiz_id = $quiz; reason = $reason; seen = (Seen-For ([string]$quiz)) }
     if ($r -and $r.pending -and ($script:HoldTold -ne $quiz)) { $script:HoldTold = $quiz; Show-Message $HoldText }
     return [bool]($r -and $r.ok -and ($r.state -eq "unlocked"))
   } catch { return $false }
@@ -699,14 +745,22 @@ while ($true) {
           # C9: the server says this student already finished this quiz - the helper did not lock.
           Add-Cap ([string]$Quiz); Log "server: $Quiz is over ($($r.capped_reason)) - not locked"; Clear-Quiz
         } elseif ($r -and $r.ok) {
-          $QuizUrl = $quizWin.Url; $LastCheck = [DateTime]::UtcNow
+          $QuizUrl = $quizWin.Url; $LastCheck = [DateTime]::UtcNow; $lockedAt = [DateTime]::UtcNow
           $Locked = $true; $MissingSince = $null; $LastBeat = [DateTime]::UtcNow; Log "LOCKED $Quiz"
+          # What was seen of this exam's attempt is kept for 6 h (a student who stepped out and came back is still in
+          # the same attempt); another exam starts fresh.
+          $nowL = [DateTime]::UtcNow
+          foreach ($k in @($script:Seen.Keys)) { if (($nowL - [datetime]$script:Seen[$k].at).TotalHours -gt 6) { $script:Seen.Remove($k) } }
+          if (-not $script:Seen.ContainsKey([string]$Quiz)) { $script:Seen[[string]$Quiz] = @{ attempt = $false; sub = $false; rt = $true; at = $nowL } }
+          $script:Seen[[string]$Quiz].sub = $false; $script:AttWin = @{}
+          $restarted = ($FirefoxFamily -contains $QuizProc) -and (Restart-QuizFirefox $QuizProc $lockedAt)
           $closed = @()
           if (Close-Browsers $FirefoxFamily $QuizProc) { $closed += "Firefox" }
           if (Close-Browsers $NoPolicy $QuizProc) { $closed += "Opera"; $OperaWarned = $true }
           # Brave reads its quiz policies (Leo, Tor windows, VPN off) only when it starts: close it once.
           if (Close-Browsers @("brave") $QuizProc) { $closed += "Brave" }
-          $note = if ($closed.Count -gt 1) { "`n`n" + (($closed[0..($closed.Count-2)]) -join ", ") + " and " + $closed[-1] + " were closed for the quiz so their AI stays off. You can reopen them; your tabs come back." } elseif ($closed.Count) { "`n`n" + $closed[0] + " was closed for the quiz so its AI stays off. You can reopen it; your tabs come back." } else { "" }
+          $rnote = if ($restarted) { "`n`nFirefox was restarted for the exam so its AI stays off. Your tabs come back." } else { "" }
+          $note = $rnote + $(if ($closed.Count -gt 1) { "`n`n" + (($closed[0..($closed.Count-2)]) -join ", ") + " and " + $closed[-1] + " were closed for the quiz so their AI stays off. You can reopen them; your tabs come back." } elseif ($closed.Count) { "`n`n" + $closed[0] + " was closed for the quiz so its AI stays off. You can reopen it; your tabs come back." } else { "" })
           $LastPw = $null; $StartTold = $null; $script:PayShown = $false; $script:PaySince = $null; $res = $null
           $script:PwFilled = @{}; $script:PwEntered = $false; $script:PwTold = $false; $script:PwSince = $null
           for ($i = 0; ($i -lt 3) -and (-not $res); $i++) {
@@ -726,6 +780,8 @@ while ($true) {
           Note-Cap $st
           if ((($st.state -eq "locked") -or ($st.state -eq "developer")) -and $st.quiz_id -and -not $Capped.ContainsKey([string]$st.quiz_id) -and ((-not $st.student) -or (-not $Student) -or ($st.student -eq $Student))) {
             $Locked = $true; $Quiz = $st.quiz_id; $QuizTab = $null; $QuizTitle = $null; $QuizUrl = ""; $QuizProc = ""
+            if (-not $script:Seen.ContainsKey([string]$Quiz)) { $script:Seen[[string]$Quiz] = @{ attempt = $false; sub = $false; rt = $true; at = [DateTime]::UtcNow } }
+            $script:Seen[[string]$Quiz].adopted = $true   # this agent did not watch the whole lock: it never says "no attempt"
             $MissingSince = $null; $LastBeat = [DateTime]::UtcNow; Log "adopted helper lock $Quiz"
           }
         } catch { }
@@ -733,6 +789,8 @@ while ($true) {
     } else {
       $step = Step-Locked $wins $quizWin $QuizTab $QuizTitle $MissingSince ([DateTime]::UtcNow) $Grace
       $MissingSince = $step.MissingSince; $reason = $step.Reason
+      Step-Evidence $wins ([string]$Quiz) ([bool]$step.Present) ([DateTime]::UtcNow)
+      if ((-not $step.Present) -and ([DateTime]::UtcNow -lt $script:RestartWait)) { $MissingSince = $null; $reason = $null }   # its Firefox is restarting for the exam
       if ($step.Present) {
         if ($quizWin -and ((Lock-Id $quizWin.Url) -eq $Quiz)) {
           # Keep the remembered quiz page fresh (titles change between quiz pages; an adopted lock has none).

@@ -73,6 +73,10 @@ LEAVING_RE = re.compile(r"quizzes_list|quiz_submissions|feedback|results|submiss
 QI_RE = re.compile(r"[?&]qi=(\d+)")                                  # the quiz's own parameters
 OU_RE = re.compile(r"[?&]ou=(\d+)")
 QUIZ_RE = QUIZ_PATH_RE   # old name, kept for anything that still imports it
+# A quiz's "turned in" pages (every leaving page except the quiz list): the attempt ends on this computer only
+# when one of these takes the place of the exam's attempt page in the same tab, on the same Brightspace host.
+SUBMIT_PATH_RE = re.compile(r"quiz_submissions|submission|feedback|results", re.I)
+ATT_SUB_S, ATT_SUB_SLOW = 15, 45   # s since that tab last showed the attempt page (live tabs / session files)
 WEB_OK_UDM = {"14", "2", "12", "7", "36"}
 WEB_OK_TBM = {"isch", "nws", "vid", "bks"}
 JXA_BROWSERS = ["Google Chrome", "Google Chrome Beta", "Google Chrome Dev", "Google Chrome Canary",
@@ -354,16 +358,31 @@ def running_apps(procs=None):
         elif "/" not in comm: names.add(comm)   # some ps builds print the bare name
     return names
 
+# (app, windowIndex, tabIndex) -> a key that stays with that tab while windows are reordered (window id plus the
+# tab's own id, or its place in that window): filled by browser_tabs(keys=True), read by the attempt evidence.
+TAB_KEYS, WANT_KEYS = {}, [False]   # WANT_KEYS[0]: the agent is locked (set by tick)
 def browser_tabs():
-    """-> list of (app, windowIndex, tabIndex, url) across every running browser."""
+    """-> list of (app, windowIndex, tabIndex, url) across every running browser (while locked, also TAB_KEYS)."""
     tabs, procs = [], ps_procs()
     apps = running_apps(procs)
+    keys = WANT_KEYS[0]
+    TAB_KEYS.clear()
     for app in JXA_BROWSERS:
         if app not in apps: continue   # never name a browser that is not running (JXA would launch it)
         try:
-            js = 'JSON.stringify(Application(%s).windows().map(w=>w.tabs().map(t=>t.url())))' % json.dumps(app)
-            for wi, urls in enumerate(json.loads(osa(js) or "[]")):
-                for ti, u in enumerate(urls or []): tabs.append((app, wi, ti, u or ""))
+            if keys:
+                js = ('JSON.stringify(Application(%s).windows().map(function(w){var i=null,d=null;try{i=w.id()}catch(e){}'
+                      'try{d=w.tabs.id()}catch(e){}return {u:w.tabs().map(t=>t.url()),w:i,t:d}}))') % json.dumps(app)
+            else:
+                js = 'JSON.stringify(Application(%s).windows().map(w=>w.tabs().map(t=>t.url())))' % json.dumps(app)
+            for wi, win in enumerate(json.loads(osa(js) or "[]")):
+                urls = win.get("u") if isinstance(win, dict) else win
+                for ti, u in enumerate(urls or []):
+                    tabs.append((app, wi, ti, u or ""))
+                    if isinstance(win, dict):
+                        ids = win.get("t") if isinstance(win.get("t"), list) else []
+                        TAB_KEYS[(app, wi, ti)] = (app, win.get("w") if win.get("w") is not None else "w%d" % wi,
+                                                   ids[ti] if ti < len(ids) and ids[ti] is not None else "#%d" % ti)
             _denied.pop(app, None)
         except Exception as e:
             if "-1743" in str(e) or "not allowed" in str(e).lower(): permission_hint(app)
@@ -754,6 +773,8 @@ class Agent:
         self.pw, self.pw_next, self.start_told = None, 0.0, None   # next /password check; "opens at" shown for
         self.quiz_app, self.opera_warned = None, False             # browser holding the quiz
         self.bl, self.bl_mtime = (set(), []), None                 # AI blocklist (hosts, host/path)
+        self.seen, self.att_tabs = {}, {}   # per quiz: what this computer saw of its attempt (sent with an unlock)
+        self.restart_wait = 0.0             # the quiz's own Firefox is being restarted: its page may be gone until then
 
     def blocklist(self):
         p = os.path.join(HERE, "blocklist.txt")
@@ -873,6 +894,31 @@ class Agent:
         if len(names) == 1:
             return "\n\n%s was closed for the quiz so its AI stays off. You can reopen it; your tabs come back." % names[0]
         return "\n\n%s were closed for the quiz so their AI stays off. You can reopen them; your tabs come back." % (", ".join(names[:-1]) + " and " + names[-1])
+
+    def restart_quiz_gecko(self, app):
+        """The exam is open in a Firefox (or fork) that was already running when this lock began: it reads the quiz
+        policies (its AI, encrypted DNS and built-in VPN off, AI sites blocked) only when it starts, so it is
+        restarted once, now - closed at once (a forced close: it comes back with its tabs) and opened again.
+        -> note for the student ('' when nothing was restarted)."""
+        b = gecko_bin_of(app)
+        if not b: return ""
+        old = [(pid, comm) for pid, et, comm in ps_procs()
+               if ".app/Contents/MacOS/" in comm and os.path.basename(comm).lower() == b and et > 3]
+        if not old: return ""
+        import signal
+        for pid, _ in old:
+            try: os.kill(pid, signal.SIGKILL)
+            except Exception: pass
+        apps = sorted({comm.split(".app/Contents/MacOS/")[0] + ".app" for _, comm in old})
+        self.restart_wait = time.time() + 120   # its exam page is gone until it is back (not "the exam was closed")
+        def reopen():
+            time.sleep(2)
+            for a in apps:
+                try: subprocess.run(["open", "-a", a], timeout=20, capture_output=True)
+                except Exception as e: log("reopen %s failed: %s" % (a, e))
+        threading.Thread(target=reopen, daemon=True).start()
+        log("%s restarted for %s (quiz policies are read when it starts)" % (app, self.quiz))
+        return "\n\n%s was restarted for the exam so its AI stays off. Your tabs come back." % app
 
     def pw_reply(self, r, now, first=False, note=""):
         """Act on the helper's /password answer -> "pw" | "pay" | "wait" | "other" | None (nothing yet).
@@ -1037,9 +1083,15 @@ class Agent:
         self.quiz, self.url, self.quiz_app, self.opera_warned, self.hand = quiz, url, app, False, None
         self.locked, self.missing_since, self.last_beat, self.pending = True, None, time.time(), None
         self.start_told = None
+        # What was seen of this exam's attempt is kept for 6 h (a student who stepped out and came back is still
+        # in the same attempt); another exam starts fresh.
+        for k in [k for k, v in self.seen.items() if time.time() - v.get("at", 0) > 6 * 3600]: self.seen.pop(k, None)
+        if quiz not in self.seen: self.seen[quiz] = {"attempt": False, "sub": False, "rt": True, "at": time.time()}
+        self.seen[quiz]["sub"] = False; self.att_tabs = {}
+        if app not in JXA_BROWSERS: self.seen[quiz]["rt"] = False   # its tabs come from a session file, not live
         log("LOCKED %s" % self.quiz)
         dev = developer_mode()
-        note = "" if dev else self.close_for_quiz(app)
+        note = "" if dev else self.close_for_quiz(app) + self.restart_quiz_gecko(app)
         self.pw, self.pay_shown, self.pay_since, res = None, False, 0, None
         for attempt in range(3):   # the helper fetches it (signed); retry a brief network blip
             try:
@@ -1050,14 +1102,41 @@ class Agent:
         if res is None and self.locked and not self.pay_shown:
             dialog("AI is locked for this quiz.\n\nIf it needs a password, LOCKqz will show it here as soon as the quiz opens." + note)
 
-    HOLD_TEXT = ("The quiz page is gone but Brightspace has not recorded your submission yet, so AI stays off.\n\n"
-                 "It comes back by itself within about a minute of your submission reaching your professor's Brightspace, "
-                 "or at the quiz end. If you did submit, nothing to do.")
+    HOLD_TEXT = ("AI stays off: this exam was not turned in on this computer.\n\n"
+                 "Go back to the exam and submit it. AI comes back the moment it is submitted. "
+                 "If you did submit, AI comes back by itself once Brightspace shows it, or when the exam ends.")
+    def seen_for(self, quiz):
+        """What this computer saw of the exam's attempt during the lock (the server ends an exam early only on
+        this): sub = its turned-in page took the place of its attempt page in the same tab; attempt = an
+        attempt page was seen (False only when every look at the exam came from a live tab list)."""
+        ev = self.seen.get(quiz)
+        if not ev: return {"sub": False, "attempt": None}
+        att = True if ev.get("attempt") else (False if ev.get("rt") and not ev.get("adopted") else None)
+        return {"sub": bool(ev.get("sub")), "attempt": att}
+    def evidence_step(self, tabs, now):
+        q = self.quiz
+        if not q: return
+        ev = self.seen.setdefault(q, {"attempt": False, "sub": False, "rt": True, "at": now})
+        for (a, w, t, u) in tabs:
+            if not is_quiz_page(u) or lock_id(u) != q: continue
+            if w < 0: ev["rt"] = False   # a session file (Firefox, Linux): written every few seconds, not live
+            path = url_parts(u)[0]
+            key = TAB_KEYS.get((a, w, t)) or (a, w, t)
+            try: host = (urllib.parse.urlsplit(u).hostname or "").lower()
+            except Exception: host = ""
+            if "/attempt/" in path:
+                ev["attempt"] = True
+                self.att_tabs[key] = (host, now)
+            elif SUBMIT_PATH_RE.search(path):
+                prev = self.att_tabs.get(key)
+                if prev and prev[0] == host and 0 <= now - prev[1] <= (ATT_SUB_S if w >= 0 else ATT_SUB_SLOW):
+                    if not ev.get("sub"): log("%s turned in (its submitted page replaced the attempt page)" % q)
+                    ev["sub"] = True
     def send_unlock(self, quiz, reason):
         """True only when the helper confirms AI is back. 202 pending = the server has not vouched for the
         quiz end yet (held): told to the student once per quiz, retried quietly."""
         try:
-            r = self.helper("/unlock", {"quiz_id": quiz, "reason": reason}, timeout=150)
+            r = self.helper("/unlock", {"quiz_id": quiz, "reason": reason, "seen": self.seen_for(quiz)}, timeout=150)
             if isinstance(r, dict) and r.get("pending") and getattr(self, "hold_told", None) != quiz:
                 self.hold_told = quiz; dialog(self.HOLD_TEXT)
             return isinstance(r, dict) and bool(r.get("ok"))
@@ -1092,6 +1171,8 @@ class Agent:
         after the normal grace period."""
         q = st.get("quiz_id")
         self.locked, self.quiz, self.url = True, q, present.get(q, "")
+        ev = self.seen.setdefault(q, {"attempt": False, "sub": False, "rt": True, "at": time.time()})
+        ev["adopted"] = True   # this agent did not watch the whole lock: it never says "no attempt"
         self.missing_since = None if q in present else time.time()
         self.last_beat, self.tabs_seen = time.time(), 0
         log("adopted existing lock %s" % q)
@@ -1176,6 +1257,7 @@ class Agent:
         # daemon never blocks AI and search tabs are never rewritten.
         if not self.console_step(): return
         dev = developer_mode() if dev is None else dev
+        WANT_KEYS[0] = bool(self.locked)
         tabs = browser_tabs() if tabs is None else tabs
         # A quiz opened from Brightspace Content/Lessons runs in a frame, so its submission never shows
         # in the address bar. Move it to its own page (same quiz, same attempt): from then on the address
@@ -1201,7 +1283,9 @@ class Agent:
                 url = next(iter(open_quizzes.values()))
                 apps = [a for (a, _, _, u) in tabs if u == url]   # the same page open in Opera and Chrome: Chrome
                 self.start(url, next((a for a in apps if a not in OPERA_APPS), apps[0] if apps else None))
-                if self.locked: self.tabs_seen = len(tabs)
+                if self.locked:
+                    self.tabs_seen = len(tabs)
+                    self.evidence_step(tabs, now)   # the page it locked on (an attempt page counts from the first look)
                 return
             if self.pending and now - self.pending_try >= 5:
                 self.pending_try = now
@@ -1220,7 +1304,11 @@ class Agent:
                 except Exception as e: log("helper check failed: %s" % e)
             return
         # locked
-        if self.quiz in present and self.quiz not in self.capped:
+        self.evidence_step(tabs, now)
+        restarting = self.quiz not in present and now < self.restart_wait and self.quiz not in self.capped
+        if restarting:
+            self.missing_since = None   # its Firefox is restarting for the exam: the page comes back with its tabs
+        elif self.quiz in present and self.quiz not in self.capped:
             self.missing_since = None
             self.tabs_seen = max(self.tabs_seen, len(tabs))
             if not self.url or "/attempt/" in url_parts(present[self.quiz])[0]: self.url = present[self.quiz]

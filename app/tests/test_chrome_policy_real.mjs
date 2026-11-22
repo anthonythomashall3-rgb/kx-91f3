@@ -20,12 +20,17 @@ spec=importlib.util.spec_from_file_location('bp','${APP}/mac/browser-policy.py')
 p=m.chromium_policy('com.google.Chrome'); p.pop(m.MARK,None)
 p['URLBlocklist']=m._union(p['URLBlocklist'], m.path_entries()+m.host_entries())
 print(json.dumps(p))`], { env: { ...process.env, LOCKQZ_BLOCKLIST: join(APP, "mac/blocklist.txt") } }).toString());
+// DeveloperToolsAvailability 2 (no developer tools during the quiz) also closes the debugging connection this test
+// drives Chromium through, so it is checked in the written policy and left out of the browser run.
+const devTools = pol.DeveloperToolsAvailability; delete pol.DeveloperToolsAvailability;
 const DIRS = ["/etc/chromium/policies/managed", "/etc/opt/chrome/policies/managed", "/etc/opt/chrome_for_testing/policies/managed", "/etc/opt/chromium/policies/managed"];
 const put = j => DIRS.forEach(d => { mkdirSync(d, { recursive: true }); writeFileSync(join(d, "lockqz-test.json"), JSON.stringify(j)); });
 const ext = mkdtempSync(join(tmpdir(), "lqzext-"));
 writeFileSync(join(ext, "manifest.json"), JSON.stringify({ manifest_version: 3, name: "AI helper test", version: "1", background: { service_worker: "bg.js" } }));
 writeFileSync(join(ext, "bg.js"), "");
 console.log(`T1 Chromium loads LOCKqz's policy (${Object.keys(pol).length} policies, ${pol.URLBlocklist.length} blocked URL entries)`);
+devTools === 2 ? ok("developer tools off during the quiz (DeveloperToolsAvailability 2, in the written policy)") : bad("DeveloperToolsAvailability is " + devTools);
+pol.URLBlocklist.includes("javascript://*") && pol.URLBlocklist.includes("view-source:*") ? ok("javascript: addresses (bookmarklets) and page-source view refused (URLBlocklist)") : bad("javascript:/view-source: not in URLBlocklist");
 put({});
 const ctx = await chromium.launchPersistentContext(mkdtempSync(join(tmpdir(), "lqzprof-")), { headless: false, args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`] });
 try {

@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.6.37"
+$Version = "0.6.38"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = if ($env:LOCKQZ_CONFIG) { $env:LOCKQZ_CONFIG } else { "$env:ProgramData\LOCKqz\config.json" }
@@ -334,6 +334,34 @@ function Stop-Test {
 # Cheap in-process check of the hosts block (same marker as the engine), for /status.
 $HostsFile = "$env:WINDIR\System32\drivers\etc\hosts"
 function HostsLocked { try { [IO.File]::ReadAllText($HostsFile) -match [regex]::Escape("# LOCKqz START") } catch { $false } }
+function Test-Online {
+  # Does the internet answer at all (two neutral pages, no proxy, a few seconds)? While it does not, an unlock that
+  # could not reach LOCKqz is not counted toward the 10 minutes after which it stands: a PC cut off from the
+  # network has no network AI either, and the block stays until LOCKqz answers again.
+  foreach ($u in @("http://www.msftconnecttest.com/connecttest.txt", "http://www.gstatic.com/generate_204")) {
+    try {
+      $rq = [System.Net.HttpWebRequest]::Create($u); $rq.Proxy = $null; $rq.Timeout = 4000; $rq.AllowAutoRedirect = $false
+      $rs = $rq.GetResponse(); $c = [int]$rs.StatusCode; $rs.Close()
+      if ($c -ge 200 -and $c -lt 500) { return $true }
+    } catch [System.Net.WebException] {
+      if ($_.Exception.Response) { $c = [int]$_.Exception.Response.StatusCode; if ($c -ge 200 -and $c -lt 500) { return $true } }
+    } catch { }
+  }
+  return $false
+}
+function LQ-AskWait($failSince, [int64]$now, [bool]$up) {
+  # LOCKqz did not answer an unlock ask: -> @{ held; since }. Online: held for 10 minutes from the first ask that
+  # got no answer, then it stands. Offline: held, and the 10 minutes start only once the internet is back.
+  if (-not $up) { return @{ held = $true; since = $null } }
+  $s = if ($failSince) { [int64]$failSince } else { $now }
+  return @{ held = (($now - $s) -lt 600); since = $s }
+}
+function LQ-Seen($v) {
+  # The agent's view of the exam attempt (sent with its unlock): only these two answers, as booleans.
+  if ($null -eq $v -or ($v -is [string])) { return $null }
+  $a = $null; if ($v.attempt -is [bool]) { $a = [bool]$v.attempt }
+  return @{ sub = (($v.sub -is [bool]) -and [bool]$v.sub); attempt = $a }
+}
 function Get-Requester($req) {
   # Which local process called us: its TCP source port -> owning process -> command line.
   # kind: "agent" (the installed LOCKqz agent), "other", or "unknown" (lookup failed).
@@ -699,6 +727,7 @@ while ($listener.IsListening) {
       if ($who.name) { $det.process = $who.name }
       if (($why -eq "local_request") -and $body.reason) { $det.claimed = ([string]$body.reason).Substring(0, [Math]::Min(40, ([string]$body.reason).Length)) }
       if (($why -eq "local_request") -and $who.cmd) { $det.cmd = $who.cmd }
+      if ($why -ne "local_request") { $sn = LQ-Seen $body.seen; if ($null -ne $sn) { $det.seen = $sn } }
       # 29 Oct 2026: no local caller (the agent, or anything with the token) ends the AI block before the quiz
       # end by itself. The server is asked first; while the gate runs it says HOLD unless Brightspace's
       # submission (Sync tab) or the quiz end vouches for it. Held: the block stays, the watcher beats every
@@ -715,8 +744,8 @@ while ($listener.IsListening) {
           $answered = ($r.code -eq 200) -and ($null -ne $r.data) -and ($r.data -isnot [string]) -and ($r.data.ok -is [bool]) -and $r.data.ok
           if ($answered -and ($r.data.hold -is [bool]) -and $r.data.hold) { $held = $true }
           elseif (-not $answered) {
-            if (-not $State.ask_fail_since) { $State.ask_fail_since = $now }
-            if (($now - [int64]$State.ask_fail_since) -lt 600) { $held = $true }
+            $w = LQ-AskWait $State.ask_fail_since $now (Test-Online)
+            $State.ask_fail_since = $w.since; if ($w.held) { $held = $true }
           } else { $State.ask_fail_since = $null }
           if ($held) { $State.hold_until = $now + 30; $State.release_pending = $true }
         }

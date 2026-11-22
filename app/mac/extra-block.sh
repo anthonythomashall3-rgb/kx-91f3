@@ -9,13 +9,21 @@
 # --- app/process kill lists (name-matched, case-insensitive) ---
 VM_APPS=("Parallels Desktop" "prl_vm_app" "UTM" "VirtualBox" "VirtualBoxVM" "VBoxHeadless" \
          "VMware Fusion" "vmware-vmx" "qemu-system" "qemu-system-aarch64" "qemu-system-x86_64" \
-         "Docker Desktop" "com.docker.backend" "OrbStack" "colima" "limactl")
+         "Docker Desktop" "com.docker.backend" "OrbStack" "colima" "limactl" \
+         "VirtualBuddy" "tart" "vfkit" "krunkit" "multipassd" "Podman Desktop" "podman" "Rancher Desktop" "Anka" \
+         "BlueStacks" "BlueStacks Air" "Genymotion")
+# Every virtual machine made with Apple's Virtualization framework (any app, any name) runs in this one system
+# service: closed by its path (the process name is cut at 16 characters).
+VM_CMD_RES=('/com\.apple\.Virtualization\.VirtualMachine\.xpc/')
 REMOTE_APPS=("TeamViewer" "AnyDesk" "RustDesk" "remoting_host" "chrome_remote_desktop" \
              "ScreenConnect" "ConnectWiseControl" "LogMeIn" "Splashtop" "SplashtopStreamer" \
              "RealVNC" "vncserver" "TigerVNC" "jump" "Jump Desktop" "GoToMyPC" "Parsec" "Moonlight" \
              "Screen Sharing" "Microsoft Remote Desktop" "Windows App" "Chrome Remote Desktop Host" \
              "iPhone Mirroring" "Screens" "Screens 5" "NoMachine" "Zoho Assist" \
-             "scrcpy" "Escrcpy" "QtScrcpy" "Vysor" "AirDroid" "AirDroid Cast" "ApowerMirror" "LetsView" "AirServer" "X-Mirage" "AnyViewer")   # iPhone Mirroring = the phone's apps (and its network) on the Mac screen
+             "scrcpy" "Escrcpy" "QtScrcpy" "Vysor" "AirDroid" "AirDroid Cast" "ApowerMirror" "LetsView" "AirServer" "X-Mirage" "AnyViewer" \
+             "Remote Desktop" "VNC Viewer" "Splashtop Business" "Splashtop Personal" "Steam Link" "steam_osx" "Royal TSX" \
+             "Citrix Workspace" "VMware Horizon Client" "Amazon WorkSpaces" "Shadow PC" "Remote Desktop Manager" \
+             "ssh" "mosh-client" "autossh" "Termius")   # iPhone Mirroring = the phone's apps (and its network) on the Mac screen; ssh/mosh/Termius = a shell on another computer
 OVERLAY_APPS=("Cluely" "Interview Coder" "InterviewCoder" "LockedIn AI" "LockedInAI" "Final Round" \
               "FinalRound" "Ohmni" "Sensei" "Leetcode Wizard" "UltraCode" "ExamShield helper" "Pieces" \
               "Verve AI" "Parakeet AI" "Beyz AI" "Interview Solver")
@@ -30,13 +38,59 @@ VPN_APPS=("NordVPN" "ExpressVPN" "Surfshark" "ProtonVPN" "Proton VPN" "Mullvad V
           "Private Internet Access" "pia" "Cloudflare WARP" "Cloudflare_WARP" "Tunnelblick" \
           "OpenVPN Connect" "WireGuard" "Windscribe" "TunnelBear" "Hotspot Shield" "CyberGhost" \
           "Tailscale" "ZeroTier One" "Psiphon" "Hiddify" "V2RayX" "ClashX" "Clash Verge" "Shadowrocket" \
-          "Tor Browser" "tor")   # Tor resolves names remotely, past /etc/hosts
+          "Tor Browser" "tor" \
+          "Proxifier" "Surge" "ShadowsocksX-NG" "V2rayU" "Stash" "ClashX Pro" "ClashX Meta" "FlClash" "Mihomo Party" "Lantern" \
+          "cloudflared" "ngrok" "frpc" "chisel" "zrok" "tailscaled" "sshuttle" "v2ray" "xray" "sing-box" "clash" "mihomo" \
+          "hysteria" "naive" "gost" "brook" "ss-local" "sslocal" "obfs4proxy" "lyrebird" "snowflake-client")   # Tor, proxies and tunnels look names up remotely, past /etc/hosts
 # A name shared with a non-VPN app (Outline VPN vs the Outline wiki/notes app): closed only when the
 # running app bundle carries a VPN network extension.
 VPN_IF_TUNNEL=("Outline")
 # Apple Intelligence that has no working switch on an unmanaged Mac: the Shortcuts "Use Model" action
 # (on-device / Private Cloud / ChatGPT) and the Image Playground app.
-APPLE_AI_APPS=("Shortcuts" "Image Playground")
+APPLE_AI_APPS=("Shortcuts" "Image Playground" "Siri")
+# Siri (it answers questions; managed preference com.apple.ironwood.support, the one a "no Siri" profile sets):
+# written only when the Mac has no such file of its own, removed at unlock only when it is LOCKqz's.
+SIRI_MDM="${LOCKQZ_SIRI_MDM:-/Library/Managed Preferences/com.apple.ironwood.support.plist}"
+siri_off() {
+  [ -e "$SIRI_MDM" ] && return 0   # ours already, or the Mac's own (an MDM profile): left as it is
+  if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would write $SIRI_MDM (Siri off)"; return 0; fi
+  mkdir -p "$(dirname "$SIRI_MDM")" 2>/dev/null || true
+  /usr/bin/python3 - "$SIRI_MDM" "$XB_MARK" <<'PY2' 2>/dev/null || return 1
+import plistlib, os, sys
+path, mark = sys.argv[1], sys.argv[2]
+tmp = path + ".lockqz.tmp"
+with open(tmp, "wb") as f: plistlib.dump({"Ironwood Allowed": False, mark: True}, f)
+os.chmod(tmp, 0o644); os.replace(tmp, path)
+PY2
+  prefs_changed
+}
+siri_on() {
+  [ -f "$SIRI_MDM" ] && /usr/bin/grep -q "$XB_MARK" "$SIRI_MDM" 2>/dev/null || return 0
+  if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would remove $SIRI_MDM"; return 0; fi
+  rm -f "$SIRI_MDM" || return 1
+  prefs_changed
+}
+# A local model under any program name: a model file named on its command line (llama.cpp -m x.gguf, a renamed
+# llamafile, MLX / transformers weights), or a big program (over 1 GB in memory) holding one open. [.] keeps this
+# pattern from matching the grep that uses it.
+MODEL_FILE_RE='[.](gguf|ggml|safetensors|llamafile)([^A-Za-z0-9]|$)|/[.]ollama/models/|/[.]lmstudio/models/|/[.]cache/lm-studio/|/huggingface/hub/model[s]--'
+MODEL_SKIP_RE='/Google Chrome|/Safari|/Firefox|/Microsoft Edge|/Brave Browser|/Arc[.]app|/Microsoft (Word|Excel|PowerPoint|Outlook|OneNote)|/zoom[.]us|/Microsoft Teams'
+models_by_file() {   # one look at the process table; lsof only for a few big programs
+  local pid kind hit=""
+  while read -r pid kind; do
+    case "$pid" in ''|*[!0-9]*) continue ;; esac
+    [ "$pid" = "$$" ] && continue
+    if [ "$kind" = args ] || lsof -nP -p "$pid" -Fn 2>/dev/null | grep -qE "^n.*($MODEL_FILE_RE)"; then hit="$hit $pid"; fi
+  done < <(ps -axww -o pid=,rss=,args= 2>/dev/null | awk -v re="$MODEL_FILE_RE" -v skip="$MODEL_SKIP_RE" '
+      { pid = $1; rss = $2; a = $0; sub(/^ *[0-9]+ +[0-9]+ +/, "", a) }
+      a ~ /^\/(System|usr\/libexec|usr\/sbin)\// { next }
+      a ~ re { print pid, "args"; next }
+      rss > 1048576 && a !~ skip && big < 6 { big++; print pid, "big" }')
+  for pid in $hit; do
+    if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would close (local model by its files): $pid"; continue; fi
+    kill -9 "$pid" 2>/dev/null || true
+  done
+}
 
 _kill_cmd_res() {   # _kill_cmd_res regex...  (python-run model tools)
   local re
@@ -282,7 +336,8 @@ airplay_receiver_restore() {
 WILD_DOMAINS=(openai.azure.com cognitiveservices.azure.com services.ai.azure.com inference.ai.azure.com ai.azure.com \
               workers.dev hf.space modal.run vercel.app fly.dev replit.dev replit.app repl.co \
               ngrok.io ngrok-free.app ngrok.app ngrok.dev ngrok-free.dev trycloudflare.com loca.lt serveo.net \
-              localhost.run pinggy.link pinggy.io zrok.io learnwise.ai forethought.ai)
+              localhost.run pinggy.link pinggy.io zrok.io learnwise.ai forethought.ai \
+              translate.goog github.dev gitpod.io csb.app mybinder.org devtunnels.ms gradio.live val.run streamlit.app)
 RESOLVER_DIR="${RESOLVER_DIR:-/etc/resolver}"
 WILD_MARK="# LOCKqz quiz lock - removed at unlock"
 wild_block_on() {
@@ -401,7 +456,8 @@ extra_lock() {
     _kill_list "VPN" "${VPN_APPS[@]}"; _kill_list "VM" "${VM_APPS[@]}"
     _kill_list "remote-desktop" "${REMOTE_APPS[@]}"; _kill_list "overlay" "${OVERLAY_APPS[@]}"
     _kill_list "local-model" "${LOCAL_MODEL_PROCS[@]}"; _kill_cmd_res "${LOCAL_MODEL_CMD_RES[@]}"
-    _kill_if_tunnel "${VPN_IF_TUNNEL[@]}"; _kill_list "Apple Intelligence" "${APPLE_AI_APPS[@]}"
+    _kill_if_tunnel "${VPN_IF_TUNNEL[@]}"; _kill_list "Apple Intelligence" "${APPLE_AI_APPS[@]}"; _kill_cmd_res "${VM_CMD_RES[@]}"
+    models_by_file; siri_off
     apple_intelligence_off; proxies_off; airplay_receiver_off
     echo "    [dry-run] would write ${#WILD_DOMAINS[@]} resolver files (wildcard AI domains) in $RESOLVER_DIR and load the AI addresses into pf <lq_warm> (warm connections)"
     echo "    [dry-run] pf already blocks local-model + VPN ports (com.lockqz.pf.conf)"
@@ -410,15 +466,17 @@ extra_lock() {
   # One look at the running programs for all the lists together (this runs every 5 s during a quiz), and one
   # for the python-run model tools.
   _kill_list "blocked program" "${VPN_APPS[@]}" "${VM_APPS[@]}" "${REMOTE_APPS[@]}" "${OVERLAY_APPS[@]}" "${LOCAL_MODEL_PROCS[@]}" "${APPLE_AI_APPS[@]}"
-  local one="" re; for re in "${LOCAL_MODEL_CMD_RES[@]}"; do one="${one:+$one|}($re)"; done
+  local one="" re; for re in "${LOCAL_MODEL_CMD_RES[@]}" "${VM_CMD_RES[@]}"; do one="${one:+$one|}($re)"; done
   _kill_cmd_res "$one"
   _kill_if_tunnel "${VPN_IF_TUNNEL[@]}"
+  models_by_file
   xb_lap x-kills
   local rc=0 ap=""
   # The AirPlay Receiver switch beside the steps below (it asks the signed-in user's settings, the slowest step
   # of a first lock); waited for before this function returns, so before the preferences service restarts.
   airplay_receiver_off & ap=$!
   apple_intelligence_off || rc=1
+  siri_off || true   # an extra: never holds up the lock
   xb_lap x-apple-ai
   # A repeat pass in the seconds after this engine restarted the preferences service leaves the proxy look to
   # the next pass (it waits for that service; the first pass of the quiz has already turned proxies off).
@@ -441,6 +499,7 @@ extra_unlock() {
   rm -f "$XB_APPLIED" 2>/dev/null || true
   airplay_receiver_restore & ap=$!   # beside the steps below; waited for before this function returns
   apple_intelligence_on || rc=1
+  siri_on || rc=1
   xb_lap x-apple-ai
   proxies_restore || true
   xb_lap x-proxies

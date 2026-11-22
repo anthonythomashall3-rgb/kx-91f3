@@ -187,7 +187,10 @@ def chromium_policy(domain):
     p = {MARK: True,
          "GenAiDefaultSettings": 2, "GeminiSettings": 1, "BuiltInAIAPIsEnabled": False,
          "DnsOverHttpsMode": "off", "ProxyMode": "direct",   # a proxy would resolve AI sites past hosts
-         "URLBlocklist": list(SEARCH_BLOCK), "URLAllowlist": list(SEARCH_ALLOW),
+         # No developer tools, page-source view or javascript: addresses (bookmarklets) during the quiz: the exam
+         # page and the password LOCKqz entered stay as Brightspace made them.
+         "DeveloperToolsAvailability": 2,
+         "URLBlocklist": list(SEARCH_BLOCK) + ["javascript://*", "view-source:*"], "URLAllowlist": list(SEARCH_ALLOW),
          "DefaultSearchProviderEnabled": True, "DefaultSearchProviderName": "Google (Web)",
          "DefaultSearchProviderSearchURL": WEB_SEARCH,
          "DefaultSearchProviderSuggestURL": "https://www.google.com/complete/search?output=chrome&q={searchTerms}",
@@ -219,6 +222,7 @@ def firefox_policy():
            "DNSOverHTTPS": {"Enabled": False, "Locked": True},
            "Proxy": {"Mode": "none", "Locked": True},
            "IPProtectionAvailable": False,          # Firefox's built-in VPN (149+)
+           "DisableDeveloperTools": True,
            "WebsiteFilter": {"Block": blk, "Exceptions": exc},
            # GenerativeAI (144+); Firefox ignores it when AIControls (149+) is present, so the
            # chatbot and Smart Window are blocked there too. Never AIControls "Default": "blocked"

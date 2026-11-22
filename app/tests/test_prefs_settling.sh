@@ -52,7 +52,7 @@ xl() { ( export PATH="$TMP2/bin:$PATH"; DRYRUN=0; STATE="$TMP2/state"; RESOLVER_
   _cc_user() { echo stu; }; _cc_exists() { return 0; }; _cc_get() { echo 0; }; _cc_set() { :; }; _cc_restart() { :; }
   "$@" ) >/dev/null 2>&1; }
 : > "$TMP2/calls"; xl extra_lock
-check "first pass: 2 process-table looks for the lists (names + command lines), not 12" '[ "$(grep -c "^ps -axww" "$TMP2/calls")" = 2 ]'
+check "first pass: 3 process-table looks (names + command lines for the lists, one for model files), not 12" '[ "$(grep -c "^ps -axww" "$TMP2/calls")" = 3 ]'
 check "the model tools: one pkill holding every pattern, each in its own group" '[ "$(grep -c "^pkill -f -- " "$TMP2/calls")" = 1 ] && grep -qF -- "pkill -f -- (/bin/mlx_lm[._][a-z_]+( |\$))|( -m mlx_lm([. ]|\$))|(/bin/vllm( |\$))|" "$TMP2/calls"'
 check "the combined pattern still matches each tool and nothing else" 'P="$(grep "^pkill -f -- " "$TMP2/calls" | sed "s/^pkill -f -- //")"; echo "/opt/x/bin/mlx_lm.server --port 1" | grep -Eq -- "$P" && echo "python3 -m vllm.entrypoints" | grep -Eq -- "$P" && echo "python -m llama_cpp.server" | grep -Eq -- "$P" && ! echo "/usr/bin/python3 /Library/Application Support/LOCKqz/lockqzd.py" | grep -Eq -- "$P" && ! echo "vim notes.txt" | grep -Eq -- "$P"'
 check "first pass looked at the proxies and left its mark" 'grep -q "^scutil --proxy" "$TMP2/calls" && [ -f "$TMP2/state/extra.applied" ]'

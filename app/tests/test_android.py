@@ -60,8 +60,8 @@ check("same protocol as the helpers: HMAC headers, register, platform tag androi
 _k = rd("app/src/main/java/app/lockqz/DnsVpnService.kt")
 _wa = set(re.findall(r'"([a-z0-9.-]+)"', re.search(r"val WILD_DOMAINS = listOf\(([^)]*)\)", _k).group(1)))
 _wm = set(re.search(r"WILD_DOMAINS=\(([^)]*)\)", open(os.path.join(APP, "mac", "extra-block.sh")).read()).group(1).replace("\\", " ").split())
-check("the phone blocks the same whole domains as the computers during a quiz (27, never pages.dev), on top of the served list",
-      _wa == _wm and len(_wa) == 27 and "pages.dev" not in _wa and "(hosts.map { it.lowercase() } + WILD_DOMAINS).toSet()" in _k
+check("the phone blocks the same whole domains as the computers during a quiz (36, never pages.dev), on top of the served list",
+      _wa == _wm and len(_wa) == 36 and "pages.dev" not in _wa and "(hosts.map { it.lowercase() } + WILD_DOMAINS).toSet()" in _k
       and "wholeDomainsAreBlockedDuringAQuiz" in rd("app/src/test/java/app/lockqz/UnitTests.kt"), sorted(_wa ^ _wm))
 _q = rd("app/src/main/java/app/lockqz/QuizAccessibilityService.kt")
 check("Private DNS switched on in the middle of a quiz is reported with the heartbeat, once per lock",

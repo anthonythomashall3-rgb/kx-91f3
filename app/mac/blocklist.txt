@@ -890,3 +890,45 @@ gauth.com
 answersai.com
 leetcodewizard.io
 studio.nebius.com
+
+# 22 Nov 2026 (sweep 28): web proxies (any site opened through their own address), computers and code
+# environments in a browser tab (a shell, a notebook or an editor with its own AI and internet), cloud PCs,
+# public tunnels to a computer at home, and hosted AI demo apps
+croxyproxy.com
+croxy.network
+croxyproxy.rocks
+proxysite.com
+kproxy.com
+proxyium.com
+4everproxy.com
+hidester.com
+blockaway.net
+proxyorb.com
+plainproxies.com
+vpnbook.com
+hide.me
+shell.cloud.google.com
+ssh.cloud.google.com
+ide.cloud.google.com
+console.cloud.google.com
+github.dev
+gitpod.io
+codesandbox.io
+csb.app
+stackblitz.com
+kaggle.com
+deepnote.com
+lightning.ai
+mybinder.org
+studiolab.sagemaker.aws
+shell.azure.com
+portal.azure.com
+console.aws.amazon.com
+windows365.microsoft.com
+windows.cloud.microsoft
+clients.amazonworkspaces.com
+devtunnels.ms
+gradio.live
+val.run
+val.town
+streamlit.app

@@ -34,7 +34,7 @@ BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.6.37"
+VERSION = "0.6.38"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -599,6 +599,27 @@ def call(path, body, signed=True):
             time.sleep(2 * (attempt + 1))
     return (0, None)
 
+def online():
+    """Does the internet answer at all (two neutral pages, no proxy, a few seconds)? While it does not, an unlock
+    that could not reach LOCKqz is not counted toward the 10 minutes after which it stands: a computer cut off
+    from the network has no network AI either, and the block stays until LOCKqz answers again."""
+    op = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    for u in ("http://www.gstatic.com/generate_204", "http://captive.apple.com/hotspot-detect.html"):
+        try:
+            with op.open(urllib.request.Request(u, headers=UA), timeout=4) as r:
+                if 200 <= r.status < 400: return True
+        except urllib.error.HTTPError as e:
+            if 200 <= e.code < 500: return True   # an answer (a captive portal too) = this computer is online
+        except Exception:
+            pass
+    return False
+
+def seen_of(v):
+    """The agent's view of the exam attempt (sent with its unlock): only these two answers, as booleans."""
+    if not isinstance(v, dict): return None
+    a = v.get("attempt")
+    return {"sub": v.get("sub") is True, "attempt": a if isinstance(a, bool) else None}
+
 def call_once(path, body, timeout=4):
     """One quick signed POST, no retries: (status, json); (0, None) without an answer."""
     if not API: return (0, None)
@@ -1100,6 +1121,8 @@ class H(BaseHTTPRequestHandler):
                 if ask and STATE.get("hold_until", 0) > time.time():
                     return self._send(202, {"ok": False, "state": "locked", "pending": "brightspace"})   # asked < 30 s ago: same answer
             det = {"reason": reason, "local": True}
+            seen = seen_of(body.get("seen"))
+            if seen is not None: det["seen"] = seen
             if was_locked: det.update(before_end=bool(before_end), held_s=held)
             if who != "root": det["uid"] = who
             if ask:
@@ -1116,9 +1139,11 @@ class H(BaseHTTPRequestHandler):
                 answered = code == 200 and isinstance(j, dict) and j.get("ok") is True
                 hold = answered and j.get("hold") is True
                 if not answered:
+                    up = online()   # outside LOCK: a few seconds at most
                     with LOCK:
-                        STATE.setdefault("ask_fail_since", time.time())
-                        hold = time.time() - STATE["ask_fail_since"] < 600
+                        if up: STATE.setdefault("ask_fail_since", time.time())
+                        else: STATE.pop("ask_fail_since", None)   # offline: the 10 minutes start once the internet is back
+                        hold = not up or time.time() - STATE["ask_fail_since"] < 600
                 else:
                     with LOCK: STATE.pop("ask_fail_since", None)
                 if hold:

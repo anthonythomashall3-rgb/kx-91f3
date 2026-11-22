@@ -64,6 +64,8 @@ run "Mac: a pass right after the preferences service restarted does not wait for
 run "Gmail payment script parser (forged alerts refused)" node test_pay_script.mjs
 run "A payment with no memo: counted by the payer's name only when it is certain" node --no-warnings test_pay_name.mjs
 run "Sweep 28: an exam attempt ends only when Brightspace or its own computer says so; live view: reopened after submit, taken without LOCKqz" node --no-warnings test_sweep28.mjs
+run "Sweep 28 (apps): what the agent saw of the attempt goes with its unlock; the exam's Firefox restarted for the quiz; offline never counts" python3 test_sweep28.py
+run "Sweep 28 (engines): VMs, remote shells, proxies and tunnels, local models by their files, Siri, more whole domains" bash test_sweep28_apps.sh
 run "26 Oct fixes: one Stripe checkout per code, overpayments carried, unexpected local unlocks red, course password retired" node --no-warnings test_oct26_fixes.mjs
 run "Helper hardening: fast user switching, per-user tokens, Windows monotonic cap, local-model apps" bash test_helper_hardening.sh
 run "Scale guard: no API query reads a whole big table (every statement planned against the real schema)" node --no-warnings test_scale_indexes.mjs
@@ -111,6 +113,7 @@ run "Download page on a Mac: Apple-signed installer = one download, command one 
 if command -v xvfb-run >/dev/null 2>&1 && [ "$(id -u)" = 0 ]; then run "Real Chromium loads the quiz policy (AI refused, Web search + notes allowed, extensions off)" xvfb-run -a node --no-warnings test_chrome_policy_real.mjs; fi
 if command -v pwsh >/dev/null 2>&1; then
   run "Windows agent/engine logic (titles, unlock retry, policy restore)" pwsh -NoProfile -File test_windows_logic.ps1
+  run "Sweep 28 (Windows): what the agent saw of the attempt, the exam's Firefox restarted, offline never counts, more closed" pwsh -NoProfile -File test_windows_sweep28.ps1
 fi
 if command -v pwsh >/dev/null 2>&1; then
   run "18/18 Windows email setup (real Setup-Identity, scripted dialogs)" pwsh -NoProfile -File test_windows_email_setup.ps1
