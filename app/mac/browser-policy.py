@@ -287,8 +287,20 @@ def host_entries():
     out = list(dict.fromkeys(out))
     # A listed host already covers its subdomains in every browser filter, so chat.openai.com next to
     # openai.com only spends one of the 1000 entries the browsers read (the hosts file keeps both).
+    out = [h for h in out if not api_only(h)]
     have = set(out)
     return [h for h in out if not any(".".join(h.split(".")[i:]) in have for i in range(1, h.count(".")))]
+
+def api_only(h):
+    """A host that only answers programs, or one under such a host (firefox.dns.nextdns.io, us.api.inference.net)."""
+    p = h.split(".")
+    return any(API_ONLY.fullmatch(".".join(p[i:])) for i in range(0, len(p) - 2))
+
+# Hosts that only answer programs (model APIs, DNS-over-HTTPS servers) stay in the hosts file and the firewall
+# tables, which have no size limit, but leave the browsers' URL filters (1,000 entries each): no page opens on
+# them, and those filters only stop pages and frames anyway.
+API_ONLY = re.compile(r"(api\d*|api-inference|inference|bedrock-runtime|bedrock-mantle|aiplatform|generativelanguage|dashscope"
+                      r"|dashscope-intl|copilot-proxy|router|integrate|appsgenaiserver-pa|grazie|llm|models|dns|doh)(\.[a-z0-9-]+){2,}")
 
 def _union(a, b):
     a = a if isinstance(a, list) else []

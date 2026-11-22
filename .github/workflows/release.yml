@@ -97,6 +97,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build the .pkg, install it, lock/unlock, uninstall
         run: bash app/tests/test_mac_install.sh
+      - name: Programs hidden from screen capture are closed (real windows, the engine as root)
+        run: bash app/tests/test_mac_hidden.sh
       # Apple Developer ID: a signed + notarized package opens straight into the installer (no Terminal, no
       # "Open Anyway"). Skipped until the MAC_INSTALLER_* secrets exist; a failure never blocks the release
       # (the deploy then keeps the live signed package).
@@ -210,6 +212,11 @@ jobs:
         shell: powershell
         run: |
           & .\app\tests\test_windows_pw_fill.ps1 -Out "$env:RUNNER_TEMP\lqz-fill"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Programs hidden from screen capture are closed (real windows, PowerShell 5.1)
+        shell: powershell
+        run: |
+          & .\app\tests\test_windows_hidden.ps1 -Out "$env:RUNNER_TEMP\lqz-hidden"
           if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: Fresh local token for this build
         shell: pwsh

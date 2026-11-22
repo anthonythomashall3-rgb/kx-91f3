@@ -862,4 +862,37 @@ ok("after 3 minutes it is asked again (its professor may have turned LOCKqz on)"
 T(g, []); ok("page closed: forgotten (asked again on the next visit)") if "123-456" not in g.nolock else bad("kept %r" % g.nolock)
 """)
 
+print("T-keep 22 Nov: the helper keeps the server's never-close list (programs hidden from screen capture) beside the AI list")
+import subprocess as _sp_k
+_kd = tempfile.mkdtemp()
+_kcode = r'''
+import importlib.util, io, json, os, sys
+d = sys.argv[1]; MAC = sys.argv[2]
+bl = os.path.join(d, "blocklist.txt"); open(bl, "w").write("chatgpt.com\nclaude.ai\ngemini.google.com\n")
+cfg = os.path.join(d, "config.json"); json.dump({"port": 18798, "api_base": "https://example.invalid/api", "device_id": "mac-keep"}, open(cfg, "w"))
+os.environ.update(LOCKQZ_DRYRUN="1", LOCKQZ_CONFIG=cfg, LOCKQZ_BLOCKLIST=bl, LOCKQZ_LOCKFILE=os.path.join(d, "active_lock.json"),
+                  LOCKQZ_TOKEN_FILE=os.path.join(d, "helper.token"), LOCKQZ_TOKEN_DIR=os.path.join(d, "tokens"), LOCKQZ_NO_DEVMODE="1")
+spec = importlib.util.spec_from_file_location("lockqzd_keep", os.path.join(MAC, "lockqzd.py")); D = importlib.util.module_from_spec(spec); spec.loader.exec_module(D)
+kf = os.path.join(d, "keep.txt"); r = {"path": D.KEEPFILE == kf}
+r["first"] = D.save_keep(["Zoomy", "bad;entry", "id:com.example.", 5]); r["text1"] = open(kf).read()
+r["again"] = D.save_keep(["Zoomy", "id:com.example."]); r["none"] = D.save_keep(None); r["text2"] = open(kf).read()
+served = {"domains": ["chatgpt.com", "claude.ai", "gemini.google.com"] + ["ai%d.example.com" % i for i in range(20)], "keep": ["FromServer"]}
+class Resp(io.BytesIO): status = 200
+D.urllib.request.urlopen = lambda *a, **k: Resp(json.dumps(served).encode())
+D.engine = lambda cmd: True
+D.STATE.update(state="unlocked", quiz_id=None); D.refresh_blocklist(); r["served"] = open(kf).read()
+served.pop("keep"); D.refresh_blocklist(); r["kept"] = open(kf).read()
+r["empty"] = D.save_keep([]); r["text3"] = open(kf).read()
+print(json.dumps(r))
+'''
+try:
+    _kr = json.loads(_sp_k.run([sys.executable, "-c", _kcode, _kd, MAC], capture_output=True, text=True, timeout=60).stdout.strip().splitlines()[-1])
+except Exception as _e:
+    _kr = {"error": repr(_e)}
+ok("keep.txt sits beside blocklist.txt (the engine reads it there)") if _kr.get("path") else bad("KEEPFILE path %r" % _kr)
+ok("valid entries saved, bad ones dropped") if _kr.get("first") is True and _kr.get("text1") == "Zoomy\nid:com.example.\n" else bad("save_keep %r" % _kr)
+ok("the same list writes nothing; no list leaves the file as it is") if _kr.get("again") is False and _kr.get("none") is False and _kr.get("text2") == "Zoomy\nid:com.example.\n" else bad("rewrite %r" % _kr)
+ok("the 12-hour refresh replaces it with the server's list; an answer without one leaves it") if _kr.get("served") == "FromServer\n" and _kr.get("kept") == "FromServer\n" else bad("refresh %r" % _kr)
+ok("an empty server list empties it") if _kr.get("empty") is True and _kr.get("text3") == "" else bad("empty %r" % _kr)
+
 print(""); print(f"RESULT: {passed} passed, {failed} failed"); sys.exit(0 if failed == 0 else 1)

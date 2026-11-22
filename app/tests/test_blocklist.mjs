@@ -293,11 +293,45 @@ import importlib.util,json,sys
 spec=importlib.util.spec_from_file_location('bp',sys.argv[1]); m=importlib.util.module_from_spec(spec); sys.argv=['x']; spec.loader.exec_module(m)
 print(json.dumps(m.host_entries()))`, join(DIR, "../mac/browser-policy.py")], { env: { ...process.env, LOCKQZ_BLOCKLIST: macF } }).toString());
   const set = new Set(r), plain = mac.filter(d => !d.includes("/"));
-  const uncovered = plain.filter(d => { const p = d.split("."); for (let i = 0; i < p.length - 1; i++) if (set.has(p.slice(i).join("."))) return false; return true; });
-  uncovered.length === 0 ? ok(`all ${plain.length} blocklist hosts covered by ${r.length} browser entries`) : bad("hosts no longer in the browser filters: " + uncovered.slice(0, 10).join(", "));
+  // model-API / DNS-over-HTTPS hosts leave the browser filters on purpose (22 Nov; the hosts file keeps them, see T26)
+  const apiOnly = new RegExp("^(" + (readFileSync(join(DIR, "../mac/browser-policy.py"), "utf8").match(/API_ONLY = re\.compile\(r"\(([^"]*)"\s*r"([^"]*)"\)/) || []).slice(1).join("") + "$");
+  const isApi = d => { const p = d.split("."); for (let i = 0; i < p.length - 2; i++) if (apiOnly.test(p.slice(i).join("."))) return true; return false; };
+  const uncovered = plain.filter(d => { if (isApi(d)) return false; const p = d.split("."); for (let i = 0; i < p.length - 1; i++) if (set.has(p.slice(i).join("."))) return false; return true; });
+  uncovered.length === 0 ? ok(`all ${plain.length} blocklist hosts covered by ${r.length} browser entries (model-API hosts: hosts file only)`) : bad("hosts no longer in the browser filters: " + uncovered.slice(0, 10).join(", "));
   const dup = r.filter(d => { const p = d.split("."); for (let i = 1; i < p.length - 1; i++) if (set.has(p.slice(i).join("."))) return true; return false; });
   dup.length === 0 ? ok("no browser entry is a subdomain of another") : bad("redundant: " + dup.slice(0, 10).join(", "));
   /\$have\.ContainsKey/.test(psPol) ? ok("Windows Get-HostEntries skips subdomains the same way") : bad("Windows browser-policy.ps1 does not collapse subdomains");
+}
+
+console.log("T26 22 Nov: programs hidden from screen capture are closed (never-close list served), model-API hosts leave the browser filters");
+{
+  const { execFileSync } = await import("node:child_process");
+  const routeK = readFileSync(join(DIR, "../cloudflare/functions/api/[[route]].js"), "utf8");
+  let keepSrv = null; try { keepSrv = JSON.parse((routeK.match(/const KEEP_APPS = (\[[\s\S]*?\]);/) || [])[1]); } catch (e) { keepSrv = null; }
+  Array.isArray(keepSrv) && keepSrv.every(k => /^(id:)?[A-Za-z0-9][A-Za-z0-9 ._&+()-]{1,59}$/.test(k)) ? ok(`KEEP_APPS is plain JSON with valid entries (${keepSrv.length} served)`) : bad("KEEP_APPS missing or not JSON / bad entry");
+  routeK.includes("json({ domains: AI_DOMAINS, keep: KEEP_APPS })") ? ok("/api/blocklist answers the never-close additions with the AI list") : bad("/blocklist without keep");
+  const dep = readFileSync(join(DIR, "../cloudflare/deploy.sh"), "utf8");
+  /KEEP_APPS[\s\S]*keep:k\?JSON\.parse\(k\[1\]\):\[\]/.test(dep) ? ok("deploy.sh puts the never-close list in blocklist.json (what the apps read)") : bad("blocklist.json without keep");
+  const macX = readFileSync(join(DIR, "../mac/extra-block.sh"), "utf8"), winA = readFileSync(join(DIR, "../windows/lockqz-agent.ps1"), "utf8");
+  const macKeep = (macX.match(/^KEEP_APPS=\(([\s\S]*?)\)$/m) || [, ""])[1], winKeep = (winA.match(/^\$KeepApps = @\(([\s\S]*?)\)$/m) || [, ""])[1];
+  ["id:us.zoom.", "id:com.microsoft.", "id:Cisco-Systems.", "id:com.google.", "id:org.mozilla.", "id:com.1password.", "id:com.bitwarden.", "id:org.whispersystems.", "id:com.respondus.", "id:com.texthelp."].every(k => macKeep.includes(`"${k}"`))
+    ? ok("Mac never closes meeting apps, browsers, password managers, Signal, proctoring browsers, reading tools") : bad("Mac KEEP_APPS missing an essential");
+  ["Zoom", "CptHost", "ms-teams", "CiscoCollabHost", "chrome", "msedge", "firefox", "1Password", "Bitwarden", "KeePassXC", "Signal", "nvda", "jfw", "ReadAndWrite", "LockDownBrowser", "obs64"].every(k => winKeep.includes(`"${k}"`))
+    ? ok("Windows never closes meeting apps, browsers, password managers, Signal, screen readers, proctoring browsers, recorders") : bad("Windows $KeepApps missing an essential");
+  !/"(Slack|Discord|WhatsApp|Telegram|Notion)"/.test(macKeep + winKeep) ? ok("apps LOCKqz closes for their own AI are not on the never-close list") : bad("an AI-closed app is on the never-close list");
+  /models_by_file; hidden_close; siri_off/.test(macX) && /models_by_file\n  hidden_close\n/.test(macX) ? ok("Mac: every lock pass (and the preview) closes hidden programs") : bad("hidden_close not in extra_lock");
+  /Close-HiddenApps \(Read-KeepApps \$KeepFile\)/.test(winA) ? ok("Windows: the agent closes hidden programs every 5 s while a quiz is open") : bad("Close-HiddenApps not called");
+  const r = JSON.parse(execFileSync("python3", ["-c", `
+import importlib.util,json,sys
+spec=importlib.util.spec_from_file_location('bp',sys.argv[1]); m=importlib.util.module_from_spec(spec); sys.argv=['x']; spec.loader.exec_module(m)
+print(json.dumps(m.host_entries()))`, join(DIR, "../mac/browser-policy.py")], { env: { ...process.env, LOCKQZ_BLOCKLIST: macF } }).toString());
+  const gone = ["generativelanguage.googleapis.com", "api.together.xyz", "bedrock-runtime.us-east-1.amazonaws.com", "dns.quad9.net", "integrate.api.nvidia.com", "aiplatform.googleapis.com", "firefox.dns.nextdns.io"];
+  const stay = ["chatgpt.com", "openai.com", "claude.ai", "deepseek.com", "copilot.microsoft.com", "gemini.google.com", "perplexity.ai"];
+  gone.every(h => !r.includes(h) && mac.includes(h)) ? ok("model-API and DNS-over-HTTPS hosts: in the hosts file, not in the browser filters") : bad("API-only host still mirrored / missing from blocklist: " + gone.filter(h => r.includes(h) || !mac.includes(h)).join(", "));
+  stay.every(h => r.includes(h)) ? ok("chat sites stay in the browser filters") : bad("a chat site left the browser filters: " + stay.filter(h => !r.includes(h)).join(", "));
+  const pyRx = (readFileSync(join(DIR, "../mac/browser-policy.py"), "utf8").match(/API_ONLY = re\.compile\(r"([^"]*)"\s*r"([^"]*)"\)/) || []).slice(1).join("");
+  const psRx = (readFileSync(join(DIR, "../windows/browser-policy.ps1"), "utf8").match(/\$apiOnly = '\^([^']*)\$'/) || [])[1];
+  pyRx && pyRx === psRx ? ok("Mac, Linux and Windows leave out the same hosts") : bad(`API-only rules differ: ${pyRx} vs ${psRx}`);
 }
 
 console.log(`RESULT: ${pass} passed, ${fail} failed`);

@@ -113,6 +113,49 @@ done
 [ -z "${MISS:-}" ] && ok "all 22 in both blocklist.txt and AI_DOMAINS (the rest of their pages: the browsers' filters cover every subdomain)"
 check "Cloudflare itself (its sign-in check pages, its own site) stays open" '! grep -qxE "cloudflare.com|www.cloudflare.com|challenges.cloudflare.com" "$MAC/blocklist.txt"'
 
+echo "H programs that hide their windows from screen capture (22 Nov 2026): closed, whatever their name"
+hw_run() {   # hw_run dryrun -> closed pids in $TMP/hw.killed, output in $TMP/hw.out (window list: $TMP/hw.list)
+  : > "$TMP/hw.killed"
+  ( STATE="$TMP/hwstate"; mkdir -p "$STATE"; HERE="$TMP/hwhere"; mkdir -p "$HERE"
+    source "$MAC/lockqz-core.sh" 2>/dev/null; source "$MAC/extra-block.sh"
+    DRYRUN="$1"
+    xb_say() { echo "LOCKqz: $*"; }
+    _hw_list() { cat "$TMP/hw.list"; }
+    _hw_path() { echo "/Users/s/Downloads/FromLsof"; }
+    _hw_bundle_id() { case "$1" in */zoom.us.app) echo us.zoom.xos ;; */Fake.app) echo com.apple.Terminal ;; */Glimp.app) echo com.glimp.desktop ;;
+                        */Keynote.app) echo com.apple.iWork.Keynote ;; *) : ;; esac; }
+    _hw_apple() { case "$1" in */Keynote.app) return 0 ;; *) return 1 ;; esac; }
+    _hw_kill() { echo "$1" >> "$TMP/hw.killed"; }
+    hidden_close ) > "$TMP/hw.out" 2>&1
+}
+T=$'\t'
+{ echo "101${T}Glimp${T}/Applications/Glimp.app/Contents/MacOS/Glimp${T}"
+  echo "102${T}zoom.us${T}/Applications/zoom.us.app/Contents/MacOS/zoom.us${T}us.zoom.xos"
+  echo "103${T}Control Center${T}/System/Library/CoreServices/ControlCenter.app/Contents/MacOS/ControlCenter${T}com.apple.controlcenter"
+  echo "104${T}Terminal${T}/Applications/Fake.app/Contents/MacOS/Terminal${T}"
+  echo "105${T}Keynote${T}/Applications/Keynote.app/Contents/MacOS/Keynote${T}"
+  echo "106${T}helper${T}${T}"
+  echo "107${T}KeptByServer${T}/private/tmp/x/KeptByServer${T}"
+  echo "108${T}1Password${T}/Applications/1Password.app/Contents/MacOS/1Password${T}com.1password.1password"
+  echo "109${T}Google Chrome${T}/Applications/Google Chrome.app/Contents/MacOS/Google Chrome${T}com.google.Chrome"
+  echo "110${T}OBS${T}/Applications/OBS.app/Contents/MacOS/OBS${T}com.obsproject.obs-studio"
+  echo "111${T}SAFE EXAM BROWSER${T}/Applications/Safe Exam Browser.app/Contents/MacOS/Safe Exam Browser${T}org.safeexambrowser.SafeExamBrowser"
+  echo "1${T}launchd${T}/sbin/launchd${T}"
+  echo "abc${T}junk${T}/x${T}"; } > "$TMP/hw.list"
+mkdir -p "$TMP/hwhere"; printf 'KeptByServer\nGlimp; rm -rf /\n# a note\n' > "$TMP/hwhere/keep.txt"
+hw_run 0
+check "an overlay app closed whatever its name (Glimp), and a program found only by its file (lsof)" 'grep -qx 101 "$TMP/hw.killed" && grep -qx 106 "$TMP/hw.killed"'
+check "a program calling itself Terminal with a fake Apple bundle id (not signed by Apple) is closed" 'grep -qx 104 "$TMP/hw.killed"'
+check "exactly those three closed (Zoom, Apple's own, Apple-signed Keynote, the server's addition, 1Password, Chrome, OBS, Safe Exam Browser stay)" '[ "$(sort -n "$TMP/hw.killed" | tr "\n" " ")" = "101 104 106 " ]'
+check "a bad line in keep.txt keeps nothing (Glimp still closed), the log names what was closed" 'grep -q "closed Glimp (/Applications/Glimp.app/Contents/MacOS/Glimp): it hides its windows from screen capture" "$TMP/hw.out"'
+hw_run 1
+check "the preview only says what it would close" '[ ! -s "$TMP/hw.killed" ] && [ "$(grep -c "would close (hides its windows from screen capture)" "$TMP/hw.out")" = 3 ]'
+: > "$TMP/hw.list"; hw_run 0
+check "nothing hidden: nothing closed, nothing said" '[ ! -s "$TMP/hw.killed" ] && [ ! -s "$TMP/hw.out" ]'
+check "the window list is read in the signed-in user's session (the engine runs as root), with no permission prompt" 'grep -q "launchctl asuser \"\$uid\" sudo -n -u \"#\$uid\" /usr/bin/osascript -l JavaScript" "$MAC/extra-block.sh" && grep -q "kCGWindowSharingState === 0" "$MAC/extra-block.sh"'
+check "the program file comes from the window list or lsof, never ps (it shows ./name)" 'grep -q "runningApplicationWithProcessIdentifier" "$MAC/extra-block.sh" && grep -q "^_hw_path() { lsof " "$MAC/extra-block.sh"'
+check "the helper saves the server's never-close list beside the AI list (keep.txt)" 'grep -q "def save_keep" "$MAC/lockqzd.py" && grep -q "save_keep(keep)" "$MAC/lockqzd.py" && grep -q "KEEP_FILE=\"\${LOCKQZ_KEEP_FILE:-\${HERE:-" "$MAC/extra-block.sh"'
+
 echo ""
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

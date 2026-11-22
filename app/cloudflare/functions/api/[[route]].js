@@ -114,6 +114,12 @@ const AI_DOMAINS = [
   "arena.ai","ppq.ai","nanogpt.com","librechat.ai","kluster.ai","globe.engineer","hark.com","hume.ai","sesame.com","thea.study","scholar.0xpi.com","hkchat.app","hkchat.hk","hkgai.net","kortix.com","kortix.ai","suna.so","atoms.dev","mgx.dev","marscode.com","lingma.aliyun.com","qoder.com","codebuddy.ai","roomote.dev","orchids.app","tempo.new","heyboss.ai","heyboss.xyz","macaly.com","capacity.so","affine.pro","otter.ai","fireflies.ai","rows.com","napkin.ai","beautiful.ai",
   "subcue.ai","accounts.subcue.ai","ctrlpotato.com","clapassist.com","offerinai.com","lastroundai.com","app.lastroundai.com","linkjob.ai","craqly.com","sigmeet.ai","aissence.ai","camcue.app","ghostpilotai.com","pluely.com","wittro.com","api.minimax.chat","api.hunyuan.cloud.tencent.com","upstage.ai","api.upstage.ai","friendli.ai","api.friendli.ai","api.studio.nebius.ai","api.chatanywhere.tech","api.chatanywhere.org"
 ];
+// Additions to the apps' own never-close list: during a quiz the apps close any program that hides its windows from
+// screen capture, except Apple's and Windows' own code and the programs people need beside a quiz (their KEEP_APPS).
+// An entry here (a program name, or "id:" + the start of a Mac bundle id) reaches every computer within 12 hours,
+// so an app closed by mistake is fixed without an app update. Plain JSON (deploy.sh puts it in blocklist.json).
+const KEEP_APPS = [];
+
 const now = () => new Date().toISOString();
 // "Today" in America/Los_Angeles as YYYY-MM-DD, so a professor stays active through the end of their
 // paid date in Pacific time (not 5pm Pacific, which UTC-midnight would give).
@@ -2199,7 +2205,7 @@ export async function onRequest(context) {
     // bookmarklet URL inside the Brightspace page). Everything else needs the real session token.
     if (viaSyncKey && !SYNC_OK.has(p)) return json({ error: "this action needs your LOCKqz login, not the Sync bookmark" }, 403);
     // ---- device endpoints (signed by the device key; see verifyDevice) ----
-    if (p === "/blocklist") return json({ domains: AI_DOMAINS });
+    if (p === "/blocklist") return json({ domains: AI_DOMAINS, keep: KEEP_APPS });
     // C7: what this host runs (deploy.sh compares lockqz.pages.dev and lockdownqz.pages.dev). No auth.
     // Microsoft Store: the download page sends Windows students to the Store (no SmartScreen warning, no
     // PowerShell) only when the Store listing is live AND carries the current LOCKqz release, because Store

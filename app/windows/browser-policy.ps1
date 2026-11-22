@@ -194,6 +194,13 @@ function Get-HostEntries {
   if ($script:HostMemo -and $script:HostMemo.stamp -eq $stamp) { return @($script:HostMemo.list) }
   $seen = New-Object 'System.Collections.Generic.HashSet[string]'
   $all = @(foreach ($l in [IO.File]::ReadAllLines($fi.FullName)) { $h = $l.Trim().ToLower(); if (($h -match '^[a-z0-9-]+(\.[a-z0-9-]+)+$') -and $seen.Add($h)) { $h } })
+  # Hosts that only answer programs (model APIs, DNS-over-HTTPS servers) stay in the hosts file and the firewall, which
+  # have no size limit, but leave the browsers' URL filters: no page opens on them, and those filters only stop pages.
+  $apiOnly = '^(api\d*|api-inference|inference|bedrock-runtime|bedrock-mantle|aiplatform|generativelanguage|dashscope|dashscope-intl|copilot-proxy|router|integrate|appsgenaiserver-pa|grazie|llm|models|dns|doh)(\.[a-z0-9-]+){2,}$'
+  # (a host under such a host too: firefox.dns.nextdns.io, us.api.inference.net)
+  $all = @($all | Where-Object { $p = $_.Split('.'); $api = $false
+    for ($i = 0; $i -lt $p.Count - 2; $i++) { if (($p[$i..($p.Count - 1)] -join '.') -cmatch $apiOnly) { $api = $true; break } }
+    -not $api })
   # A listed host already covers its subdomains in every browser filter, so chat.openai.com next to
   # openai.com only spends one of the 1000 entries (the hosts file keeps both).
   $have = @{}; foreach ($h in $all) { $have[$h] = $true }

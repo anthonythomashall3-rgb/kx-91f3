@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.6.41"
+$Version = "0.6.42"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = if ($env:LOCKQZ_CONFIG) { $env:LOCKQZ_CONFIG } else { "$env:ProgramData\LOCKqz\config.json" }
@@ -267,14 +267,34 @@ function LQ-MergeBlocklist($domains, [string]$file) {
   [IO.File]::AppendAllLines($file, [string[]]$lines.ToArray(), (New-Object System.Text.UTF8Encoding -ArgumentList $false))
   return $add.Count
 }
-function LQ-FetchBlocklist([string]$api, [string]$version) {
-  # -> the served list (array), or $null without an answer
+function LQ-FetchServed([string]$api, [string]$version) {
+  # -> the answer from the server (domains, keep), or $null without one
   if (-not $api) { return $null }
   try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-    $r = Invoke-RestMethod -Uri (($api -replace '/api/?$', '') + "/blocklist.json") -TimeoutSec 15 -UserAgent ("LOCKqz/" + $version + " (Windows)")
-    return ,@($r.domains)
+    return (Invoke-RestMethod -Uri (($api -replace '/api/?$', '') + "/blocklist.json") -TimeoutSec 15 -UserAgent ("LOCKqz/" + $version + " (Windows)"))
   } catch { return $null }
+}
+function LQ-FetchBlocklist([string]$api, [string]$version) {
+  # -> the served list (array), or $null without an answer
+  $r = LQ-FetchServed $api $version
+  if ($null -eq $r) { return $null }
+  return ,@($r.domains)
+}
+function LQ-SaveKeep($served, [string]$file) {
+  # Additions from the server to the never-close list (programs that hide their windows from screen capture; the agent
+  # reads it). Replaced each time (the server may take an entry back); only from an answer that carries the list.
+  if ($null -eq $served -or -not $file -or -not (@($served.PSObject.Properties.Name) -contains "keep")) { return $false }
+  $rx = '^(id:)?[A-Za-z0-9][A-Za-z0-9 ._&+()-]{1,59}$'
+  $k = @(@($served.keep) | Where-Object { $_ -is [string] } | ForEach-Object { $_.Trim() } | Where-Object { $_ -cmatch $rx } | Select-Object -First 200)
+  $text = (@($k | ForEach-Object { $_ + "`n" }) -join "")
+  try {
+    if ((Test-Path -LiteralPath $file) -and ([IO.File]::ReadAllText($file) -eq $text)) { return $false }
+    $tmp = "$file.tmp"
+    [IO.File]::WriteAllText($tmp, $text, (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+    Move-Item -LiteralPath $tmp -Destination $file -Force
+    return $true
+  } catch { return $false }
 }
 function LQ-RefreshBlocklist([string]$api, [string]$file, [string]$version) {
   $d = LQ-FetchBlocklist $api $version
@@ -587,7 +607,9 @@ $watcher.AddScript({
     # A minute after start and every 12 h, never during a quiz: additions to the AI list from the server.
     if (($listLate -or ($cycles -eq 12) -or ($cycles % 8640 -eq 0)) -and ($State.state -eq "unlocked")) {
       $wallList = $now
-      $served = LQ-FetchBlocklist $Api $Version   # the download happens outside the engine lock: a quiz starting now never waits for it
+      $obj = LQ-FetchServed $Api $Version   # the download happens outside the engine lock: a quiz starting now never waits for it
+      $served = if ($null -ne $obj) { ,@($obj.domains) } else { $null }
+      if ($null -ne $obj) { [void](LQ-SaveKeep $obj "$env:ProgramData\LOCKqz\keep.txt") }
       if ($null -ne $served) {
         $got = WLock
         try { if ($State.state -eq "unlocked") { $n = LQ-MergeBlocklist $served (Join-Path $Here "blocklist.txt"); if ($n -gt 0) { Write-Host "blocklist: $n additions from the server" } } } catch { } finally { WUnlockMx $got }

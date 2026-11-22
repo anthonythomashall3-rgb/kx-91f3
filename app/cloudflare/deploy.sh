@@ -111,7 +111,7 @@ fi
 ROUTE="$STAGE/functions/api/[[route]].js"
 # Static copy of the AI blocklist: agents read it 2-3 times a day, and static files never count against
 # the free plan's 100,000 Functions requests/day (/api/blocklist stays for older installs).
-node -e 'const fs=require("fs"); const m=fs.readFileSync(process.argv[1],"utf8").match(/const AI_DOMAINS = (\[[\s\S]*?\]);/); const d=JSON.parse(m[1]); if(d.length<90) process.exit(1); fs.writeFileSync(process.argv[2], JSON.stringify({domains:d}));' "$ROUTE" "$STAGE/public/blocklist.json"
+node -e 'const fs=require("fs"); const m=fs.readFileSync(process.argv[1],"utf8").match(/const AI_DOMAINS = (\[[\s\S]*?\]);/); const d=JSON.parse(m[1]); if(d.length<90) process.exit(1); const k=fs.readFileSync(process.argv[1],"utf8").match(/const KEEP_APPS = (\[[\s\S]*?\]);/); fs.writeFileSync(process.argv[2], JSON.stringify({domains:d, keep:k?JSON.parse(k[1]):[]}));' "$ROUTE" "$STAGE/public/blocklist.json"
 python3 - "$ROUTE" "$VERSION" "$BUILD" <<'PY'
 import sys
 p, v, b = sys.argv[1:4]

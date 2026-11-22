@@ -108,6 +108,44 @@ Check "the model-file pattern matches llama.cpp, Ollama and Hugging Face paths, 
   ('C:\Users\a\.ollama\models\blobs\sha256-1' -match $( ([regex]::Match($eng, "\`$ModelFileRe = '([^']+)'")).Groups[1].Value )) -and
   -not ('C:\Program Files\Microsoft Office\WINWORD.EXE /n notes.docx' -match $( ([regex]::Match($eng, "\`$ModelFileRe = '([^']+)'")).Groups[1].Value )))
 
+Write-Host "H programs that hide their windows from screen capture (22 Nov 2026): closed whatever their name"
+$astA = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $Win "lockqz-agent.ps1"), [ref]$null, [ref]$null)
+$ka = @($astA.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and $_.Left.Extent.Text -eq '$KeepApps' })[0]
+. ([ScriptBlock]::Create($ka.Extent.Text))
+foreach ($t in (FuncTexts "lockqz-agent.ps1" @("Read-KeepApps", "Keep-Hidden", "Close-HiddenApps"))) { . ([ScriptBlock]::Create($t)) }
+$tmpH = Join-Path ([IO.Path]::GetTempPath()) ("lqh-" + [guid]::NewGuid().ToString("N")); New-Item -ItemType Directory -Path $tmpH | Out-Null
+[IO.File]::WriteAllText((Join-Path $tmpH "keep.txt"), "KeptByServer`nGlimp; rm -rf`n# a note`n")
+$kk = Read-KeepApps (Join-Path $tmpH "keep.txt")
+Check "keep.txt adds names; a bad line adds nothing; the shipped list is always there (any case)" ($kk.Contains("KeptByServer") -and -not $kk.Contains("Glimp; rm -rf") -and -not $kk.Contains("Glimp") -and $kk.Contains("ZOOM") -and $kk.Contains("nvda"))
+$wd = $env:WINDIR; $env:WINDIR = "C:\Windows"
+Check "Windows' own programs stay (the Windows folder, Microsoft's Store apps); an unreadable (elevated) program is left alone" ((Keep-Hidden "x" "C:\Windows\System32\x.exe" $kk) -and (Keep-Hidden "ms-teams" "C:\Program Files\WindowsApps\MSTeams_25.1.0.0_x64__8wekyb3d8bbwe\ms-teams.exe" $kk) -and (Keep-Hidden "evil" "" $kk))
+Check "another publisher's Store app, a program in AppData or a folder named like Windows is closed unless its name is listed" ((-not (Keep-Hidden "evil" "C:\Program Files\WindowsApps\Evil_1.0_x64__abcdefghjkmnp\evil.exe" $kk)) -and (-not (Keep-Hidden "Cluely" "C:\Users\s\AppData\Local\Programs\cluely\Cluely.exe" $kk)) -and (-not (Keep-Hidden "x" "C:\WindowsEvil\x.exe" $kk)) -and (Keep-Hidden "Zoom" "C:\Users\s\AppData\Roaming\Zoom\bin\Zoom.exe" $kk))
+$env:WINDIR = $wd
+$sleepExe = @(Get-Command sleep -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 | ForEach-Object { $_.Source })[0]
+if ($sleepExe -and -not $IsWindows) {
+  $procs = [ordered]@{}
+  foreach ($n in @("Glimp", "Zoom", "KeptByServer", "bitwarden")) { $f = Join-Path $tmpH $n; Copy-Item $sleepExe $f; & chmod +x $f; $procs[$n] = Start-Process -FilePath $f -ArgumentList "30" -PassThru }
+  Start-Sleep -Milliseconds 300
+  function Get-HiddenPids { @($procs.Values | ForEach-Object { $_.Id }) }
+  $closed = @(Close-HiddenApps $kk)
+  $gone = $procs["Glimp"].WaitForExit(3000)
+  Check "a real program with a hidden window is closed (Glimp); Zoom, the server's addition and Bitwarden stay" ($gone -and ($closed -join ",") -eq "Glimp" -and -not $procs["Zoom"].HasExited -and -not $procs["KeptByServer"].HasExited -and -not $procs["bitwarden"].HasExited)
+  foreach ($p in $procs.Values) { try { if (-not $p.HasExited) { $p.Kill() } } catch { } }
+  function Get-HiddenPids { throw "no window list here" }
+  Check "no window list (an error): nothing closed, no error" (@(Close-HiddenApps $kk).Count -eq 0)
+}
+$astD = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $Win "lockqzd.ps1"), [ref]$null, [ref]$null)
+$sl = @($astD.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and $_.Left.Extent.Text -eq '$SignLib' })[0]
+. ([ScriptBlock]::Create($sl.Right.Expression.Value))
+$kf = Join-Path $tmpH "keep2.txt"
+$o = [pscustomobject]@{ domains = @("chatgpt.com"); keep = @("Zoomy", "bad;entry", "id:com.example.", 5) }
+Check "the helper saves the server's never-close list (valid entries only)" ((LQ-SaveKeep $o $kf) -and ([IO.File]::ReadAllText($kf) -eq "Zoomy`nid:com.example.`n"))
+Check "the same list again writes nothing; an answer without the list changes nothing" ((-not (LQ-SaveKeep $o $kf)) -and (-not (LQ-SaveKeep ([pscustomobject]@{ domains = @("a") }) $kf)) -and ([IO.File]::ReadAllText($kf) -eq "Zoomy`nid:com.example.`n"))
+Check "an empty list empties it (the server took its additions back)" ((LQ-SaveKeep ([pscustomobject]@{ domains = @(); keep = @() }) $kf) -and ([IO.File]::ReadAllText($kf) -eq ""))
+$dsrc = [IO.File]::ReadAllText((Join-Path $Win "lockqzd.ps1"))
+Check "the helper saves it with each 12-hour refresh, where the agent reads it" (($dsrc -match 'LQ-SaveKeep \$obj "\$env:ProgramData\\LOCKqz\\keep\.txt"') -and ((Get-Content (Join-Path $Win "lockqz-agent.ps1") -Raw) -match [regex]::Escape('"$env:ProgramData\LOCKqz\keep.txt"')))
+Remove-Item -Recurse -Force $tmpH -ErrorAction SilentlyContinue
+
 Write-Host ""
 Write-Host "RESULT: $pass passed, $fail failed"
 if ($fail) { exit 1 }

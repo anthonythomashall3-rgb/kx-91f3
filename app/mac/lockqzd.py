@@ -31,10 +31,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENGINE = os.path.join(HERE, "lockqz.sh")
 BLOCKLIST = os.environ.get("LOCKQZ_BLOCKLIST") or os.path.join(HERE, "blocklist.txt")
+# The server's additions to the never-close list (programs that hide their windows from screen capture; extra-block.sh)
+KEEPFILE = os.environ.get("LOCKQZ_KEEP_FILE") or os.path.join(os.path.dirname(BLOCKLIST), "keep.txt")
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.6.41"
+VERSION = "0.6.42"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -732,18 +734,44 @@ def report_install():
         except Exception as e: log("could not save install record: %s" % e)
     return code == 200
 
+def save_keep(keep, path=None):
+    """The server's never-close additions -> keep.txt, replaced each time (the server may take one back). Only from
+    an answer that carries the list; each entry a program name or "id:" + the start of a bundle id. True if written."""
+    path = path or KEEPFILE
+    if not isinstance(keep, list): return False
+    good = [k.strip() for k in keep if isinstance(k, str) and re.fullmatch(r"(id:)?[A-Za-z0-9][A-Za-z0-9 ._&+()-]{1,59}", k.strip())][:200]
+    text = "".join(k + "\n" for k in good)
+    try:
+        try:
+            with open(path) as f:
+                if f.read() == text: return False
+        except FileNotFoundError:
+            pass
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f: f.write(text)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
+        return True
+    except Exception as e:
+        log("keep list not saved: %s" % e)
+        return False
+
 def refresh_blocklist():
     if not API: return
     try:
         # Static copy first (free on Cloudflare Pages: no Functions request), the API as a fallback.
-        doms = []
+        doms, keep = [], None
         for u in ([SITE + "/blocklist.json"] if SITE else []) + [API + "/blocklist"]:
             try:
                 r = urllib.request.urlopen(urllib.request.Request(u, headers=UA), timeout=8, context=ssl.create_default_context())
-                doms = json.loads(r.read()).get("domains", [])
-                if doms: break
+                obj = json.loads(r.read())
+                doms = obj.get("domains", [])
+                if doms:
+                    keep = obj.get("keep")
+                    break
             except Exception as e:
                 log("blocklist %s: %s" % (u, e))
+        save_keep(keep)
         # Validate before trusting: must be a healthy list of well-formed hosts, and
         # must still contain the anchors. A bad/empty download never wipes the list.
         # host names AND host/path entries (bing.com/chat): the browser policy enforces the paths

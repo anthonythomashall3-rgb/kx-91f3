@@ -456,6 +456,77 @@ warm_apply() {   # called on every lock pass (5 s): cheap unless the list change
 }
 warm_clear() { rm -f "$STATE/warm.loaded" 2>/dev/null; pfctl -a "$PF_ANCHOR" -t lq_warm -T flush >/dev/null 2>&1 || true; pfctl -a "$PF_ANCHOR" -t lq_api -T flush >/dev/null 2>&1 || true; }
 
+# --- Programs that hide their windows from screen capture (22 Nov 2026) ---
+# AI assistants that sit over the screen (Cluely and its many copies; the free ones can be renamed at will) hide
+# their windows from screen capture (NSWindow sharingType none, Electron setContentProtection). During a quiz any
+# program with such a window is closed, whatever its name, except Apple's own code (in the system folders, or signed
+# by Apple) and what people need beside a quiz: KEEP_APPS (a program or app name, or "id:" + the start of a bundle
+# id) plus the server's additions in keep.txt (the helper writes it with the AI list), so an app closed by mistake
+# is fixed from the server without an update. The window list needs no permission and takes ~0.1 s.
+KEEP_APPS=("id:us.zoom." "zoom.us" "id:com.microsoft." "id:Cisco-Systems." "id:com.cisco." "id:com.webex." "Webex" \
+           "id:com.logmein." "id:com.goto." "id:com.ringcentral." "id:com.amazon.Amazon-Chime" "id:com.tencent.meeting" \
+           "id:com.tencent.xinWeChat" "id:com.alibaba.DingTalkMac" "Lark" "Feishu" "Jitsi Meet" "BlueJeans" \
+           "id:com.google." "id:org.mozilla." "id:com.brave." "id:com.vivaldi." "id:company.thebrowser.Browser" \
+           "id:com.1password." "id:com.agilebits." "id:com.bitwarden." "id:org.keepassxc." "id:com.dashlane." \
+           "id:com.lastpass." "id:com.keepersecurity." "id:com.nordsec." "id:me.proton." "id:ch.protonmail." \
+           "id:in.sinew." "id:com.markmcguill." "id:com.siber." "id:org.whispersystems." \
+           "id:com.obsproject." "id:com.loom." "id:pl.maketheweb." "id:com.techsmith." "id:cc.ffitch." \
+           "id:com.timpler." "id:com.wulkano." "id:net.telestream." "id:com.monosnap." \
+           "id:com.texthelp." "id:com.kurzweiledu." "id:com.nuance." "id:com.donjohnston." "id:com.claro" \
+           "id:com.respondus." "id:org.safeexambrowser." "id:com.honorlock." "id:com.examsoft." "id:com.proctoru." \
+           "id:no.inspera." "LockDown Browser" "Safe Exam Browser" "Examplify" "Guardian Browser" \
+           "id:com.lockqz." "id:app.lockqz." "LOCKqz")
+KEEP_FILE="${LOCKQZ_KEEP_FILE:-${HERE:-/Library/Application Support/LOCKqz}/keep.txt}"
+HW_JXA='try { ObjC.import("CoreGraphics"); ObjC.import("AppKit");
+var a = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo(0, 0))) || [], o = {};
+a.forEach(function (w) { if (w.kCGWindowSharingState === 0 && w.kCGWindowOwnerPID > 1) o[w.kCGWindowOwnerPID] = String(w.kCGWindowOwnerName || ""); });
+Object.keys(o).map(function (p) { var r = $.NSRunningApplication.runningApplicationWithProcessIdentifier(Number(p)), e = "", b = "";
+  if (!r.isNil()) { try { e = ObjC.unwrap(r.executableURL.path) || ""; } catch (x) {} try { b = ObjC.unwrap(r.bundleIdentifier) || ""; } catch (x) {} }
+  return [p, o[p], e, b].map(function (s) { return String(s).replace(/[\t\n]/g, " "); }).join("\t"); }).join("\n"); } catch (e) { "" }'
+# tests replace the _hw_* functions
+_hw_uid() { stat -f %u /dev/console 2>/dev/null; }
+_hw_list() {   # -> "pid<TAB>name<TAB>program file<TAB>bundle id" per program with a window hidden from capture
+  local uid; uid="$(_hw_uid)"
+  case "$uid" in ""|0|*[!0-9]*) return 0 ;; esac
+  launchctl asuser "$uid" sudo -n -u "#$uid" /usr/bin/osascript -l JavaScript -e "$HW_JXA" 2>/dev/null
+}
+_hw_path() { lsof -nP -a -p "$1" -d txt -Fn 2>/dev/null | sed -n 's/^n//p' | head -1; }   # when the window list has none (never ps: it shows ./name)
+_hw_bundle_id() { /usr/bin/defaults read "$1/Contents/Info" CFBundleIdentifier 2>/dev/null; }
+_hw_apple() { /usr/bin/codesign --verify -R="anchor apple" "$1" >/dev/null 2>&1; }
+_hw_kill() { kill -TERM "$1" 2>/dev/null; sleep 0.3; kill -0 "$1" 2>/dev/null && kill -KILL "$1" 2>/dev/null; return 0; }
+hw_keep() {   # hw_keep path name bundle-id keep... (keep entries in lower case) -> 0 when the program stays open
+  local path="$1" name="$2" bid="$3" app="" k n; shift 3
+  case "$path" in "") return 0 ;; /System/*|/usr/*|/bin/*|/sbin/*|/Library/Apple/*) return 0 ;; /*) ;; *) return 0 ;; esac
+  case "$path" in *.app/Contents/*) app="${path%%.app/Contents/*}.app"; [ -n "$bid" ] || bid="$(_hw_bundle_id "$app")" ;; esac
+  case "$bid" in com.apple.*) _hw_apple "${app:-$path}" && return 0 ;; esac
+  # the window's owner name, the program file's name and the app's name, all in lower case, one per line
+  n="${app##*/}"; n="$(printf '%s\n%s\n%s\n%s' "$bid" "$name" "${path##*/}" "${n%.app}" | tr '[:upper:]' '[:lower:]')"
+  local nl=$'\n'; local lbid="${n%%${nl}*}" names="${n#*${nl}}"
+  for k in "$@"; do
+    case "$k" in
+      id:*) [ -n "$lbid" ] && case "$lbid" in "${k#id:}"*) return 0 ;; esac ;;
+      *) printf '%s\n' "$names" | grep -Fxq -- "$k" && return 0 ;;
+    esac
+  done
+  return 1
+}
+hidden_close() {   # every lock pass: close what hides its windows from screen capture (see above)
+  local found l pid name path bid lkeep=()
+  found="$(_hw_list)"; [ -n "$found" ] || return 0   # the usual case: nothing hidden, nothing more to do
+  while IFS= read -r l; do [ -n "$l" ] && lkeep+=("$l"); done < <( { printf '%s\n' "${KEEP_APPS[@]}"
+    [ -f "$KEEP_FILE" ] && grep -E '^(id:)?[A-Za-z0-9][A-Za-z0-9 ._&+()-]{1,59}$' "$KEEP_FILE"; } | tr '[:upper:]' '[:lower:]')
+  while IFS=$'\t' read -r pid name path bid; do
+    case "$pid" in ""|*[!0-9]*) continue ;; esac
+    [ "$pid" -le 1 ] || [ "$pid" = "$$" ] && continue
+    [ -n "$path" ] || path="$(_hw_path "$pid")"
+    hw_keep "$path" "$name" "$bid" "${lkeep[@]}" && continue
+    if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would close (hides its windows from screen capture): $name"; continue; fi
+    _hw_kill "$pid"
+    xb_say "closed $name ($path): it hides its windows from screen capture"
+  done <<< "$found"
+  return 0
+}
+
 extra_lock() {
   if [ "$DRYRUN" = "1" ]; then
     xb_say "[dry-run] extra blockers:"
@@ -463,7 +534,7 @@ extra_lock() {
     _kill_list "remote-desktop" "${REMOTE_APPS[@]}"; _kill_list "overlay" "${OVERLAY_APPS[@]}"
     _kill_list "local-model" "${LOCAL_MODEL_PROCS[@]}"; _kill_cmd_res "${LOCAL_MODEL_CMD_RES[@]}"
     _kill_if_tunnel "${VPN_IF_TUNNEL[@]}"; _kill_list "Apple Intelligence" "${APPLE_AI_APPS[@]}"; _kill_cmd_res "${VM_CMD_RES[@]}"
-    models_by_file; siri_off
+    models_by_file; hidden_close; siri_off
     apple_intelligence_off; proxies_off; airplay_receiver_off
     echo "    [dry-run] would write ${#WILD_DOMAINS[@]} resolver files (wildcard AI domains) in $RESOLVER_DIR and load the AI addresses into pf <lq_warm> (warm connections)"
     echo "    [dry-run] pf already blocks local-model + VPN ports (com.lockqz.pf.conf)"
@@ -476,6 +547,7 @@ extra_lock() {
   _kill_cmd_res "$one"
   _kill_if_tunnel "${VPN_IF_TUNNEL[@]}"
   models_by_file
+  hidden_close
   xb_lap x-kills
   local rc=0 ap=""
   # The AirPlay Receiver switch beside the steps below (it asks the signed-in user's settings, the slowest step

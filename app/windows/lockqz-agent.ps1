@@ -551,6 +551,85 @@ Start-Setup -Force   # checks the server once per login; asks only if not yet co
 try { Helper "/student" @{ student = $Student } 8 | Out-Null } catch { Log "helper not reachable yet" }
 Log "running (device $Device, student $Student)"
 
+# ---- programs that hide their windows from screen capture (22 Nov 2026) ----
+# AI assistants that sit over the screen (Cluely and its many copies; the free ones can be renamed at will) hide their
+# windows from screen capture (SetWindowDisplayAffinity, Electron setContentProtection). During a quiz any program of
+# this user with such a window is closed, whatever its name, except Windows' own code (the Windows folder, Microsoft's
+# Store apps) and what people need beside a quiz: $KeepApps plus the server's additions in keep.txt (the helper writes
+# it with the AI list), so an app closed by mistake is fixed from the server without an update.
+$KeepApps = @("Zoom","CptHost","aomhost64","zWebview2Agent","ms-teams","Teams","msteams","CiscoCollabHost","webexmta","atmgr",
+  "CiscoWebexStart","ptoneclk","WebexHost","Webex","GoTo","g2mcomm","g2mstart","g2mui","GoToMeeting","RingCentral","RingCentral Video",
+  "Chime","BlueJeans","Jitsi Meet","wemeetapp","WeMeet","TencentMeeting","VooVMeeting","WeChat","Weixin","WeChatAppEx","DingTalk","Lark","Feishu",
+  "chrome","msedge","msedgewebview2","firefox","brave","vivaldi","arc","iexplore",
+  "1Password","Bitwarden","KeePassXC","KeePass","Dashlane","keeperpasswordmanager","Keeper Password Manager","NordPass","ProtonPass",
+  "Proton Pass","Enpass","RoboForm","robotaskbaricon","LastPass","StickyPassword","Signal",
+  "obs64","obs32","obs","Loom","ShareX","Snagit32","SnagitEditor","SnagitCapture","CamtasiaStudio","CamtasiaRecorder","Greenshot",
+  "Lightshot","ScreenToGif","bdcam","Bandicam","Screenpresso","Monosnap",
+  "nvda","nvda_slave","jfw","ZoomText","Zt","ZoomTextFusion","Fusion","ReadAndWrite","TextHelpReadAndWrite","Kurzweil 3000","natspeak",
+  "Dragon","dragonbar","SuperNova","ClaroRead","WordQ",
+  "LockDownBrowser","LockDownBrowserOEM","Respondus LockDown Browser","SafeExamBrowser","Safe Exam Browser","Honorlock","Guardian",
+  "GuardianBrowser","Examplify","ExamSoft","Inspera Exam Portal","InsperaExamPortal","LOCKqz")
+$KeepFile = if ($env:LOCKQZ_KEEP_FILE) { $env:LOCKQZ_KEEP_FILE } else { "$env:ProgramData\LOCKqz\keep.txt" }
+function Get-HiddenPids {
+  # -> the process ids that own a top-level window hidden from screen capture (display affinity not WDA_NONE)
+  if (-not ('LqHidden' -as [type])) {
+    Add-Type -ErrorAction Stop -TypeDefinition @'
+using System; using System.Collections.Generic; using System.Runtime.InteropServices;
+public static class LqHidden {
+  delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr l);
+  [DllImport("user32.dll")] static extern bool GetWindowDisplayAffinity(IntPtr h, out uint a);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  public static uint[] Pids() {
+    Dictionary<uint, bool> s = new Dictionary<uint, bool>();
+    EnumProc cb = delegate (IntPtr h, IntPtr l) {
+      uint a, p;
+      if (GetWindowDisplayAffinity(h, out a) && a != 0 && GetWindowThreadProcessId(h, out p) != 0 && p != 0) s[p] = true;
+      return true;
+    };
+    EnumWindows(cb, IntPtr.Zero); GC.KeepAlive(cb);
+    return new List<uint>(s.Keys).ToArray();
+  }
+}
+'@
+  }
+  return @([LqHidden]::Pids())
+}
+function Read-KeepApps([string]$file) {
+  # the shipped never-close list plus the server's additions (each a program name; "id:" entries are for Macs)
+  $k = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+  foreach ($a in $script:KeepApps) { [void]$k.Add([string]$a) }
+  try {
+    if ($file -and (Test-Path -LiteralPath $file)) {
+      foreach ($l in [IO.File]::ReadAllLines($file)) { $t = $l.Trim(); if ($t -cmatch '^[A-Za-z0-9][A-Za-z0-9 ._&+()-]{1,59}$') { [void]$k.Add($t) } }
+    }
+  } catch { }
+  return ,$k
+}
+function Keep-Hidden([string]$name, [string]$path, $keep) {
+  # $true = stays open: Windows' own code, Microsoft's own Store apps, or a name on the never-close list
+  if (-not $path) { return $true }   # unreadable: an elevated or system program, not this user's to close
+  $w = ([string]$env:WINDIR).TrimEnd('\')
+  if ($w -and $path.StartsWith($w + '\', [StringComparison]::OrdinalIgnoreCase)) { return $true }
+  if ($path -match '\\WindowsApps\\[^\\]+__8wekyb3d8bbwe\\') { return $true }   # Teams, Snipping Tool, Game Bar, ...
+  return [bool]$keep.Contains($name)
+}
+function Close-HiddenApps($keep) {
+  # every few seconds during a quiz -> the names closed
+  $closed = @()
+  $ids = @(); try { $ids = @(Get-HiddenPids) } catch { return $closed }
+  foreach ($id in $ids) {
+    if ([int]$id -eq $PID) { continue }
+    $p = Get-Process -Id ([int]$id) -ErrorAction SilentlyContinue; if (-not $p) { continue }
+    $path = ""; try { $path = [string]$p.Path } catch { }
+    if (Keep-Hidden ([string]$p.ProcessName) $path $keep) { continue }
+    try { Stop-Process -Id ([int]$id) -Force -ErrorAction Stop; $closed += [string]$p.ProcessName; Log "closed $($p.ProcessName) ($path): it hides its windows from screen capture" }
+    catch { Log "could not close $($p.ProcessName): $_" }
+  }
+  return $closed
+}
+$HiddenAt = [DateTime]::MinValue
+
 # ---- main loop ----
 $Locked = $false; $Quiz = $null; $QuizTab = $null; $QuizTitle = $null; $QuizUrl = $null; $QuizProc = ""
 # Every timer below runs on UTC ([DateTime]::UtcNow), never local Get-Date: local time jumps back an
@@ -802,6 +881,8 @@ while ($true) {
           $QuizTitle = Clean-Title $quizWin.Title; $QuizProc = [string]$quizWin.Proc
           if (-not $QuizUrl) { $QuizUrl = $quizWin.Url }
         }
+        # Programs hiding their windows from screen capture (overlay AI assistants) -> closed, every 5 s.
+        if (([DateTime]::UtcNow - $HiddenAt).TotalSeconds -ge 5) { $HiddenAt = [DateTime]::UtcNow; try { Close-HiddenApps (Read-KeepApps $KeepFile) | Out-Null } catch { } }
         # Opera reopened during the quiz (no policy layer, built-in VPN) -> closed again.
         if (Close-Browsers $NoPolicy $QuizProc) { if (-not $OperaWarned) { $OperaWarned = $true; Show-Message "Opera was closed: it cannot turn its AI off during a quiz. Use it again after the quiz." } }
         # Gated quizzes change password every 5 min: until the attempt starts, re-check and hand over a new
