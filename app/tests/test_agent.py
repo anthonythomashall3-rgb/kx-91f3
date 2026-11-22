@@ -413,6 +413,16 @@ ok("Chrome quit and reopened during the quiz: the restored quiz page is handed t
 T(g, [tab(SUMM + "#lqz-in")])
 ok("... and entered once it answers; nothing shown") if g.hand["in"] and not clips else bad("hand %r clips %r" % (g.hand, clips))
 msgs[:] = []; clips[:] = []; sets[:] = []
+g, h = hagent(); T(g, [tab(SUMM), ("Safari", 0, 0, SUMM)]); T(g, [tab(SUMM), ("Safari", 0, 0, SUMM)])
+ok("the quiz also open in Safari (nothing to hand it to there): shown and copied at once") if g.quiz_app == "Google Chrome" and clips == ["LQ-AB12CD34"] and sum("Quiz password:  LQ-AB12CD34" in m for m in msgs) == 1 else bad("app %r clips %r msgs %r" % (g.quiz_app, clips, msgs))
+T(g, [tab(SUMM), ("Safari", 0, 0, SUMM)])
+ok("... once") if clips == ["LQ-AB12CD34"] else bad("clips %r" % (clips,))
+msgs[:] = []; clips[:] = []; sets[:] = []
+g, h = hagent(); T(g, [tab(SUMM)]); T(g, [tab(SUMM)]); T(g, [tab(SUMM + "#lqz-in")])
+was_in, c0 = g.hand["in"], list(clips)
+T(g, [tab(SUMM + "#lqz-in"), ("firefox", -1, -1, SUMM)])
+ok("entered in Chrome, then the quiz opened in Firefox too: shown and copied there") if was_in and not c0 and clips == ["LQ-AB12CD34"] else bad("in %r clips %r" % (was_in, clips))
+msgs[:] = []; clips[:] = []; sets[:] = []
 A.set_tab_url = lambda app, wi, ti, url, *k: (sets.append((app, wi, ti, url)), False)[1]   # the tab moved: nothing was set
 g, h = hagent(); T(g, [tab(SUMM)]); T(g, [tab(SUMM)])
 ok("a hand-over that did not reach the tab (it moved) is not counted as handed") if sets and not g.hand.get("handed") else bad("hand %r" % (g.hand,))
