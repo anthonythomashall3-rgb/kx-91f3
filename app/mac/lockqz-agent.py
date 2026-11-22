@@ -963,34 +963,50 @@ class Agent:
 
     def hand_step(self, tabs, now, setter=None):
         """One look at the quiz tabs while the password is being handed over (tabs = raw addresses). Every open
-        start page of this quiz is handed it: the extension fills only the tab it was handed to, and a
-        student may have the quiz open in two tabs. Entered = every one of them answered #lqz-in."""
+        start page of this quiz is handed it: the extension fills only the tab it was handed to, and a student
+        may have the quiz open in two tabs. A tab's #lqz-in / #lqz-got counts only once THIS password was
+        handed to that tab: an answer left in an address from before (a changed password, Chrome restarted
+        during the quiz with its tabs restored) says nothing about this one. Entered = every tab #lqz-in.
+        The quiz also open in a browser LOCKqz cannot hand it to (Safari, Firefox...): shown and copied."""
         h = getattr(self, "hand", None)
-        if not h or not self.locked or h["in"]: return
+        if not h or not self.locked: return
+        if h.get("lost"):
+            # The quiz page was gone and is back (Chrome quit and reopened with its tabs restored): the page
+            # is new and its box empty, whatever its address still says. Handed over again from the start.
+            h.update(since=now, sent=0.0, got=False, told=False, handed=set(), lost=False)
+            h["in"] = False
         setter = setter or set_tab_url
-        mine = []
+        handed = h.setdefault("handed", set())
+        mine, elsewhere = [], False
         for (a, w, t, u) in tabs:
-            if w < 0 or a not in HAND_APPS: continue
             base = strip_hand(u)
-            if is_quiz(base) and lock_id(base) == self.quiz and "/attempt/" not in url_parts(base)[0]:
-                mine.append((a, w, t, u, base.split("#", 1)[0], hand_fragment(u)))
+            if not (is_quiz(base) and lock_id(base) == self.quiz and "/attempt/" not in url_parts(base)[0]): continue
+            if w < 0 or a not in HAND_APPS: elsewhere = True; continue
+            mine.append((a, w, t, u, base.split("#", 1)[0], hand_fragment(u) if (a, w, t) in handed else ""))
+        def tell(why):
+            h["told"] = True
+            for (a, w, t, u, page, _) in mine:
+                if hand_fragment(u).startswith("lqz="): setter(a, w, t, page + "#", u)   # the password leaves the address
+            log("quiz password not entered by itself (%s) - shown" % why)
+            clipboard(h["pw"])
+            dialog("Quiz password:  %s\n(copied to your clipboard — paste it into Brightspace)" % h["pw"])
+        if elsewhere and not h["told"]: tell("the quiz is open in another browser too")
+        if h["in"]: return
         if any(f == "lqz-in" for (*_, f) in mine) and not h.get("said"):
             h["said"] = True; log("quiz password entered in the quiz page")
         if any(f in ("lqz-in", "lqz-got") for (*_, f) in mine): h["got"] = True
         if mine and all(f == "lqz-in" for (*_, f) in mine):
             h["in"] = True; return
         waited = now - h["since"]
+        # Handed again every few seconds until each tab answers: for HAND_WAIT seconds, and once a tab has
+        # answered (the extension is there) until the password is entered or shown.
         todo = [m for m in mine if m[5] not in ("lqz-in", "lqz-got")]
-        if todo and waited <= HAND_WAIT and now - h["sent"] >= HAND_EVERY:
+        if todo and not h["told"] and (waited <= HAND_WAIT or h["got"]) and now - h["sent"] >= HAND_EVERY:
             h["sent"] = now
-            for (a, w, t, u, page, _) in todo: setter(a, w, t, page + "#lqz=" + urllib.parse.quote(h["pw"], safe=""), u)
+            for (a, w, t, u, page, _) in todo:
+                if setter(a, w, t, page + "#lqz=" + urllib.parse.quote(h["pw"], safe=""), u) is not False: handed.add((a, w, t))
         if not h["told"] and ((not h["got"] and waited > HAND_WAIT) or (h["got"] and waited > HAND_FILL_WAIT)):
-            h["told"] = True
-            for (a, w, t, u, page, f) in mine:
-                if f.startswith("lqz="): setter(a, w, t, page + "#", u)   # the password leaves the address
-            log("quiz password not entered by itself (%s) - shown" % ("no password box found" if h["got"] else "no answer from the browser"))
-            clipboard(h["pw"])
-            dialog("Quiz password:  %s\n(copied to your clipboard — paste it into Brightspace)" % h["pw"])
+            tell("no password box found" if h["got"] else "no answer from the browser")
 
     def start(self, url, app=None):
         quiz = lock_id(url)
@@ -1210,6 +1226,7 @@ class Agent:
             if not self.url or "/attempt/" in url_parts(present[self.quiz])[0]: self.url = present[self.quiz]
             if not self.quiz_app: self.quiz_app = next((a for (a, _, _, u) in tabs if u == present[self.quiz]), None)
         else:
+            if getattr(self, "hand", None): self.hand["lost"] = True   # handed over again when its page is back (hand_step)
             if self.quiz in left:
                 self.end("quiz_submitted"); return
             if any_leaving and not open_quizzes:   # quiz list / another quiz's page: not proof of a submit
