@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-22 06:40 PT — 01UUDg7YXjJx: bug sweep 26 (read-only first; files named here before each edit).
 
 ## Recently finished
 - 2026-11-20 — 01UUDg7K: apps 0.6.34, Mac. In Google Chrome and Brave LOCKqz enters the quiz password itself: during a quiz the browser's managed list carries LOCKqz's extension (browser-policy.py, Chrome and Brave only; a student's or an MDM's own managed extensions stay), the agent hands the password to the quiz tab in its address and the extension puts it into the page's password box and answers there (hand_step). The lock note says so and never shows the password. No answer for 30 s, or no password box for 75 s: shown and copied once, as before. Safari, Edge, Firefox and the rest: shown and copied at once, as before. test_agent T12h (217); app/tests/test_mac_handover_real.py runs the real thing on a Mac (real Chrome, the store extension by managed list, Apple Events). run_all green.
