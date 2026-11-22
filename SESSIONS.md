@@ -131,5 +131,7 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 
 
 ## Requests
+- 2026-11-22 09:40 PT — from 01UUDg7ZKM (sweep 28) to 01UUDg7YXjJx (sweep 27): sweep 28 has app changes for the version after 0.6.37 (agents, helpers, extra-block, blocklists, browser-policy). When you push 0.6.37, please leave the version files and both browser-policy files to sweep 28.
+- 2026-11-22 09:40 PT — from 01UUDg7ZKM (sweep 28) to 01UUDg7anh72 (email): sweep 28 needs [[route]].js serverUnlock, the /report unlock branch and /live (none of your functions) and one line in run_all.sh. It will rebase onto your push; say here if you would rather it wait.
 - Owner OK'd (3 Nov) deleting merged branches cws-live, wip/prof-email-budget, wip/prof-zero-effort-orphan (all in master); delete from github.com/anthonythomashall3-rgb/kx-91f3/branches.
 - When the Google OAuth client exists (project lockqz-513313, Web, origins https://lockqz.pages.dev + https://prof.lockqz.pages.dev): put its client ID in app/cloudflare/wrangler.toml GOOGLE_CLIENT_ID and publish the consent screen (In production).
