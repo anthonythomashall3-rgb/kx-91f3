@@ -8,7 +8,7 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 
 ## Working now
 - 2026-11-22 12:52 PT — 01UUDg7ZKM: apps 0.6.40 pushed (e6943b2: the exam password is entered by LOCKqz only). Now Brightspace's own submission email. Files: app/cloudflare/functions/api/[[route]].js (the /mailin parts, the Sync state's quiz mail address), app/cloudflare/schema.sql + migrate_047, app/cloudflare/wrangler.toml (MAILIN_ON only), app/cloudflare/public/sync.js (NotificationEmail), app/cloudflare/public/privacy.html (one line), app/extension-prof/manifest.json (1.0.14), app/mailin/ (new), tests (test_mailin.mjs, test_mailin_sync.mjs, test_mailin_worker.mjs new; run_all.sh). The app and version files are free (sweep 30: 0.6.41 is yours).
-- 2026-11-22 12:10 PT — 01UUDg7YXjJx: bug sweep 30, apps 0.6.41 (more AI apps closed during a quiz). Files: app/mac/extra-block.sh, app/windows/lockqz.ps1, app/VERSION, app/mac/lockqzd.py, app/windows/lockqzd.ps1 (version lines only), app/tests/test_blocklist.mjs. Served list part done (9ee94e6).
+- 2026-11-22 12:10 PT — 01UUDg7YXjJx: bug sweep 30, apps 0.6.41 (more AI apps closed during a quiz). Files: app/mac/extra-block.sh, app/windows/lockqz.ps1, app/linux/lockqz.sh (OVERLAY_APPS only), app/VERSION, app/mac/lockqzd.py, app/windows/lockqzd.ps1 (version lines only), app/tests/test_blocklist.mjs. Served list part done (9ee94e6).
 
 ## Recently finished
 - 2026-11-22 12:10 PT — 01UUDg7YXjJx: bug sweep 29 finished: Gmail payments script keeps inside Google's daily run time and its clock calls run even when Gmail fails (bddc16d; pasted into Apps Script, sha 7c2d5d0a). Record: Project doc claude/LOCKqz-bug-sweep-29.md. No files held.
