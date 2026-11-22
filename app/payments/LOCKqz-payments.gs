@@ -66,39 +66,66 @@ function owners_(props) {
   return list;
 }
 
+// Google gives a free account's triggers 90 minutes of run time a day. A normal minute takes 1 to 2 s (about 40
+// minutes a day), but now and then a Gmail call hangs for 8 minutes before Google gives up ("We're sorry, a server
+// error occurred"; 2 to 5 a day were seen in Nov 2026). Enough of those in one day would stop the trigger until the
+// next day, and with it payments and LOCKqz's clock. So the script keeps its own estimate of the last 24 hours' run
+// time (RT_MS, decayed to now) and past SOFT_MS reads Gmail only every 2nd minute, past HARD_MS every 5th. The clock
+// calls (/cron, /pay/tick) keep their pace.
+const DAY_MS = 86400000, SOFT_MS = 55 * 60000, HARD_MS = 75 * 60000;
+function used_(props, now) {
+  const ms = Number(props.getProperty("RT_MS") || 0), at = Number(props.getProperty("RT_AT") || 0);
+  if (!(ms > 0) || !(at > 0)) return 0;
+  return Math.max(0, ms * (1 - Math.min(1, Math.max(0, now - at) / DAY_MS)));
+}
+function spent_(props, t0) {
+  const now = Date.now();
+  try { props.setProperties({ RT_MS: String(Math.round(used_(props, now) + Math.max(0, now - t0))), RT_AT: String(now) }); } catch (e) {}
+}
+
 function run() {
-  const props = PropertiesService.getScriptProperties();
+  const t0 = Date.now(), props = PropertiesService.getScriptProperties();
+  try { run_(props, t0); } finally { spent_(props, t0); }   // a run that failed (or hung, then failed) counts too
+}
+
+function run_(props, t0) {
   const secret = props.getProperty("PAY_SECRET");
   if (!secret) throw new Error("Set PAY_SECRET in Project Settings → Script properties");
-  const label = GmailApp.getUserLabelByName(DONE) || GmailApp.createLabel(DONE);
-  const started = Math.floor(Date.now() / 1000);
-  // Only mail since the last successful run (10 minutes of overlap), never the same alert twice.
-  const last = Number(props.getProperty("LAST_RUN") || 0) || (started - 3 * 86400);
-  const since = last - 600;
-  // in:anywhere: an alert already moved to Trash (a filter, or an inbox cleared within the minute) is read
-  // too. Spam is left out.
-  const query = "in:anywhere -in:spam after:" + since + " -label:" + DONE.replace(/\//g, "-") + " (zelle OR " + Object.keys(SENDERS).map(d => "from:" + d).join(" OR ") + ") " + WORDS;
-  const threads = GmailApp.search(query, 0, 50);
-  const own = owners_(props), opts = { owners: own, zellepayOk: props.getProperty("ZELLEPAY_OK") === "1",
-    accountMarks: String(props.getProperty("ACCOUNT_MARKS") || "").split(",").map(s => s.trim()).filter(Boolean) };
-  const out = [];
-  threads.forEach(th => th.getMessages().forEach(m => {
-    if (m.getDate && m.getDate().getTime() / 1000 < since) return;     // older message in the thread
-    const p = parse(m, opts);
-    if (p) out.push(p);
-  }));
-  for (let i = 0; i < out.length; i += 100) {
-    const r = UrlFetchApp.fetch(API, { method: "post", contentType: "application/json", muteHttpExceptions: true,
-      headers: { "X-LOCKqz-Pay": secret }, payload: JSON.stringify({ payments: out.slice(i, i + 100) }) });
-    if (r.getResponseCode() !== 200) throw new Error("LOCKqz said " + r.getResponseCode() + ": " + r.getContentText().slice(0, 200));
-  }
-  threads.forEach(th => th.addLabel(label));
-  // A full page (50 threads) can leave older alerts behind (e.g. the script was stopped for a day): keep the
-  // window, so the next run (which skips the labelled threads) takes the rest.
-  if (threads.length < 50) props.setProperty("LAST_RUN", String(started));
-  // Bank-transfer questions every ~5 min (a second Gmail search every minute would spend Google's 90 min/day
-  // trigger-runtime allowance for free accounts; payment alerts above stay every minute).
-  if (started - Number(props.getProperty("LAST_ASK") || 0) > 4 * 60) {
+  const started = Math.floor(t0 / 1000);
+  const used = used_(props, t0), every = used > HARD_MS ? 5 : used > SOFT_MS ? 2 : 1;
+  const own = owners_(props);
+  // A Gmail failure never stops LOCKqz's clock below: it is kept and thrown at the end (the run still shows as failed).
+  let gmailErr = null;
+  if (Math.floor(t0 / 60000) % every === 0) try {
+    // Only mail since the last successful run (10 minutes of overlap), never the same alert twice.
+    const last = Number(props.getProperty("LAST_RUN") || 0) || (started - 3 * 86400);
+    const since = last - 600;
+    // in:anywhere: an alert already moved to Trash (a filter, or an inbox cleared within the minute) is read
+    // too. Spam is left out.
+    const query = "in:anywhere -in:spam after:" + since + " -label:" + DONE.replace(/\//g, "-") + " (zelle OR " + Object.keys(SENDERS).map(d => "from:" + d).join(" OR ") + ") " + WORDS;
+    const threads = GmailApp.search(query, 0, 50);
+    const opts = { owners: own, zellepayOk: props.getProperty("ZELLEPAY_OK") === "1",
+      accountMarks: String(props.getProperty("ACCOUNT_MARKS") || "").split(",").map(s => s.trim()).filter(Boolean) };
+    const out = [];
+    threads.forEach(th => th.getMessages().forEach(m => {
+      if (m.getDate && m.getDate().getTime() / 1000 < since) return;     // older message in the thread
+      const p = parse(m, opts);
+      if (p) out.push(p);
+    }));
+    for (let i = 0; i < out.length; i += 100) {
+      const r = UrlFetchApp.fetch(API, { method: "post", contentType: "application/json", muteHttpExceptions: true,
+        headers: { "X-LOCKqz-Pay": secret }, payload: JSON.stringify({ payments: out.slice(i, i + 100) }) });
+      if (r.getResponseCode() !== 200) throw new Error("LOCKqz said " + r.getResponseCode() + ": " + r.getContentText().slice(0, 200));
+    }
+    // The label is looked up only when there is something to mark (one Gmail call less on a quiet minute).
+    if (threads.length) { const label = GmailApp.getUserLabelByName(DONE) || GmailApp.createLabel(DONE); threads.forEach(th => th.addLabel(label)); }
+    // A full page (50 threads) can leave older alerts behind (e.g. the script was stopped for a day): keep the
+    // window, so the next run (which skips the labelled threads) takes the rest.
+    if (threads.length < 50) props.setProperty("LAST_RUN", String(started));
+  } catch (e) { gmailErr = e; }
+  // Bank-transfer questions every ~5 min, ~15 min while the day's run time is high (a second Gmail search every
+  // minute would spend Google's 90 min/day trigger-runtime allowance for free accounts).
+  if (started - Number(props.getProperty("LAST_ASK") || 0) > (every > 1 ? 14 : 4) * 60) {
     props.setProperty("LAST_ASK", String(started));
     try { answerBankAsks_(secret, own); } catch (e) { Logger.log("bank answers: " + e); }
   }
@@ -113,6 +140,7 @@ function run() {
     props.setProperty("LAST_TICK", String(started));
     UrlFetchApp.fetch(API.replace("/notify", "/tick"), { method: "post", contentType: "application/json", muteHttpExceptions: true, headers: { "X-LOCKqz-Pay": secret }, payload: "{}" });
   }
+  if (gmailErr) throw gmailErr;
 }
 
 // Someone emailed LOCKqz asking to pay by bank transfer: LOCKqz emails them the details (once per thread).

@@ -98,4 +98,41 @@ check("owner address unknown -> review only", p && p.needs_review === true, JSON
   check("run(): 50 threads (a full page) -> the window stays (older alerts come next run)", mk(50) === "1000");
   check("run(): fewer than 50 -> the window moves on", mk(3) !== "1000");
 }
+{ // (22 Nov) run(): Google's 90 min/day trigger allowance. Gmail calls that hang 8 minutes (seen 2 to 5 a day) count;
+  // past 55 min in the last 24 h Gmail is read every 2nd minute, past 75 min every 5th; the clock (/cron, /pay/tick)
+  // keeps its pace, and a Gmail failure never stops it.
+  const world = (props0, { at, threads = 0, searchThrows = null, spend = 0 } = {}) => {
+    const props = { PAY_SECRET: "k", ...props0 }, calls = { search: 0, label: 0, fetch: [] }; let now = at;
+    const c = { Date: class extends Date { constructor(...a) { if (a.length) super(...a); else super(now); } static now() { return now; } },
+      PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] ?? null, setProperty: (k, v) => { props[k] = String(v); },
+        setProperties: o => { for (const k in o) props[k] = String(o[k]); } }) },
+      GmailApp: { getUserLabelByName: () => { calls.label++; return {}; }, createLabel: () => ({}),
+        search: q => { calls.search++; if (/in:anywhere/.test(q)) { now += spend; if (searchThrows) throw new Error(searchThrows); } return Array.from({ length: threads }, () => ({ getMessages: () => [], addLabel() {} })); } },
+      UrlFetchApp: { fetch: u => { calls.fetch.push(String(u).replace(/^.*\/api/, "")); return { getResponseCode: () => 200, getContentText: () => "" }; } },
+      Session: { getEffectiveUser: () => ({ getEmail: () => OWN }) }, Logger: { log() {} } };
+    vm.createContext(c); vm.runInContext(src + "\nthis.run = run;", c);
+    let threw = null; try { c.run(); } catch (e) { threw = e; }
+    return { props, calls, threw, now };
+  };
+  const T = Date.parse("2026-11-22T18:00:00Z"), even = T - (T % 120000), odd = even + 60000, s = x => String(Math.floor(x / 1000));
+  const quiet = at => ({ LAST_ASK: s(at), LAST_CRON: s(at), LAST_TICK: s(at), LAST_RUN: s(at - 60000) });
+  let w = world(quiet(odd), { at: odd, spend: 1500 });
+  check("a normal minute: Gmail read, no label lookup when nothing came, its 1.5 s counted", w.calls.search === 1 && w.calls.label === 0 && Number(w.props.RT_MS) === 1500 && w.props.RT_AT === String(odd + 1500), JSON.stringify(w.props));
+  w = world(quiet(odd), { at: odd, threads: 2 });
+  check("alerts came: the label is looked up and they are marked", w.calls.label === 1 && w.calls.search === 1);
+  w = world({ ...quiet(odd), RT_MS: String(10 * 60000), RT_AT: String(odd - 12 * 3600000) }, { at: odd, spend: 1000 });
+  check("the estimate is a rolling day: 10 min of 12 h ago counts as 5 min now", Math.abs(Number(w.props.RT_MS) - (5 * 60000 + 1000)) < 20, w.props.RT_MS);
+  w = world({ ...quiet(odd), RT_MS: String(56 * 60000), RT_AT: String(odd) }, { at: odd });
+  const w2 = world({ ...quiet(even), RT_MS: String(56 * 60000), RT_AT: String(even) }, { at: even });
+  check("past 55 min: Gmail every 2nd minute (odd minute skipped, even read)", w.calls.search === 0 && w2.calls.search === 1, `${w.calls.search} ${w2.calls.search}`);
+  w = world({ ...quiet(even), RT_MS: String(76 * 60000), RT_AT: String(even) }, { at: even - (even % 300000) + 120000 });
+  const w5 = world({ ...quiet(even), RT_MS: String(76 * 60000), RT_AT: String(even) }, { at: even - (even % 300000) });
+  check("past 75 min: Gmail every 5th minute", w.calls.search === 0 && w5.calls.search === 1, `${w.calls.search} ${w5.calls.search}`);
+  w = world({ PAY_SECRET: "k", LAST_RUN: s(odd - 60000), RT_MS: String(80 * 60000), RT_AT: String(odd) }, { at: odd });
+  check("a skipped minute still runs LOCKqz's clock (/cron, /pay/tick) when due", w.calls.search <= 1 && w.calls.fetch.includes("/cron") && w.calls.fetch.includes("/pay/tick"), JSON.stringify(w.calls.fetch));
+  w = world({ PAY_SECRET: "k", LAST_RUN: s(odd - 60000) }, { at: odd, searchThrows: "We're sorry, a server error occurred.", spend: 480000 });
+  check("Gmail hangs 8 min then fails: the clock still runs, the run still fails, its 8 min are counted", w.calls.fetch.includes("/cron") && w.calls.fetch.includes("/pay/tick") && w.threw && /server error/.test(w.threw.message) && Number(w.props.RT_MS) === 480000 && w.props.LAST_RUN === s(odd - 60000), JSON.stringify({ f: w.calls.fetch, rt: w.props.RT_MS, t: String(w.threw) }));
+  w = world({ PAY_SECRET: "k", LAST_RUN: s(odd - 60000), LAST_ASK: s(odd - 6 * 60000), LAST_CRON: s(odd), LAST_TICK: s(odd), RT_MS: String(60 * 60000), RT_AT: String(odd) }, { at: odd });
+  check("bank questions wait ~15 min (not ~5) while the day's run time is high", w.calls.search === 0, String(w.calls.search));
+}
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
