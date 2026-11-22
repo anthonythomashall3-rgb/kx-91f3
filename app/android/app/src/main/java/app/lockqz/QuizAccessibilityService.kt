@@ -4,8 +4,6 @@ import android.accessibilityservice.AccessibilityService
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Handler
@@ -18,8 +16,9 @@ import org.json.JSONObject
 import java.util.concurrent.Executors
 
 /** The quiz watcher. Reads the browser's address bar; on a Brightspace quiz attempt page it locks (VPN
- *  block on, signed lock report, password fetched and shown), while locked it sends AI apps home and
- *  pings the server, and when the quiz page is gone (submitted / left / closed) it unlocks. */
+ *  block on, signed lock report, password fetched and entered in the quiz page's password box by LOCKqz:
+ *  never shown or copied), while locked it sends AI apps home and pings the server, and when the quiz page
+ *  is gone (submitted / left / closed) it unlocks. */
 class QuizAccessibilityService : AccessibilityService() {
     companion object {
         const val TAG = "LOCKqz-watch"
@@ -78,7 +77,12 @@ class QuizAccessibilityService : AccessibilityService() {
     @Volatile private var missingSince = 0L
     @Volatile private var lastBeat = 0L
     @Volatile private var lastSeen = 0L
-    @Volatile private var pwShown: String? = null
+    @Volatile private var pwShown: String? = null       // the quiz password LOCKqz holds: entered by LOCKqz, never shown
+    @Volatile private var pwSince = 0L
+    @Volatile private var pwFilledAt = 0L
+    @Volatile private var pwTried = 0L
+    @Volatile private var pwTold = false
+    @Volatile private var pwNoted = false
     @Volatile private var held = false                   // the server has not vouched for the quiz end yet: block stays
     @Volatile private var holdUntil = 0L
     @Volatile private var askFailSince = 0L
@@ -123,6 +127,7 @@ class QuizAccessibilityService : AccessibilityService() {
         val root = rootInActiveWindow ?: return
         val url = readUrl(root, barId) ?: return
         onUrl(url)
+        if (quiz != null && pwShown != null) fillPassword(root, url)
     }
 
     private fun readUrl(root: AccessibilityNodeInfo, id: String): String? {
@@ -157,6 +162,12 @@ class QuizAccessibilityService : AccessibilityService() {
         if (now - lastBeat > (if (held) HOLD_BEAT_MS else BEAT_MS)) { lastBeat = now; exec.execute { beat(q) } }
         val u = quizUrl
         if (!held && u != null && "/attempt/" !in parts(u).first && now >= pwNext) { pwNext = now + 15_000; exec.execute { password(u, q, quiet = true) } }   // gated: new code every 5 min
+        if (pwShown != null && u != null && "/attempt/" !in parts(u).first) {
+            rootInActiveWindow?.let { r -> r.packageName?.toString()?.let { URL_BARS[it] }?.let { id -> readUrl(r, id)?.let { fillPassword(r, it) } } }
+            if (pwFilledAt == 0L && !pwTold && now - pwSince > 40_000) {
+                pwTold = true; notify("LOCKqz has the quiz password ready", "Open the quiz's start page (the one with Start Quiz): LOCKqz enters it there.")
+            }
+        }
     }
 
     private fun start(url: String, id: String) {
@@ -166,6 +177,7 @@ class QuizAccessibilityService : AccessibilityService() {
         if (!DnsVpnService.running) { notifyOnce("vpn", "LOCKqz is off", "Open LOCKqz and allow the AI block (VPN) to get the quiz password."); return }
         DnsVpnService.setBlocklist(Api.blocklist(this))
         DnsVpnService.locked = true; quiz = id; quizUrl = url; lastSeen = System.currentTimeMillis(); missingSince = 0; pwShown = null; held = false; holdUntil = 0; askFailSince = 0; pwNext = 0; pdnsTold = false
+        pwFilledAt = 0; pwTold = false; pwNoted = false
         getSharedPreferences("lockqz", Context.MODE_PRIVATE).edit().putString("locked_quiz", id).apply()
         checkOtherProfiles(id)
         Log.i(TAG, "locked $id")
@@ -230,10 +242,40 @@ class QuizAccessibilityService : AccessibilityService() {
         main.postDelayed({ if (quiz == id && pwShown == null) exec.execute { password(quizUrl ?: url, id) } }, 15_000)
     }
 
+    /** The quiz password is never shown or copied (a password a student can read can be passed to a device without
+     *  LOCKqz): LOCKqz enters it in the quiz page's password box itself (fillPassword, on every look while the quiz's
+     *  start page is in front). */
     private fun showPassword(pw: String) {
-        try { (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("LOCKqz", pw)) } catch (_: Exception) {}
-        notify("Quiz password: $pw", "Copied to the clipboard. Paste it into Brightspace. AI stays off until you submit.", important = true)
-        main.post { Toast.makeText(this, "LOCKqz password $pw (copied)", Toast.LENGTH_LONG).show() }
+        pwSince = System.currentTimeMillis(); pwFilledAt = 0; pwTold = false
+        main.post { rootInActiveWindow?.let { r -> r.packageName?.toString()?.let { URL_BARS[it] }?.let { id -> readUrl(r, id)?.let { fillPassword(r, it) } } } }
+        if (!pwNoted) { pwNoted = true; notify("AI is off for your quiz", "LOCKqz enters the quiz password for you. Just start the quiz. AI stays off until you submit.", important = true) }
+    }
+
+    /** Puts the password into each empty password box of the locked quiz's own start page in the browser in front
+     *  (never inside the attempt, never another page), at most once a second. -> boxes filled now. */
+    private fun fillPassword(root: AccessibilityNodeInfo, rawUrl: String): Int {
+        val pw = pwShown ?: return 0
+        val now = System.currentTimeMillis()
+        if (now - pwTried < 1000) return 0
+        pwTried = now
+        val url = innerUrl(rawUrl)
+        if (!isQuiz(url) || lockId(url) != quiz || "/attempt/" in parts(url).first) return 0
+        var n = 0
+        try {
+            val todo = ArrayDeque<AccessibilityNodeInfo>(); todo.add(root)
+            var seen = 0
+            while (todo.isNotEmpty() && seen < 3000) {
+                val node = todo.removeLast(); seen++
+                if (node.isPassword && node.isEditable && node.text.isNullOrEmpty()) {
+                    val args = android.os.Bundle()
+                    args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, pw)
+                    if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) n++
+                }
+                for (i in 0 until node.childCount) node.getChild(i)?.let { todo.add(it) }
+            }
+        } catch (e: Exception) { Log.w(TAG, "password box: $e") }
+        if (n > 0) { pwFilledAt = now; Log.i(TAG, "quiz password entered in the quiz page ($n box)") }
+        return n
     }
 
     private fun beat(id: String) {

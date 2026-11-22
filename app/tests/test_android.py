@@ -47,7 +47,9 @@ for b in ["com.android.chrome", "org.mozilla.firefox", "com.sec.android.app.sbro
     check("address bar read: " + b, '"%s" to' % b in q)
 check("Content/Lessons frame URL decoded (inner quiz URL)", "fun innerUrl" in q and 'startsWith("/d2l/")' in q)
 check("lock report before /password; unlock reported with a reason; heartbeat obeys the server's unlock", 'Api.report(this, "lock"' in q and 'Api.report(this, "unlock"' in q and 'optBoolean("unlock")' in q)
-check("the password is shown + copied, never typed into the page", "setPrimaryClip" in q and "performAction(" not in q)
+check("the password is never shown nor copied: LOCKqz types it into the quiz page's own password box only",
+      "setPrimaryClip" not in q and "Quiz password: $" not in q and "ACTION_SET_TEXT" in q and "node.isPassword && node.isEditable" in q
+      and 'lockId(url) != quiz || "/attempt/" in parts(url).first' in q)
 
 print("A4 DNS filter")
 d = rd("app/src/main/java/app/lockqz/DnsVpnService.kt")

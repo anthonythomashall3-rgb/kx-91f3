@@ -179,8 +179,10 @@ EDGE_AI_OFF = {
     "GenAILocalFoundationalModelSettings": 1,
 }
 
-# LOCKqz's own extension (Chrome Web Store). Added while a quiz is locked; a student's or an MDM's own
-# managed extensions stay as they are (merge_chromium).
+# LOCKqz's own extension (Chrome Web Store; Edge takes Chrome Web Store extensions by this update address too).
+# Added while a quiz is locked; a student's or an MDM's own managed extensions stay as they are (merge_chromium).
+# It enters the quiz password, which the agent hands to it in the tab's address: no history is saved during the
+# quiz (SavingBrowserHistoryDisabled), so that address is kept nowhere.
 PW_EXT = "bidlfpkdggdpmfbfkpjcnbjhfkfligkk"
 PW_EXT_FORCE = PW_EXT + ";https://clients2.google.com/service/update2/crx"
 def chromium_policy(domain):
@@ -194,8 +196,9 @@ def chromium_policy(domain):
          "DefaultSearchProviderEnabled": True, "DefaultSearchProviderName": "Google (Web)",
          "DefaultSearchProviderSearchURL": WEB_SEARCH,
          "DefaultSearchProviderSuggestURL": "https://www.google.com/complete/search?output=chrome&q={searchTerms}",
-         "ExtensionInstallBlocklist": ["*"], "ExtensionInstallAllowlist": list(SAFE_EXTENSIONS) + [i for i in assist_extensions() if i not in SAFE_EXTENSIONS]}
-    if domain.startswith(("com.google.Chrome", "com.brave.Browser")): p["ExtensionInstallForcelist"] = [PW_EXT_FORCE]
+         "ExtensionInstallBlocklist": ["*"], "ExtensionInstallAllowlist": list(SAFE_EXTENSIONS) + [i for i in assist_extensions() if i not in SAFE_EXTENSIONS],
+         "SavingBrowserHistoryDisabled": True}
+    if domain.startswith(("com.google.Chrome", "com.brave.Browser", "com.microsoft.Edge")): p["ExtensionInstallForcelist"] = [PW_EXT_FORCE]
     p.update(CHROMIUM_AI_OFF)
     if keep_proxy(): p.pop("ProxyMode")
     if domain.startswith("com.microsoft.Edge"):

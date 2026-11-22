@@ -604,14 +604,15 @@ function Next-PwCheck([datetime]$now, $opens) {
 }
 $PwWait = 40
 function Step-Pw([datetime]$now) {
-  # Every look while a quiz is locked and has not started: enter the password wherever its box now is. No box
-  # for $PwWait seconds after the password arrived -> shown and copied once (the old way), and still entered
-  # by LOCKqz if the box turns up later.
+  # Every look while a quiz is locked and has not started: enter the password wherever its box now is. The
+  # password is never shown or copied (a password a student can read can be passed to a computer without
+  # LOCKqz). No box for $PwWait seconds after the password arrived -> the student is told, once, where LOCKqz
+  # enters it; it is still entered the moment the box shows.
   if (-not $script:LastPw) { return }
   if ((Fill-QuizPassword $script:LastPw) -gt 0) { $script:PwEntered = $true }
   if ((-not $script:PwEntered) -and (-not $script:PwTold) -and $script:PwSince -and (($now - $script:PwSince).TotalSeconds -gt $PwWait)) {
-    $script:PwTold = $true; Set-Clipboard -Value $script:LastPw
-    Show-Message ("Quiz password:  " + $script:LastPw + "`n(copied to your clipboard - paste it into Brightspace)")
+    $script:PwTold = $true
+    Show-Message "LOCKqz has the quiz password ready. Open the quiz's start page (the one with Start Quiz) in Chrome, Edge or Firefox: LOCKqz enters it there."
   }
 }
 function Handle-Pw($pr, [bool]$first, [string]$note) {
@@ -623,8 +624,7 @@ function Handle-Pw($pr, [bool]$first, [string]$note) {
     $pw = [string]$pr.password; $script:PwNext = $now.AddSeconds($rc)
     if ($pw -ne $script:LastPw) {
       # LOCKqz enters the password in the quiz page itself (Fill-QuizPassword, now and on every look while the
-      # quiz has not started): nothing to type or paste. Only when no password box was found for $PwWait
-      # seconds is it shown and copied, as before (Step-Pw), so nobody is left without it.
+      # quiz has not started): nothing to type or paste, never shown or copied (Step-Pw).
       $script:LastPw = $pw; $script:PwSince = $now; $script:PwTold = $false
       $script:PwEntered = ((Fill-QuizPassword $pw) -gt 0)
       if ($first) { Show-Message ("AI is locked for this quiz.`n`nLOCKqz enters the quiz password for you. Just start the quiz." + $note) }

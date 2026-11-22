@@ -166,16 +166,37 @@ check("one session file per profile (a second profile window never hides the qui
 prof = os.path.join(TMP, "prof"); os.makedirs(os.path.join(prof, "Default", "Sessions")); open(os.path.join(prof, "Default", "Sessions", "Session_1"), "wb").write(snss)
 f = A.chromium_session_file(prof); check("newest Sessions/Session_* found", f and f[1].endswith("Session_1"))
 check("desktop pieces swapped: LinuxUI, Linux tabs, no tab rewriting, Linux paths", A.M.MacUI is A.LinuxUI and A.M.browser_tabs is A.browser_tabs and A.M.set_tab_url("x", 0, 0, "u") is None and A.M.USER_DIR.endswith(".config/lockqz") and A.M.TOKEN_DIR == TMP)
-_msgs, _clips = [], []
-_d, _c, _dm = A.M.dialog, A.M.clipboard, A.M.developer_mode
+_msgs, _clips, _opens = [], [], []
+_d, _c, _dm, _oi, _ai = A.M.dialog, A.M.clipboard, A.M.developer_mode, A.M.open_in, A.M.app_installed
 A.M.dialog = lambda m, *a, **k: _msgs.append(m); A.M.clipboard = lambda t, *a, **k: _clips.append(t); A.M.developer_mode = lambda: False
+A.M.open_in = lambda app, url: (_opens.append((app, url)), True)[1]; A.M.app_installed = lambda app: app == "Google Chrome"
+QS = "https://usc.brightspace.com/d2l/lms/quizzing/user/quiz_summary.d2l?qi=456&ou=123"
 try:
     for _app in ("Google Chrome", "Brave", "Chromium", "Firefox"):
         ga = A.Agent.__new__(A.Agent); ga.quiz_app, ga.pw, ga.locked, ga.quiz, ga.hand = _app, None, True, "123-456", None
         ga.pw_reply({"password": "LQ-AB12CD34"}, 1000.0, first=True, note="")
-finally: A.M.dialog, A.M.clipboard, A.M.developer_mode = _d, _c, _dm
-check("quiz password: shown and copied at once in every Linux browser (a Linux tab address cannot be set, so it is never handed to the tab)",
-      not A.M.HAND_APPS and _clips == ["LQ-AB12CD34"] * 4 and all("Quiz password:  LQ-AB12CD34" in m for m in _msgs) and not any("enters the quiz password for you" in m for m in _msgs), (_msgs, _clips))
+    check("quiz password: never shown nor copied on Linux, in any browser", not _clips and not any("LQ-AB12CD34" in m for m in _msgs), (_msgs, _clips))
+    ga = A.Agent.__new__(A.Agent); ga.quiz_app, ga.pw, ga.locked, ga.quiz, ga.hand = "Firefox", None, True, "123-456", None
+    ga.pw_reply({"password": "LQ-AB12CD34"}, 1000.0, first=True, note="")
+    ga.hand_step([("Firefox", -1, -1, QS)], 1001.0)
+    check("an exam open only in Firefox: its start page opens in Chrome, with no password in that address", _opens == [("Google Chrome", QS)], _opens)
+    ga.hand_step([("Firefox", -1, -1, QS), ("Google Chrome", -1, -1, QS)], 1005.0)
+    want = QS + "#lqz=LQ-AB12CD34"
+    check("... once it shows in the running Chrome, it is opened there again with the password (the extension takes it)", _opens[-1] == ("Google Chrome", want), _opens)
+    n = len(_opens); ga.hand_step([("Google Chrome", -1, -1, QS)], 1010.0)
+    check("... not again while Chrome may still be answering", len(_opens) == n, _opens)
+    ga.hand_step([("Google Chrome", -1, -1, QS + "#lqz-in")], 1012.0)
+    check("... Chrome's session file shows #lqz-in: entered; nothing ever shown", ga.hand["in"] and not _clips and not any("LQ-AB12CD34" in m for m in _msgs))
+    _opens[:] = []
+    gb = A.Agent.__new__(A.Agent); gb.quiz_app, gb.pw, gb.locked, gb.quiz, gb.hand = "Google Chrome", None, True, "123-456", None
+    gb.pw_reply({"password": "LQ-AB12CD34"}, 2000.0, first=True, note="")
+    gb.hand_step([("Google Chrome", -1, -1, QS)], 2001.0)
+    check("an exam open in a running Chrome: handed at once by opening it there with the password", _opens == [("Google Chrome", want)], _opens)
+    gb.hand_step([("Google Chrome", -1, -1, QS)], 2001.0 + A.M.MOVE_WAIT + 1)
+    gb.hand_step([("Google Chrome", -1, -1, QS)], 2002.0 + 2 * (A.M.MOVE_WAIT + 1))
+    check("... no answer: tried twice, then the student is told once (never the password)", len(_opens) == 2 and sum("could not enter the quiz password" in m for m in _msgs) == 1 and not any("LQ-AB12CD34" in m for m in _msgs), (_opens, _msgs[-1:]))
+    check("Linux hands it only to Chrome, Brave or Edge (they carry LOCKqz's extension during the quiz)", A.M.HAND_APPS == {"Google Chrome", "Brave", "Microsoft Edge"} and A.M.HAND_BY_OPEN is True)
+finally: A.M.dialog, A.M.clipboard, A.M.developer_mode, A.M.open_in, A.M.app_installed = _d, _c, _dm, _oi, _ai
 procs = [(100, 50, "/usr/lib/firefox/firefox"), (101, 50, "/usr/lib/firefox/firefox -contentproc --type=tab"), (200, 40, "/opt/google/chrome/chrome"), (300, 30, "/app/brave/brave"), (400, 20, "/usr/lib/opera/opera")]
 rb = A.running_browsers(procs)
 check("running browsers by family (helpers excluded), flatpak flagged", set(rb) == {"Firefox", "Google Chrome", "Brave", "Opera"} and rb["Brave"][2] is True and rb["Firefox"][1] == [100], rb)

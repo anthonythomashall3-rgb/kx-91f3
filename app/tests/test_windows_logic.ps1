@@ -368,9 +368,11 @@ Check "password arrives -> LOCKqz tries to enter it; not shown, not copied" (($r
 Step-Pw ([DateTime]::UtcNow.AddSeconds(20))
 Check "no password box yet, 20 s: still not shown" (($null -eq $Clip) -and ($Msgs.Count -eq $m0))
 Step-Pw ([DateTime]::UtcNow.AddSeconds(45))
-Check "no password box for 40 s -> shown and copied once (nobody is left without it)" (($Clip -eq "PW9") -and (@($Msgs | Where-Object { $_ -match "Quiz password:  PW9" }).Count -eq 1))
+Check "no password box for 40 s -> told once where LOCKqz enters it; the password is never shown nor copied" (($null -eq $Clip) -and (@($Msgs | Where-Object { $_ -match "PW9" }).Count -eq 0) -and (@($Msgs | Where-Object { $_ -match "start page" }).Count -eq 1))
 Step-Pw ([DateTime]::UtcNow.AddSeconds(90))
-Check "... not shown a second time" (@($Msgs | Where-Object { $_ -match "Quiz password:  PW9" }).Count -eq 1)
+Check "... not told a second time, still never shown" ((@($Msgs | Where-Object { $_ -match "start page" }).Count -eq 1) -and ($null -eq $Clip) -and (@($Msgs | Where-Object { $_ -match "PW9" }).Count -eq 0))
+$script:FillFinds = 1; Step-Pw ([DateTime]::UtcNow.AddSeconds(120)); $script:FillFinds = 0
+Check "... the box shows later: entered by LOCKqz then" ($PwEntered -eq $true)
 $script:Clip = $null; $script:FillFinds = 1; $LastPw = $null; $m1 = $Msgs.Count
 $r = Handle-Pw ([pscustomobject]@{ password = "PW10"; status = 200 }) $true ""
 Check "password box on the page -> entered by LOCKqz; the lock note never shows the password" (($r -eq "pw") -and ($null -eq $Clip) -and ($Msgs.Count -eq $m1 + 1) -and ($Msgs[-1] -match "enters the quiz password for you") -and ($Msgs[-1] -notmatch "PW10"))

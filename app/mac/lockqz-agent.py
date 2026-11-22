@@ -6,7 +6,8 @@ Every 2 s it reads the open tab URLs of every running browser (Chrome, Edge, Bra
 Chromium, Vivaldi, Arc, Safari via Apple Events; Firefox via its session file) and:
   * on a Brightspace quiz attempt page  -> tells the root helper to LOCK, then asks the
     helper for the quiz password (the helper checks its block is in place and makes a
-    request signed with its root-only device key), shows it and copies it to the clipboard
+    request signed with its root-only device key) and enters it in the quiz page itself
+    (never shown, never copied: see HAND_APPS)
   * while locked                        -> pings the backend (live monitor), and forces
     any Google/Bing/DDG/... search tab onto Google "Web" results (no AI answer) —
     the backstop for Safari, which has no policy layer
@@ -429,16 +430,35 @@ def move_content_quizzes(tabs, now=None, setter=None):
 
 # ---------- browsers that cannot switch their AI off mid-session (G3/G4) ----------
 OPERA_APPS = ("Opera", "Opera GX", "Opera Air", "Opera Neon")   # no policy layer (Aria AI, built-in VPN)
-# The quiz password, entered by LOCKqz. During a quiz Google Chrome and Brave carry LOCKqz's own extension
-# (browser-policy.py adds it for the length of the quiz). The agent hands the password to the quiz tab in
-# its address (#lqz=...); the extension takes it out at once, puts it into the page's password box and
-# answers in the address: #lqz-got = it has the password, #lqz-in = it is in the box. No answer within
-# HAND_WAIT seconds (a browser without the extension), or no password box within HAND_FILL_WAIT: the
-# password is shown and copied once, as before. Every other browser: shown and copied at once, as before
-# (only browsers proven to add the extension by themselves on a student's Mac are listed here).
+# The quiz password is entered by LOCKqz only: never shown, never copied (a password a student can read can be
+# passed to a computer without LOCKqz). During a quiz Google Chrome, Brave and Microsoft Edge carry LOCKqz's own
+# extension (browser-policy.py adds it for the length of the quiz, and turns their history off then, so the
+# handed address is kept nowhere). The agent hands the password to the quiz tab in its address (#lqz=...); the
+# extension takes it out at once, puts it into the page's password box and answers in the address: #lqz-got =
+# it has the password, #lqz-in = it is in the box. An exam whose start page is open only in another browser
+# (Safari, Firefox, Arc, Vivaldi...) is opened in the first of MOVE_TO that is installed, and taken there. A
+# browser that gives no answer for HAND_WAIT seconds (MOVE_WAIT just after LOCKqz opened it) has no extension:
+# the next one is tried. The extension answered but no password box for HAND_FILL_WAIT: the student is told
+# where the box is (the extension still fills it when it appears).
 HAND_APPS = frozenset(("Google Chrome", "Google Chrome Beta", "Google Chrome Dev", "Google Chrome Canary",
-                       "Brave Browser", "Brave Browser Beta", "Brave Browser Nightly"))
-HAND_WAIT, HAND_FILL_WAIT, HAND_EVERY = 30, 75, 3
+                       "Brave Browser", "Brave Browser Beta", "Brave Browser Nightly",
+                       "Microsoft Edge", "Microsoft Edge Beta", "Microsoft Edge Dev", "Microsoft Edge Canary"))
+MOVE_TO = ("Google Chrome", "Brave Browser", "Microsoft Edge")
+HAND_WAIT, HAND_FILL_WAIT, HAND_EVERY, MOVE_WAIT, MOVE_AGAIN, MOVE_MAX = 30, 75, 3, 60, 90, 3
+HAND_BY_OPEN = False   # Linux: a tab address cannot be set; the start page is opened again with the password (hand_step)
+_INSTALLED = {}
+def app_installed(app):
+    """True when the app is in /Applications or ~/Applications (looked at once a minute)."""
+    now = time.time(); c = _INSTALLED.get(app)
+    if c and now - c[1] < 60: return c[0]
+    ok = any(os.path.isdir(os.path.join(d, app + ".app")) for d in ("/Applications", os.path.expanduser("~/Applications")))
+    _INSTALLED[app] = (ok, now)
+    return ok
+def open_in(app, url):
+    """Opens url in app (started if it is not running). The address never carries the password."""
+    try: return subprocess.run(["open", "-a", app, url], capture_output=True, timeout=20).returncode == 0
+    except Exception as e:
+        log("open in %s failed: %s" % (app, e)); return False
 def hand_fragment(url):
     try: f = urllib.parse.urlsplit(str(url or "")).fragment
     except Exception: return ""
@@ -932,19 +952,18 @@ class Agent:
             # Gated quiz: the server says when the code can next change (older servers: every 15 s).
             rc = r.get("recheck")
             self.pw, self.pw_next = pw, now + (max(15, min(360, rc)) if isinstance(rc, (int, float)) else 15)
-            if changed and getattr(self, "quiz_app", None) in HAND_APPS and not developer_mode():
-                # LOCKqz enters it in the quiz page itself (hand_step): nothing shown, nothing copied.
+            if changed and not developer_mode():
+                # LOCKqz enters it in the quiz page itself (hand_step): never shown, never copied.
                 self.hand = {"pw": pw, "since": now, "sent": 0.0, "got": False, "in": False, "told": False}
-                if first: dialog("AI is locked for this quiz.\n\nLOCKqz enters the quiz password for you. Just start the quiz." + note)
+                if first and getattr(self, "quiz_app", None) in HAND_APPS:
+                    dialog("AI is locked for this quiz.\n\nLOCKqz enters the quiz password for you. Just start the quiz." + note)
+                elif first and note:
+                    dialog("AI is locked for this quiz." + note)   # where the quiz opens for its password follows (hand_move)
             elif changed:
+                # Developer mode (the admin's own Mac, its key file): shown so the admin can try a quiz by hand.
                 self.hand = None
                 clipboard(pw)
-                if first and developer_mode():
-                    dialog("Developer mode: AI stays ON for you.\n\nQuiz password:  %s\n(copied to your clipboard)" % pw)
-                elif first:
-                    dialog("AI is locked for this quiz.\n\nQuiz password:  %s\n(copied to your clipboard — paste it into Brightspace)" % pw + note)
-                else:
-                    dialog(("The quiz password changed.\n\nNew password:  %s" if had else "Quiz password:  %s") % pw + "\n(copied to your clipboard)")
+                if first: dialog("Developer mode: AI stays ON for you.\n\nQuiz password:  %s\n(copied to your clipboard)" % pw)
             return "pw"
         if self.payment(r):
             # Unpaid at the exam: asked again at the server's pace (a few seconds) for the first 10 minutes after
@@ -962,7 +981,7 @@ class Agent:
             if self.start_told != self.quiz:
                 self.start_told = self.quiz
                 at = time.strftime("%I:%M %p", time.localtime(opens)).lstrip("0") if opens else "its start time"
-                dialog("AI is locked for this quiz.\n\nThe quiz opens at %s. LOCKqz shows the password here then." % at + note)
+                dialog("AI is locked for this quiz.\n\nThe quiz opens at %s. LOCKqz enters its password for you then." % at + note)
             return "wait"
         if reason == "other_school":
             # C10: the helper has already put AI back (nothing to protect here).
@@ -985,7 +1004,7 @@ class Agent:
         if reason == "gate_off" and getattr(self, "gate_told", None) != self.quiz:
             # The professor's gate is not running yet: the password is held; it arrives by itself.
             self.gate_told = self.quiz
-            dialog("AI is locked for this quiz.\n\nThe quiz opens once your professor's LOCKqz is running. The password appears here by itself." + note)
+            dialog("AI is locked for this quiz.\n\nThe quiz opens once your professor's LOCKqz is running. LOCKqz enters its password for you then." + note)
         if reason in ("in_use", "too_many_devices") and getattr(self, "share_told", None) != self.quiz:
             # One payment = one student: the paid email is in use on another computer.
             self.share_told = self.quiz
@@ -1009,51 +1028,121 @@ class Agent:
         return None
 
     def hand_step(self, tabs, now, setter=None):
-        """One look at the quiz tabs while the password is being handed over (tabs = raw addresses). Every open
-        start page of this quiz is handed it: the extension fills only the tab it was handed to, and a student
-        may have the quiz open in two tabs. A tab's #lqz-in / #lqz-got counts only once THIS password was
-        handed to that tab: an answer left in an address from before (a changed password, Chrome restarted
-        during the quiz with its tabs restored) says nothing about this one. Entered = every tab #lqz-in.
-        The quiz also open in a browser LOCKqz cannot hand it to (Safari, Firefox...): shown and copied."""
+        """One look at the quiz's start pages while LOCKqz enters its password (tabs = raw addresses). Every open
+        start page of this quiz in a browser with LOCKqz's extension (HAND_APPS) is handed it: the extension fills
+        only the tab it was handed to, and a student may have the quiz open in two tabs. A tab's #lqz-in / #lqz-got
+        counts only once THIS password was handed to that tab: an answer left in an address from before (a changed
+        password, Chrome restarted during the quiz with its tabs restored) says nothing about this one. Entered =
+        every such tab #lqz-in. The password is never shown or copied: a start page open only in another browser is
+        opened in one with the extension (hand_move), and a browser that never answers is left for the next one."""
         h = getattr(self, "hand", None)
         if not h or not self.locked: return
         if h.get("lost"):
             # The quiz page was gone and is back (Chrome quit and reopened with its tabs restored): the page
             # is new and its box empty, whatever its address still says. Handed over again from the start.
-            h.update(since=now, sent=0.0, got=False, told=False, handed=set(), lost=False)
+            h.update(since=now, sent=0.0, got=False, told=False, handed=set(), lost=False, seen=None, bad=set(), moves=0,
+                     moved_at=None, none_told=False)
             h["in"] = False
         setter = setter or set_tab_url
-        handed = h.setdefault("handed", set())
-        mine, elsewhere = [], False
+        handed, bad = h.setdefault("handed", set()), h.setdefault("bad", set())
+        mine, other = [], []
         for (a, w, t, u) in tabs:
             base = strip_hand(u)
             if not (is_quiz(base) and lock_id(base) == self.quiz and "/attempt/" not in url_parts(base)[0]): continue
-            if w < 0 or a not in HAND_APPS: elsewhere = True; continue
-            mine.append((a, w, t, u, base.split("#", 1)[0], hand_fragment(u) if (a, w, t) in handed else ""))
-        def tell(why):
-            h["told"] = True
-            for (a, w, t, u, page, _) in mine:
-                if hand_fragment(u).startswith("lqz="): setter(a, w, t, page + "#", u)   # the password leaves the address
-            log("quiz password not entered by itself (%s) - shown" % why)
-            clipboard(h["pw"])
-            dialog("Quiz password:  %s\n(copied to your clipboard — paste it into Brightspace)" % h["pw"])
-        if elsewhere and not h["told"]: tell("the quiz is open in another browser too")
+            page = base.split("#", 1)[0]
+            if w >= 0 and a in HAND_APPS and a not in bad:
+                mine.append((a, w, t, u, page, hand_fragment(u) if (a, w, t) in handed else ""))
+            else: other.append((a, page))
         if h["in"]: return
+        if HAND_BY_OPEN: return self.hand_by_open(h, tabs, other, now)
         if any(f == "lqz-in" for (*_, f) in mine) and not h.get("said"):
             h["said"] = True; log("quiz password entered in the quiz page")
         if any(f in ("lqz-in", "lqz-got") for (*_, f) in mine): h["got"] = True
         if mine and all(f == "lqz-in" for (*_, f) in mine):
             h["in"] = True; return
-        waited = now - h["since"]
-        # Handed again every few seconds until each tab answers: for HAND_WAIT seconds, and once a tab has
-        # answered (the extension is there) until the password is entered or shown.
+        if not mine:
+            h["seen"] = None
+            if other: self.hand_move(h, other[0][1], now)
+            return
+        if h.get("seen") is None: h["seen"] = now   # a start page in a browser with the extension: its wait starts now
+        waited = now - h["seen"]
+        wait = MOVE_WAIT if h.get("moved_to") in {m[0] for m in mine} else HAND_WAIT   # just opened: it may still be adding the extension
+        # Handed again every few seconds until each tab answers: for the wait, and once a tab has answered (the
+        # extension is there) until the password is entered.
         todo = [m for m in mine if m[5] not in ("lqz-in", "lqz-got")]
-        if todo and not h["told"] and (waited <= HAND_WAIT or h["got"]) and now - h["sent"] >= HAND_EVERY:
+        if todo and (waited <= wait or h["got"]) and now - h["sent"] >= HAND_EVERY:
             h["sent"] = now
             for (a, w, t, u, page, _) in todo:
                 if setter(a, w, t, page + "#lqz=" + urllib.parse.quote(h["pw"], safe=""), u) is not False: handed.add((a, w, t))
-        if not h["told"] and ((not h["got"] and waited > HAND_WAIT) or (h["got"] and waited > HAND_FILL_WAIT)):
-            tell("no password box found" if h["got"] else "no answer from the browser")
+        if not h["got"] and waited > wait:
+            # No answer: this browser has no LOCKqz extension (yet). The password leaves its address; the next browser is tried.
+            for (a, w, t, u, page, _) in mine:
+                if hand_fragment(u).startswith("lqz="): setter(a, w, t, page + "#", u)
+            apps = sorted({m[0] for m in mine})
+            log("no answer from %s for the quiz password - another browser is tried" % ", ".join(apps))
+            bad.update(apps); h["seen"] = None
+            self.hand_move(h, mine[0][4], now, failed=apps[0])
+        elif h["got"] and waited > HAND_FILL_WAIT and not h["told"]:
+            # The extension has it but the page shows no password box yet: it enters it when the box appears.
+            h["told"] = True
+            dialog("LOCKqz has the quiz password ready. Open the quiz's start page (the one with Start Quiz): LOCKqz enters it there.")
+
+    def hand_by_open(self, h, tabs, other, now):
+        """(Linux) A tab address cannot be set, and its tabs come from session files: the quiz's start page, once it
+        shows in a running browser with LOCKqz's extension, is opened there again with the password in its address
+        (launched into the running browser, so no long-lived command line carries it; its history is off during the
+        quiz). Answers are read from the session files. At most twice per password, MOVE_WAIT apart."""
+        here = [(a, p) for (a, p) in other if a in HAND_APPS]
+        if not here and other:
+            # Not open in such a browser yet. One that is running (its session file is read) is handed it at once;
+            # otherwise the start page is opened, without the password, in one that is installed (it starts).
+            run = {a for (a, w, t, u) in tabs if a in HAND_APPS}
+            a0 = next((a for a in MOVE_TO if a in run), None)
+            if a0: here = [(a0, other[0][1])]
+        if h.get("opened_at"):
+            ans = {hand_fragment(u) for (a, w, t, u) in tabs
+                   if a in HAND_APPS and is_quiz(strip_hand(u)) and lock_id(strip_hand(u)) == self.quiz}
+            if "lqz-in" in ans:
+                h["in"] = True; log("quiz password entered in the quiz page"); return
+            if "lqz-got" in ans: h["got"] = True
+        if not here:
+            if other: self.hand_move(h, other[0][1], now)
+            return
+        if h["got"] or (h.get("opened_at") and now - h["opened_at"] < MOVE_WAIT): return
+        if h.get("opens", 0) >= 2:
+            if not h.get("none_told"):
+                h["none_told"] = True
+                dialog("AI is locked for this quiz.\n\nLOCKqz could not enter the quiz password in %s. Quit it, then open the quiz again." % here[0][0])
+            return
+        if open_in(here[0][0], here[0][1] + "#lqz=" + urllib.parse.quote(h["pw"], safe="")):
+            h["opened_at"], h["opens"] = now, h.get("opens", 0) + 1
+            log("quiz password handed to %s" % here[0][0])
+
+    def hand_move(self, h, page, now, failed=None):
+        """The quiz's start page is open only where LOCKqz cannot enter its password: open it in the first browser of
+        MOVE_TO that is installed and has not failed (at most MOVE_MAX times, MOVE_AGAIN apart unless a browser just
+        failed: a sign-in page may come first). None installed: the student is told to open it in Chrome."""
+        if not failed and h.get("moved_at") and now - h["moved_at"] < MOVE_AGAIN: return
+        bad = h.setdefault("bad", set())
+        target = next((a for a in MOVE_TO if a not in bad and app_installed(a)), None)
+        if target and h.get("moves", 0) < MOVE_MAX:
+            h["moved_at"], h["moved_to"], h["moves"] = now, target, h.get("moves", 0) + 1
+            if not open_in(target, page):
+                bad.add(target); return
+            log("quiz %s opened in %s: LOCKqz enters its password there" % (self.quiz, target))
+            if h.get("move_told") != target:
+                h["move_told"] = target
+                why = ("LOCKqz could not enter the quiz password in %s.\n\n" % failed) if failed else ""
+                dialog("AI is locked for this quiz.\n\n" + why + "Your quiz opened in %s: LOCKqz enters its password there. "
+                       "Take the quiz in %s." % (target, target))
+        elif not h.get("none_told"):
+            h["none_told"] = True   # looked at again on every look: a browser installed now is used at once
+            have = [a for a in MOVE_TO if app_installed(a)]
+            if bad and have: msg = "LOCKqz could not enter the quiz password in %s. Quit it, then open the quiz again." % ", ".join(sorted(bad))
+            elif have: msg = "Open the quiz in %s: LOCKqz enters its password there." % have[0]
+            else: msg = ("Open it in Google Chrome: LOCKqz enters the quiz password there (Brave and Microsoft Edge work too)."
+                         "\n\nNo Chrome? Get it at google.com/chrome")
+            dialog("AI is locked for this quiz.\n\n" + msg)
 
     def start(self, url, app=None):
         quiz = lock_id(url)
@@ -1101,7 +1190,7 @@ class Agent:
             if res or not self.locked: break
             time.sleep(2)
         if res is None and self.locked and not self.pay_shown:
-            dialog("AI is locked for this quiz.\n\nIf it needs a password, LOCKqz will show it here as soon as the quiz opens." + note)
+            dialog("AI is locked for this quiz.\n\nIf it needs a password, LOCKqz enters it for you as soon as the quiz opens." + note)
 
     HOLD_TEXT = ("AI stays off: this exam was not turned in on this computer.\n\n"
                  "Go back to the exam and submit it. AI comes back the moment it is submitted. "

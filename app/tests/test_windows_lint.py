@@ -73,9 +73,9 @@ pol = os.path.join(WIN, "browser-policy.ps1")
 print("T6a lockqz-agent.ps1 + browser-policy.ps1 brackets balanced")
 b = balanced(agt); ok("agent balanced") if not b else bad("agent: " + b)
 b = balanced(pol); ok("policy balanced") if not b else bad("policy: " + b)
-print("T6b agent detects the quiz, locks, shows the password, unlocks, pings")
+print("T6b agent detects the quiz, locks, enters the password, unlocks, pings")
 miss = required(agt, ["/d2l/lms/quizzing/user/", "UIAutomationClient", "TabItem", "/lock", "/unlock",
-                      "/password", "Set-Clipboard", "heartbeat", "quiz_left", "/student", "Ask-Box", "Setup-Identity", "\"/verify\"", "param([switch]$Setup, [switch]$QuizOpen)"])
+                      "/password", "Fill-QuizPassword", "heartbeat", "quiz_left", "/student", "Ask-Box", "Setup-Identity", "\"/verify\"", "param([switch]$Setup, [switch]$QuizOpen)"])
 ok("agent complete") if not miss else bad("agent missing: " + ", ".join(miss))
 print("T6c policy covers Chrome/Edge/Brave/Firefox, lock AND unlock")
 miss = required(pol, ["Policies\\Google\\Chrome", "Policies\\Microsoft\\Edge", "Policies\\BraveSoftware\\Brave",

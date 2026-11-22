@@ -43,7 +43,7 @@ for label, rc, want in [("an older server (no recheck)", None, 15), ("recheck 1 
 
 print("A2 the payment lands")
 n = len(said)
-check("the next answer carries the password: shown, copied", a.pw_reply({"password": "LQ-PW1", "status": 200}, T + 700) == "pw" and a.pw == "LQ-PW1" and len(said) == n + 1 and "LQ-PW1" in said[-1])
+check("the next answer carries the password: LOCKqz enters it (never shown nor copied)", a.pw_reply({"password": "LQ-PW1", "status": 200}, T + 700) == "pw" and a.pw == "LQ-PW1" and a.hand and a.hand["pw"] == "LQ-PW1" and not any("LQ-PW1" in m for m in said))
 check("password answers keep their own 15 s schedule", a.pw_next == T + 715)
 src = open(os.path.join(APP, "mac", "lockqz-agent.py"), encoding="utf-8").read()
 check("each new quiz starts the fast pace over", "self.pw, self.pay_shown, self.pay_since, res = None, False, 0, None" in src)

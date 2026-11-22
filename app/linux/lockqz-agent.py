@@ -125,9 +125,26 @@ M.clipboard = clipboard
 M.at_console = lambda: True            # one graphical session per account is the Linux norm; the helper checks the owner uid too
 M.set_tab_url = lambda app, wi, ti, url, *a: None
 M.move_content_quizzes = lambda tabs, now=None, setter=None: []
-# The Mac agent hands the quiz password to Chrome / Brave through their tab address; a Linux tab address
-# cannot be set, so the password is shown and copied at once here, in every browser.
-M.HAND_APPS = frozenset()
+# The quiz password is entered by LOCKqz only, never shown or copied. A Linux tab address cannot be set, so the
+# quiz's start page is opened again, with the password in its address, in a running browser that carries LOCKqz's
+# extension during the quiz (Chrome, Brave, Edge: browser-policy.py); the extension takes it out at once and puts
+# it into the password box. An exam open only in another browser is first opened in one of those (no password).
+M.HAND_APPS = frozenset(("Google Chrome", "Brave", "Microsoft Edge"))
+M.MOVE_TO = ("Google Chrome", "Brave", "Microsoft Edge")
+M.HAND_BY_OPEN = True
+_BINS = {"Google Chrome": ("google-chrome", "google-chrome-stable"), "Brave": ("brave-browser", "brave"),
+         "Microsoft Edge": ("microsoft-edge", "microsoft-edge-stable")}
+def app_installed(app): return any(_which(b) for b in _BINS.get(app, ()))
+def open_in(app, url):
+    b = next((x for x in _BINS.get(app, ()) if _which(x)), None)
+    if not b: return False
+    try:
+        subprocess.Popen([b, url], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        return True
+    except Exception as e:
+        log("open in %s failed: %s" % (app, e)); return False
+M.app_installed = app_installed
+M.open_in = open_in
 M.permission_hint = lambda app, now=None, front=None: False
 M.front_app = lambda: None
 

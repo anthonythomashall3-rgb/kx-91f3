@@ -242,6 +242,7 @@ ok("summary page alone -> present") if pres.get("123-456") == SUMM else bad("sum
 ''')
 _section(r'''
 A.dialog = lambda *a, **k: None; A.clipboard = lambda *a, **k: None
+A.open_in = lambda app, url: True; A.app_installed = lambda app: app == "Google Chrome"   # never a real browser from a test
 class FakeHelper:
     """Stands in for the root helper: records calls, scripted failures, scripted status."""
     def __init__(self): self.calls, self.fail_unlock, self.status = [], 0, {"state": "unlocked"}
@@ -297,11 +298,13 @@ ok("no quiz open -> helper unlocked after the grace period (reason quiz_left)") 
 ''')
 
 _section(r'''
-print("T12h the quiz password is handed to the quiz page (Chromium browsers), never typed or pasted")
+print("T12h the quiz password is entered by LOCKqz only (Chrome, Brave, Edge): never shown, never copied")
 import urllib.parse as _up
-msgs = []; clips = []; sets = []
+msgs = []; clips = []; sets = []; opens = []; inst = {"Google Chrome"}
 A.dialog = lambda m, *a, **k: msgs.append(m); A.clipboard = lambda t, *a, **k: clips.append(t)
 A.set_tab_url = lambda app, wi, ti, url, *k: sets.append((app, wi, ti, url))
+A.open_in = lambda app, url: (opens.append((app, url)), True)[1]; A.app_installed = lambda app: app in inst
+never = lambda pw="LQ-AB12CD34": not clips and not any(pw in m for m in msgs)
 class HP(FakeHelper):
     def __call__(self, path, body=None, timeout=90):
         if path == "/password": self.calls.append((path, body)); return {"password": "LQ-AB12CD34"}
@@ -324,48 +327,74 @@ n = len(sets); g.hand["sent"] = 0; T(g, [tab(SUMM + "#lqz-got")])
 ok("... and it is not handed over again") if len(sets) == n else bad("sets %r" % (sets[n:],))
 T(g, [tab(SUMM + "#lqz-in")])
 ok("#lqz-in: the password is in the page's box; never shown, never copied") if g.hand["in"] and len(msgs) == 1 and not clips else bad("hand %r msgs %r" % (g.hand, msgs))
-g.hand["since"] -= 1000; T(g, [tab(SUMM + "#lqz-in")])
+g.hand["seen"] -= 1000; T(g, [tab(SUMM + "#lqz-in")])
 ok("... also not later") if len(msgs) == 1 and not clips else bad("msgs %r" % (msgs,))
 
-msgs[:] = []; clips[:] = []; sets[:] = []
+msgs[:] = []; clips[:] = []; sets[:] = []; opens[:] = []; inst |= {"Brave Browser"}
 g, h = hagent(); T(g, [tab(SUMM)]); T(g, [tab(SUMM)])
-g.hand["since"] -= A.HAND_WAIT - 5; T(g, [tab(want)])
-ok("no answer yet, under 30 s: still nothing shown") if not clips and len(msgs) == 1 else bad("msgs %r" % (msgs,))
-g.hand["since"] -= 10; T(g, [tab(want)])
-ok("no answer for 30 s (a browser without the extension): shown and copied once, as before") if clips == ["LQ-AB12CD34"] and sum("Quiz password:  LQ-AB12CD34" in m for m in msgs) == 1 else bad("msgs %r clips %r" % (msgs, clips))
-ok("... and the password is taken out of the address (no reload: an empty # part)") if sets and sets[-1] == ("Google Chrome", 0, 0, SUMM + "#") else bad("sets %r" % (sets[-2:],))
+g.hand["seen"] -= A.HAND_WAIT - 5; T(g, [tab(want)])
+ok("no answer yet, under 30 s: still nothing shown") if not clips and len(msgs) == 1 and not opens else bad("msgs %r" % (msgs,))
+g.hand["seen"] -= 10; T(g, [tab(want)])
+ok("no answer for 30 s (Chrome without the extension): never shown nor copied; the quiz opens in the next browser (Brave)") if never() and opens == [("Brave Browser", SUMM)] and any("could not enter the quiz password in Google Chrome" in m and "opened in Brave Browser" in m for m in msgs) else bad("msgs %r clips %r opens %r" % (msgs, clips, opens))
+ok("... and the password is taken out of Chrome's address (no reload: an empty # part)") if sets and sets[-1] == ("Google Chrome", 0, 0, SUMM + "#") else bad("sets %r" % (sets[-2:],))
 n = len(sets); T(g, [tab(SUMM + "#")]); T(g, [tab(SUMM)])
-ok("... shown once only, and not handed over again") if clips == ["LQ-AB12CD34"] and len(sets) == n else bad("clips %r sets %r" % (clips, sets[n:]))
+ok("... Chrome is not handed it again") if len(sets) == n and never() else bad("clips %r sets %r" % (clips, sets[n:]))
+g.hand["sent"] = 0; T(g, [tab(SUMM), ("Brave Browser", 0, 0, SUMM)])
+ok("... the quiz's page in Brave is handed it") if sets[-1] == ("Brave Browser", 0, 0, want) and never() else bad("sets %r" % (sets[-2:],))
+inst -= {"Brave Browser"}
+msgs[:] = []; clips[:] = []; sets[:] = []; opens[:] = []
+g, h = hagent(); T(g, [tab(SUMM)]); T(g, [tab(SUMM)]); g.hand["seen"] -= A.HAND_WAIT + 1; T(g, [tab(want)])
+ok("no answer and no other browser: told to quit Chrome and open the quiz again; nothing shown, nothing opened") if never() and not opens and any("could not enter the quiz password in Google Chrome" in m and "Quit it" in m for m in msgs) else bad("msgs %r opens %r" % (msgs, opens))
+T(g, [tab(SUMM)]); T(g, [tab(SUMM)])
+ok("... told once") if sum("Quit it" in m for m in msgs) == 1 else bad("msgs %r" % (msgs,))
 
 msgs[:] = []; clips[:] = []; sets[:] = []
 g, h = hagent(); T(g, [tab(SUMM)]); T(g, [tab(SUMM + "#lqz-got")])
-g.hand["since"] -= A.HAND_FILL_WAIT - 5; T(g, [tab(SUMM + "#lqz-got")])
-ok("the browser has it but the page shows no password box, under 75 s: nothing shown") if not clips else bad("clips %r" % (clips,))
-g.hand["since"] -= 10; T(g, [tab(SUMM + "#lqz-got")])
-ok("no password box for 75 s: shown and copied once") if clips == ["LQ-AB12CD34"] else bad("clips %r" % (clips,))
-T(g, [tab(SUMM + "#lqz-in")])
-ok("the box turned up afterwards and was filled: nothing more is shown") if g.hand["in"] and clips == ["LQ-AB12CD34"] else bad("hand %r" % (g.hand,))
+g.hand["seen"] -= A.HAND_FILL_WAIT - 5; T(g, [tab(SUMM + "#lqz-got")])
+ok("the browser has it but the page shows no password box, under 75 s: nothing said") if never() and len(msgs) == 1 else bad("msgs %r" % (msgs,))
+g.hand["seen"] -= 10; T(g, [tab(SUMM + "#lqz-got")])
+ok("no password box for 75 s: told once where LOCKqz enters it; the password never shown nor copied") if never() and sum("start page" in m for m in msgs) == 1 else bad("msgs %r clips %r" % (msgs, clips))
+T(g, [tab(SUMM + "#lqz-got")]); T(g, [tab(SUMM + "#lqz-in")])
+ok("the box turned up afterwards and was filled; told only once") if g.hand["in"] and sum("start page" in m for m in msgs) == 1 and never() else bad("hand %r" % (g.hand,))
 
-msgs[:] = []; clips[:] = []; sets[:] = []
+msgs[:] = []; clips[:] = []; sets[:] = []; opens[:] = []
 g, h = hagent(); T(g, [("Safari", 0, 0, SUMM)]); T(g, [("Safari", 0, 0, SUMM)])
-ok("Safari: shown and copied at the lock, as before; its address is never changed") if g.hand is None and clips == ["LQ-AB12CD34"] and any("Quiz password:  LQ-AB12CD34" in m for m in msgs) and not sets else bad("msgs %r sets %r" % (msgs, sets))
-msgs[:] = []; clips[:] = []; sets[:] = []
+ok("Safari: never shown nor copied; the quiz opens in Chrome (no password in that address), Safari's tab is left alone") if g.hand and never() and opens == [("Google Chrome", SUMM)] and not sets else bad("msgs %r sets %r opens %r" % (msgs, sets, opens))
+ok("... the student is told once, with the lock note: take the quiz in Chrome") if sum("opened in Google Chrome" in m and "Take the quiz in Google Chrome" in m for m in msgs) == 1 and msgs[-1].startswith("AI is locked") else bad("msgs %r" % (msgs,))
+T(g, [("Safari", 0, 0, SUMM)])
+ok("... not opened again at once (a sign-in page may come first)") if len(opens) == 1 else bad("opens %r" % (opens,))
+T(g, [("Safari", 0, 0, SUMM), tab(SUMM)]); T(g, [("Safari", 0, 0, SUMM), tab(SUMM)])
+ok("... the quiz's page in Chrome is handed the password") if sets and sets[-1] == ("Google Chrome", 0, 0, want) and never() else bad("sets %r" % (sets,))
+T(g, [("Safari", 0, 0, SUMM), tab(SUMM + "#lqz-in")])
+ok("... and entered there; nothing ever shown") if g.hand["in"] and never() else bad("hand %r" % (g.hand,))
+msgs[:] = []; clips[:] = []; sets[:] = []; opens[:] = []
+g, h = hagent(); T(g, [("Safari", 0, 0, SUMM)]); T(g, [("Safari", 0, 0, SUMM)]); g.hand["moved_at"] -= A.MOVE_AGAIN + 1; T(g, [("Safari", 0, 0, SUMM)])
+ok("still only in Safari after the wait (signed out of Brightspace in Chrome): opened again") if opens == [("Google Chrome", SUMM)] * 2 else bad("opens %r" % (opens,))
+for _ in range(5): g.hand["moved_at"] -= A.MOVE_AGAIN + 1; T(g, [("Safari", 0, 0, SUMM)])
+ok("... at most 3 times, then told once where to open it") if len(opens) == A.MOVE_MAX and sum("Open the quiz in Google Chrome" in m for m in msgs) == 1 and never() else bad("opens %r msgs %r" % (opens, msgs))
+msgs[:] = []; clips[:] = []; sets[:] = []; opens[:] = []
 g, h = hagent(); T(g, [("firefox", -1, -1, SUMM)]); T(g, [("firefox", -1, -1, SUMM)])
-ok("Firefox: shown and copied, as before") if g.hand is None and clips == ["LQ-AB12CD34"] and not sets else bad("msgs %r sets %r" % (msgs, sets))
+ok("Firefox: never shown nor copied; the quiz opens in Chrome") if g.hand and never() and opens == [("Google Chrome", SUMM)] and not sets else bad("msgs %r sets %r opens %r" % (msgs, sets, opens))
+msgs[:] = []; clips[:] = []; sets[:] = []; opens[:] = []; inst.clear()
+g, h = hagent(); T(g, [("Safari", 0, 0, SUMM)]); T(g, [("Safari", 0, 0, SUMM)])
+ok("no Chrome, Brave or Edge installed: told to open it in Chrome (where to get it); nothing shown, nothing opened") if never() and not opens and any("google.com/chrome" in m for m in msgs) else bad("msgs %r opens %r" % (msgs, opens))
+inst |= {"Google Chrome"}; T(g, [("Safari", 0, 0, SUMM)])
+ok("... Chrome installed a moment later: the quiz opens there") if opens == [("Google Chrome", SUMM)] else bad("opens %r" % (opens,))
 msgs[:] = []; clips[:] = []; sets[:] = []
 g, h = hagent(); T(g, [tab(SUMM)]); T(g, [tab(ATT)]); T(g, [tab(ATT)])
 ok("inside the attempt nothing is handed over and nothing is shown") if not sets and not clips else bad("sets %r clips %r" % (sets, clips))
 ok("strip_hand: only LOCKqz's own part is removed") if A.strip_hand(SUMM + "#lqz-in") == SUMM and A.strip_hand(SUMM + "#top") == SUMM + "#top" and A.strip_hand(SUMM) == SUMM else bad("strip_hand")
-msgs[:] = []; clips[:] = []; sets[:] = []
+msgs[:] = []; clips[:] = []; sets[:] = []; opens[:] = []
 g, h = hagent(); T(g, [("Microsoft Edge", 0, 0, SUMM)]); T(g, [("Microsoft Edge", 0, 0, SUMM)])
-ok("Edge and every other browser: shown and copied at once, as before (no wait)") if g.hand is None and clips == ["LQ-AB12CD34"] and not sets else bad("msgs %r sets %r" % (msgs, sets))
+ok("Edge: handed to the quiz tab like Chrome") if g.hand and never() and sets and sets[-1][0] == "Microsoft Edge" and not opens else bad("msgs %r sets %r" % (msgs, sets))
 import importlib.util as _iu
 _ps = _iu.spec_from_file_location("lqz_policy_h", os.path.join(os.path.dirname(os.path.abspath(A.__file__)), "browser-policy.py")); _P = _iu.module_from_spec(_ps); _ps.loader.exec_module(_P)
-ok("the managed list carries LOCKqz's extension for Chrome and Brave only") if _P.chromium_policy("com.google.Chrome").get("ExtensionInstallForcelist") == [_P.PW_EXT_FORCE] and _P.chromium_policy("com.brave.Browser.beta").get("ExtensionInstallForcelist") == [_P.PW_EXT_FORCE] and "ExtensionInstallForcelist" not in _P.chromium_policy("com.microsoft.Edge") and "ExtensionInstallForcelist" not in _P.chromium_policy("com.vivaldi.Vivaldi") else bad("forcelist")
+ok("the managed list carries LOCKqz's extension for Chrome, Brave and Edge only") if _P.chromium_policy("com.google.Chrome").get("ExtensionInstallForcelist") == [_P.PW_EXT_FORCE] and _P.chromium_policy("com.brave.Browser.beta").get("ExtensionInstallForcelist") == [_P.PW_EXT_FORCE] and _P.chromium_policy("com.microsoft.Edge").get("ExtensionInstallForcelist") == [_P.PW_EXT_FORCE] and "ExtensionInstallForcelist" not in _P.chromium_policy("com.vivaldi.Vivaldi") else bad("forcelist")
+ok("no browser history is saved during the quiz (the handed address is kept nowhere)") if all(_P.chromium_policy(d).get("SavingBrowserHistoryDisabled") is True for d in ("com.google.Chrome", "com.brave.Browser", "com.microsoft.Edge")) else bad("history")
 msgs[:] = []; clips[:] = []; sets[:] = []
 g, h = hagent(); T(g, [("Brave Browser", 0, 0, SUMM)]); T(g, [("Brave Browser", 0, 0, SUMM)])
 ok("Brave: handed to the quiz tab like Chrome") if g.hand and not clips and sets and sets[-1][0] == "Brave Browser" else bad("hand %r sets %r" % (g.hand, sets))
-ok("a browser with no managed extensions gets no empty list") if "ExtensionInstallForcelist" not in _P.merge_chromium({}, _P.chromium_policy("com.microsoft.Edge")) and _P.merge_chromium({"ExtensionInstallForcelist": ["x;y"]}, _P.chromium_policy("com.microsoft.Edge"))["ExtensionInstallForcelist"] == ["x;y"] else bad("merge forcelist")
+ok("a browser with no managed extensions gets no empty list") if "ExtensionInstallForcelist" not in _P.merge_chromium({}, _P.chromium_policy("com.vivaldi.Vivaldi")) and _P.merge_chromium({"ExtensionInstallForcelist": ["x;y"]}, _P.chromium_policy("com.vivaldi.Vivaldi"))["ExtensionInstallForcelist"] == ["x;y"] and _P.merge_chromium({"ExtensionInstallForcelist": ["x;y"]}, _P.chromium_policy("com.microsoft.Edge"))["ExtensionInstallForcelist"] == ["x;y", _P.PW_EXT_FORCE] else bad("merge forcelist")
 _pe, _pc = _P.chromium_policy("com.microsoft.Edge"), _P.chromium_policy("com.google.Chrome")
 ok("Edge: Copilot actions + browsing with Copilot + Web Remix + AI history search off, Copilot browser use blocked everywhere (own list copy)") if _pe.get("CopilotCoworkToolActionsEnabled") is False and _pe.get("AllowBrowsingWithCopilot") is False and _pe.get("RemixAvailability") == 0 and _pe.get("EdgeHistoryAISearchEnabled") is False and _pe.get("CopilotBrowserUseBlockList") == ["*"] and _pe["CopilotBrowserUseBlockList"] is not _P.EDGE_AI_OFF["CopilotBrowserUseBlockList"] else bad("edge ai switches")
 ok("Chrome: talk to type, Find and Fill with Gemini, Indigo off; no Edge-only switches") if _pc.get("VoiceTypingSettings") == 2 and _pc.get("FindAndFillWithGeminiSettings") == 2 and _pc.get("Indigo") == 2 and "RemixAvailability" not in _pc and "CopilotBrowserUseBlockList" not in _pc else bad("chrome per-feature")
@@ -384,8 +413,8 @@ T(g, two("#lqz-in", "#lqz-in"))
 ok("both tabs answered #lqz-in: entered, nothing shown or copied") if g.hand["in"] and not clips and len(msgs) == 1 else bad("hand %r msgs %r" % (g.hand, msgs))
 msgs[:] = []; clips[:] = []; sets[:] = []
 g, h = hagent(); T(g, two()); T(g, two("#lqz-in", ""))
-g.hand["since"] -= A.HAND_FILL_WAIT + 1; T(g, two("#lqz-in", ""))
-ok("a second tab that never takes it: after 75 s the password is shown and copied once") if clips == ["LQ-AB12CD34"] and sum("Quiz password:  LQ-AB12CD34" in m for m in msgs) == 1 else bad("clips %r msgs %r" % (clips, msgs))
+g.hand["seen"] -= A.HAND_FILL_WAIT + 1; T(g, two("#lqz-in", ""))
+ok("a second tab that never takes it: after 75 s told once where to go; the password never shown nor copied") if never() and sum("start page" in m for m in msgs) == 1 else bad("clips %r msgs %r" % (clips, msgs))
 msgs[:] = []; clips[:] = []; sets[:] = []
 g, h = hagent(); T(g, [tab(SUMM + "#d2l_content")]); T(g, [tab(SUMM + "#d2l_content")])
 ok("a quiz address with its own # part (Skip to main content) is handed the password without it") if sets and sets[-1] == ("Google Chrome", 0, 0, want) else bad("sets %r" % (sets,))
@@ -404,7 +433,7 @@ T(g, [tab(SUMM + "#lqz-in")])
 ok("... entered once the tab answers for the new one; still nothing shown") if g.hand["in"] and g.hand["pw"] == "LQ-ZZ99YY88" and not clips else bad("hand %r clips %r" % (g.hand, clips))
 msgs[:] = []; clips[:] = []; sets[:] = []
 g, h = hagent(); T(g, [tab(SUMM)]); T(g, [tab(SUMM)]); T(g, [tab(SUMM + "#lqz-got")])
-g.hand["since"] -= A.HAND_WAIT + 10; g.hand["sent"] = 0
+g.hand["seen"] -= A.HAND_WAIT + 10; g.hand["sent"] = 0
 T(g, [tab(SUMM + "#lqz-got"), ("Google Chrome", 0, 1, SUMM)])
 ok("the extension has answered: a tab opened after 30 s is still handed the password") if sets[-1] == ("Google Chrome", 0, 1, want) and not clips else bad("sets %r clips %r" % (sets[-2:], clips))
 msgs[:] = []; clips[:] = []; sets[:] = []
@@ -415,16 +444,14 @@ T(g, [tab(SUMM + "#lqz-in")])               # ... and reopened with its tabs res
 ok("Chrome quit and reopened during the quiz: the restored quiz page is handed the password again") if was_in and g.locked and sets[n:] == [("Google Chrome", 0, 0, want)] and not g.hand["in"] else bad("hand %r sets %r" % (g.hand, sets[n:]))
 T(g, [tab(SUMM + "#lqz-in")])
 ok("... and entered once it answers; nothing shown") if g.hand["in"] and not clips else bad("hand %r clips %r" % (g.hand, clips))
-msgs[:] = []; clips[:] = []; sets[:] = []
+msgs[:] = []; clips[:] = []; sets[:] = []; opens[:] = []
 g, h = hagent(); T(g, [tab(SUMM), ("Safari", 0, 0, SUMM)]); T(g, [tab(SUMM), ("Safari", 0, 0, SUMM)])
-ok("the quiz also open in Safari (nothing to hand it to there): shown and copied at once") if g.quiz_app == "Google Chrome" and clips == ["LQ-AB12CD34"] and sum("Quiz password:  LQ-AB12CD34" in m for m in msgs) == 1 else bad("app %r clips %r msgs %r" % (g.quiz_app, clips, msgs))
-T(g, [tab(SUMM), ("Safari", 0, 0, SUMM)])
-ok("... once") if clips == ["LQ-AB12CD34"] else bad("clips %r" % (clips,))
+ok("the quiz also open in Safari: handed in Chrome only; nothing shown, nothing opened, Safari's tab left alone") if g.quiz_app == "Google Chrome" and never() and not opens and sets and all(x[0] == "Google Chrome" for x in sets) else bad("app %r clips %r msgs %r" % (g.quiz_app, clips, msgs))
 msgs[:] = []; clips[:] = []; sets[:] = []
 g, h = hagent(); T(g, [tab(SUMM)]); T(g, [tab(SUMM)]); T(g, [tab(SUMM + "#lqz-in")])
 was_in, c0 = g.hand["in"], list(clips)
 T(g, [tab(SUMM + "#lqz-in"), ("firefox", -1, -1, SUMM)])
-ok("entered in Chrome, then the quiz opened in Firefox too: shown and copied there") if was_in and not c0 and clips == ["LQ-AB12CD34"] else bad("in %r clips %r" % (was_in, clips))
+ok("entered in Chrome, then the quiz opened in Firefox too: nothing shown or copied") if was_in and not c0 and never() else bad("in %r clips %r" % (was_in, clips))
 msgs[:] = []; clips[:] = []; sets[:] = []
 A.set_tab_url = lambda app, wi, ti, url, *k: (sets.append((app, wi, ti, url)), False)[1]   # the tab moved: nothing was set
 g, h = hagent(); T(g, [tab(SUMM)]); T(g, [tab(SUMM)])
@@ -627,7 +654,7 @@ ok("when it opens (Chrome): LOCKqz hands the password to the quiz page, nothing 
 g = A.Agent(); g.verified = True; h = H2({"password": None, "status": 403, "reason": "not started", "start_in": 1200}); g.helper = h
 stab = lambda u: ("Safari", 0, 0, u)
 T(g, [stab(SUMM)]); g.pw_next = 0; h.reply = {"password": "PW2", "status": 200}; T(g, [stab(SUMM)])
-ok("when it opens (Safari): the password is shown, as before") if g.pw == "PW2" and g.hand is None and any("PW2" in m for m in msgs) else bad("pw %r hand %r" % (g.pw, g.hand))
+ok("when it opens (Safari): never shown; LOCKqz enters it (the quiz opens in Chrome)") if g.pw == "PW2" and g.hand and g.hand["pw"] == "PW2" and not any("PW2" in m for m in msgs) else bad("pw %r hand %r" % (g.pw, g.hand))
 g = A.Agent(); g.verified = True; h = H2({"password": None, "status": 403, "reason": "other_school"}); g.helper = h; msgs[:] = []
 T(g, [tab(SUMM)])
 ok("other school: told once, agent not locked") if not g.locked and any("not set up for this school" in m for m in msgs) else bad("locked=%r msgs=%r" % (g.locked, msgs))
