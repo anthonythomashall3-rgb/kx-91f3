@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-22 08:55 PT — 01UUDg7YXjJx: failure-mode review (sweep 27): read-only first; files named here before each edit.
 
 ## Recently finished
 - 2026-11-22 07:40 PT — 01UUDg7YXjJx: bug sweep 26, apps 0.6.35 and 0.6.36 + server. Mac (Chrome, Brave): the quiz password is handed to every open start page of the quiz and counts as entered once each tab answers for THIS password (a new password, or tabs Chrome restored after it quit and reopened during the quiz, are handed it again); a tab is sent to a new address only while it still shows the page that was read (set_tab_url expect: hand-over, Content move, AI tabs); an address with its own # part takes it; the quiz also open in Safari, Firefox or another browser: shown and copied at once. Linux: shown and copied at once (no tab address to set). Windows: only the locked quiz's page gets the password. Server: payer names match Brightspace names with accents dropped, special letters spelled out, Jr/Sr/II-IV left out. Privacy page: email services and the password entry. test_agent T12i (240), test_linux (78), test_pay_name N5 (26), test_windows_pw_fill (Release step), test_mac_handover_real.py (by hand: two tabs, a new password, windows reordered, Chrome restarted; passed on GitHub's Mac runner). run_all green (real Chromium, PowerShell).
