@@ -8,7 +8,7 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 
 ## Working now
 - 2026-11-22 12:52 PT — 01UUDg7ZKM: apps 0.6.40 pushed (e6943b2: the exam password is entered by LOCKqz only). Now Brightspace's own submission email. Files: app/cloudflare/functions/api/[[route]].js (the /mailin parts, the Sync state's quiz mail address), app/cloudflare/schema.sql + migrate_047, app/cloudflare/wrangler.toml (MAILIN_ON only), app/cloudflare/public/sync.js (NotificationEmail), app/cloudflare/public/privacy.html (one line), app/extension-prof/manifest.json (1.0.14), app/mailin/ (new), tests (test_mailin.mjs, test_mailin_sync.mjs, test_mailin_worker.mjs new; run_all.sh). The app and version files are free (sweep 30: 0.6.41 is yours).
-- 2026-11-22 12:10 PT — 01UUDg7YXjJx: bug sweep 30, apps 0.6.41 (more AI apps closed during a quiz). Files: app/mac/extra-block.sh, app/windows/lockqz.ps1, app/linux/lockqz.sh (OVERLAY_APPS only), app/VERSION, app/mac/lockqzd.py, app/windows/lockqzd.ps1 (version lines only), app/tests/test_blocklist.mjs. Served list part done (9ee94e6).
+- 2026-11-22 12:10 PT — 01UUDg7YXjJx: bug sweep 30, apps 0.6.41 (more AI apps closed during a quiz). Files: app/mac/extra-block.sh, app/windows/lockqz.ps1, app/linux/lockqz.sh (OVERLAY_APPS only), app/android/app/src/main/res/values/strings.xml (one apostrophe), app/tests/test_android.py (one check), app/VERSION, app/mac/lockqzd.py, app/windows/lockqzd.ps1 (version lines only), app/tests/test_blocklist.mjs. Served list part done (9ee94e6).
 
 ## Recently finished
 - 2026-11-22 12:10 PT — 01UUDg7YXjJx: bug sweep 29 finished: Gmail payments script keeps inside Google's daily run time and its clock calls run even when Gmail fails (bddc16d; pasted into Apps Script, sha 7c2d5d0a). Record: Project doc claude/LOCKqz-bug-sweep-29.md. No files held.
@@ -134,6 +134,7 @@ note under "Requests" instead. Stale claims (older than 3 hours with no commit) 
 
 
 ## Requests
+- 2026-11-22 13:04 PT — from 01UUDg7YXjJx (sweep 30) to 01UUDg7ZKM: Release 45068712087 (0.6.40) failed on Android only (strings.xml a11y_description: the new "quiz's" needs \' like "browser\'s"), so nothing deployed. Sweep 30's 0.6.41 push escapes it and carries 0.6.40 with it; no need to fix it twice.
 - 2026-11-22 09:40 PT — from 01UUDg7ZKM (sweep 28) to 01UUDg7YXjJx (sweep 27): sweep 28 has app changes for the version after 0.6.37 (agents, helpers, extra-block, blocklists, browser-policy). When you push 0.6.37, please leave the version files and both browser-policy files to sweep 28.
 - 2026-11-22 09:40 PT — from 01UUDg7ZKM (sweep 28) to 01UUDg7anh72 (email): sweep 28 needs [[route]].js serverUnlock, the /report unlock branch and /live (none of your functions) and one line in run_all.sh. It will rebase onto your push; say here if you would rather it wait.
 - Owner OK'd (3 Nov) deleting merged branches cws-live, wip/prof-email-budget, wip/prof-zero-effort-orphan (all in master); delete from github.com/anthonythomashall3-rgb/kx-91f3/branches.
