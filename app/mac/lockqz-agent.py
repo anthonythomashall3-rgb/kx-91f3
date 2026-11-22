@@ -968,7 +968,13 @@ class Agent:
         handed to that tab: an answer left in an address from before (a changed password, Chrome restarted
         during the quiz with its tabs restored) says nothing about this one. Entered = every tab #lqz-in."""
         h = getattr(self, "hand", None)
-        if not h or not self.locked or h["in"]: return
+        if not h or not self.locked: return
+        if h.get("lost"):
+            # The quiz page was gone and is back (Chrome quit and reopened with its tabs restored): the page
+            # is new and its box empty, whatever its address still says. Handed over again from the start.
+            h.update(since=now, sent=0.0, got=False, told=False, handed=set(), lost=False)
+            h["in"] = False
+        if h["in"]: return
         setter = setter or set_tab_url
         handed = h.setdefault("handed", set())
         mine = []
@@ -1216,6 +1222,7 @@ class Agent:
             if not self.url or "/attempt/" in url_parts(present[self.quiz])[0]: self.url = present[self.quiz]
             if not self.quiz_app: self.quiz_app = next((a for (a, _, _, u) in tabs if u == present[self.quiz]), None)
         else:
+            if getattr(self, "hand", None): self.hand["lost"] = True   # handed over again when its page is back (hand_step)
             if self.quiz in left:
                 self.end("quiz_submitted"); return
             if any_leaving and not open_quizzes:   # quiz list / another quiz's page: not proof of a submit

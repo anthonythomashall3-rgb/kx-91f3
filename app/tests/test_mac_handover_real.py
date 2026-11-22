@@ -135,6 +135,31 @@ try:
                 check(r2 is True and any(u == "about:blank" for (_, _, _, u) in A.browser_tabs()), "... and the page that was read is changed at its own place", repr((r2, A.browser_tabs()))[:400])
             else:
                 print("  NOTE: the window order did not change here (%r) -- the reorder check is skipped" % (after,), flush=True)
+        # Chrome quits and reopens during the quiz with its tabs restored: the restored quiz pages still say
+        # #lqz-in in their address, but they are new pages with an empty box (and the extension's memory is
+        # gone with the old browser). The agent sees the page gone and back (tick marks the hand "lost").
+        chrome.terminate()
+        try: chrome.wait(30)
+        except Exception: chrome.kill()
+        time.sleep(3)
+        mark = len(hits())
+        chrome = subprocess.Popen([CHROME, "--user-data-dir=" + prof, "--no-first-run", "--no-default-browser-check", "--ignore-certificate-errors",
+                                   "--host-resolver-rules=MAP brightspace.usc.edu 127.0.0.1:%d" % PORT, "--restore-last-session"],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        t0 = time.time()
+        while time.time() - t0 < 60 and not [t for t in A.browser_tabs() if "quiz_start_frame_auto" in t[3]]: time.sleep(1)
+        time.sleep(6)
+        qt = [t for t in A.browser_tabs() if "quiz_start_frame_auto" in t[3]]
+        empty = ("poll=" + PW2) not in hits()[mark:] and ("pw=" + PW2) not in hits()[mark:]
+        print("  after the restart: %d quiz tab(s) %r; their box %s" % (len(qt), [u[-12:] for (_, _, _, u) in qt], "is empty" if empty else "still holds the password"), flush=True)
+        check(bool(qt), "Chrome restored the quiz tabs", repr(A.browser_tabs())[:300])
+        g.hand["lost"] = True
+        t0 = time.time()
+        while time.time() - t0 < 60 and (g.hand.get("lost") or not g.hand["in"]) and not g.hand["told"]:
+            g.hand_step([(a, w, t, A.inner_url(u)) for (a, w, t, u) in A.browser_tabs()], time.time()); time.sleep(1)
+        time.sleep(3); h2 = hits()[mark:]
+        check(g.hand["in"] and (("poll=" + PW2) in h2 or ("pw=" + PW2) in h2), "after the restart the restored quiz pages get the password again (%d s)" % int(time.time() - t0), repr((g.hand, h2[-300:]))[:500])
+        check(not clips and not any(PW2 in m for m in msgs), "... and nothing is shown or copied", repr((msgs, clips)))
 finally:
     chrome.terminate(); srv.terminate()
     subprocess.run(["sudo", "rm", "-f", MP], capture_output=True); subprocess.run(["sudo", "killall", "cfprefsd"], capture_output=True)

@@ -405,6 +405,14 @@ g.hand["since"] -= A.HAND_WAIT + 10; g.hand["sent"] = 0
 T(g, [tab(SUMM + "#lqz-got"), ("Google Chrome", 0, 1, SUMM)])
 ok("the extension has answered: a tab opened after 30 s is still handed the password") if sets[-1] == ("Google Chrome", 0, 1, want) and not clips else bad("sets %r clips %r" % (sets[-2:], clips))
 msgs[:] = []; clips[:] = []; sets[:] = []
+g, h = hagent(); T(g, [tab(SUMM)]); T(g, [tab(SUMM)]); T(g, [tab(SUMM + "#lqz-in")])
+was_in = g.hand["in"]; n = len(sets)
+T(g, [])                                    # Chrome quit: no tabs for a moment
+T(g, [tab(SUMM + "#lqz-in")])               # ... and reopened with its tabs restored (the address as before, the box empty)
+ok("Chrome quit and reopened during the quiz: the restored quiz page is handed the password again") if was_in and g.locked and sets[n:] == [("Google Chrome", 0, 0, want)] and not g.hand["in"] else bad("hand %r sets %r" % (g.hand, sets[n:]))
+T(g, [tab(SUMM + "#lqz-in")])
+ok("... and entered once it answers; nothing shown") if g.hand["in"] and not clips else bad("hand %r clips %r" % (g.hand, clips))
+msgs[:] = []; clips[:] = []; sets[:] = []
 A.set_tab_url = lambda app, wi, ti, url, *k: (sets.append((app, wi, ti, url)), False)[1]   # the tab moved: nothing was set
 g, h = hagent(); T(g, [tab(SUMM)]); T(g, [tab(SUMM)])
 ok("a hand-over that did not reach the tab (it moved) is not counted as handed") if sets and not g.hand.get("handed") else bad("hand %r" % (g.hand,))
