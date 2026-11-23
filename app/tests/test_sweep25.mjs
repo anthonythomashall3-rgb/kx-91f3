@@ -160,12 +160,12 @@ console.log("F. A whole class behind one campus address");
 console.log("G. Email codes: a class on one address");
 { const api = readFileSync(join(CF, "functions", "api", "[[route]].js"), "utf8");
   check("the per-address ceiling for codes is IP_CODES; per computer and per recipient limits are unchanged",
-    /Number\(c\.dh\) >= 5 \|\| Number\(c\.dd\) >= 15 \|\| Number\(c\.eh\) >= 3 \|\| Number\(c\.ed\) >= 5 \|\| Number\(c\.ih\) >= IP_CODES/.test(api)); }
+    /Number\(c\.dh\) - own >= 5 \|\| Number\(c\.dd\) - own >= 15 \|\| Number\(c\.eh\) - own >= 3 \|\| Number\(c\.ed\) - own >= 5 \|\| Number\(c\.ih\) - own >= IP_CODES/.test(api)); }
 console.log("H. Professor sign-ups, the support form, bank-details email: the same room per address");
 { const api = readFileSync(join(CF, "functions", "api", "[[route]].js"), "utf8");
   check("ceilings per address per hour: sign-ups 1,000, support messages 500, bank-details emails 1,000", /IP_SIGNUP = 1000, IP_SUPPORT = 500, IP_BANK = 1000;/.test(api));
   check("sign-ups (typed and Google) are counted in the per-address counter row", (api.match(/ipRoom\("signup", IP_SIGNUP\)/g) || []).length === 2);
-  check("support: 5 an hour per sender and the daily total are unchanged", /AND student=\?"\)\.bind\(hr, email\)\.first\(\)\)\.n\) >= 5\)/.test(api) && /SUPPORT_MAX_DAY \|\| 60/.test(api) && />= IP_SUPPORT/.test(api));
+  check("support: 5 an hour per sender and the daily total are unchanged", /Number\(u\.me\) - own >= 5 \?/.test(api) && /SUPPORT_MAX_DAY \|\| 60/.test(api) && /- own >= IP_SUPPORT/.test(api));
   check("bank details: one email per address per 10 minutes and the daily total are unchanged", />= IP_BANK\)/.test(api) && /BANK_MAIL_DAILY_MAX \|\| 60/.test(api)); }
 globalThis.fetch = realFetch;
 console.log(`\nSweep 25: ${pass} passed, ${fail} failed`);

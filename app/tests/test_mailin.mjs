@@ -38,6 +38,7 @@ for (const m of readdirSync(CF).filter(f => /^migrate_\d+.*\.sql$/.test(f)).sort
 const one = (sql, ...a) => sqlite.prepare(sql).get(...a);
 const all = (sql, ...a) => sqlite.prepare(sql).all(...a);
 const run = (sql, ...a) => sqlite.prepare(sql).run(...a);
+const get = (sql, ...a) => sqlite.prepare(sql).get(...a);
 const sent = [];
 const env = { DB: d1(sqlite), TEACHER_KEY: "admin-key-mi", REQUIRE_SIGNED: "1", ADMIN_EMAIL: "admin@usc.edu", ROT_SECRET: "rot-mi", LIVE_CACHE_MS: "0", PAID_CACHE_MS: "0",
   MAILIN_ON: "1", MAIL_SINK: async m => { sent.push(m); return true; } };
@@ -243,6 +244,15 @@ console.log("M7 an email the mailbox turned away for a while: LOCKqz sends it on
   r = await fwdCall(B, KEY);
   check("at most MAILFWD_DAY_MAX a day: then refused (the sender's server tries again later)", r.status === 429 && sent.length === 0);
   delete env.MAILFWD_DAY_MAX;
+  run("DELETE FROM mail_sent WHERE ou='_all' AND kind='fwd'"); env.MAILFWD_DAY_MAX = "5"; sent.length = 0;
+  const burst = await Promise.all(Array.from({ length: 12 }, () => fwdCall(B, KEY)));
+  const ok = burst.filter(x => x.status === 200).length, n = Number(get("SELECT COALESCE(SUM(n),0) AS n FROM mail_sent WHERE ou='_all' AND kind='fwd'")?.n);
+  check("12 emails at the same moment: never more than the day's limit sent, and the count is what went out", sent.length <= 5 && sent.length === ok && n === ok && burst.every(x => x.status === 200 || x.status === 429), `sent ${sent.length}, ok ${ok}, count ${n}`);
+  const sink = env.MAIL_SINK; env.MAIL_SINK = async () => { throw new Error("smtp down"); }; sent.length = 0;
+  run("DELETE FROM mail_sent WHERE ou='_all' AND kind='fwd'");
+  r = await fwdCall(B, KEY);
+  check("a send that fails: its place in the day's count is given back", r.status === 502 && Number(get("SELECT COALESCE(SUM(n),0) AS n FROM mail_sent WHERE ou='_all' AND kind='fwd'")?.n) === 0);
+  env.MAIL_SINK = sink; delete env.MAILFWD_DAY_MAX;
   env.MAILIN_KEY = "short"; r = await fwdCall(B, "short");
   check("a key shorter than 32 characters is never accepted", r.status === 403);
   delete env.MAILIN_KEY;

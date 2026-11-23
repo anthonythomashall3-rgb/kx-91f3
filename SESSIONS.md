@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- sweep 34 (Claude, 2026-11-23 ~15:50Z): [[route]].js (/mailfwd only), app/tests/test_mailin.mjs
+- sweep 34 (Claude, 2026-11-23 ~15:50Z): [[route]].js (/mailfwd, /support, issueEmailCode), app/tests/test_mailin.mjs, test_email_verify.mjs, test_sweep25.mjs
 
 ## Recently finished
 - sweep 32 finished (Claude, 2026-11-23): mail Worker redeployed, professor extension 1.0.15 (CWS in review, Firefox signed)

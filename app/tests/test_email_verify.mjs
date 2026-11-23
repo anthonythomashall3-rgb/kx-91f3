@@ -182,6 +182,21 @@ async function suite(label, oldSchema) {
   r = await get(on, "/live?quiz=" + OU);
   check("course-level /live still finds the quiz's locks", (r.data?.rows || []).some(x => x.device_id === DEV), JSON.stringify(r.data).slice(0, 200));
 
+  console.log("V14 the limits hold when requests arrive at the same moment");
+  {
+    const D7 = "mac-7777-0000-2222", K7 = await reg(on, D7), S7 = { key: K7, device: D7 }, m0 = mail.length;
+    const burst = await Promise.all(Array.from({ length: 8 }, () => call(on, "/verify", { op: "send", email: "burst@usc.edu" }, S7)));
+    const ok = burst.filter(x => x.status === 200 && !x.data?.error).length, rows = Number(sqlite.prepare("SELECT COUNT(*) AS n FROM events WHERE event='code_sent' AND student='burst@usc.edu'").get().n);
+    check("8 code requests at once for one email: at most 3 codes sent (3 an hour per email), one row per code sent", mail.length - m0 <= 3 && mail.length - m0 === ok && rows === ok && burst.filter(x => x.status === 429).length === 8 - ok, `mailed ${mail.length - m0}, ok ${ok}, rows ${rows}`);
+    const s0 = mail.length;
+    const sup = await Promise.all(Array.from({ length: 9 }, (_, i) => call(on, "/support", { email: "same@usc.edu", name: "Sam", message: "message number " + i })));
+    const sOk = sup.filter(x => x.status === 200 && x.data?.ok).length, sRows = Number(sqlite.prepare("SELECT COUNT(*) AS n FROM events WHERE event='support' AND student='same@usc.edu'").get().n);
+    check("9 support messages at once from one sender: at most 5 sent (5 an hour per sender), one row per message sent", mail.length - s0 <= 5 && mail.length - s0 === sOk && sRows === sOk, `mailed ${mail.length - s0}, ok ${sOk}, rows ${sRows}`);
+    const fail = { ...on, MAIL_SINK: () => { throw new Error("smtp down"); } };
+    r = await call(fail, "/support", { email: "down@usc.edu", message: "is anyone there" });
+    check("a support message that could not be sent does not count", r.status >= 500 && !sqlite.prepare("SELECT 1 FROM events WHERE event='support' AND student='down@usc.edu'").get(), `${r.status}`);
+  }
+
   console.log("V10 SMTP client: real conversation with a fake Gmail server");
   const said = [];
   const fakeSmtp = (codes) => async () => {

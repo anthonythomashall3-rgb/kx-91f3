@@ -2154,9 +2154,16 @@ export async function onRequest(context) {
   // else the error response. dev = the computer (app email setup) or "web:<email>" (download-page sign-in).
   async function issueEmailCode(dev, email, web = false) {
     const since = ms => new Date(Date.now() - ms).toISOString(), hr = since(3600000);
-    const c = await db.prepare("SELECT COALESCE(SUM(ts>=? AND device_id=?),0) AS dh, COALESCE(SUM(device_id=?),0) AS dd, COALESCE(SUM(ts>=? AND student=?),0) AS eh, COALESCE(SUM(student=?),0) AS ed, COALESCE(SUM(ts>=? AND detail=?),0) AS ih, COUNT(*) AS total FROM events WHERE event='code_sent' AND " + RL_EV + " AND ts>=?")
-      .bind(hr, dev, dev, hr, email, email, hr, "ip:" + clientIp, since(86400000)).first();
-    if (Number(c.dh) >= 5 || Number(c.dd) >= 15 || Number(c.eh) >= 3 || Number(c.ed) >= 5 || Number(c.ih) >= IP_CODES) return json({ error: "too_many_codes", retry_minutes: 60 }, 429);
+    // The limits are read, then this code takes its place (its code_sent row) and they are read again counting only the
+    // places taken before it, so requests at the same moment cannot pass them together. A code refused then, or not
+    // sent, gives its place back.
+    const counts = async upTo => db.prepare("SELECT COALESCE(SUM(ts>=? AND device_id=?),0) AS dh, COALESCE(SUM(device_id=?),0) AS dd, COALESCE(SUM(ts>=? AND student=?),0) AS eh, COALESCE(SUM(student=?),0) AS ed, COALESCE(SUM(ts>=? AND detail=?),0) AS ih, COUNT(*) AS total FROM events WHERE event='code_sent' AND " + RL_EV + " AND ts>=?" + (upTo ? " AND id<=?" : ""))
+      .bind(hr, dev, dev, hr, email, email, hr, "ip:" + clientIp, since(86400000), ...(upTo ? [upTo] : [])).first();
+    const over = (c, own) => Number(c.dh) - own >= 5 || Number(c.dd) - own >= 15 || Number(c.eh) - own >= 3 || Number(c.ed) - own >= 5 || Number(c.ih) - own >= IP_CODES;
+    if (over(await counts(0), 0)) return json({ error: "too_many_codes", retry_minutes: 60 }, 429);
+    const mine = Number((await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?) RETURNING id").bind(dev, email, null, "code_sent", "ip:" + clientIp, now()).first())?.id) || 0;
+    const giveBack = () => db.prepare("DELETE FROM events WHERE id=? AND event='code_sent'").bind(mine).run().catch(() => {});
+    if (over(await counts(mine), 1)) { await giveBack(); return json({ error: "too_many_codes", retry_minutes: 60 }, 429); }
     // The one Gmail budget: codes are essential (room is always kept for them); an email on no synced class
     // list may use only the first half, so a flood of strangers cannot starve real students.
     // With SES on, its budget applies (and Gmail stays the fallback); otherwise the Gmail budget.
@@ -2169,7 +2176,7 @@ export async function onRequest(context) {
     const rFree = rOn && rUsed + 1 <= resendMax(env), sFree = sOn && sMonthOk && sUsed + 1 <= s2gDayMax(env);
     const cap = ses ? sesMax(env) : rsd ? (rOn ? resendMax(env) : 0) + (sOn && sMonthOk ? s2gDayMax(env) : 0) + (mOn && mMonthOk ? mjDayMax(env) : 0) : MAIL_HARD_MAX;
     const used = ses ? await sesUsed() : rsd ? rUsed + (sOn && sMonthOk ? sUsed : 0) + (mOn && mMonthOk ? mUsed : 0) : await mailUsed(), half = Math.floor(cap / 2);
-    if ((used + 1 > cap && !((ses || rsd) && gOk && (await mailUsed()) + 1 <= MAIL_HARD_MAX)) || (used >= half && !(await db.prepare("SELECT name FROM roster WHERE email=? AND name IS NOT NULL LIMIT 1").bind(email).first()))) return json({ error: "mail_busy" }, 503);
+    if ((used + 1 > cap && !((ses || rsd) && gOk && (await mailUsed()) + 1 <= MAIL_HARD_MAX)) || (used >= half && !(await db.prepare("SELECT name FROM roster WHERE email=? AND name IS NOT NULL LIMIT 1").bind(email).first()))) { await giveBack(); return json({ error: "mail_busy" }, 503); }
     const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, "0");
     let sent = false;
     if (ses && used + 1 <= cap) { const cm = codeMail(env, email, code, web);
@@ -2181,12 +2188,10 @@ export async function onRequest(context) {
     if (!sent && mFree) { const cm = codeMail(env, email, code, web);
       try { await mailjetSend(env, email, cm.subject, cm.text, { html: cm.html }); sent = true; await clockMark("mail_ok"); try { await mjCount(1); } catch {} } catch (e) { await mjFail(e); } }
     try { if (!sent) { if (!gOk) throw new Error("no mail channel"); await sendCode(env, email, code, web); await clockMark("mail_ok"); try { await mailCount(1); } catch {} } }
-    catch (e) { await clockMark("mail_fail");   // the admin's home shows it until a send works again
+    catch (e) { await giveBack(); await clockMark("mail_fail");   // the admin's home shows it until a send works again
       await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(dev, email, null, "code_send_failed", String(e).slice(0, 200), now()).run(); return json({ error: "send_failed" }, 502); }
-    await db.batch([
-      db.prepare("INSERT OR REPLACE INTO email_codes (device_id,email,code_hash,expires,tries,created_at) VALUES (?,?,?,?,0,?)")
-        .bind(dev, email, await sha256hex(enc.encode(dev + ":" + code)), Date.now() + CODE_MS, now()),
-      db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(dev, email, null, "code_sent", "ip:" + clientIp, now())]);
+    await db.prepare("INSERT OR REPLACE INTO email_codes (device_id,email,code_hash,expires,tries,created_at) VALUES (?,?,?,?,0,?)")
+      .bind(dev, email, await sha256hex(enc.encode(dev + ":" + code)), Date.now() + CODE_MS, now()).run();   // its code_sent row is in already
     return null;
   }
   // ---- Student account (gear icon on the download page): signed in with an emailed code; the token is
@@ -2289,8 +2294,14 @@ export async function onRequest(context) {
     if (p === "/mailfwd" && request.method === "POST") {
       const key = String(env.MAILIN_KEY || "");
       if (key.length < 32 || !sameHex(String(request.headers.get("X-LQZ-Key") || ""), key)) return json({ error: "forbidden" }, 403);
-      if (Number((await db.prepare("SELECT COALESCE(SUM(n),0) AS n FROM mail_sent WHERE ou='_all' AND kind='fwd' AND day>=?").bind(hourKey(Date.now() - 24 * 3600000)).first())?.n || 0) >= Number(env.MAILFWD_DAY_MAX || 40))
+      // The day's count: the earlier hours are read, then this hour's row goes up by one in a single statement only
+      // while there is room, so emails that arrive at the same moment cannot pass the limit together (a refusal
+      // writes nothing). A send that fails gives its place back.
+      const FMAX = Number(env.MAILFWD_DAY_MAX || 40), fk = hourKey();
+      const before = Number((await db.prepare("SELECT COALESCE(SUM(n),0) AS n FROM mail_sent WHERE ou='_all' AND kind='fwd' AND day>=? AND day<>?").bind(hourKey(Date.now() - 24 * 3600000), fk).first())?.n || 0);
+      if (!(before < FMAX && await db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('_all','fwd',?,1,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+1, at=excluded.at WHERE n<? RETURNING n").bind(fk, now(), FMAX - before).first()))
         return json({ error: "too many today" }, 429);
+      const giveBack = () => db.prepare("UPDATE mail_sent SET n=n-1 WHERE ou='_all' AND kind='fwd' AND day=? AND n>0").bind(fk).run().catch(() => {});
       const line = (v, n) => String(v == null ? "" : v).replace(/[\r\n\t]+/g, " ").trim().slice(0, n);
       const to = String(env.SUPPORT_EMAIL || "lockqz.app@gmail.com"), from = line(body.from, 200), rcpt = line(body.to, 200);
       const subject = "Fwd: " + (line(body.subject, 200) || "(no subject)");
@@ -2310,9 +2321,8 @@ export async function onRequest(context) {
             to, subject, text, { replyTo, html: autoHtml(text, { sign: false }) });
           try { await mailCount(1); } catch {}
         } else await mailOut(to, subject, text, { replyTo, inbox: true }, "essential");
-      } catch { return json({ error: "send_failed" }, 502); }
-      await db.batch([db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('_all','fwd',?,1,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+1, at=excluded.at").bind(hourKey(), now()),
-        db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES ('mail',NULL,NULL,'mail_fwd',?,?)").bind((rcpt + " | " + line(body.why, 250)).slice(0, 300), now())]).catch(() => {});
+      } catch { await giveBack(); return json({ error: "send_failed" }, 502); }
+      await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES ('mail',NULL,NULL,'mail_fwd',?,?)").bind((rcpt + " | " + line(body.why, 250)).slice(0, 300), now()).run().catch(() => {});
       return json({ ok: true });
     }
     if (p === "/version") return json({ ...buildInfo(), codes_on: codesOn, strict, fee_on: feeOn(), stripe: stripeOn(), google: env.GOOGLE_CLIENT_ID || null, google_hd: env.GOOGLE_CLIENT_ID ? String(env.GOOGLE_HD ?? "usc.edu") : null });
@@ -3271,17 +3281,23 @@ export async function onRequest(context) {
       if (String(body.website || "").trim()) return json({ ok: true });   // bot trap (hidden field)
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: "Enter your email." }, 400);
       if (msg.length < 5) return json({ error: "Write your message." }, 400);
-      const hr = new Date(Date.now() - 3600000).toISOString(), day = new Date(Date.now() - 86400000).toISOString();
-      if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='support' AND ts>? AND device_id=?").bind(hr, "ip:" + clientIp).first()).n) >= IP_SUPPORT
-       || Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='support' AND ts>? AND student=?").bind(hr, email).first()).n) >= 5)
-        return json({ error: "Too many messages. Try again in an hour." }, 429);
-      if (Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='support' AND ts>?").bind(day).first()).n) >= Number(env.SUPPORT_MAX_DAY || 60))
-        return json({ error: "Too many messages today. Email support@lockqz.com." }, 429);
+      const hr = new Date(Date.now() - 3600000).toISOString(), day = new Date(Date.now() - 86400000).toISOString(), SMAX = Number(env.SUPPORT_MAX_DAY || 60);
+      // The limits are read, then this message takes its place (its event row) and they are read again counting only
+      // the places taken before it, so messages sent at the same moment cannot pass them together. A message
+      // refused then, or not sent, gives its place back.
+      const used = async upTo => db.prepare("SELECT COALESCE(SUM(ts>? AND device_id=?),0) AS ip, COALESCE(SUM(ts>? AND student=?),0) AS me, COUNT(*) AS day FROM events WHERE event='support' AND ts>?" + (upTo ? " AND id<=?" : ""))
+        .bind(hr, "ip:" + clientIp, hr, email, day, ...(upTo ? [upTo] : [])).first();
+      const tooMany = (u, own) => Number(u.ip) - own >= IP_SUPPORT || Number(u.me) - own >= 5 ? "hour" : Number(u.day) - own >= SMAX ? "day" : "";
+      const refuse = why => why === "hour" ? json({ error: "Too many messages. Try again in an hour." }, 429) : json({ error: "Too many messages today. Email support@lockqz.com." }, 429);
+      let why = tooMany(await used(0), 0);
+      if (why) return refuse(why);
+      const mine = Number((await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?) RETURNING id").bind("ip:" + clientIp, email, null, "support", null, now()).first())?.id) || 0;
+      const giveBack = () => db.prepare("DELETE FROM events WHERE id=? AND event='support'").bind(mine).run().catch(() => {});
+      if ((why = tooMany(await used(mine), 1))) { await giveBack(); return refuse(why); }
       const to = String(env.SUPPORT_EMAIL || "lockqz.app@gmail.com");
       const name = String(body.name || "").replace(/[\r\n]/g, " ").trim().slice(0, 100);
       try { await mailOut(to, `LOCKqz support: ${name ? name + " · " : ""}${email}`, `From: ${name ? name + " <" + email + ">" : email}\n\n${msg}\n\n— Reply to this email to answer them.`, { replyTo: email, inbox: true }, "auto"); }
-      catch (e) { return json({ error: "Could not send. Email support@lockqz.com." }, e && e.budget ? 503 : 502); }
-      await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + clientIp, email, null, "support", null, now()).run();
+      catch (e) { await giveBack(); return json({ error: "Could not send. Email support@lockqz.com." }, e && e.budget ? 503 : 502); }
       return json({ ok: true });
     }
     if (p === "/pay/bank" && request.method === "POST") {
