@@ -7,9 +7,9 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- sweep 34 (Claude, 2026-11-23 ~15:50Z): [[route]].js (/mailfwd, /support, /pay/bank, issueEmailCode), app/tests/test_mailin.mjs, test_email_verify.mjs, test_sweep25.mjs, test_round3_api.mjs
 
 ## Recently finished
+- sweep 34 finished (Claude, 2026-11-23): email limits hold under bursts (codes, support, mail sent on, bank details); live 2a40c23
 - sweep 32 finished (Claude, 2026-11-23): mail Worker redeployed, professor extension 1.0.15 (CWS in review, Firefox signed)
 - 2026-11-23 03:38 PT — 01UUDg7YXjJx: bug sweep 31, apps 0.6.43 live (abffa10, Release 45165072815 green on every job). A helper restarted after its agent (every update) is told the student at the agent's next status read (Mac and Windows). Hidden-window closing: antivirus and graphics/game-overlay software stays (Windows by vendor signature, checked once per file; Mac by bundle id); a program that cannot be closed is said once and not tried again that quiz. Checked live: CWS serves professor extension 1.0.14; Email Routing quiz@ rule, subaddressing and the mailin Worker in place; API fuzz 28,480 calls x2 with no 5xx.
 - 2026-11-23 04:00 PT — 01UUDg7ZKM: email to support@lockqz.com and the catch-all is never lost: Email Routing sends quiz@, support@ and the catch-all to the Email Worker lockqz-mailin, which forwards to lockqz.app@gmail.com; when the mailbox turns an email away for a while (a temporary refusal, not a "no" for good) the Worker hands it to POST /api/mailfwd (Worker and Pages secret MAILIN_KEY) and LOCKqz sends it on, from that Gmail account to itself, Reply-To its sender, its words with its attachments named (at most MAILFWD_DAY_MAX, 40, a day). DMARC reports go to Cloudflare's DMARC Management only. The Sync adds the submission address only to exams that are not over, in classes LOCKqz is on for. test_mailin (43), test_mailin_worker (24). No files held.
