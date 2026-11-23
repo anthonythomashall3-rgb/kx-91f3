@@ -60,6 +60,15 @@ console.log("W2 handed to the API");
   calls.length = 0; status = [404];
   await W.default.email({ ...message, raw: new Blob([RAW]).stream() }, env);
   check("not a quiz address (4xx): not tried again", calls.length === 1);
+  calls.length = 0; status = [503, 503, 503];
+  let down = null;
+  try { await W.default.email({ ...message, raw: new Blob([RAW]).stream() }, env); } catch (e) { down = e; }
+  check("LOCKqz never answers (3 tries): not dropped, the sender's server tries again later", !!down && calls.length === 3);
+  calls.length = 0; status = [];
+  await W.default.email({ ...message, raw: new Blob([RAW]).stream(), rawSize: 30000000, headers: new Headers({ subject: "Quiz submitted", date: "Sun, 22 Nov 2026 20:05:00 +0000" }) }, env);
+  const bb = calls.length ? JSON.parse(calls[0].o.body) : {};
+  check("a huge email to a quiz address: its words are not read (its subject and date are handed on)", calls.length === 1 && bb.text === "" && bb.subject === "Quiz submitted", JSON.stringify(bb));
+  calls.length = 0; status = [];
   calls.length = 0; status = [];
   const big = RAW.replace("has completed the quiz", "x".repeat(20000) + " has completed the quiz");
   await W.default.email({ ...message, raw: new Blob([big]).stream() }, env);
@@ -97,6 +106,12 @@ console.log("W3 an email that is not a quiz's: on to the mailbox; sent on by LOC
   threw = null; status = [502, 502, 502];
   try { await W.default.email(msg(async () => { throw new Error(TEMP); }), base); } catch (e) { threw = e; }
   check("LOCKqz busy too (3 tries): the sender's server tries again later", !!threw && calls.length === 3);
+  calls.length = 0; threw = null; status = [];
+  try { await W.default.email(msg(async () => { throw new Error(TEMP.replace("cf.236 - gsmtp", "cf.536 - gsmtp")); }), base); } catch (e) { threw = e; }
+  check("Gmail's reference ending in a 5xx-like number (...cf.536) is not a 'no' for good: sent on", !threw && calls.length === 1 && /mailfwd$/.test(calls[0].u));
+  check("what counts as 'no' for good", W.forGood("upstream (mx.example.com.) permanent error: (550): 5.1.1 no such user") && W.forGood("550 5.7.1 Service unavailable") &&
+    !W.forGood(TEMP) && !W.forGood("upstream temporary error: (451): 4.3.0 try again [2a06:98c0:3600::503 12]") && !W.forGood("Error: internal error") &&
+    !W.forGood("upstream (gmail-smtp-in.l.google.com.) temporary error: (421): 4.7.0 [104.30.5.12.7] try again"));
   calls.length = 0; threw = null; status = [429];
   try { await W.default.email(msg(async () => { throw new Error(TEMP); }), base); } catch (e) { threw = e; }
   check("LOCKqz refuses it (too many today, a wrong key): tried once, the sender's server tries again later", !!threw && calls.length === 1);
@@ -106,6 +121,10 @@ console.log("W3 an email that is not a quiz's: on to the mailbox; sent on by LOC
   await W.default.email(msg(async () => { throw new Error(TEMP); }, { raw: new Blob(["Subject: x\n\nhuge"]).stream(), rawSize: 30000000 }), base);
   const b2 = calls.length ? JSON.parse(calls[0].o.body) : {};
   check("a very large email: sent on with its subject (its words are not read)", calls.length === 1 && b2.subject === "Can't install" && b2.text === "", JSON.stringify(b2));
+  calls.length = 0;
+  await W.default.email(msg(async () => { throw new Error(TEMP); }, { from: "bounces+77@em.list.example", headers: new Headers({ subject: "Hi", from: "=?UTF-8?Q?Ana_Mu=C3=B1oz?= <ana@usc.edu>", "reply-to": "help@usc.edu" }) }), base);
+  const b3 = calls.length ? JSON.parse(calls[0].o.body) : {};
+  check("who wrote it and where an answer goes (its From and Reply-To lines) go with it, beside the envelope's sender", b3.author === "Ana Muñoz <ana@usc.edu>" && b3.reply === "help@usc.edu" && b3.from === "bounces+77@em.list.example", JSON.stringify(b3));
   const wt = readFileSync(join(HERE, "..", "mailin", "wrangler.toml"), "utf8");
   check("the key is a secret, never in the repo", !/^\s*MAILIN_KEY\s*=/m.test(wt) && /wrangler secret put/.test(wt));
 }

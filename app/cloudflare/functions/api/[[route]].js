@@ -2295,10 +2295,15 @@ export async function onRequest(context) {
       const to = String(env.SUPPORT_EMAIL || "lockqz.app@gmail.com"), from = line(body.from, 200), rcpt = line(body.to, 200);
       const subject = "Fwd: " + (line(body.subject, 200) || "(no subject)");
       const files = (Array.isArray(body.files) ? body.files : []).map(f => line(f, 120)).filter(Boolean).slice(0, 20);
-      const text = `LOCKqz sent this email on itself: the mailbox turned the direct forward away for a while.\n\nFrom: ${from || "(unknown)"}\nTo: ${rcpt || "(unknown)"}` +
+      // Who wrote it and where an answer goes: its From and Reply-To lines (the envelope's sender, from, can be a bounce
+      // address), else the envelope's sender.
+      const ADDR = /^[^@\s<>"(),;:]+@[^@\s<>"(),;:]+\.[^@\s<>"(),;:]+$/;
+      const addrOf = v => { const t = line(v, 300), m = /<([^<>]*)>/.exec(t), a = (m ? m[1] : t).trim(); return ADDR.test(a) ? a : null; };
+      const author = line(body.author, 300);
+      const text = `LOCKqz sent this email on itself: the mailbox turned the direct forward away for a while.\n\nFrom: ${author || from || "(unknown)"}\nTo: ${rcpt || "(unknown)"}` +
         (line(body.date, 100) ? `\nDate: ${line(body.date, 100)}` : "") + (files.length ? `\nAttachments (not included): ${files.join(", ")}` : "") +
         `\n\n${String(body.text || "").slice(0, 20000) || "(no text)"}`;
-      const replyTo = /^[^@\s<>"(),;:]+@[^@\s<>"(),;:]+\.[^@\s<>"(),;:]+$/.test(from) ? from : null;
+      const replyTo = addrOf(body.reply) || addrOf(author) || addrOf(from);
       try {
         if (gmailOn(env) && String(env.MAIL_USER || "").toLowerCase() === to.toLowerCase() && await mailRoom(1, "essential")) {
           await sendMail({ MAIL_SINK: env.MAIL_SINK, MAIL_OPEN: env.MAIL_OPEN, MAIL_HOST: env.MAIL_HOST, MAIL_PORT: env.MAIL_PORT, MAIL_USER: env.MAIL_USER, MAIL_APP_PASSWORD: env.MAIL_APP_PASSWORD },

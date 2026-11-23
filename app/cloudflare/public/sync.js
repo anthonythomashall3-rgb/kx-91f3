@@ -328,9 +328,13 @@
     var OURMAIL = /^(?:lqz-|[^+@\s]+\+)\d+-\d+-[0-9a-f]{12}@(?:[a-z0-9-]+\.)*lockqz\.com$/i;
     var mailsOf = function (v) { return String(v || "").split(/[,;]/).map(function (x) { return x.trim(); }).filter(Boolean); };
     var withMail = function (v, mail) { var a = mailsOf(v).filter(function (x) { return !OURMAIL.test(x); }); if (mail) a.push(mail); return a.length ? a.join(", ") : null; };
+    // The same addresses, however Brightspace writes the list back (";" or "," with or without spaces, capitals): no
+    // new write then.
+    var sameMails = function (a, b) { return mailsOf(a).join(",").toLowerCase() === mailsOf(b).join(",").toLowerCase(); };
     async function protect(ou, qi, pw, mail) {    // put LOCKqz's password (and its submission address) on the quiz
       var cur = await get(quizUrl(ou, qi));
       var ne = mail ? withMail(cur.NotificationEmail, mail) : (cur.NotificationEmail || null);
+      if (sameMails(ne, cur.NotificationEmail)) ne = cur.NotificationEmail || null;
       if (cur.Password === pw && ne === (cur.NotificationEmail || null)) return "already";
       await saveOrig(ou, qi, cur);
       if (ne !== (cur.NotificationEmail || null)) {

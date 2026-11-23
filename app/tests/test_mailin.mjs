@@ -224,6 +224,18 @@ console.log("M7 an email the mailbox turned away for a while: LOCKqz sends it on
   sent.length = 0;
   r = await fwdCall({ ...B, from: "x@y.com\r\nBcc: z@z.com", subject: "hi\r\nBcc: z@z.com" }, KEY);
   check("a sender or subject with line breaks: kept on one line, no Reply-To made from it", r.status === 200 && !/[\r\n]/.test(sent[0].subject) && sent[0].replyTo === null && !/^Bcc:/m.test(sent[0].text), JSON.stringify(sent[0]));
+  sent.length = 0;
+  r = await fwdCall({ ...B, from: "bounces+77@em.list.example", author: "Ana Muñoz <ana@usc.edu>", reply: "" }, KEY);
+  check("a bounce address as the envelope's sender: Reply-To from its From line, and From shows who wrote it", r.status === 200 && sent[0].replyTo === "ana@usc.edu" && /From: Ana Muñoz <ana@usc\.edu>/.test(sent[0].text), JSON.stringify(sent[0]));
+  sent.length = 0;
+  r = await fwdCall({ ...B, author: "Ana <ana@usc.edu>", reply: "Help Desk <help@usc.edu>" }, KEY);
+  check("a Reply-To line: answers go there", r.status === 200 && sent[0].replyTo === "help@usc.edu");
+  sent.length = 0;
+  r = await fwdCall({ ...B, author: "undisclosed-recipients:;", reply: "a@b.com, c@d.com" }, KEY);
+  check("a From or Reply-To that is not one plain address: no Reply-To made from it (the envelope's sender then)", r.status === 200 && sent[0].replyTo === "ana@usc.edu", JSON.stringify(sent[0].replyTo));
+  sent.length = 0;
+  r = await fwdCall({ ...B, author: "x <a@b.com>\r\nBcc: z@z.com" }, KEY);
+  check("a From line with line breaks: kept on one line", r.status === 200 && !/^Bcc:/m.test(sent[0].text) && sent[0].replyTo === "a@b.com", JSON.stringify(sent[0].replyTo));
   delete env.MAIL_USER; sent.length = 0;
   r = await fwdCall(B, KEY);
   check("LOCKqz's Gmail sender is another account: sent through LOCKqz's mail, Reply-To its sender", r.status === 200 && sent.length === 1 && sent[0].to === "lockqz.app@gmail.com" && sent[0].replyTo === "ana@usc.edu");

@@ -3,7 +3,8 @@
 //  * quiz+<ou>-<qi>-<tok>@lockqz.com is the address the professor's Sync puts in each protected quiz's Notification
 //    Email, so Brightspace writes to it the moment an attempt is submitted. Such an email is read (headers, plain text,
 //    the text of its HTML with its links) and handed to the LOCKqz API (POST /api/mailin), which keeps it only for a real
-//    quiz address.
+//    quiz address. When LOCKqz does not answer at all (3 tries), the email is not dropped: the sender's server tries
+//    again later.
 //  * Every other email goes on to the mailbox (FORWARD_TO). When the mailbox turns it away for a while (Gmail slows
 //    down mail that Cloudflare forwards to it), LOCKqz sends it on itself (POST /api/mailfwd with MAILIN_KEY, a secret
 //    the Worker and the server share), so it is never lost and its sender is not left trying again for days. A mailbox
@@ -11,15 +12,22 @@
 // Nothing is stored. Deploy: cd app/mailin && npx wrangler deploy, and once: npx wrangler secret put MAILIN_KEY (the
 // value of the Pages project's MAILIN_KEY). Email Routing: quiz@, support@ and the catch-all -> Worker lockqz-mailin.
 const QUIZ_TO = /^(?:lqz-|[^+@\s]+\+)\d{1,12}-\d{1,12}-[0-9a-f]{12}@/i;
-const RAW_MAX = 2000000;   // an email's words are read (to send it on if need be) when it is under 2 MB
-const PERMANENT = /\bpermanent|\b5\d\d\b|\b5\.\d{1,3}\.\d{1,3}\b/i;   // "no" for good: 5xx, 5.x.x
+const RAW_MAX = 2000000;   // an email's words are read (to hand on, or to send it on if need be) when it is under 2 MB
+// What the mailbox said, as Cloudflare words it ("temporary error ... (421): 4.7.28 ..." / "permanent error ... (550):
+// 5.7.1 ..."). Only a plain "no for good" goes back to the sender: a reply that says "for a while" anywhere is one, and a
+// number inside the mailbox's own reference (Gmail's ends in one, as in "...cf.536 - gsmtp") is not read as a code.
+const TEMPORARY = /\btemporar|\btransient|\(4\d\d\)|(?:^|\s)4\d\d[\s-]|(?:^|[\s:(])4\.\d{1,3}\.\d{1,3}(?![\d.])/i;
+const PERMANENT = /\bpermanent|\(5\d\d\)|(?:^|\s)5\d\d[\s-]|(?:^|[\s:(])5\.\d{1,3}\.\d{1,3}(?![\d.])/i;
+export const forGood = why => PERMANENT.test(String(why || "")) && !TEMPORARY.test(String(why || ""));
 
 export default {
   async email(message, env) {
     if (!QUIZ_TO.test(String(message.to || ""))) return onward(message, env);
-    const raw = await new Response(message.raw).text();
-    const mail = readMail(raw);
-    await post(env, "/mailin", JSON.stringify({ to: message.to, from: message.from, subject: mail.subject, text: mail.text.slice(0, 8000), date: mail.date }));
+    const h = message.headers && typeof message.headers.get === "function" ? message.headers : new Headers();
+    const mail = Number(message.rawSize) > RAW_MAX ? { subject: words(h.get("subject") || ""), date: h.get("date") || "", text: "" }   // no submission email is this big
+      : readMail(await new Response(message.raw).text());
+    const st = await post(env, "/mailin", JSON.stringify({ to: message.to, from: message.from, subject: mail.subject, text: mail.text.slice(0, 8000), date: mail.date }));
+    if (!st) throw new Error("LOCKqz did not answer: try again later");   // never dropped: the sender's server tries again
   },
 };
 
@@ -32,25 +40,29 @@ async function onward(message, env) {
   try { await message.forward(env.FORWARD_TO); return; }
   catch (e) {
     const why = String((e && e.message) || e || "").slice(0, 300);
-    if (!env.MAILIN_KEY || PERMANENT.test(why)) throw e;
+    if (!env.MAILIN_KEY || forGood(why)) throw e;
     const h = message.headers && typeof message.headers.get === "function" ? message.headers : new Headers();
     const mail = raw != null ? readMail(raw) : { subject: words(h.get("subject") || ""), date: h.get("date") || "", text: "", files: [] };
-    const body = JSON.stringify({ to: message.to, from: message.from, subject: mail.subject, date: mail.date, text: mail.text.slice(0, 20000), files: mail.files.slice(0, 20), why });
-    if (!(await post(env, "/mailfwd", body, { "X-LQZ-Key": String(env.MAILIN_KEY) }))) throw e;   // the sender's server tries again later
+    // The envelope's sender (from) can be a bounce address (mailing lists, mail services, forwarders): the From and
+    // Reply-To lines say who wrote it and where an answer goes.
+    const body = JSON.stringify({ to: message.to, from: message.from, author: words(h.get("from") || "").slice(0, 300), reply: words(h.get("reply-to") || "").slice(0, 300),
+      subject: mail.subject, date: mail.date, text: mail.text.slice(0, 20000), files: mail.files.slice(0, 20), why });
+    const st = await post(env, "/mailfwd", body, { "X-LQZ-Key": String(env.MAILIN_KEY) });
+    if (!(st >= 200 && st < 300)) throw e;   // the sender's server tries again later
   }
 }
 
-// POST to the LOCKqz API. A busy API (5xx, no answer) is tried 3 times; true when it took the email (2xx).
+// POST to the LOCKqz API. A busy API (5xx, no answer) is tried 3 times. Its answer's status, or 0 when it never gave one.
 async function post(env, path, body, extra = {}) {
   const f = env.FETCH || fetch, api = (env.API || "https://lockqz.pages.dev/api").replace(/\/$/, "");
   for (let i = 0; i < 3; i++) {
     try {
       const r = await f(api + path, { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": "LOCKqz-mailin", ...extra }, body });
-      if (r.status < 500) return r.status < 300;
+      if (r.status < 500) return r.status;
     } catch {}
     if (env.NO_WAIT !== true) await new Promise(r => setTimeout(r, 1500 * (i + 1)));
   }
-  return false;
+  return 0;
 }
 
 // ---- a small MIME reader: headers (folded lines, RFC 2047 words), multipart, quoted-printable, base64 ----

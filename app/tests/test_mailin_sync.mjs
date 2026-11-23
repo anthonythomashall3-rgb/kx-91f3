@@ -137,6 +137,10 @@ check("Quiz 2: the professor's own address first, LOCKqz's after it", bq(112).No
 console.log("S2 a second Sync changes nothing");
 const p0 = BS.puts; OFF += 2 * 3600000; await runSync();
 check("no write to Brightspace when both are in place", BS.puts === p0, BS.puts - p0);
+bq(112).NotificationEmail = bq(112).NotificationEmail.replace(", ", ";").toUpperCase(); bq(111).NotificationEmail = " " + bq(111).NotificationEmail + " ";
+const p1 = BS.puts, keep = bq(112).NotificationEmail; OFF += 2 * 3600000; await runSync();
+check("Brightspace writes the list its own way (';', spaces, capitals): still no write", BS.puts === p1 && bq(112).NotificationEmail === keep, BS.puts - p1);
+bq(112).NotificationEmail = "prof@usc.edu, " + ours(112); bq(111).NotificationEmail = ours(111);
 
 console.log("S3 a Brightspace that refuses a list of addresses");
 BS.quizzes.push(Object.assign(quiz(113, "Quiz 3"), { NotificationEmail: "ta@usc.edu" }));
