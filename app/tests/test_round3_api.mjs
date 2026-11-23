@@ -178,6 +178,16 @@ console.log("S6 bank-details emails have a global daily cap (Gmail's quota is sh
   check("the 3rd address of the day is refused once the cap (2) is reached", st[0] === 200 && st[1] === 200 && st[2] === 429, st.join(","));
   r = await call("/pay/bank", { email: "bank9@usc.edu" }, { ip: "10.66.0.9", hdr: { "X-LOCKqz-Pay": env.PAY_SECRET }, envx: { BANK_MAIL_DAILY_MAX: "2", STUDENT_FEE_FROM: "2020-01-01" } });
   check("the Gmail script (answering a payer's own email) is not capped", r.status === 200, JSON.stringify(r.data));
+  await invited("bank5@usc.edu"); const m0 = MAILS.length;
+  const burst = await Promise.all(Array.from({ length: 6 }, (_, i) => call("/pay/bank", { email: "bank5@usc.edu" }, { ip: "10.66.1." + i, envx: { STUDENT_FEE_FROM: "2020-01-01" } })));
+  const toHim = MAILS.slice(m0).filter(x => [].concat(x.to).includes("bank5@usc.edu")).length;
+  check("6 requests at once for one address: one bank-details email (one per address per 10 minutes)", toHim === 1 && burst.every(x => x.status === 200), `emails ${toHim}, ${burst.map(x => x.status).join(",")}`);
+  await invited("bank6@usc.edu");
+  const sink = env.MAIL_SINK; env.MAIL_SINK = async () => { throw new Error("smtp down"); };
+  r = await call("/pay/bank", { email: "bank6@usc.edu" }, { ip: "10.66.2.1", envx: { STUDENT_FEE_FROM: "2020-01-01" } });
+  env.MAIL_SINK = sink; const m1 = MAILS.length;
+  const r2 = await call("/pay/bank", { email: "bank6@usc.edu" }, { ip: "10.66.2.1", envx: { STUDENT_FEE_FROM: "2020-01-01" } });
+  check("a send that failed (try again in a minute): the retry really sends", r.status === 502 && r2.status === 200 && !r2.data?.again && MAILS.slice(m1).some(x => [].concat(x.to).includes("bank6@usc.edu")), `${r.status} ${JSON.stringify(r2.data)}`);
 }
 
 console.log("S7 /pay/tick: wrong key refused, right key accepted");

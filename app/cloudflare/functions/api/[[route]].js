@@ -3325,7 +3325,20 @@ export async function onRequest(context) {
         // offers it; this also answers the Gmail script's auto-reply and anyone posting here by hand.
         return json({ error: "Students pay by card, Venmo or Zelle at " + PAY_URL + " — there is no bank transfer option.", student: true }, 400);
       }
-      await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind("ip:" + (script ? "gmail" : clientIp), email, null, "pay_bank", kind, now()).run();
+      // This request's place (its row) is taken, then the limits are read again counting only the places taken before
+      // it, so requests at the same moment send one email per address and stay within the caps; a refused or unsent
+      // one gives its place back (a retry after a failed send is not taken for "sent a minute ago").
+      const mine = Number((await db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?) RETURNING id").bind("ip:" + (script ? "gmail" : clientIp), email, null, "pay_bank", kind, now()).first())?.id) || 0;
+      const giveBack = () => db.prepare("DELETE FROM events WHERE id=? AND event='pay_bank'").bind(mine).run().catch(() => {});
+      if (mine && await db.prepare("SELECT 1 FROM events WHERE event='pay_bank' AND " + RL_EV + " AND student=? AND ts>? AND id<?").bind(email, ten, mine).first()) {
+        await giveBack(); return json({ ok: true, sent: true, to: email, again: true });
+      }
+      if (mine && !script && Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_bank' AND " + RL_EV + " AND ts>? AND device_id=? AND id<=?").bind(hr, "ip:" + clientIp, mine).first()).n) > IP_BANK) {
+        await giveBack(); return json({ error: "too many requests — try again in an hour" }, 429);
+      }
+      if (mine && !script && Number((await db.prepare("SELECT COUNT(*) AS n FROM events WHERE event='pay_bank' AND " + RL_EV + " AND ts>? AND id<=?").bind(new Date(Date.now() - 86400000).toISOString(), mine).first()).n) > Number(env.BANK_MAIL_DAILY_MAX || 60)) {
+        await giveBack(); return json({ error: "Too many requests today. Email " + (stuBank() || "support@lockqz.com") + " for the bank details." }, 429);
+      }
       // Without the email's pay-link token the answer is the same whatever the email (never says "paid" or the balance).
       const seeAll = script || await payOk(email, body.t);
       if (!(left > 0.005)) return json(seeAll ? { ok: true, paid: true } : { ok: true, sent: true, to: email });
@@ -3340,7 +3353,7 @@ export async function onRequest(context) {
         + (env.ZELLE_TO ? `Faster: Zelle ${m(taxOn() ? waysFor(kind, left).zelle.total : w.total)} to ${env.ZELLE_TO} with memo ${code}. It arrives in minutes.\n` : "")   // Zelle's own price (professors: lower than a bank transfer)
         + `\nQuestions: reply to this email.`;
       try { await mailOut(email, `LOCKqz bank transfer details · ${code}`, text, {}, "essential"); }
-      catch (e) { return json({ error: "Could not send the email. Try again in a minute." }, 502); }
+      catch (e) { await giveBack(); return json({ error: "Could not send the email. Try again in a minute." }, 502); }
       if (!details && env.ADMIN_EMAIL) try { await mailOut(String(env.ADMIN_EMAIL), `Send bank details: ${email} (${code})`, `${email} asked to pay ${m(w.total)} by bank transfer (memo ${code}).\nReply to them with LOCKqz's bank details.\nTo answer automatically: set the Pages secret BANK_DETAILS.`, { inbox: true }); } catch {}
       return json(seeAll ? { ok: true, sent: true, to: email, amount: w.total } : { ok: true, sent: true, to: email });
     }
