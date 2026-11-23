@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- sweep 32 (Claude, 2026-11-23 ~12:00Z): app/mailin/worker.js, app/tests/test_mailin_worker.mjs, app/tests/test_mailin.mjs, app/cloudflare/public/sync.js, app/tests/test_mailin_sync.mjs, [[route]].js (/mailfwd only)
 
 ## Recently finished
 - 2026-11-23 03:38 PT — 01UUDg7YXjJx: bug sweep 31, apps 0.6.43 live (abffa10, Release 45165072815 green on every job). A helper restarted after its agent (every update) is told the student at the agent's next status read (Mac and Windows). Hidden-window closing: antivirus and graphics/game-overlay software stays (Windows by vendor signature, checked once per file; Mac by bundle id); a program that cannot be closed is said once and not tried again that quiz. Checked live: CWS serves professor extension 1.0.14; Email Routing quiz@ rule, subaddressing and the mailin Worker in place; API fuzz 28,480 calls x2 with no 5xx.
