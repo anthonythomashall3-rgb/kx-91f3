@@ -895,4 +895,18 @@ ok("the same list writes nothing; no list leaves the file as it is") if _kr.get(
 ok("the 12-hour refresh replaces it with the server's list; an answer without one leaves it") if _kr.get("served") == "FromServer\n" and _kr.get("kept") == "FromServer\n" else bad("refresh %r" % _kr)
 ok("an empty server list empties it") if _kr.get("empty") is True and _kr.get("text3") == "" else bad("empty %r" % _kr)
 
+print("T-tell 23 Nov: a helper restarted after the agent (an update) learns the student again")
+_A3 = load("lockqz-agent.py")
+_ag = _A3.Agent.__new__(_A3.Agent); _ag.student = "s@usc.edu"; _calls = []
+def _hp(path, body=None, timeout=None):
+    _calls.append((path, (body or {}).get("student"))); return {"ok": True}
+_ag.helper = _hp
+_ag.tell_student({"state": "unlocked", "quiz_id": None, "student": None})
+ok("a helper without the student is told it") if _calls == [("/student", "s@usc.edu")] else bad("tell_student calls %r" % _calls)
+_calls.clear(); _ag.tell_student({"state": "locked", "quiz_id": "1-2", "student": "s@usc.edu"}); _ag.tell_student({"state": "other_user", "quiz_id": None})
+_ag.tell_student({"state": "unlocked"}); _ag.student = ""; _ag.tell_student({"state": "unlocked", "student": None})
+ok("never when it knows one, while another account's quiz holds it, from an old helper, or with no student here") if not _calls else bad("extra calls %r" % _calls)
+_src3 = open(os.path.join(MAC, "lockqz-agent.py")).read()
+ok("checked at every helper status read (unlocked and locked)") if _src3.count("self.tell_student(st)") == 2 else bad("tell_student not called twice")
+
 print(""); print(f"RESULT: {passed} passed, {failed} failed"); sys.exit(0 if failed == 0 else 1)

@@ -110,9 +110,8 @@ Check "the model-file pattern matches llama.cpp, Ollama and Hugging Face paths, 
 
 Write-Host "H programs that hide their windows from screen capture (22 Nov 2026): closed whatever their name"
 $astA = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $Win "lockqz-agent.ps1"), [ref]$null, [ref]$null)
-$ka = @($astA.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and $_.Left.Extent.Text -eq '$KeepApps' })[0]
-. ([ScriptBlock]::Create($ka.Extent.Text))
-foreach ($t in (FuncTexts "lockqz-agent.ps1" @("Read-KeepApps", "Keep-Hidden", "Close-HiddenApps"))) { . ([ScriptBlock]::Create($t)) }
+foreach ($ka in @($astA.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and @('$KeepApps', '$KeepSigners', '$SignerCache', '$HiddenNoClose') -contains $_.Left.Extent.Text })) { . ([ScriptBlock]::Create($ka.Extent.Text)) }
+foreach ($t in (FuncTexts "lockqz-agent.ps1" @("Read-KeepApps", "Keep-Hidden", "Close-HiddenApps", "Signer-Kept", "Tell-Student"))) { . ([ScriptBlock]::Create($t)) }
 $tmpH = Join-Path ([IO.Path]::GetTempPath()) ("lqh-" + [guid]::NewGuid().ToString("N")); New-Item -ItemType Directory -Path $tmpH | Out-Null
 [IO.File]::WriteAllText((Join-Path $tmpH "keep.txt"), "KeptByServer`nGlimp; rm -rf`n# a note`n")
 $kk = Read-KeepApps (Join-Path $tmpH "keep.txt")
@@ -135,6 +134,38 @@ if (-not $IsWindows) {
   function Get-HiddenPids { throw "no window list here" }
   Check "no window list (an error): nothing closed, no error" (@(Close-HiddenApps $kk).Count -eq 0)
 }
+# 23 Nov: security and graphics software stays (by its signature), a program that cannot be closed is not tried again
+$script:sigCalls = 0
+function Get-AuthenticodeSignature { param([string]$LiteralPath, $ErrorAction)
+  $script:sigCalls++
+  $o = switch -Wildcard ($LiteralPath) { "*\ms*" { "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" } "*\nv*" { "CN=NVIDIA Corporation, O=NVIDIA Corporation, L=Santa Clara, S=California, C=US" } "*\fake*" { "CN=x, O=Evil NVIDIA Corporation Fans, C=US" } default { $null } }
+  if (-not $o) { return [pscustomobject]@{ Status = "NotSigned"; SignerCertificate = $null } }
+  [pscustomobject]@{ Status = "Valid"; SignerCertificate = [pscustomobject]@{ Subject = $o } } }
+$script:SignerCache = @{}
+Check "Microsoft- and NVIDIA-signed programs stay; an unsigned one or a look-alike signer does not" ((Signer-Kept "C:\x\ms\a.exe") -and (Signer-Kept "C:\x\nv\o.exe") -and -not (Signer-Kept "C:\x\cluely\c.exe") -and -not (Signer-Kept "C:\x\fake\f.exe"))
+$n0 = $script:sigCalls; [void](Signer-Kept "C:\x\ms\a.exe"); [void](Signer-Kept "C:\x\cluely\c.exe")
+Check "each program file is checked once (every 5 s would be slow)" ($script:sigCalls -eq $n0)
+Check "Keep-Hidden asks the signature last: an AppData program signed by Microsoft stays" ((Keep-Hidden "PowerToys.Overlay" "C:\x\ms\PowerToys.Overlay.exe" $kk) -and -not (Keep-Hidden "Overlay" "C:\x\cluely\Overlay.exe" $kk))
+Remove-Item function:Get-AuthenticodeSignature
+if (-not $IsWindows) {
+  $f = Join-Path $tmpH "Stubborn"; [IO.File]::WriteAllText($f, "#!/bin/sh`nwhile :; do sleep 1; done`n"); & chmod +x $f
+  $stub = Start-Process -FilePath $f -PassThru; Start-Sleep -Milliseconds 300
+  function Get-HiddenPids { @($stub.Id) }
+  $script:logs = @(); function Log($m) { $script:logs += $m }
+  function Stop-Process { param($Id, [switch]$Force, $ErrorAction) throw "Access is denied" }
+  $script:HiddenNoClose = New-Object 'System.Collections.Generic.HashSet[int]'
+  $c1 = @(Close-HiddenApps $kk); $c2 = @(Close-HiddenApps $kk)
+  Check "a program that cannot be closed (an antivirus' own) is tried once, said once, then left alone" ($c1.Count -eq 0 -and $c2.Count -eq 0 -and @($script:logs | Where-Object { $_ -like "could not close Stubborn*not tried again*" }).Count -eq 1 -and $script:HiddenNoClose.Contains($stub.Id))
+  Remove-Item function:Stop-Process; function Log($m) { }
+  try { $stub.Kill() } catch { }
+}
+$script:told = @(); function Helper($path, $body) { $script:told += ,@($path, $body.student) }
+$script:Student = "s@usc.edu"
+Tell-Student ([pscustomobject]@{ state = "unlocked"; student = $null })
+Tell-Student ([pscustomobject]@{ state = "locked"; student = "s@usc.edu" }); Tell-Student ([pscustomobject]@{ state = "unlocked" })
+Check "a helper restarted after the agent (an update) is told the student again, only when it has none" ($script:told.Count -eq 1 -and $script:told[0][0] -eq "/student" -and $script:told[0][1] -eq "s@usc.edu")
+$asrc = Get-Content (Join-Path $Win "lockqz-agent.ps1") -Raw
+Check "asked at both helper status reads" (([regex]::Matches($asrc, 'Tell-Student \$st')).Count -eq 2)
 $astD = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $Win "lockqzd.ps1"), [ref]$null, [ref]$null)
 $sl = @($astD.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and $_.Left.Extent.Text -eq '$SignLib' })[0]
 . ([ScriptBlock]::Create($sl.Right.Expression.Value))

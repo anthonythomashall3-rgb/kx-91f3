@@ -154,6 +154,24 @@ check "the preview only says what it would close" '[ ! -s "$TMP/hw.killed" ] && 
 check "nothing hidden: nothing closed, nothing said" '[ ! -s "$TMP/hw.killed" ] && [ ! -s "$TMP/hw.out" ]'
 check "the window list is read in the signed-in user's session (the engine runs as root), with no permission prompt" 'grep -q "launchctl asuser \"\$uid\" sudo -n -u \"#\$uid\" /usr/bin/osascript -l JavaScript" "$MAC/extra-block.sh" && grep -q "kCGWindowSharingState === 0" "$MAC/extra-block.sh"'
 check "the program file comes from the window list or lsof, never ps (it shows ./name)" 'grep -q "runningApplicationWithProcessIdentifier" "$MAC/extra-block.sh" && grep -q "^_hw_path() { lsof " "$MAC/extra-block.sh"'
+{ echo "120${T}Stubborn${T}/Applications/Stubborn.app/Contents/MacOS/Stubborn${T}com.stubborn.app"
+  echo "121${T}Norton 360${T}/Applications/Norton 360.app/Contents/MacOS/Norton 360${T}com.norton.mac.antivirus"
+  echo "122${T}Glimp${T}/Applications/Glimp.app/Contents/MacOS/Glimp${T}com.glimp.desktop"; } > "$TMP/hw.list"
+rm -f "$TMP/hwstate/hidden.skip"
+hw_run_k() {   # like hw_run, but 120 cannot be closed
+  : > "$TMP/hw.killed"
+  ( STATE="$TMP/hwstate"; mkdir -p "$STATE"; HERE="$TMP/hwhere"; mkdir -p "$HERE"
+    source "$MAC/lockqz-core.sh" 2>/dev/null; source "$MAC/extra-block.sh"; DRYRUN=0
+    xb_say() { echo "LOCKqz: $*"; }
+    _hw_list() { cat "$TMP/hw.list"; }; _hw_bundle_id() { :; }; _hw_apple() { return 1; }
+    _hw_kill() { echo "$1" >> "$TMP/hw.killed"; [ "$1" != 120 ]; }
+    hidden_close ) > "$TMP/hw.out" 2>&1
+}
+hw_run_k
+check "a program that cannot be closed is said once and remembered; an antivirus (Norton) is never touched" '[ "$(sort -n "$TMP/hw.killed" | tr "\n" " ")" = "120 122 " ] && grep -q "could not close Stubborn" "$TMP/hw.out" && grep -qx 120 "$TMP/hwstate/hidden.skip"'
+hw_run_k
+check "the next pass does not try it again (only the new copy of Glimp)" '[ "$(cat "$TMP/hw.killed" | tr "\n" " ")" = "122 " ] && ! grep -q "Stubborn" "$TMP/hw.out"'
+check "the list of programs not tried again is cleared when the quiz ends" 'grep -q "rm -f \"\$XB_APPLIED\" \"\$HW_SKIP\"" "$MAC/extra-block.sh"'
 check "the helper saves the server's never-close list beside the AI list (keep.txt)" 'grep -q "def save_keep" "$MAC/lockqzd.py" && grep -q "save_keep(keep)" "$MAC/lockqzd.py" && grep -q "KEEP_FILE=\"\${LOCKQZ_KEEP_FILE:-\${HERE:-" "$MAC/extra-block.sh"'
 
 echo ""

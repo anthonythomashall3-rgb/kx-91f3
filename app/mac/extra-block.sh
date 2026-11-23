@@ -475,8 +475,12 @@ KEEP_APPS=("id:us.zoom." "zoom.us" "id:com.microsoft." "id:Cisco-Systems." "id:c
            "id:com.texthelp." "id:com.kurzweiledu." "id:com.nuance." "id:com.donjohnston." "id:com.claro" \
            "id:com.respondus." "id:org.safeexambrowser." "id:com.honorlock." "id:com.examsoft." "id:com.proctoru." \
            "id:no.inspera." "LockDown Browser" "Safe Exam Browser" "Examplify" "Guardian Browser" \
-           "id:com.lockqz." "id:app.lockqz." "LOCKqz")
+           "id:com.lockqz." "id:app.lockqz." "LOCKqz" \
+           "id:com.symantec." "id:com.norton." "id:com.mcafee." "id:com.avast." "id:com.avg." "id:com.bitdefender." \
+           "id:com.kaspersky." "id:com.eset." "id:com.malwarebytes." "id:com.sophos." "id:com.trendmicro." "id:com.intego." \
+           "id:com.crowdstrike." "id:com.sentinelone." "id:com.webroot." "id:com.avira.")
 KEEP_FILE="${LOCKQZ_KEEP_FILE:-${HERE:-/Library/Application Support/LOCKqz}/keep.txt}"
+HW_SKIP="${STATE:-/Library/Application Support/LOCKqz}/hidden.skip"   # programs that could not be closed: not tried again this quiz
 HW_JXA='try { ObjC.import("CoreGraphics"); ObjC.import("AppKit");
 var a = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo(0, 0))) || [], o = {};
 a.forEach(function (w) { if (w.kCGWindowSharingState === 0 && w.kCGWindowOwnerPID > 1) o[w.kCGWindowOwnerPID] = String(w.kCGWindowOwnerName || ""); });
@@ -493,7 +497,7 @@ _hw_list() {   # -> "pid<TAB>name<TAB>program file<TAB>bundle id" per program wi
 _hw_path() { lsof -nP -a -p "$1" -d txt -Fn 2>/dev/null | sed -n 's/^n//p' | head -1; }   # when the window list has none (never ps: it shows ./name)
 _hw_bundle_id() { /usr/bin/defaults read "$1/Contents/Info" CFBundleIdentifier 2>/dev/null; }
 _hw_apple() { /usr/bin/codesign --verify -R="anchor apple" "$1" >/dev/null 2>&1; }
-_hw_kill() { kill -TERM "$1" 2>/dev/null; sleep 0.3; kill -0 "$1" 2>/dev/null && kill -KILL "$1" 2>/dev/null; return 0; }
+_hw_kill() { kill -TERM "$1" 2>/dev/null; sleep 0.3; kill -0 "$1" 2>/dev/null && kill -KILL "$1" 2>/dev/null; sleep 0.1; ! kill -0 "$1" 2>/dev/null; }
 hw_keep() {   # hw_keep path name bundle-id keep... (keep entries in lower case) -> 0 when the program stays open
   local path="$1" name="$2" bid="$3" app="" k n; shift 3
   case "$path" in "") return 0 ;; /System/*|/usr/*|/bin/*|/sbin/*|/Library/Apple/*) return 0 ;; /*) ;; *) return 0 ;; esac
@@ -518,11 +522,12 @@ hidden_close() {   # every lock pass: close what hides its windows from screen c
   while IFS=$'\t' read -r pid name path bid; do
     case "$pid" in ""|*[!0-9]*) continue ;; esac
     [ "$pid" -le 1 ] || [ "$pid" = "$$" ] && continue
+    [ -f "$HW_SKIP" ] && grep -qx "$pid" "$HW_SKIP" 2>/dev/null && continue
     [ -n "$path" ] || path="$(_hw_path "$pid")"
     hw_keep "$path" "$name" "$bid" "${lkeep[@]}" && continue
     if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would close (hides its windows from screen capture): $name"; continue; fi
-    _hw_kill "$pid"
-    xb_say "closed $name ($path): it hides its windows from screen capture"
+    if _hw_kill "$pid"; then xb_say "closed $name ($path): it hides its windows from screen capture"
+    else echo "$pid" >> "$HW_SKIP" 2>/dev/null; xb_say "could not close $name ($path), not tried again this quiz"; fi
   done <<< "$found"
   return 0
 }
@@ -574,7 +579,7 @@ extra_unlock() {
   # VPN/VM/remote/overlay/model apps are left for the student to reopen; only the
   # OS-level Apple Intelligence policy and the proxies must be actively restored.
   local rc=0 ap=""
-  rm -f "$XB_APPLIED" 2>/dev/null || true
+  rm -f "$XB_APPLIED" "$HW_SKIP" 2>/dev/null || true
   airplay_receiver_restore & ap=$!   # beside the steps below; waited for before this function returns
   apple_intelligence_on || rc=1
   siri_on || rc=1

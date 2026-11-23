@@ -1392,6 +1392,7 @@ class Agent:
                 try:
                     st = self.helper("/status", timeout=8)
                     self.note_cap(st)
+                    self.tell_student(st)
                     if st.get("state") == "locked" and st.get("quiz_id") and st["quiz_id"] not in self.capped:
                         self.adopt(st, present)
                 except Exception as e: log("helper check failed: %s" % e)
@@ -1438,6 +1439,7 @@ class Agent:
                 st = self.helper("/status")
                 self.helper_ok = True
                 self.note_cap(st)
+                self.tell_student(st)
                 if self.quiz in self.capped:
                     log("%s released %s — not re-locking" % (st.get("capped_reason") or "safety cap", self.quiz))
                     self.locked, self.quiz, self.url, self.missing_since = False, None, None, None
@@ -1473,6 +1475,15 @@ class Agent:
             self.last_beat = now
             self.api_post("/report", {"device_id": self.device, "event": "heartbeat", "quiz_id": self.quiz,
                                       "student": self.student, "source": "agent"})
+
+    def tell_student(self, st):
+        """A helper that came up after this agent (an update or a reboot restarts both) missed the student this
+        agent told it at start: tell it again, once it answers. Never while another account's quiz holds it."""
+        if self.student and isinstance(st, dict) and "student" in st and not st.get("student") and st.get("state") != "other_user":
+            try:
+                self.helper("/student", {"student": self.student}, timeout=8)
+                log("told the helper the student again (%s)" % self.student)
+            except Exception: pass
 
     def run(self):
         try: self.helper("/student", {"student": self.student}, timeout=8)

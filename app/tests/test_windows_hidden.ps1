@@ -10,8 +10,8 @@ function Check($m, $c) { if ($c) { $script:pass++; Write-Host "  ok: $m" } else 
 function Log($m) { Write-Host "    agent: $m" }
 $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $Win "lockqz-agent.ps1"), [ref]$null, [ref]$null)
 foreach ($s in $ast.EndBlock.Statements) {
-  if (($s -is [System.Management.Automation.Language.FunctionDefinitionAst] -and @("Get-HiddenPids", "Read-KeepApps", "Keep-Hidden", "Close-HiddenApps") -contains $s.Name) -or
-      ($s -is [System.Management.Automation.Language.AssignmentStatementAst] -and $s.Left.Extent.Text -eq '$KeepApps')) { . ([ScriptBlock]::Create($s.Extent.Text)) }
+  if (($s -is [System.Management.Automation.Language.FunctionDefinitionAst] -and @("Get-HiddenPids", "Read-KeepApps", "Keep-Hidden", "Close-HiddenApps", "Signer-Kept") -contains $s.Name) -or
+      ($s -is [System.Management.Automation.Language.AssignmentStatementAst] -and @('$KeepApps', '$KeepSigners', '$SignerCache', '$HiddenNoClose') -contains $s.Left.Extent.Text)) { . ([ScriptBlock]::Create($s.Extent.Text)) }
 }
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 
@@ -49,6 +49,7 @@ $closed = @(Close-HiddenApps (Read-KeepApps (Join-Path $Out "keep.txt")))
 Check "the program with the hidden window is closed" ($h.WaitForExit(5000) -and ($closed -contains "LQHiddenTest"))
 Check "the normal one and a name the server added stay open" ((-not $s.HasExited) -and (-not $k.HasExited) -and ($closed -notcontains "KeptByServer"))
 Check "nothing else on this computer was closed" (@($closed | Where-Object { $_ -ne "LQHiddenTest" }).Count -eq 0)
+Check "a Microsoft-signed program counts as Windows' own; the unsigned test program does not" (((Signer-Kept "$env:WINDIR\System32\notepad.exe") -or (Signer-Kept "$env:WINDIR\explorer.exe")) -and -not (Signer-Kept $exe))
 foreach ($p in @($s, $k)) { try { if (-not $p.HasExited) { $p.Kill() } } catch { } }
 
 Write-Host ""

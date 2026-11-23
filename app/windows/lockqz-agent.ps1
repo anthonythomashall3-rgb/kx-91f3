@@ -570,6 +570,36 @@ $KeepApps = @("Zoom","CptHost","aomhost64","zWebview2Agent","ms-teams","Teams","
   "LockDownBrowser","LockDownBrowserOEM","Respondus LockDown Browser","SafeExamBrowser","Safe Exam Browser","Honorlock","Guardian",
   "GuardianBrowser","Examplify","ExamSoft","Inspera Exam Portal","InsperaExamPortal","LOCKqz")
 $KeepFile = if ($env:LOCKQZ_KEEP_FILE) { $env:LOCKQZ_KEEP_FILE } else { "$env:ProgramData\LOCKqz\keep.txt" }
+# Security and graphics software is never closed, whatever it names its programs: an antivirus may hide its own alerts
+# from capture (and treats an attempt to close it as an attack on itself); graphics and game overlays may hide theirs.
+$KeepSigners = @("Microsoft Corporation", "Microsoft Windows", "NVIDIA Corporation", "Advanced Micro Devices", "Intel Corporation",
+  "Gen Digital", "NortonLifeLock", "Symantec", "McAfee", "Avast Software", "AVG Technologies", "Bitdefender", "Kaspersky", "ESET",
+  "Malwarebytes", "Sophos", "Trend Micro", "Webroot", "Avira", "F-Secure", "WithSecure", "CrowdStrike", "SentinelOne", "Cisco",
+  "Zoom Video Communications", "Zoom Communications", "Google LLC", "Mozilla Corporation", "Brave Software")
+$SignerCache = @{}
+$HiddenNoClose = New-Object 'System.Collections.Generic.HashSet[int]'
+function Signer-Kept([string]$path) {
+  # $true when the program file carries a valid signature of one of $KeepSigners (checked once per file)
+  if (-not $path) { return $false }
+  if ($script:SignerCache.ContainsKey($path)) { return $script:SignerCache[$path] }
+  $ok = $false
+  try {
+    $sig = Get-AuthenticodeSignature -LiteralPath $path -ErrorAction Stop
+    if ($sig.Status -eq 'Valid' -and $sig.SignerCertificate) {
+      $subj = [string]$sig.SignerCertificate.Subject
+      foreach ($k in $script:KeepSigners) { if ($subj -match ('(^|, )O="?' + [regex]::Escape($k))) { $ok = $true; break } }
+    }
+  } catch { }
+  $script:SignerCache[$path] = $ok
+  return $ok
+}
+function Tell-Student($st) {
+  # A helper that came up after this agent (an update or a reboot restarts both) missed the student this agent told
+  # it at start: tell it again once it answers.
+  if ($script:Student -and $st -and (@($st.PSObject.Properties.Name) -contains "student") -and -not $st.student) {
+    try { Helper "/student" @{ student = $script:Student } | Out-Null; Log "told the helper the student again ($script:Student)" } catch { }
+  }
+}
 function Get-HiddenPids {
   # -> the process ids that own a top-level window hidden from screen capture (display affinity not WDA_NONE)
   if (-not ('LqHidden' -as [type])) {
@@ -612,19 +642,20 @@ function Keep-Hidden([string]$name, [string]$path, $keep) {
   $w = ([string]$env:WINDIR).TrimEnd('\')
   if ($w -and $path.StartsWith($w + '\', [StringComparison]::OrdinalIgnoreCase)) { return $true }
   if ($path -match '\\WindowsApps\\[^\\]+__8wekyb3d8bbwe\\') { return $true }   # Teams, Snipping Tool, Game Bar, ...
-  return [bool]$keep.Contains($name)
+  if ($keep.Contains($name)) { return $true }
+  return (Signer-Kept $path)   # security and graphics software (see $KeepSigners)
 }
 function Close-HiddenApps($keep) {
   # every few seconds during a quiz -> the names closed
   $closed = @()
   $ids = @(); try { $ids = @(Get-HiddenPids) } catch { return $closed }
   foreach ($id in $ids) {
-    if ([int]$id -eq $PID) { continue }
+    if (([int]$id -eq $PID) -or $script:HiddenNoClose.Contains([int]$id)) { continue }
     $p = Get-Process -Id ([int]$id) -ErrorAction SilentlyContinue; if (-not $p) { continue }
     $path = ""; try { $path = [string]$p.Path } catch { }
     if (Keep-Hidden ([string]$p.ProcessName) $path $keep) { continue }
     try { Stop-Process -Id ([int]$id) -Force -ErrorAction Stop; $closed += [string]$p.ProcessName; Log "closed $($p.ProcessName) ($path): it hides its windows from screen capture" }
-    catch { Log "could not close $($p.ProcessName): $_" }
+    catch { [void]$script:HiddenNoClose.Add([int]$id); Log "could not close $($p.ProcessName) (not tried again): $_" }
   }
   return $closed
 }
@@ -861,6 +892,7 @@ while ($true) {
         try {
           $st = Helper "/status" $null 8
           Note-Cap $st
+          Tell-Student $st
           if ((($st.state -eq "locked") -or ($st.state -eq "developer")) -and $st.quiz_id -and -not $Capped.ContainsKey([string]$st.quiz_id) -and ((-not $st.student) -or (-not $Student) -or ($st.student -eq $Student))) {
             $Locked = $true; $Quiz = $st.quiz_id; $QuizTab = $null; $QuizTitle = $null; $QuizUrl = ""; $QuizProc = ""
             if (-not $script:Seen.ContainsKey([string]$Quiz)) { $script:Seen[[string]$Quiz] = @{ attempt = $false; sub = $false; rt = $true; at = [DateTime]::UtcNow } }
@@ -902,6 +934,7 @@ while ($true) {
             $st = Helper "/status" $null
             $hs = $st.state
             $HelperOk = $true
+            Tell-Student $st
             if ($st.capped_quiz -and ([string]$st.capped_quiz -eq [string]$Quiz)) {
               Add-Cap ([string]$Quiz)
               Log "$(if ($st.capped_reason) { $st.capped_reason } else { 'safety cap' }) released $Quiz - not re-locking"
