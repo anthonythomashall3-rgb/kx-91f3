@@ -2137,8 +2137,14 @@ export async function onRequest(context) {
     const ogOf = r => og.get(String(r.ou) + "\u0000" + String(r.qi)) ?? null;
     const protect = (await db.prepare(`SELECT q.ou,q.qi,q.password,q.title,q.gated FROM quizzes q WHERE q.ou IN (${ph}) AND q.qi IS NOT NULL`).bind(...ous).all()).results.map(r => withOrig({ ...r, orig: ogOf(r) }));
     // Brightspace's submission email for each protected quiz goes to LOCKqz too (sync.js adds this address to the
-    // quiz's Notification Email, beside the professor's own, and takes only it away when the quiz is released).
-    if (mailinOn()) for (const r of protect) r.mail = await quizMail(String(r.ou), String(r.qi));
+    // quiz's Notification Email, beside the professor's own, and takes only it away when the quiz is released): only
+    // for an exam that is not over, in a class LOCKqz is on for. A class turned off, or a past exam, is left as it is.
+    if (mailinOn() && protect.length) {
+      const live = new Set((await db.prepare(`SELECT q.ou AS ou, q.qi AS qi FROM quizzes q LEFT JOIN bs_quizzes b ON b.ou=q.ou AND b.qi=q.qi
+          WHERE q.ou IN (${ph}) AND q.qi IS NOT NULL AND NOT EXISTS (SELECT 1 FROM course_off co WHERE co.ou=q.ou)
+            AND (b.end_date IS NULL OR b.end_date='' OR b.end_date>?)`).bind(...ous, now()).all()).results.map(r => String(r.ou) + "-" + String(r.qi)));
+      for (const r of protect) if (live.has(String(r.ou) + "-" + String(r.qi))) r.mail = await quizMail(String(r.ou), String(r.qi));
+    }
     const clear = (await db.prepare(`SELECT c.ou,c.qi,c.password FROM pending_clear c WHERE c.ou IN (${ph})`).bind(...ous).all()).results.map(r => withOrig({ ...r, orig: ogOf(r) }));
     return { protect, clear };
   }
@@ -2273,6 +2279,36 @@ export async function onRequest(context) {
         str(body.from, 200), str(body.subject, 300), String(body.text || "").slice(0, 8000)).run();
       const n = await mailinRun({ id: r.meta.last_row_id });
       return json({ ok: true, found: n > 0 });
+    }
+    // An email to support@lockqz.com or the catch-all that the mailbox turned away for a while (Gmail slows down mail
+    // Cloudflare forwards to it), handed over by LOCKqz's Email Worker (app/mailin) with its key (MAILIN_KEY): LOCKqz
+    // sends it on to the same mailbox itself - from that Gmail account to itself when it is LOCKqz's Gmail sender,
+    // otherwise through LOCKqz's mail - with Reply-To its sender. Its words only (attachments are named); at most
+    // MAILFWD_DAY_MAX (40) a day (counted with the other mail, mail_sent '_all'). Kept: that one went on (to which
+    // address, and why), never its sender or words.
+    if (p === "/mailfwd" && request.method === "POST") {
+      const key = String(env.MAILIN_KEY || "");
+      if (key.length < 32 || !sameHex(String(request.headers.get("X-LQZ-Key") || ""), key)) return json({ error: "forbidden" }, 403);
+      if (Number((await db.prepare("SELECT COALESCE(SUM(n),0) AS n FROM mail_sent WHERE ou='_all' AND kind='fwd' AND day>=?").bind(hourKey(Date.now() - 24 * 3600000)).first())?.n || 0) >= Number(env.MAILFWD_DAY_MAX || 40))
+        return json({ error: "too many today" }, 429);
+      const line = (v, n) => String(v == null ? "" : v).replace(/[\r\n\t]+/g, " ").trim().slice(0, n);
+      const to = String(env.SUPPORT_EMAIL || "lockqz.app@gmail.com"), from = line(body.from, 200), rcpt = line(body.to, 200);
+      const subject = "Fwd: " + (line(body.subject, 200) || "(no subject)");
+      const files = (Array.isArray(body.files) ? body.files : []).map(f => line(f, 120)).filter(Boolean).slice(0, 20);
+      const text = `LOCKqz sent this email on itself: the mailbox turned the direct forward away for a while.\n\nFrom: ${from || "(unknown)"}\nTo: ${rcpt || "(unknown)"}` +
+        (line(body.date, 100) ? `\nDate: ${line(body.date, 100)}` : "") + (files.length ? `\nAttachments (not included): ${files.join(", ")}` : "") +
+        `\n\n${String(body.text || "").slice(0, 20000) || "(no text)"}`;
+      const replyTo = /^[^@\s<>"(),;:]+@[^@\s<>"(),;:]+\.[^@\s<>"(),;:]+$/.test(from) ? from : null;
+      try {
+        if (gmailOn(env) && String(env.MAIL_USER || "").toLowerCase() === to.toLowerCase() && await mailRoom(1, "essential")) {
+          await sendMail({ MAIL_SINK: env.MAIL_SINK, MAIL_OPEN: env.MAIL_OPEN, MAIL_HOST: env.MAIL_HOST, MAIL_PORT: env.MAIL_PORT, MAIL_USER: env.MAIL_USER, MAIL_APP_PASSWORD: env.MAIL_APP_PASSWORD },
+            to, subject, text, { replyTo, html: autoHtml(text, { sign: false }) });
+          try { await mailCount(1); } catch {}
+        } else await mailOut(to, subject, text, { replyTo, inbox: true }, "essential");
+      } catch { return json({ error: "send_failed" }, 502); }
+      await db.batch([db.prepare("INSERT INTO mail_sent (ou,kind,day,n,at) VALUES ('_all','fwd',?,1,?) ON CONFLICT(ou,kind,day) DO UPDATE SET n=n+1, at=excluded.at").bind(hourKey(), now()),
+        db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES ('mail',NULL,NULL,'mail_fwd',?,?)").bind((rcpt + " | " + line(body.why, 250)).slice(0, 300), now())]).catch(() => {});
+      return json({ ok: true });
     }
     if (p === "/version") return json({ ...buildInfo(), codes_on: codesOn, strict, fee_on: feeOn(), stripe: stripeOn(), google: env.GOOGLE_CLIENT_ID || null, google_hd: env.GOOGLE_CLIENT_ID ? String(env.GOOGLE_HD ?? "usc.edu") : null });
 

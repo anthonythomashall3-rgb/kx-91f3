@@ -126,8 +126,11 @@ REQUIRE_GATE = "0"
 # (quiz+<ou>-<qi>-<tok>@lockqz.com) to its Notification Email, beside the professor's own; LOCKqz's Email Worker
 # (app/mailin; Email Routing rule quiz@lockqz.com, subaddressing on) hands each email to /api/mailin, which records
 # the submission (AI back at once on a held computer) and tells the professor of a submit without LOCKqz.
-# "0" = off: the Sync leaves Notification Email alone.
+# "0" = off: the Sync leaves Notification Email alone. Only exams that are not over, in classes LOCKqz is on for.
 MAILIN_ON = "1"
+# Email to support@lockqz.com and the catch-all goes through the same Worker to the mailbox; when the mailbox turns it
+# away for a while, the Worker hands it to /api/mailfwd and LOCKqz sends it on (Pages secret MAILIN_KEY, the Worker's
+# own secret of the same value; at most MAILFWD_DAY_MAX, 40, a day).
 
 # Exam emails (27 Oct 2026): reminders 48 h / 3 h before each protected exam to students without LOCKqz, and
 # the professor's T-70 check-in, run by POST /api/cron (X-LOCKqz-Pay). Cloudflare Pages Functions have no

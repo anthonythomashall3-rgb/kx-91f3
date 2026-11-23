@@ -73,5 +73,42 @@ console.log("W2 handed to the API");
   check("Workers Free, no storage, no public address; anything else goes on to the mailbox", /name = "lockqz-mailin"/.test(wt) && !/kv_namespaces|d1_databases|r2_buckets/.test(wt) && /workers_dev = false/.test(wt) && /FORWARD_TO = "lockqz\.app@gmail\.com"/.test(wt));
 }
 
+console.log("W3 an email that is not a quiz's: on to the mailbox; sent on by LOCKqz when the mailbox turns it away for a while");
+{
+  const calls = []; let status = [];
+  const KEY = "k".repeat(64);
+  const base = { API: "https://lockqz.test/api", NO_WAIT: true, FORWARD_TO: "lockqz.app@gmail.com", MAILIN_KEY: KEY, FETCH: async (u, o) => { calls.push({ u, o }); return new Response("{}", { status: status.shift() ?? 200 }); } };
+  const SUP = ["From: Ana Ruiz <ana@usc.edu>", "To: support@lockqz.com", "Subject: =?UTF-8?Q?Can=E2=80=99t_install?=", "Date: Mon, 23 Nov 2026 10:00:00 +0000", "MIME-Version: 1.0",
+    'Content-Type: multipart/mixed; boundary="m1"', "", "--m1", "Content-Type: text/plain; charset=utf-8", "", "The installer stops at step 2.", "--m1",
+    'Content-Type: image/png; name="shot.png"', 'Content-Disposition: attachment; filename="shot.png"', "Content-Transfer-Encoding: base64", "", "iVBORw0KGgo=", "--m1--", ""].join("\r\n");
+  const msg = (forward, extra = {}) => ({ to: "support@lockqz.com", from: "ana@usc.edu", raw: new Blob([SUP]).stream(), headers: new Headers({ subject: "Can't install" }), forward, ...extra });
+  const TEMP = "upstream (gmail-smtp-in.l.google.com.) temporary error: Unknown error: transient error (421): 4.7.28 Gmail has detected an unusual rate of unsolicited mail. To protect our users from spam, mail has been temporarily rate limited. d75a77b69052e-55d66c706cdsi25588961cf.236 - gsmtp";
+  const fwd = [];
+  await W.default.email(msg(async a => fwd.push(a)), base);
+  check("the mailbox takes it: forwarded, nothing else", fwd.length === 1 && fwd[0] === "lockqz.app@gmail.com" && calls.length === 0);
+  await W.default.email(msg(async () => { throw new Error(TEMP); }), base);
+  const b = calls.length ? JSON.parse(calls[0].o.body) : {};
+  check("Gmail's 'unusual rate' (421, for a while): LOCKqz sends it on (POST /api/mailfwd with the Worker's key)", calls.length === 1 && calls[0].u === "https://lockqz.test/api/mailfwd" && calls[0].o.headers["X-LQZ-Key"] === KEY);
+  check("... who wrote, to which address, the subject, the date and the words; an attachment by its name only", b.from === "ana@usc.edu" && b.to === "support@lockqz.com" && b.subject === "Can’t install" && /Mon, 23 Nov 2026/.test(b.date) && /stops at step 2/.test(b.text) && !/iVBOR/.test(b.text) && JSON.stringify(b.files) === '["shot.png"]' && /4\.7\.28/.test(b.why), JSON.stringify(b));
+  calls.length = 0;
+  let threw = null;
+  try { await W.default.email(msg(async () => { throw new Error("upstream (gmail-smtp-in.l.google.com.) permanent error: (550): 5.7.1 message rejected as spam"); }), base); } catch (e) { threw = e; }
+  check("a 'no' for good (550, spam): not sent on; the sender's server is told, as before", !!threw && calls.length === 0);
+  threw = null; status = [502, 502, 502];
+  try { await W.default.email(msg(async () => { throw new Error(TEMP); }), base); } catch (e) { threw = e; }
+  check("LOCKqz busy too (3 tries): the sender's server tries again later", !!threw && calls.length === 3);
+  calls.length = 0; threw = null; status = [429];
+  try { await W.default.email(msg(async () => { throw new Error(TEMP); }), base); } catch (e) { threw = e; }
+  check("LOCKqz refuses it (too many today, a wrong key): tried once, the sender's server tries again later", !!threw && calls.length === 1);
+  calls.length = 0; threw = null; status = [];
+  try { await W.default.email(msg(async () => { throw new Error(TEMP); }), { ...base, MAILIN_KEY: "" }); } catch (e) { threw = e; }
+  check("no key set: as before (the sender's server tries again later)", !!threw && calls.length === 0);
+  await W.default.email(msg(async () => { throw new Error(TEMP); }, { raw: new Blob(["Subject: x\n\nhuge"]).stream(), rawSize: 30000000 }), base);
+  const b2 = calls.length ? JSON.parse(calls[0].o.body) : {};
+  check("a very large email: sent on with its subject (its words are not read)", calls.length === 1 && b2.subject === "Can't install" && b2.text === "", JSON.stringify(b2));
+  const wt = readFileSync(join(HERE, "..", "mailin", "wrangler.toml"), "utf8");
+  check("the key is a secret, never in the repo", !/^\s*MAILIN_KEY\s*=/m.test(wt) && /wrangler secret put/.test(wt));
+}
+
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

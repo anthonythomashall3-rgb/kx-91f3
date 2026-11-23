@@ -6,6 +6,8 @@
 //   M4 a student none of whose computers locked for the quiz: the professor is told once; not for a locked student,
 //      one let in, or a quiz LOCKqz does not protect
 //   M5 /watch reads what a blip left unread; MAILIN_ON off = nothing changes
+//   M6 the address only on an exam that is not over, in a class LOCKqz is on for
+//   M7 POST /mailfwd: an email to support@ or the catch-all the mailbox turned away, sent on with the Worker's key
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync, writeFileSync, mkdtempSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -180,6 +182,58 @@ console.log("M5 /watch reads what a blip left; old rows go");
   check("the table is in schema.sql and its own migrate file", /CREATE TABLE IF NOT EXISTS mailin/.test(readFileSync(join(CF, "schema.sql"), "utf8")) && readdirSync(CF).some(f => /^migrate_\d+_mailin\.sql$/.test(f)));
   const route = readFileSync(join(CF, "functions", "api", "[[route]].js"), "utf8");
   check("old rows are removed with the other short-lived rows (14 days)", /DELETE FROM mailin WHERE id IN \(SELECT id FROM mailin WHERE at<\? LIMIT 300\)"\)\.bind\(ago\(14\)\)/.test(route));
+}
+
+console.log("M6 the address goes only on an exam that is not over, in a class LOCKqz is on for");
+{
+  const past = [{ qi: "3", name: "Exam 0", active: true, start: iso(Date.now() - 30 * 24 * H), end: iso(Date.now() - 20 * 24 * H) }];
+  run("INSERT OR REPLACE INTO quizzes (ou, qi, quiz_id, password, gated) VALUES ('700','3','700-3','LQ-ABCDEFGHJK',0)");
+  const syncAll = () => call("/sync", { whoami: { id: "8001" }, courses: [{ ou: "700", name: "BUAD 306", classlist: roster, quizzes: [...quizzes, ...past] }] }, { teacher: P });
+  let r = await syncAll();
+  const row = qi => (r.data?.protect || []).find(x => String(x.qi) === qi);
+  check("an exam that is not over: its address", row("1") && row("1").mail === addr("700", "1"), JSON.stringify(r.data?.protect));
+  check("a past exam LOCKqz still lists: no address (its Brightspace settings are left as they are)", !!row("3") && !("mail" in row("3")), JSON.stringify(row("3")));
+  run("INSERT OR REPLACE INTO course_off (ou, teacher_id, at) VALUES ('700', 'p', ?)", iso(Date.now()));
+  r = await syncAll();
+  check("a class turned off: no address on any of its exams", (r.data?.protect || []).length > 0 && (r.data.protect || []).every(x => !("mail" in x)), JSON.stringify(r.data?.protect));
+  run("DELETE FROM course_off WHERE ou='700'");
+  r = await syncAll();
+  check("... turned on again: the upcoming exam has it again", row("1") && row("1").mail === addr("700", "1"));
+}
+
+console.log("M7 an email the mailbox turned away for a while: LOCKqz sends it on, only with the Worker's key");
+{
+  const KEY = "a".repeat(64);
+  const fwdCall = async (b, key) => { const res = await onRequest({ request: new Request(BASE + "/api/mailfwd", { method: "POST", headers: { "Content-Type": "application/json", "CF-Connecting-IP": "10.0.47.9", ...(key ? { "X-LQZ-Key": key } : {}) }, body: JSON.stringify(b) }), env, waitUntil: p => p });
+    return { status: res.status, data: await res.json().catch(() => null) }; };
+  const B = { to: "support@lockqz.com", from: "ana@usc.edu", subject: "Can’t install", date: "Mon, 23 Nov 2026 10:00:00 +0000", text: "The installer stops at step 2.", files: ["shot.png"], why: "421 4.7.28 unusual rate" };
+  sent.length = 0;
+  let r = await fwdCall(B, KEY);
+  check("no key set on the server: refused", r.status === 403 && sent.length === 0);
+  env.MAILIN_KEY = KEY; env.MAIL_USER = "lockqz.app@gmail.com";
+  r = await fwdCall(B, "b".repeat(64));
+  check("a wrong key: refused, nothing sent", r.status === 403 && sent.length === 0);
+  r = await fwdCall(B);
+  check("no key: refused", r.status === 403 && sent.length === 0);
+  r = await fwdCall(B, KEY);
+  const m = sent[0] || {};
+  check("the Worker's key: sent on to the mailbox (lockqz.app@gmail.com), Reply-To its sender", r.status === 200 && sent.length === 1 && m.to === "lockqz.app@gmail.com" && m.replyTo === "ana@usc.edu" && m.subject === "Fwd: Can’t install", JSON.stringify(m));
+  check("... who wrote, to which address, when, its words, its attachments named", /From: ana@usc\.edu/.test(m.text) && /To: support@lockqz\.com/.test(m.text) && /Mon, 23 Nov 2026/.test(m.text) && /stops at step 2/.test(m.text) && /Attachments \(not included\): shot\.png/.test(m.text), m.text);
+  const ev = one("SELECT detail FROM events WHERE event='mail_fwd' ORDER BY id DESC LIMIT 1");
+  check("kept: that one went on (to which address, why), never its sender or words", !!ev && /support@lockqz\.com/.test(ev.detail) && /4\.7\.28/.test(ev.detail) && !/ana@usc/.test(ev.detail) && !/installer/.test(ev.detail), JSON.stringify(ev));
+  sent.length = 0;
+  r = await fwdCall({ ...B, from: "x@y.com\r\nBcc: z@z.com", subject: "hi\r\nBcc: z@z.com" }, KEY);
+  check("a sender or subject with line breaks: kept on one line, no Reply-To made from it", r.status === 200 && !/[\r\n]/.test(sent[0].subject) && sent[0].replyTo === null && !/^Bcc:/m.test(sent[0].text), JSON.stringify(sent[0]));
+  delete env.MAIL_USER; sent.length = 0;
+  r = await fwdCall(B, KEY);
+  check("LOCKqz's Gmail sender is another account: sent through LOCKqz's mail, Reply-To its sender", r.status === 200 && sent.length === 1 && sent[0].to === "lockqz.app@gmail.com" && sent[0].replyTo === "ana@usc.edu");
+  env.MAILFWD_DAY_MAX = "3"; sent.length = 0;
+  r = await fwdCall(B, KEY);
+  check("at most MAILFWD_DAY_MAX a day: then refused (the sender's server tries again later)", r.status === 429 && sent.length === 0);
+  delete env.MAILFWD_DAY_MAX;
+  env.MAILIN_KEY = "short"; r = await fwdCall(B, "short");
+  check("a key shorter than 32 characters is never accepted", r.status === 403);
+  delete env.MAILIN_KEY;
 }
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);

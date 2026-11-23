@@ -1,6 +1,8 @@
 # LOCKqz mail-in (see worker.js): an Email Worker, Workers Free, no storage. $0.
-# Email Routing on lockqz.com: rule quiz@lockqz.com -> this Worker, Subaddressing on (Email Routing settings). An email
-# that is not a quiz's goes on to FORWARD_TO (a verified destination address).
+# Email Routing on lockqz.com: quiz@lockqz.com, support@lockqz.com and the catch-all -> this Worker; Subaddressing on
+# (Email Routing settings). An email that is not a quiz's goes on to FORWARD_TO (a verified destination address); when
+# that mailbox turns it away for a while, the server sends it on (POST /api/mailfwd). Secret (wrangler secret put):
+# MAILIN_KEY, the same value as the Pages project's MAILIN_KEY.
 name = "lockqz-mailin"
 main = "worker.js"
 compatibility_date = "2026-11-01"
