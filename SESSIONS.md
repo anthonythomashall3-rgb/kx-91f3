@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-23 03:12 PT — 01UUDg7YXjJx: bug sweep 31, apps 0.6.43. Files: app/mac/lockqz-agent.py, app/windows/lockqz-agent.ps1 (student told to a restarted helper; hidden-window closing: security and graphics software stay, a program that cannot be closed is not retried), app/mac/extra-block.sh (KEEP_APPS, hidden_close), app/VERSION, app/mac/lockqzd.py and app/windows/lockqzd.ps1 (version lines), tests (test_sweep28_apps.sh, test_windows_sweep28.ps1, test_agent.py, test_blocklist.mjs).
 - 2026-11-23 03:05 PT — 01UUDg7ZKM: email to support@lockqz.com and the catch-all is never lost: the Email Worker forwards it, and when the mailbox refuses it for a while the server sends it on (POST /api/mailfwd, Worker key MAILIN_KEY); the Sync adds the submission address only to upcoming quizzes of classes LOCKqz is on for. Files: app/mailin/worker.js, app/mailin/wrangler.toml, app/cloudflare/functions/api/[[route]].js (bsState and the /mailfwd answer only), app/cloudflare/wrangler.toml (MAILFWD lines), app/tests/test_mailin.mjs, app/tests/test_mailin_worker.mjs.
 
 ## Recently finished
