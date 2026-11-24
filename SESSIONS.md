@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-24 05:30 PT — 01UUDg7YNWV9Q: bug sweep 35, whole repo (server, pages, apps, extension, workers). Holds no files yet; will name them here before editing.
 
 ## Recently finished
 - sweep 34 finished (Claude, 2026-11-23): email limits hold under bursts (codes, support, mail sent on, bank details); live 2a40c23
