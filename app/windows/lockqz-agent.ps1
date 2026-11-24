@@ -677,7 +677,16 @@ $NoLock = @{}
 function NoLock-Now([string]$q) { $NoLock.ContainsKey($q) -and ([DateTime]::UtcNow -lt $NoLock[$q]) }
 $CapLeft = @{}     # quiz id -> its page left the attempt pages since the release (summary seen)
 $CapForgot = @{}   # quiz id -> unix time this agent forgot its release (the helper's older one is ignored)
-function Add-Cap([string]$q) { if (-not $script:Capped.ContainsKey($q)) { $script:CapLeft[$q] = $false }; $script:Capped[$q] = [DateTime]::UtcNow }
+$CapWhy = @{}      # quiz id -> why it was released (the helper's capped_reason)
+# A quiz the server released because Brightspace says the attempt is over (submitted, or a gated quiz's end): once its
+# pages have been gone this long it locks normally again, so a student who goes back for another attempt is handed the
+# password at once (it is entered before the attempt starts). The safety cap and the other releases keep $Grace.
+$SrvGrace = 5; $SrvEnds = @("quiz_submitted", "quiz_ended")
+function Add-Cap([string]$q, [string]$why = "") {
+  if (-not $script:Capped.ContainsKey($q)) { $script:CapLeft[$q] = $false; $script:CapWhy[$q] = $why } elseif ($why) { $script:CapWhy[$q] = $why }
+  if ($SrvEnds -contains $why) { Attempt-Over $q }   # Brightspace says the attempt is over
+  $script:Capped[$q] = [DateTime]::UtcNow
+}
 function Note-Cap($st) {
   # The helper reports a release: remembered unless it is one this agent already forgot.
   if (-not $st -or -not $st.capped_quiz) { return }
@@ -685,11 +694,11 @@ function Note-Cap($st) {
   if ($script:Capped.ContainsKey($q)) { return }
   $at = [int64]0; [void][int64]::TryParse([string]$st.capped_at, [ref]$at)
   if ($script:CapForgot.ContainsKey($q) -and ($at -le [int64]$script:CapForgot[$q])) { return }
-  Add-Cap $q
+  Add-Cap $q ([string]$st.capped_reason)
 }
 function Forget-Cap([string]$q, [string]$why) {
   # Page closed or a NEW attempt started: the quiz locks normally again; the helper forgets it too.
-  $script:Capped.Remove($q); $script:CapLeft.Remove($q); $script:CapForgot[$q] = [int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+  $script:Capped.Remove($q); $script:CapLeft.Remove($q); $script:CapWhy.Remove($q); $script:CapForgot[$q] = [int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
   Log "${why}: $q may lock again"
   try { Helper "/uncap" @{ quiz_id = $q } 8 | Out-Null } catch { }
 }
@@ -702,7 +711,7 @@ function Step-Caps($openId, $openUrl) {
       if ($attempt -and $script:CapLeft[$cq]) { Forget-Cap $cq "new attempt"; continue }
       if (-not $attempt) { $script:CapLeft[$cq] = $true }
       $script:Capped[$cq] = [DateTime]::UtcNow
-    } elseif (([DateTime]::UtcNow - [datetime]$script:Capped[$cq]).TotalSeconds -gt $Grace) { Forget-Cap $cq "page closed" }
+    } elseif (([DateTime]::UtcNow - [datetime]$script:Capped[$cq]).TotalSeconds -gt $(if ($SrvEnds -contains [string]$script:CapWhy[$cq]) { $SrvGrace } else { $Grace })) { Forget-Cap $cq "page closed" }
   }
 }
 function Next-PwCheck([datetime]$now, $opens) {
@@ -808,13 +817,21 @@ function Handle-Pw($pr, [bool]$first, [string]$note) {
 function Clear-Quiz { $script:Locked = $false; $script:Quiz = $null; $script:QuizTab = $null; $script:QuizTitle = $null; $script:QuizUrl = $null; $script:QuizProc = ""; $script:MissingSince = $null; $script:OperaWarned = $false }
 $script:HoldTold = $null
 $HoldText = "AI stays off: this exam was not turned in on this computer.`n`nGo back to the exam and submit it. AI comes back the moment it is submitted. If you did submit, AI comes back by itself once Brightspace shows it, or when the exam ends."
+function Attempt-Over([string]$quiz) {
+  # The lock ended with AI back (the PC's own turned-in page, or the server vouched): an attempt page seen before is
+  # over, so a later visit to the exam (its start page, to look at a score) starts fresh and ends the moment the
+  # student leaves it. A new attempt is seen again on its own page.
+  if ($quiz -and $script:Seen.ContainsKey($quiz)) { $script:Seen[$quiz].attempt = $false }
+}
 function Send-Unlock($quiz, $reason) {
   # -> $true only when the helper confirmed it is unlocked. 202 pending = the server has not vouched for the
   # quiz end yet (held): told to the student once per quiz, retried quietly.
   try {
     $r = Helper "/unlock" @{ quiz_id = $quiz; reason = $reason; seen = (Seen-For ([string]$quiz)) }
     if ($r -and $r.pending -and ($script:HoldTold -ne $quiz)) { $script:HoldTold = $quiz; Show-Message $HoldText }
-    return [bool]($r -and $r.ok -and ($r.state -eq "unlocked"))
+    $ok = [bool]($r -and $r.ok -and ($r.state -eq "unlocked"))
+    if ($ok) { Attempt-Over ([string]$quiz) }
+    return $ok
   } catch { return $false }
 }
 while ($true) {
@@ -857,7 +874,7 @@ while ($true) {
           $NoLock[[string]$Quiz] = [DateTime]::UtcNow.AddSeconds(180); Log "not protected: $Quiz ($($r.reason)) - not locked"; Clear-Quiz
         } elseif ($r -and $r.ok -and ($r.capped_quiz -eq $Quiz)) {
           # C9: the server says this student already finished this quiz - the helper did not lock.
-          Add-Cap ([string]$Quiz); Log "server: $Quiz is over ($($r.capped_reason)) - not locked"; Clear-Quiz
+          Add-Cap ([string]$Quiz) ([string]$r.capped_reason); Log "server: $Quiz is over ($($r.capped_reason)) - not locked"; Clear-Quiz
         } elseif ($r -and $r.ok) {
           $QuizUrl = $quizWin.Url; $LastCheck = [DateTime]::UtcNow; $lockedAt = [DateTime]::UtcNow
           $Locked = $true; $MissingSince = $null; $LastBeat = [DateTime]::UtcNow; Log "LOCKED $Quiz"
@@ -936,7 +953,7 @@ while ($true) {
             $HelperOk = $true
             Tell-Student $st
             if ($st.capped_quiz -and ([string]$st.capped_quiz -eq [string]$Quiz)) {
-              Add-Cap ([string]$Quiz)
+              Add-Cap ([string]$Quiz) ([string]$st.capped_reason)
               Log "$(if ($st.capped_reason) { $st.capped_reason } else { 'safety cap' }) released $Quiz - not re-locking"
               Clear-Quiz; $reason = $null
             } elseif (($hs -ne "locked") -and ($hs -ne "developer")) {

@@ -41,6 +41,10 @@ def _helper_version():
 VERSION = _helper_version()
 PAY_FAST = 600   # s: how long an unpaid student's password is asked for at the server's fast pace
 POLL, POLL_LOCKED, GRACE, BEAT = 2, 1, 30, 60   # agent reports (every 60s) only while the helper is unreachable
+# A quiz the server released because Brightspace says the attempt is over (submitted, or a gated quiz's end): once its
+# pages have been gone this long it locks normally again, so a student who goes back for another attempt is handed the
+# password at once (it is entered before the attempt starts). The safety cap and the other releases keep GRACE.
+SRV_GRACE, SRV_ENDS = 5, ("quiz_submitted", "quiz_ended")
 DEV_KEY = os.path.join(USER_DIR, "developer.key")
 DEV_KEY_HASH = "4695a520432e105e967dd2703366c24c039fe0a850fe35db03b73b6b9506aecd"
 
@@ -785,6 +789,7 @@ class Agent:
         self.pending_try = 0.0
         self.capped = {}             # quiz id -> last time its page was seen (released by the safety cap or the server)
         self.cap_left = {}           # quiz id -> its page left the attempt pages since the release (summary seen)
+        self.cap_why = {}            # quiz id -> why it was released (the helper's capped_reason)
         self.nolock = {}             # quiz id -> when to ask again: the helper did not lock it (not LOCKqz's quiz)
         self.cap_forgot = {}         # quiz id -> when this agent forgot its release (the helper's older one is ignored)
         self.tabs_seen = 0           # how many tabs were open while the quiz was open
@@ -1232,9 +1237,18 @@ class Agent:
             r = self.helper("/unlock", {"quiz_id": quiz, "reason": reason, "seen": self.seen_for(quiz)}, timeout=150)
             if isinstance(r, dict) and r.get("pending") and getattr(self, "hold_told", None) != quiz:
                 self.hold_told = quiz; dialog(self.HOLD_TEXT)
-            return isinstance(r, dict) and bool(r.get("ok"))
+            ok = isinstance(r, dict) and bool(r.get("ok"))
+            if ok: self.attempt_over(quiz)
+            return ok
         except Exception as e:
             log("helper unlock failed: %s" % e); return False
+
+    def attempt_over(self, quiz):
+        """The lock ended with AI back (the student's own turned-in page, or the server vouched): an attempt page seen
+        before is over, so a later visit to the exam (its start page, to look at a score) starts fresh and ends the
+        moment the student leaves it. A new attempt is seen again on its own page."""
+        ev = self.seen.get(quiz)
+        if ev: ev["attempt"] = False
 
     def end(self, reason):
         """reason: quiz_submitted | quiz_left | quiz_tab_closed. A failed unlock is kept as pending and
@@ -1270,10 +1284,12 @@ class Agent:
         self.last_beat, self.tabs_seen = time.time(), 0
         log("adopted existing lock %s" % q)
 
-    def add_cap(self, q, now=None):
+    def add_cap(self, q, now=None, why=None):
         """A quiz the helper (cap / server / other school) just released: not re-locked while its page stays open."""
         now = time.time() if now is None else now
         if q not in self.capped: self.cap_left[q] = False
+        if why or q not in self.capped: self.cap_why[q] = why
+        if why in SRV_ENDS: self.attempt_over(q)   # Brightspace says the attempt is over
         self.capped[q] = now
 
     def note_cap(self, st):
@@ -1282,11 +1298,11 @@ class Agent:
         try: at = float(st.get("capped_at") or 0)
         except Exception: at = 0.0
         if q in self.cap_forgot and at <= self.cap_forgot[q]: return   # a release this agent already forgot
-        self.add_cap(q)
+        self.add_cap(q, why=st.get("capped_reason"))
 
     def forget_cap(self, q, why):
         """Its page was closed, or a NEW attempt started: the quiz locks normally again. The helper forgets it too."""
-        self.capped.pop(q, None); self.cap_left.pop(q, None); self.cap_forgot[q] = time.time()
+        self.capped.pop(q, None); self.cap_left.pop(q, None); self.cap_why.pop(q, None); self.cap_forgot[q] = time.time()
         log("%s: %s may lock again" % (why, q))
         try: self.helper("/uncap", {"quiz_id": q}, timeout=8)
         except Exception as e: log("helper uncap failed: %s" % e)
@@ -1302,7 +1318,7 @@ class Agent:
                     self.forget_cap(q, "new attempt"); continue
                 if not attempt: self.cap_left[q] = True
                 self.capped[q] = now
-            elif now - self.capped[q] > GRACE:
+            elif now - self.capped[q] > (SRV_GRACE if self.cap_why.get(q) in SRV_ENDS else GRACE):
                 self.forget_cap(q, "page closed")
 
     def console_step(self, now_console=None):

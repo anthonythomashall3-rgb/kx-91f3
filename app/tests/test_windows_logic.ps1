@@ -404,13 +404,13 @@ Check "a healthy start just counts (starts=1)" ((Get-Content "$bd\.pending") -co
 Remove-Item $bd -Recurse -Force
 
 Write-Host "G. round-2 #4: a released quiz locks again for a new attempt or once its page was closed (real Add-Cap / Note-Cap / Forget-Cap / Step-Caps)"
-foreach ($f in @($agentAst.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.FunctionDefinitionAst] -and @("Add-Cap","Note-Cap","Forget-Cap","Step-Caps") -contains $_.Name })) {
+foreach ($f in @($agentAst.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.FunctionDefinitionAst] -and @("Add-Cap","Note-Cap","Forget-Cap","Step-Caps","Attempt-Over") -contains $_.Name })) {
   . ([scriptblock]::Create($f.Extent.Text))
 }
 $script:HelperCalls = @()
 function Helper($path, $body, $timeout = 90) { $script:HelperCalls += $path; return [pscustomobject]@{ ok = $true } }
 function Log($m) { }
-$Grace = 30; $Capped = @{}; $CapLeft = @{}; $CapForgot = @{}
+$Grace = 30; $Capped = @{}; $CapLeft = @{}; $CapForgot = @{}; $CapWhy = @{}; $SrvGrace = 5; $SrvEnds = @("quiz_submitted", "quiz_ended"); $Seen = @{}
 $cAtt = "https://brightspace.usc.edu/d2l/lms/quizzing/user/attempt/quiz_attempt_page.d2l?ou=1&qi=2"
 $cSum = "https://brightspace.usc.edu/d2l/lms/quizzing/user/quiz_summary.d2l?qi=2&ou=1"
 $nowU = [int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
@@ -428,6 +428,26 @@ Check "a later release of the same quiz is honored" ($Capped.ContainsKey("1-2"))
 $Capped["1-2"] = [DateTime]::UtcNow.AddSeconds(-40)
 Step-Caps $null ""
 Check "page gone for the grace period -> forgotten" (-not $Capped.ContainsKey("1-2"))
+# 24 Nov: released because Brightspace says the attempt is over: its pages gone 5 s is enough (another attempt gets the
+# password at once); a safety-cap release keeps the 30 s.
+Note-Cap ([pscustomobject]@{ capped_quiz = "1-3"; capped_at = $nowU + 10; capped_reason = "quiz_submitted" })
+$Capped["1-3"] = [DateTime]::UtcNow.AddSeconds(-7)
+Step-Caps $null ""
+Check "server release (submitted): pages gone 7 s -> forgotten (locks again for another attempt)" (-not $Capped.ContainsKey("1-3"))
+Note-Cap ([pscustomobject]@{ capped_quiz = "1-4"; capped_at = $nowU + 10; capped_reason = "cap" })
+$Capped["1-4"] = [DateTime]::UtcNow.AddSeconds(-7)
+Step-Caps $null ""
+Check "safety-cap release: pages gone 7 s -> still released (30 s)" ($Capped.ContainsKey("1-4") -and ([string]$CapWhy["1-4"] -eq "cap"))
+# 24 Nov: an attempt Brightspace says is over is over on this PC too: a later visit to the exam's start page starts fresh.
+$Seen["1-5"] = @{ attempt = $true; sub = $false; rt = $true; at = [DateTime]::UtcNow }
+Note-Cap ([pscustomobject]@{ capped_quiz = "1-5"; capped_at = $nowU + 10; capped_reason = "quiz_submitted" })
+Check "server release (submitted): the attempt seen before is over (a later visit starts fresh)" (-not $Seen["1-5"].attempt)
+$Seen["1-6"] = @{ attempt = $true; sub = $false; rt = $true; at = [DateTime]::UtcNow }
+Note-Cap ([pscustomobject]@{ capped_quiz = "1-6"; capped_at = $nowU + 10; capped_reason = "cap" })
+Check "safety-cap release: the attempt seen is kept" ([bool]$Seen["1-6"].attempt)
+$agentSrc = Get-Content (Join-Path $Win "lockqz-agent.ps1") -Raw
+Check "a confirmed unlock ends the attempt seen (Send-Unlock -> Attempt-Over)" ($agentSrc -match '\$ok = \[bool\]\(\$r -and \$r\.ok -and \(\$r\.state -eq "unlocked"\)\)\s+if \(\$ok\) \{ Attempt-Over')
+Check "the reason reaches Add-Cap from /lock and /status" (($agentSrc -match 'Add-Cap \(\[string\]\$Quiz\) \(\[string\]\$r\.capped_reason\)') -and ($agentSrc -match 'Add-Cap \(\[string\]\$Quiz\) \(\[string\]\$st\.capped_reason\)'))
 $dmnSrc = Get-Content (Join-Path $Win "lockqzd.ps1") -Raw
 Check "helper: /uncap endpoint and a 30 min release window (was 24 h)" (($dmnSrc -match '"/uncap"') -and ($dmnSrc -match 'else \{ 1800 \}') -and ($dmnSrc -match '-lt \$CapForget\)') -and -not ($dmnSrc -match 'capped_at\) -lt 86400'))
 

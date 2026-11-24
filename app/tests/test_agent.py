@@ -281,6 +281,29 @@ ok("no re-lock flapping while the submission page stays open") if not any(p == "
 ''')
 
 _section(r'''
+print("T12b an attempt turned in is over: a later visit to the exam's start page starts fresh (24 Nov)")
+g, h = agent()
+T(g, [tab(ATT)]); T(g, [tab(SUBM)])   # the turned-in page takes the attempt page's place in the same tab
+ok("turned in, AI back -> the attempt seen is over") if not g.locked and g.seen.get("123-456", {}).get("attempt") is False else bad("seen %r" % g.seen)
+T(g, [tab(SUMM)])                     # later: back on the exam's start page, to look at the score
+ok("revisit: locked, and nothing of an attempt seen during this lock") if g.locked and g.seen_for("123-456") == {"sub": False, "attempt": False} else bad("seen_for %r" % g.seen_for("123-456"))
+g.missing_since = _t.time() - A.GRACE - 1; T(g, [("Google Chrome", 0, 0, "https://example.com/")])
+u = [b for (p, b) in h.calls if p == "/unlock"][-1]
+ok("... leaving it: the ask says no attempt (the server ends it at once)") if u["seen"] == {"sub": False, "attempt": False} else bad("ask %r" % u)
+g, h = agent(); real = h
+def held(path, body=None, timeout=90):
+    if path == "/unlock": real.calls.append((path, body)); return {"ok": False, "state": "locked", "pending": "brightspace"}
+    return real(path, body, timeout)
+g.helper = held
+T(g, [tab(ATT)]); g.missing_since = _t.time() - A.GRACE - 1; T(g, [("Google Chrome", 0, 0, "https://example.com/")])
+ok("left mid-attempt and held: the attempt seen stays (a return to the start page is still that attempt)") if g.seen.get("123-456", {}).get("attempt") is True else bad("seen %r" % g.seen)
+g.helper = real; g.pending = None
+h.status = {"state": "unlocked", "capped_quiz": "123-456", "capped_reason": "quiz_submitted", "capped_at": _t.time()}
+g.last_check = 0; T(g, [])
+ok("... then Brightspace says it was turned in (the server's release): over") if g.seen.get("123-456", {}).get("attempt") is False else bad("seen %r" % g.seen)
+''')
+
+_section(r'''
 print("T12 a failed unlock is retried until the helper confirms")
 g, h = agent()
 T(g, [tab(ATT)])
@@ -726,6 +749,20 @@ g.last_check = 0; T(g, [tab(ATT)]); g.capped["123-456"] = _t.time() - A.GRACE - 
 h.status = {"state": "unlocked", "capped_quiz": "123-456", "capped_at": _t.time() + 1}   # a NEW release later
 g.last_check = 0; T(g, [])
 ok("a later release of the same quiz is honored again") if "123-456" in g.capped else bad("new release ignored")
+# 24 Nov: a release because Brightspace says the attempt is over (submitted): its pages gone SRV_GRACE (5 s) is enough, so a
+# student who goes back for another attempt locks and is handed the password at once; a safety-cap release keeps GRACE.
+g, h = agent(); T(g, [tab(ATT)])
+h.status = {"state": "unlocked", "capped_quiz": "123-456", "capped_reason": "quiz_submitted", "capped_at": _t.time()}
+g.last_check = 0; T(g, [tab(ATT)])
+g.capped["123-456"] = _t.time() - A.SRV_GRACE - 1; h.status = {"state": "unlocked"}; T(g, [])
+ok("server release (submitted): pages gone 6 s -> forgotten, helper told /uncap") if "123-456" not in g.capped and any(p == "/uncap" for (p, _) in h.calls) else bad("still released: %r" % g.capped)
+T(g, [tab(SUMM)])
+ok("... back on the start page for another attempt: locks (the password is handed there)") if g.locked else bad("not locked on the start page")
+g, h = agent(); T(g, [tab(ATT)])
+h.status = {"state": "unlocked", "capped_quiz": "123-456", "capped_reason": "cap", "capped_at": _t.time()}
+g.last_check = 0; T(g, [tab(ATT)])
+g.capped["123-456"] = _t.time() - A.SRV_GRACE - 1; h.status = {"state": "unlocked"}; T(g, [])
+ok("safety-cap release: pages gone 6 s -> still released (GRACE)") if "123-456" in g.capped and g.cap_why.get("123-456") == "cap" else bad("forgotten too soon: %r" % g.capped)
 print("T23 a quiz opened from Brightspace Content (quiz in a frame) is moved to its own page, so submitting shows")
 CV = B + "/d2l/le/content/123/fullscreen/77/ViewLocation?title=Q&location=%2fd2l%2flms%2fquizzing%2fuser%2fquiz_summary.d2l%3fqi%3d456%26ou%3d123"
 moved = []; mexp = []; _st = A.set_tab_url; A.set_tab_url = lambda a, w, t, u, *k: (moved.append((a, w, t, u)), mexp.append(k[0] if k else None))
