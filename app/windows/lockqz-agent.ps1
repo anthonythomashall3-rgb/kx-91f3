@@ -167,6 +167,93 @@ function Move-ToQuiz($edit, [string]$url) {
     return $true
   } catch { return $false }
 }
+# Web search during a quiz: Chrome, Edge and Brave take a default-search policy only on a PC that a school or company
+# manages (never a student's own PC), and Firefox only in its ESR edition, so a search typed in the address bar goes to
+# the engine's usual results page (Google's AI Overview, Bing's Copilot), which the quiz policy refuses. That search is
+# sent on to Google's Web results (udm=14: no AI answer), as the Mac agent does (rewrite_search: the same rules).
+$WebOkUdm = @("14","2","12","7","36"); $WebOkTbm = @("isch","nws","vid","bks")
+function Query-Map([string]$u) {
+  # "a=1&b=x+y" -> @{ a = @("1"); b = @("x y") } (decoded; a name may come more than once).
+  $m = @{}
+  foreach ($kv in ((Url-Query $u) -split '&')) {
+    if (-not $kv) { continue }
+    $i = $kv.IndexOf('=')
+    $k = if ($i -ge 0) { $kv.Substring(0, $i) } else { $kv }
+    $v = if ($i -ge 0) { $kv.Substring($i + 1) } else { "" }
+    try { $k = [uri]::UnescapeDataString($k.Replace('+', ' ')) } catch { }
+    try { $v = [uri]::UnescapeDataString($v.Replace('+', ' ')) } catch { }
+    if (-not $m.ContainsKey($k)) { $m[$k] = @() }
+    $m[$k] = @($m[$k]) + @($v)
+  }
+  return $m
+}
+function Rewrite-Search([string]$u) {
+  # -> the address a locked browser tab is sent to instead ($null = leave it alone).
+  if (-not $u) { return $null }
+  if (($u -match '^[A-Za-z][A-Za-z0-9+.-]*:') -and ($u -notmatch '^(?i)https?://')) { return $null }
+  $h = Url-Host $u; $p = Url-Path $u
+  if ($h -notmatch '\.') { return $null }
+  $q = Query-Map $u
+  $query = ""
+  if ($q.ContainsKey("q")) { $query = [string](@($q["q"])[0]) } elseif ($q.ContainsKey("p")) { $query = [string](@($q["p"])[0]) }
+  $web = "https://www.google.com/search?udm=14&q=" + [uri]::EscapeDataString($query)
+  if (($h -eq "lens.google.com") -or ($h -match '^lens\.google\.[a-z.]+$')) { return $web }   # Lens answers photographed questions
+  if (($h -match '^(www\.)?google\.[a-z.]+$') -and ((@("/search","/webhp","/","") -contains $p) -or $p.StartsWith("/ai") -or $p.StartsWith("/searchbyimage"))) {
+    if ($p.StartsWith("/ai") -or $p.StartsWith("/searchbyimage")) { return $web }   # AI Mode / image search pages
+    $udm = if ($q.ContainsKey("udm")) { @($q["udm"]) } else { @() }
+    $tbm = if ($q.ContainsKey("tbm")) { @($q["tbm"]) } else { @() }
+    if (($udm.Count + $tbm.Count) -gt 0) {
+      # Every udm/tbm on the page must be an AI-free vertical (tbm=nws&udm=50 is not news).
+      if ((@($udm | Where-Object { $WebOkUdm -notcontains $_ }).Count -eq 0) -and (@($tbm | Where-Object { $WebOkTbm -notcontains $_ }).Count -eq 0)) { return $null }
+      return $web
+    }
+    if ($query -and ($p -ne "/") -and ($p -ne "")) { return $web }
+    return $null
+  }
+  if ($h.EndsWith("bing.com") -and ($p.StartsWith("/search") -or $p.StartsWith("/copilotsearch") -or $p.StartsWith("/chat"))) { return $web }
+  if ($h.EndsWith("duckduckgo.com") -or ($h -eq "duck.ai")) { return $web }
+  if ((@("search.yahoo.com","search.brave.com","you.com","kagi.com") -contains $h) -or $h.EndsWith(".search.yahoo.com")) { return $web }
+  if ((@(@("ecosia.org","yandex.com","yandex.ru","ya.ru","ask.com","yep.com","sogou.com") | Where-Object { $h.EndsWith($_) }).Count -gt 0) -and ($p.StartsWith("/search") -or $p.StartsWith("/web") -or $p.StartsWith("/chat"))) { return $web }
+  if ($h.EndsWith("search.naver.com") -and $p.StartsWith("/search")) { return $web }
+  if ($h.EndsWith("search.aol.com") -and $p.StartsWith("/aol/")) { return $web }
+  if ((@(@("baidu.com","so.com") | Where-Object { $h.EndsWith($_) }).Count -gt 0) -and (($p -eq "/s") -or $p.StartsWith("/search"))) { return $web }
+  return $null
+}
+function Is-Foreground($w) {
+  # The window that holds the keyboard focus (the one the student is looking at): only that one is sent on, so
+  # LOCKqz never brings another window to the front.
+  try {
+    $e = [System.Windows.Automation.AutomationElement]::FocusedElement
+    $walk = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+    for ($i = 0; $e -and ($i -lt 60); $i++) {
+      $up = $walk.GetParent($e)
+      if ((-not $up) -or [System.Windows.Automation.Automation]::Compare($up, $Root)) { break }
+      $e = $up
+    }
+    return [bool]($e -and [System.Windows.Automation.Automation]::Compare($e, $w))
+  } catch { return $false }
+}
+$script:SearchMoved = @{}
+function Move-ToSearch($edit, [string]$from, [string]$to) {
+  # Like Move-ToQuiz: that window's own address bar, never while the student is typing in it, at most once every
+  # 10 s per address.
+  if (-not $script:SearchMoved) { $script:SearchMoved = @{} }
+  $now = [DateTime]::UtcNow
+  if ($script:SearchMoved.ContainsKey($from) -and (($now - $script:SearchMoved[$from]).TotalSeconds -lt 10)) { return $false }
+  try {
+    if ($edit.Current.HasKeyboardFocus) { return $false }
+    $vp = $null
+    if (-not $edit.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { return $false }
+    $script:SearchMoved[$from] = $now
+    $edit.SetFocus(); Start-Sleep -Milliseconds 150
+    $vp.SetValue($to); Start-Sleep -Milliseconds 100
+    $f = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if (-not $f -or -not [System.Windows.Automation.Automation]::Compare($f, $edit)) { return $false }
+    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+    Log "web search sent to Google's Web results (no AI answer)"
+    return $true
+  } catch { return $false }
+}
 $script:PwFilled = @{}
 function Fill-QuizPassword([string]$pw) {
   # Puts the quiz password into the password box of the quiz page itself (UI Automation), so the student
@@ -222,6 +309,8 @@ function Get-BrowserWindows {
     $inner = Inner-Url $url
     if ($edit -and ($inner -ne $url) -and (Is-Quiz $inner)) { [void](Move-ToQuiz $edit $inner) }
     $url = $inner
+    # During a quiz, a web search with an AI answer goes to Google's Web results (only the window in front).
+    if ($script:Locked -and $edit) { $to = Rewrite-Search $url; if ($to -and (Is-Foreground $w) -and (Move-ToSearch $edit $url $to)) { $url = $to } }
     $tabs = @()
     foreach ($t in $w.FindAll($TS::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::TabItem)))) { $tabs += $t.Current.Name }
     $out += [pscustomobject]@{ Title = $w.Current.Name; Url = $url; Tabs = $tabs; Proc = $names[$wpid]; Hwnd = $w.Current.NativeWindowHandle }

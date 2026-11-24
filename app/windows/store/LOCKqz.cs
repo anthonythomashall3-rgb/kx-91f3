@@ -49,6 +49,15 @@ static class LOCKqz {
     } catch { return false; }
   }
   const string SModeSwitch = "ms-windows-store://pdp/?productid=BF712690PMLF";
+  // Smart App Control on (Windows 11; VerifiedAndReputablePolicyState 1 = on, 2 = evaluation, 0 = off).
+  static bool SacOn() {
+    try {
+      using (RegistryKey k = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\CI\Policy")) {
+        object v = k == null ? null : k.GetValue("VerifiedAndReputablePolicyState");
+        return v is int && (int)v == 1;
+      }
+    } catch { return false; }
+  }
 
   static int Install() {
     string token = "lqz-" + Guid.NewGuid().ToString("N").Substring(0, 20);
@@ -220,6 +229,7 @@ static class LOCKqz {
           else if (r == -2) msg.Text = "Click Set up, then Yes on the Windows prompt.";
           else if (r == -3 && SMode()) ShowAll("smode");
           else if (r == -3) msg.Text = "Windows blocked LOCKqz's setup.\nAsk whoever manages this PC to allow it.";
+          else if (r == 7 || SacOn()) msg.Text = "Smart App Control stops LOCKqz on this PC (code " + r + ").\nSee Windows Security > App & browser control.";
           else msg.Text = "Setup did not finish (code " + r + ").\nClick Set up to try again.";
         });
       });

@@ -47,6 +47,22 @@ $quizPath = "/d2l/lms/quizzing/user/quiz_summary.d2l?qi=77&ou=123"
 $contentQuiz = "$base/d2l/le/content/123/fullscreen/456/ViewLocation?tId=456&location=" + [Uri]::EscapeDataString($quizPath)
 $contentFile = "$base/d2l/le/content/123/fullscreen/457/ViewLocation?tId=457&location=" + [Uri]::EscapeDataString("/d2l/le/content/123/viewContent/457/View")
 
+# A browser this test starts may open behind other windows (Windows 11 keeps a background process from taking the
+# foreground); the student's own browser is in front when they use it. Bring the test browser to the front the way
+# a click would (an ALT key press first gives this process the right to), so the window can take the keyboard focus.
+Add-Type -TypeDefinition @'
+using System; using System.Runtime.InteropServices;
+public static class LqzFront {
+  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+  public static void Front(IntPtr h) { keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero); ShowWindow(h, 9); SetForegroundWindow(h); }
+}
+'@
+function Front-Browser([string]$proc) {
+  $p = @(Get-Process $proc -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero }) | Select-Object -First 1
+  if ($p) { try { [LqzFront]::Front($p.MainWindowHandle) } catch { } }
+}
 $fail = 0
 function Check($ok, $what) { if ($ok) { Write-Host "  ok   $what" } else { Write-Host "  FAIL $what"; $script:fail++ } }
 function Shot($name) {
@@ -127,6 +143,7 @@ foreach ($b in $browsers) {
   $wasMoved = $false; $seen = @()
   for ($i = 0; $i -lt 40 -and -not $wasMoved; $i++) {
     Start-Sleep -Seconds 1
+    Front-Browser $b.Proc
     $wins = @(Get-BrowserWindows)
     $seen = @($wins | ForEach-Object { $_.Url })
     if ((Get-Content $hits -Raw) -match ('document ' + [regex]::Escape($quizPath))) { $wasMoved = $true }

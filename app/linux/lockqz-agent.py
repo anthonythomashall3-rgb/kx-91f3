@@ -145,6 +145,22 @@ def open_in(app, url):
         log("open in %s failed: %s" % (app, e)); return False
 M.app_installed = app_installed
 M.open_in = open_in
+_GECKO_BINS = {"Firefox": ("firefox", "firefox-esr"), "LibreWolf": ("librewolf",), "Waterfox": ("waterfox",), "Floorp": ("floorp",),
+               "Zen": ("zen", "zen-browser"), "Mullvad Browser": ("mullvad-browser", "mullvadbrowser")}
+def open_search(procs, label, url):
+    """A search with an AI answer (no tab can be sent anywhere from outside on Linux): the AI-free results open in a
+    new tab of the browser it was made in (a running Firefox takes the address into a new tab of its own)."""
+    if label in _GECKO_BINS:
+        b = next((x for x in _GECKO_BINS[label] if _which(x)), None)
+        cmd = [b, "--new-tab", url] if b else (["flatpak", "run", "org.mozilla.firefox", "--new-tab", url] if label == "Firefox" and _which("flatpak") else None)
+        if not cmd: return False
+        try:
+            subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            return True
+        except Exception as e:
+            log("open in %s failed: %s" % (label, e)); return False
+    return open_in(label, url)
+M.open_search = open_search
 M.permission_hint = lambda app, now=None, front=None: False
 M.front_app = lambda: None
 

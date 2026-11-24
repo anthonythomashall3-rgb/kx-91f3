@@ -454,6 +454,31 @@ Check "the reason reaches Add-Cap from /lock and /status" (($agentSrc -match 'Ad
 $dmnSrc = Get-Content (Join-Path $Win "lockqzd.ps1") -Raw
 Check "helper: /uncap endpoint and a 30 min release window (was 24 h)" (($dmnSrc -match '"/uncap"') -and ($dmnSrc -match 'else \{ 1800 \}') -and ($dmnSrc -match '-lt \$CapForget\)') -and -not ($dmnSrc -match 'capped_at\) -lt 86400'))
 
+# ======================================================================================
+Write-Host "S. agent: during a quiz a web search with an AI answer goes to Google's Web results (real Rewrite-Search)"
+foreach ($f in @($agentAst.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.FunctionDefinitionAst] -and @("Url-Path","Url-Query","Url-Host","Query-Map","Rewrite-Search") -contains $_.Name })) {
+  . ([scriptblock]::Create($f.Extent.Text))
+}
+$agentSrc2 = Get-Content (Join-Path $Win "lockqz-agent.ps1") -Raw
+Check "the agent's allowed Google verticals are the Mac agent's (Web, Images, News, Videos, Books)" ($agentSrc2 -match [regex]::Escape('$WebOkUdm = @("14","2","12","7","36"); $WebOkTbm = @("isch","nws","vid","bks")'))
+$WebOkUdm = @("14","2","12","7","36"); $WebOkTbm = @("isch","nws","vid","bks")
+$W = "https://www.google.com/search?udm=14&q="
+Check "Google All -> Web" ((Rewrite-Search "https://www.google.com/search?q=what+is+gdp&oq=what&sourceid=chrome&ie=UTF-8") -eq ($W + "what%20is%20gdp"))
+Check "the address bar without https:// (Chrome hides it)" ((Rewrite-Search "google.com/search?q=gdp") -eq ($W + "gdp"))
+Check "Firefox's own Google search -> Web" ((Rewrite-Search "https://www.google.com/search?client=firefox-b-d&q=gdp") -eq ($W + "gdp"))
+Check "a country Google -> Web" ((Rewrite-Search "https://www.google.co.uk/search?q=gdp") -eq ($W + "gdp"))
+Check "Web left alone (no loop)" ($null -eq (Rewrite-Search ($W + "gdp")))
+Check "Web, Images, News left alone" (($null -eq (Rewrite-Search "https://www.google.com/search?q=x&udm=14")) -and ($null -eq (Rewrite-Search "https://www.google.com/search?tbm=isch&q=x")) -and ($null -eq (Rewrite-Search "https://www.google.com/search?tbm=nws&q=x")))
+Check "AI Mode (udm=50), with or without q, on /search and on /" (((Rewrite-Search "https://www.google.com/search?udm=50") -eq $W) -and ((Rewrite-Search "https://www.google.com/?udm=50") -eq $W) -and ((Rewrite-Search "https://www.google.com/search?q=x&udm=50") -eq ($W + "x")))
+Check "news next to AI Mode is not news" ((Rewrite-Search "https://www.google.com/search?tbm=nws&udm=50&q=x") -eq ($W + "x"))
+Check "google.com/ai and Lens -> Web" (((Rewrite-Search "https://www.google.com/ai?q=x") -eq ($W + "x")) -and ($null -ne (Rewrite-Search "https://lens.google.com/search?p=abc")))
+Check "Google home page and Google Docs left alone" (($null -eq (Rewrite-Search "https://www.google.com/")) -and ($null -eq (Rewrite-Search "https://docs.google.com/document/d/1")) -and ($null -eq (Rewrite-Search "https://www.google.com")))
+Check "Bing search and Copilot search -> Web (Edge's own search)" (((Rewrite-Search "https://www.bing.com/search?q=gdp&form=QBLH") -eq ($W + "gdp")) -and ($null -ne (Rewrite-Search "https://www.bing.com/copilotsearch?q=gdp")) -and ($null -eq (Rewrite-Search "https://www.bing.com/maps")))
+Check "DuckDuckGo, Yahoo (p=), Brave Search -> Web" (((Rewrite-Search "https://duckduckgo.com/?q=gdp&ia=chat") -eq ($W + "gdp")) -and ((Rewrite-Search "https://search.yahoo.com/search?p=gdp") -eq ($W + "gdp")) -and ($null -ne (Rewrite-Search "https://search.brave.com/search?q=gdp")))
+Check "Ecosia search -> Web, its home page alone; Baidu search -> Web, other pages alone" (($null -ne (Rewrite-Search "https://www.ecosia.org/search?q=gdp")) -and ($null -eq (Rewrite-Search "https://www.ecosia.org/")) -and ($null -ne (Rewrite-Search "https://www.baidu.com/s?wd=x")) -and ($null -eq (Rewrite-Search "https://www.baidu.com/about")))
+Check "the quiz, Brightspace, other sites and typed words left alone" (($null -eq (Rewrite-Search "https://brightspace.usc.edu/d2l/lms/quizzing/user/quiz_summary.d2l?qi=1&ou=2")) -and ($null -eq (Rewrite-Search "https://en.wikipedia.org/wiki/GDP?q=x")) -and ($null -eq (Rewrite-Search "photosynthesis")) -and ($null -eq (Rewrite-Search "about:blank")) -and ($null -eq (Rewrite-Search "")))
+Check "the agent sends only the window in front, never while the student types in its address bar" (($agentSrc2 -match 'if \(\$script:Locked -and \$edit\) \{ \$to = Rewrite-Search \$url; if \(\$to -and \(Is-Foreground \$w\) -and \(Move-ToSearch \$edit \$url \$to\)\)') -and ($agentSrc2 -match 'if \(\$edit\.Current\.HasKeyboardFocus\) \{ return \$false \}'))
+
 Write-Host ""
 Write-Host "RESULT: $pass passed, $fail failed"
 if ($fail -gt 0) { exit 1 }

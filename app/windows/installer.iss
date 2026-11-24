@@ -53,8 +53,12 @@ begin
          '" -Api "{#LQAPI}" -FromExe', '', SW_HIDE, ewWaitUntilTerminated, R)) or (R <> 0) then
     begin
       SetupFailed := True;
-      SuppressibleMsgBox('LOCKqz could not finish setting up (code ' + IntToStr(R) + '). ' +
-        'Please run the installer again. If it keeps failing, tell your professor.', mbError, MB_OK, IDOK);
+      if R = 7 then
+        SuppressibleMsgBox('Smart App Control (or the App Control of whoever manages this PC) stops LOCKqz on this PC. ' +
+          'See Windows Security > App & browser control.', mbError, MB_OK, IDOK)
+      else
+        SuppressibleMsgBox('LOCKqz could not finish setting up (code ' + IntToStr(R) + '). ' +
+          'Please run the installer again. If it keeps failing, tell your professor.', mbError, MB_OK, IDOK);
     end;
   end;
 end;

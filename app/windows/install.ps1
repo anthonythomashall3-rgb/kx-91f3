@@ -10,6 +10,13 @@
 param([string]$Token, [string]$Api, [string]$Student = "", [string]$StorePackage = "", [switch]$FromExe)
 
 $ErrorActionPreference = "Stop"
+# Smart App Control / App Control can run a script that is not signed in a restricted language mode, where LOCKqz's
+# helper cannot work: stop at once with code 7, which the Store app and the installer explain to the student.
+if ($ExecutionContext.SessionState.LanguageMode -ne "FullLanguage") {
+  Write-Host "LOCKqz: Windows runs this script in restricted mode here (Smart App Control or App Control), so LOCKqz cannot work on this PC." -ForegroundColor Red
+  if ($MyInvocation.MyCommand.Path) { exit 7 }
+  throw "LOCKqz was not installed: Windows runs scripts in restricted mode on this PC (Smart App Control or App Control)."
+}
 $Here = if ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { "" }
 $FromFile = [bool]$Here   # $false: pasted as "irm ... | iex" (remote mode sets $Here later)
 $Dest = "$env:ProgramData\LOCKqz"

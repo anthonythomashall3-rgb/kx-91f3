@@ -402,6 +402,35 @@ def browser_tabs():
         except Exception: pass
     return tabs
 
+GECKO_APP_RE = re.compile(r"^(/.+?\.app)/Contents/MacOS/")
+
+def gecko_app(procs, base):
+    """The running app (its .app path) of the Gecko browser whose profile folder is `base`; None when not running."""
+    for (_, _, comm) in procs:
+        if base in GECKO_DIRS.get(os.path.basename(comm).lower(), []):
+            m = GECKO_APP_RE.match(comm)
+            if m: return m.group(1)
+    return None
+
+def new_gecko_searches(tabs, before, blocked):
+    """Firefox and its forks (tabs read from their session files, wi < 0): a search with an AI answer that is NEW since
+    the last look -> [(profile folder, AI-free results URL)]. No tab of theirs can be sent anywhere from outside, so the
+    results open in a new tab of the same browser, once per search; `before` = the (folder, url) seen last time."""
+    out = []
+    for (app, wi, _, u) in tabs:
+        if wi >= 0 or (app, u) in before or blocked(u): continue
+        new = rewrite_search(u)
+        if new: out.append((app, new))
+    return out
+
+def open_search(procs, base, url):
+    """Opens url in a new tab of the running Gecko browser whose profile folder is `base` (Linux has its own)."""
+    a = gecko_app(procs, base)
+    if not a: return False
+    try: return subprocess.run(["/usr/bin/open", "-a", a, url], capture_output=True, timeout=10).returncode == 0
+    except Exception as e:
+        log("could not open Web results: %s" % e); return False
+
 def set_tab_url(app, wi, ti, url, expect=None):
     """Sends one tab to url. expect: the address that tab showed when the tabs were read. Windows are listed
     front to back, so a click on another window between that read and this call shifts the indexes: the
@@ -1477,6 +1506,14 @@ class Agent:
                 if wi < 0: continue
                 new = "about:blank" if blocked_tab(u, hosts, paths) else rewrite_search(u)
                 if new: set_tab_url(app, wi, ti, new, u)
+            # Firefox family: the AI-free results of a new search open in a new tab of that browser.
+            gk = set((a, u) for (a, wi, _, u) in tabs if wi < 0)
+            todo = new_gecko_searches(tabs, getattr(self, "gecko_seen", gk), lambda u: blocked_tab(u, hosts, paths))
+            self.gecko_seen = gk
+            if todo:
+                procs = ps_procs()
+                for (base, new) in todo[:3]:
+                    if open_search(procs, base, new): log("web search in %s: Google's Web results opened in a new tab (no AI answer)" % base)
             # Opera reopened during the quiz (no policy layer, built-in VPN) -> closed again.
             if now - getattr(self, "opera_check", 0) >= 5:
                 self.opera_check = now

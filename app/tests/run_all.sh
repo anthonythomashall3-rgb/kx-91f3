@@ -60,6 +60,7 @@ run "Outside watch of the live site (GET /watch: database, clock, email; the Ser
 run "5-minute watch Worker (looks, tells once, again after 6 h, fine again; by hand)" node --no-warnings test_watch_worker.mjs
 run "A laptop that slept catches up by the clock (list additions, update check; Mac/Linux helper, Windows rule)" python3 test_wake_catchup.py
 run "Helper: a computer that runs for weeks without a restart still says it is there (weekly report)" python3 test_sweep36.py
+run "Web search during a quiz in Firefox (Mac, Linux) and every Linux browser: AI-free results in a new tab" python3 test_sweep36_search.py
 run "A professor's sections are found by name through an index (no whole-table read)" node --no-warnings test_sections_lookup.mjs
 run "Mac: a pass right after the preferences service restarted does not wait for it (AirPlay switch look)" bash test_prefs_settling.sh
 run "Gmail payment script parser (forged alerts refused)" node test_pay_script.mjs

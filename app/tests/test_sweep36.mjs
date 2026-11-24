@@ -151,6 +151,7 @@ console.log("C every kind of computer is installed and tested by the Release");
   check("only the x64 installer is the release", /- uses: actions\/upload-artifact@v4\n\s+if: matrix\.runner == 'windows-latest'\n\s+with:\n\s+name: lockqz-win/.test(wf));
   check("Linux: x64 and Arm", /runner: ubuntu-latest, arch: x64/.test(wf) && /runner: ubuntu-24\.04-arm/.test(wf));
   check("nothing deploys unless the Intel Mac passed (or had nothing to test)", /needs: \[test, mac, mac_intel, windows, linux, android\]/.test(wf) && /needs\.mac_intel\.result == 'success' \|\| needs\.mac_intel\.result == 'skipped'/.test(wf));
+  check("every Windows leg also checks web search in real Chrome, Edge and Firefox", /test_windows_search\.ps1/.test(wf));
   const msix = read("app/windows/store/build-msix.ps1");
   check("the Store package builds on Windows on Arm (compiler and makeappx found)", /FrameworkArm64/.test(msix) && /arm64\\makeappx\.exe/.test(msix));
 }
@@ -159,6 +160,9 @@ console.log("C S mode, on-device AI, local model runners, the weekly report");
   const cs = read("app/windows/store/LOCKqz.cs");
   check("Store app: S mode is found (SkuPolicyRequired) and the free switch opens", /SkuPolicyRequired/.test(cs) && /productid=BF712690PMLF/.test(cs) && /if \(SMode\(\)\) \{ ShowAll\("smode"\); return; \}/.test(cs));
   check("Store app: a refused start is not shown as 'click Yes' (only error 1223 is the prompt answered No)", /NativeErrorCode == 1223 \? -2 : -3/.test(cs));
+  const inst = read("app/windows/install.ps1"), iss = read("app/windows/installer.iss");
+  check("setup stops at once with code 7 when Windows runs scripts in restricted mode (Smart App Control / App Control)", /if \(\$ExecutionContext\.SessionState\.LanguageMode -ne "FullLanguage"\) \{[\s\S]{0,300}exit 7/.test(inst) && inst.indexOf("LanguageMode") < inst.indexOf("[Security.Principal.WindowsPrincipal]"));
+  check("... and the Store app and the installer say so", /r == 7 \|\| SacOn\(\)/.test(cs) && /VerifiedAndReputablePolicyState/.test(cs) && /if R = 7 then/.test(iss));
   const pol = read("app/windows/browser-policy.ps1");
   check("Windows: other apps' use of Windows' on-device text and image generation force-denied", /AppPrivacy" "LetAppsAccessSystemAIModels" 2/.test(pol) && /AppPrivacy" "LetAppsAccessGenerativeAI" 2/.test(pol));
   const eng = read("app/windows/lockqz.ps1"), mac = read("app/mac/extra-block.sh"), lin = read("app/linux/lockqz.sh");

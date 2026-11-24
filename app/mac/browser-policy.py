@@ -237,7 +237,10 @@ def firefox_policy():
            "Preferences": {"browser.ml.chat.enabled": {"Value": False, "Status": "locked"},
                            "browser.ml.enable": {"Value": False, "Status": "locked"},
                            "browser.ml.linkPreview.enabled": {"Value": False, "Status": "locked"},
-                           "browser.smartwindow.enabled": {"Value": False, "Status": "locked"}}}
+                           "browser.smartwindow.enabled": {"Value": False, "Status": "locked"},
+                           # Open tabs written every 2 s (was 15 s) while the quiz is on: LOCKqz reads them there, so
+                           # the exam's start, its submission and a search are seen within seconds.
+                           "browser.sessionstore.interval": {"Value": 2000, "Status": "locked"}}}
     if keep_proxy(): pol.pop("Proxy")
     return pol
 
