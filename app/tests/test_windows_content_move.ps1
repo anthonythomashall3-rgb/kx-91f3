@@ -56,9 +56,29 @@ public static class LqzFront {
   [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
   [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   public static void Front(IntPtr h) { keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero); ShowWindow(h, 9); SetForegroundWindow(h); }
+  public static string Fg() { IntPtr h = GetForegroundWindow(); uint p = 0; GetWindowThreadProcessId(h, out p); return h.ToString() + " pid " + p; }
 }
 '@
+function Diag-Focus([string]$proc) {
+  # When a check that needs the keyboard focus fails: which window is in front, and what has the focus after the
+  # address bar is asked to take it (the move into the page works only when that is the address bar).
+  try {
+    $p = @(Get-Process $proc -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero }) | Select-Object -First 1
+    Write-Host ("  [focus] foreground window: {0}; {1} main window {2} pid {3}" -f [LqzFront]::Fg(), $proc, $(if ($p) { $p.MainWindowHandle } else { "-" }), $(if ($p) { $p.Id } else { "-" }))
+    foreach ($w in $Root.FindAll($TS::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+      if ($BrowserClasses -notcontains $w.Current.ClassName) { continue }
+      $e = $w.FindFirst($TS::Descendants, $script:AddressBar); if (-not $e) { continue }
+      $err = ""; try { $e.SetFocus() } catch { $err = " (SetFocus: " + $_.Exception.Message + ")" }
+      Start-Sleep -Milliseconds 300
+      $f = [System.Windows.Automation.AutomationElement]::FocusedElement
+      Write-Host ("  [focus] after SetFocus{0}: focused = {1} '{2}' class '{3}' pid {4}; is the address bar: {5}; HasKeyboardFocus: {6}" -f $err, $(if ($f) { $f.Current.ControlType.ProgrammaticName } else { "none" }), $(if ($f) { $f.Current.Name } else { "" }), $(if ($f) { $f.Current.ClassName } else { "" }), $(if ($f) { $f.Current.ProcessId } else { "" }), $(if ($f) { [System.Windows.Automation.Automation]::Compare($f, $e) } else { $false }), $e.Current.HasKeyboardFocus)
+      Write-Host ("  [focus] this test runs in session {0}; the browser in session {1}" -f [System.Diagnostics.Process]::GetCurrentProcess().SessionId, (Get-Process -Id $w.Current.ProcessId).SessionId)
+    }
+  } catch { Write-Host "  [focus] diagnostics failed: $_" }
+}
 function Front-Browser([string]$proc) {
   $p = @(Get-Process $proc -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero }) | Select-Object -First 1
   if ($p) { try { [LqzFront]::Front($p.MainWindowHandle) } catch { } }
@@ -160,7 +180,7 @@ foreach ($b in $browsers) {
   Check (([regex]::Matches($h, 'document /d2l/lms/quizzing/user/quiz_summary')).Count -eq 1) "$($b.Name): the quiz page loaded once (no reload loop)"
   $wins = @(Get-BrowserWindows)
   Check (@($wins | Where-Object { Is-Quiz $_.Url }).Count -ge 1) "$($b.Name): the agent still sees the quiz (lock stays on)"
-  if ($fail) { Dump-Tree $b.Proc }
+  if ($fail) { Diag-Focus $b.Proc; Dump-Tree $b.Proc }
   Get-Process $b.Proc -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Seconds 2
 }
 Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue
