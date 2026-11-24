@@ -15,6 +15,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
+using Microsoft.Win32;
 
 static class LOCKqz {
   static readonly Color Usc = Color.FromArgb(153, 0, 0);
@@ -27,14 +28,27 @@ static class LOCKqz {
     return File.Exists(f) ? File.ReadAllText(f).Trim() : "";
   }
 
-  // Returns the script's exit code; -2 when the student said No to the Windows prompt.
+  // Returns the script's exit code; -2 when the student said No to the Windows prompt; -3 when Windows would not start
+  // it at all (S mode, or a policy that blocks PowerShell).
   static int Elevated(string script, string args) {
     var psi = new ProcessStartInfo("powershell.exe",
       "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + script + "\" " + args);
     psi.UseShellExecute = true; psi.Verb = "runas"; psi.WindowStyle = ProcessWindowStyle.Hidden;
     try { var p = Process.Start(psi); p.WaitForExit(); return p.ExitCode; }
-    catch (Win32Exception) { return -2; }
+    catch (Win32Exception e) { return e.NativeErrorCode == 1223 ? -2 : -3; }   // 1223 = the prompt was answered No
   }
+
+  // Windows in S mode runs only Store apps, never PowerShell, which LOCKqz's helper is: the student switches out of
+  // S mode (free, in the Store) first. SkuPolicyRequired = 1 marks S mode (Windows 10 1803 and later).
+  static bool SMode() {
+    try {
+      using (RegistryKey k = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\CI\Policy")) {
+        object v = k == null ? null : k.GetValue("SkuPolicyRequired");
+        return v is int && (int)v == 1;
+      }
+    } catch { return false; }
+  }
+  const string SModeSwitch = "ms-windows-store://pdp/?productid=BF712690PMLF";
 
   static int Install() {
     string token = "lqz-" + Guid.NewGuid().ToString("N").Substring(0, 20);
@@ -126,6 +140,7 @@ static class LOCKqz {
       remove.SetBounds(150, 196, 120, 26); remove.Text = "Remove LOCKqz"; remove.FlatStyle = FlatStyle.Flat;
       remove.ForeColor = Color.Gray; remove.FlatAppearance.BorderSize = 0; remove.Font = new Font("Segoe UI", 8.5f);
       main.Click += delegate {
+        if (state == "smode") { try { Process.Start(new ProcessStartInfo(SModeSwitch) { UseShellExecute = true }); } catch { } return; }
         if (state == "setup") DoInstall();
         else if (state == "on") StartTest();
         else if (state == "testing") StopTest();
@@ -155,6 +170,7 @@ static class LOCKqz {
       if (s == "on") { msg.Text = "LOCKqz is on.\nAI turns off only during your quizzes."; main.Text = "Test it now"; }
       else if (s == "testing") { msg.Text = TestText(left); main.Text = "Stop test"; }
       else if (s == "removed") { msg.Text = "LOCKqz was removed.\nYou can uninstall this app."; main.Text = "Close"; }
+      else if (s == "smode") { msg.Text = "This PC is in S mode, which blocks LOCKqz.\nGet \"Switch out of S mode\" (free), then open LOCKqz."; main.Text = "Open the Store"; }
       else { msg.Text = "Setting up...\nClick Yes on the Windows prompt."; main.Text = "Set up"; }
     }
     static string TestText(int s) { return "AI is off for " + (s / 60) + ":" + (s % 60).ToString("00") + ".\nTry chatgpt.com: it won't open."; }
@@ -193,6 +209,7 @@ static class LOCKqz {
       });
     }
     public void DoInstall() {
+      if (SMode()) { ShowAll("smode"); return; }
       ShowAll("setup"); main.Enabled = false; Refresh();
       // Run setup off the window thread so the window never shows "Not responding".
       var t = new System.Threading.Thread(delegate () {
@@ -201,6 +218,8 @@ static class LOCKqz {
           main.Enabled = true;
           if (r == 0 && Installed) ShowAll("on");
           else if (r == -2) msg.Text = "Click Set up, then Yes on the Windows prompt.";
+          else if (r == -3 && SMode()) ShowAll("smode");
+          else if (r == -3) msg.Text = "Windows blocked LOCKqz's setup.\nAsk whoever manages this PC to allow it.";
           else msg.Text = "Setup did not finish (code " + r + ").\nClick Set up to try again.";
         });
       });

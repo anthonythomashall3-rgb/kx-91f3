@@ -61,7 +61,7 @@ check "live 'signed' package is not a real .pkg -> this build ships (warned), no
 
 echo "M3 release.yml + download page"
 check "mac job: signs after the install test, before the upload; outputs signed" \
-  awk '/test_mac_install.sh/{a=NR} /mac-sign.sh sign \/tmp\/lockqz-mac.pkg/{b=NR} /name: lockqz-mac$/{c=NR} END{exit !(a && a<b && b<c)}' "$R"
+  awk '/test_mac_install.sh/ && !a {a=NR} /mac-sign.sh sign \/tmp\/lockqz-mac.pkg/{b=NR} /name: lockqz-mac$/{c=NR} END{exit !(a && a<b && b<c)}' "$R"
 check "mac job output wired" has 'signed: ${{ steps.sign.outputs.signed }}' "$R"
 c(){ for s in MAC_SIGNING MAC_INSTALLER_P12 MAC_INSTALLER_P12_PASSWORD NOTARY_KEY_P8 NOTARY_KEY_ID NOTARY_ISSUER_ID APPLE_ID APPLE_APP_PASSWORD APPLE_TEAM_ID; do has "$s: \${{ secrets.$s }}" "$R" || return 1; done; }
 check "every signing secret reaches the sign step" c

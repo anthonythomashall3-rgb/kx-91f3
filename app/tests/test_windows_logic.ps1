@@ -117,6 +117,7 @@ Check "C9: no unlock field / unlock 'true' as text -> nothing" (($null -eq (LQ-S
 $rec = [pscustomobject]@{ version = "0.4.1"; student = "a@usc.edu"; at = $t0 }
 Check "C6: same version + student within 24 h -> no install report" (-not (LQ-InstallDue $rec "0.4.1" "a@usc.edu" ($t0 + 3600)))
 Check "C6: new version, new student, 24 h, or no record -> report" ((LQ-InstallDue $rec "0.4.2" "a@usc.edu" ($t0 + 60)) -and (LQ-InstallDue $rec "0.4.1" "b@usc.edu" ($t0 + 60)) -and (LQ-InstallDue $rec "0.4.1" "a@usc.edu" ($t0 + 86400)) -and (LQ-InstallDue $null "0.4.1" "x" $t0))
+Check "weekly report (12-hour round): none within a week, one after a week" ((-not (LQ-InstallDue $rec "0.4.1" "a@usc.edu" ($t0 + 3 * 86400) 604800)) -and (LQ-InstallDue $rec "0.4.1" "a@usc.edu" ($t0 + 604800) 604800))
 $oldCfg = '{"port":8787,"token":"lqz-abc","api_base":"https://lockdownqz.pages.dev/api","device_id":"win-1","student":"s"}'
 $mc = Migrate-ConfText $oldCfg
 Check "E1: lockdownqz api_base moves to lockqz.pages.dev, everything else byte-for-byte" ($mc.changed -and ($mc.text -eq $oldCfg.Replace("lockdownqz.pages.dev", "lockqz.pages.dev")))
@@ -257,6 +258,8 @@ Check "Firefox: GenerativeAI SmartWindow off + built-in VPN off" (((RG-Read "$F\
 $ffb = @(RG-ValueNames "$F\WebsiteFilter\Block" | ForEach-Object { (RG-Read "$F\WebsiteFilter\Block" $_).value })
 Check "Firefox WebsiteFilter has every host (*://*.host/*), <= 1000" ((@($hostsW | Where-Object { $ffb -notcontains ("*://*." + $_ + "/*") }).Count -eq 0) -and ($ffb.Count -le 1000))
 Check "Notepad AI off (WindowsNotepad\DisableAIFeatures = 1)" ((RG-Read "HKLM:\SOFTWARE\Policies\WindowsNotepad" "DisableAIFeatures").value -eq 1)
+$AP = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy"
+Check "Windows' on-device text and image generation for other apps force-denied (AppPrivacy = 2)" (((RG-Read $AP "LetAppsAccessSystemAIModels").value -eq 2) -and ((RG-Read $AP "LetAppsAccessGenerativeAI").value -eq 2))
 $OP1 = "Registry::HKEY_USERS\$SID1\Software\Policies\Microsoft\office\16.0\common\privacy"
 Check "Office Copilot off for the signed-in user (usercontentdisabled = 2, HKU)" ((RG-Read $OP1 "usercontentdisabled").value -eq 2)
 Check "proxy forced direct when the internet works without it (no probe without a user proxy)" (((RG-Read $C "ProxyMode").value -eq "direct") -and ($script:Probes -eq 0))

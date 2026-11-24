@@ -36,7 +36,7 @@ KEEPFILE = os.environ.get("LOCKQZ_KEEP_FILE") or os.path.join(os.path.dirname(BL
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.6.44"
+VERSION = "0.6.45"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -714,25 +714,35 @@ def report_async(event, extra=None):
     # a successful lock/unlock look like a failure to the agent (which would then never unlock).
     threading.Thread(target=lambda: report(event, extra), daemon=True).start()
 
-def install_due(rec, version, student, now):
-    """C6: send the 'install' report only when the version or the student changed, or 24 h passed."""
+def install_due(rec, version, student, now, every=86400):
+    """C6: send the 'install' report only when the version or the student changed, or `every` seconds (24 h) passed."""
     if not isinstance(rec, dict): return True
     try: at = float(rec.get("at") or 0)
     except Exception: at = 0.0
-    return rec.get("version") != version or rec.get("student") != student or not (0 <= now - at < 86400)
+    return rec.get("version") != version or rec.get("student") != student or not (0 <= now - at < every)
 
-def report_install():
+def report_install(every=86400):
     try:
         with open(INSTFILE) as f: rec = json.load(f)
     except Exception:
         rec = None
     student = STATE["student"]
-    if not install_due(rec, VERSION, student, time.time()): return False
+    if not install_due(rec, VERSION, student, time.time(), every): return False
     code, _ = report("install", {"platform": platform_tag(), "version": VERSION})
     if code == 200:
         try: _write_private(INSTFILE, json.dumps({"version": VERSION, "student": student, "at": time.time()}))
         except Exception as e: log("could not save install record: %s" % e)
     return code == 200
+
+# The professor's page counts a computer as ready when LOCKqz saw it in the last 30 days. A computer that runs for weeks
+# without a restart or an app update says so once a week (the same report, from the 12-hour round): one request a week.
+SEEN_EVERY = 7 * 86400
+
+def report_seen():
+    try: return report_install(SEEN_EVERY)
+    except Exception as e:
+        log("seen report: %s" % e)
+        return False
 
 def save_keep(keep, path=None):
     """The server's never-close additions -> keep.txt, replaced each time (the server may take one back). Only from
@@ -1008,6 +1018,7 @@ def watch_once(cycles, last_beat):
     if cycles % 8640 == 0 or late("blocklist", 12 * 3600):   # ~every 12h — keeps API calls minimal
         WALL["blocklist"] = now
         refresh_blocklist()
+        threading.Thread(target=report_seen, daemon=True).start()
     if cycles % 720 == 0:    # ~hourly: keep the helper log small
         rotate_log()
     if cycles % 720 == 0 and not NET["registered"]:   # ~hourly until the server knows this key

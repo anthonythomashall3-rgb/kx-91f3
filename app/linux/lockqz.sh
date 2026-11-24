@@ -36,7 +36,7 @@ AI_APPS=(chatgpt ChatGPT claude Claude claude-desktop copilot perplexity ollama 
          notion Notion notion-app canva slack Slack evernote
          whatsapp WhatsApp whatsapp-desktop telegram-desktop Telegram telegram discord Discord messenger Messenger)
 LOCAL_MODEL_PROCS=(ollama llama-server llama-cli llama-run llamafile koboldcpp localai local-ai lm-studio-server jan-server gpt4all
-                   vllm lms ollama_llama_server llama-mtmd-cli cortex cortex-server open-webui lmdeploy sglang lemonade-server text-generation-launcher)
+                   vllm lms ollama_llama_server llama-mtmd-cli cortex cortex-server open-webui lmdeploy sglang lemonade-server text-generation-launcher foundry Inference.Service.Agent)
 LOCAL_MODEL_CMD_RES=('/bin/mlx_lm[._][a-z_]+( |$)' ' -m mlx_lm([. ]|$)' '/bin/vllm( |$)' ' -m vllm[. ]' ' -m llama_cpp\.server( |$)'
                      '/bin/open-webui( |$)' ' -m open_webui( |$)' ' -m sglang\.launch_server' '/bin/text-generation-launcher( |$)' 'ollama serve')
 VPN_APPS=(openvpn openvpn-gui nordvpn nordvpnd expressvpn expressvpnd surfshark protonvpn protonvpn-app protonvpn-cli mullvad mullvad-daemon mullvad-gui

@@ -59,6 +59,7 @@ run "Email From lockqz.com: Mailjet third sender (request shape, after Resend an
 run "Outside watch of the live site (GET /watch: database, clock, email; the Server watch workflow)" node --no-warnings test_watch.mjs
 run "5-minute watch Worker (looks, tells once, again after 6 h, fine again; by hand)" node --no-warnings test_watch_worker.mjs
 run "A laptop that slept catches up by the clock (list additions, update check; Mac/Linux helper, Windows rule)" python3 test_wake_catchup.py
+run "Helper: a computer that runs for weeks without a restart still says it is there (weekly report)" python3 test_sweep36.py
 run "A professor's sections are found by name through an index (no whole-table read)" node --no-warnings test_sections_lookup.mjs
 run "Mac: a pass right after the preferences service restarted does not wait for it (AirPlay switch look)" bash test_prefs_settling.sh
 run "Gmail payment script parser (forged alerts refused)" node test_pay_script.mjs
@@ -70,6 +71,7 @@ run "Brightspace's own submission email (server): each quiz's address, the one s
 run "Brightspace's own submission email (Sync): LOCKqz's address beside the professor's own in Notification Email, only it taken away" node --no-warnings test_mailin_sync.mjs
 run "Brightspace's own submission email (Email Worker): the email read (multipart, quoted-printable, its links) and handed to the API" node --no-warnings test_mailin_worker.mjs
 run "Sweep 35: an exam taken more than once - each unlock matched with its own attempt; every attempt's time kept" node --no-warnings test_sweep35.mjs
+run "Sweep 36: a look at an exam's start page is not red; a later attempt's early unlock is; every kind of computer tested" node --no-warnings test_sweep36.mjs
 run "26 Oct fixes: one Stripe checkout per code, overpayments carried, unexpected local unlocks red, course password retired" node --no-warnings test_oct26_fixes.mjs
 run "Helper hardening: fast user switching, per-user tokens, Windows monotonic cap, local-model apps" bash test_helper_hardening.sh
 run "Scale guard: no API query reads a whole big table (every statement planned against the real schema)" node --no-warnings test_scale_indexes.mjs

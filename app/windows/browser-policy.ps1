@@ -326,6 +326,11 @@ function Get-PolicyPlan([bool]$KeepProxy = $false) {
   V "$PolicyRoot\Microsoft\Windows\WindowsAI" "DisableClickToDo" 1
   # Notepad Write / Rewrite / Summarize (policy DisableAIFeaturesInNotepad, Notepad 11.2503.16+).
   V "$PolicyRoot\WindowsNotepad" "DisableAIFeatures" 1
+  # Windows' own on-device models for every other app (Copilot+ PCs on Snapdragon, Intel and AMD: Phi Silica text and
+  # image generation through the Windows AI APIs, with no network at all): App Privacy "Let Windows apps make use of
+  # text and image generative features" and "Let Windows apps access generative AI", 2 = Force Deny, for the quiz.
+  V "$PolicyRoot\Microsoft\Windows\AppPrivacy" "LetAppsAccessSystemAIModels" 2
+  V "$PolicyRoot\Microsoft\Windows\AppPrivacy" "LetAppsAccessGenerativeAI" 2
   # Adobe Acrobat (Pro / Standard / the unified 64-bit Reader) and the classic Acrobat Reader: generative AI
   # (AI Assistant) off and locked - FeatureLockDown bEnableGentech = 0 (Adobe community answer; same key
   # Intune / GPO guides deploy). Saved and restored exactly like every other value here.

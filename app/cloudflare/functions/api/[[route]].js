@@ -2451,7 +2451,11 @@ export async function onRequest(context) {
 
     if (p === "/report" && request.method === "POST") {
       const v = await verifyDevice(request, raw, db);
-      const { event, quiz_id, student, detail } = body;
+      const { event, quiz_id, student } = body;
+      // What the server writes into an unlock's record (its word on the end, when the lock began, how the computer ended
+      // it, a hold) is never taken from the computer's own report: the live view relies on it.
+      const detail = body.detail && typeof body.detail === "object" && !Array.isArray(body.detail)
+        ? Object.fromEntries(Object.entries(body.detail).filter(([k]) => !["expected", "unexpected", "began", "ended", "held"].includes(k))) : body.detail;
       const ev = event || "heartbeat";
       const agentBeat = ev === "heartbeat" && /^(ext|agent)/.test(String(body.source || body.from || "helper"));
       if (v.ok && body.device_id && body.device_id !== v.id) return json({ error: "device mismatch" }, 400);
@@ -4507,6 +4511,10 @@ export async function onRequest(context) {
         return typeof r === "string" && r ? r.slice(0, 40) : null; };
       // When the lock an unlock ended began (its event keeps it from 24 Nov 2026), in ms; NaN when not known.
       const beganOf = e => { if (e.event !== "unlock") return NaN; try { const d = JSON.parse(e.detail); return d && typeof d === "object" && d.began ? Date.parse(d.began) : NaN; } catch { return NaN; } };
+      // An unlock the server let stand because that lock never held an attempt: its computer saw no attempt page of the
+      // exam during it (no_attempt: the student only looked at the exam's start page), or was never given the exam's
+      // LOCKqz password (no_password). AI was not open during an attempt, so it is not "AI unblocked before submitting".
+      const noAttempt = e => { if (e.event !== "unlock") return false; try { const d = JSON.parse(e.detail); return !!d && typeof d === "object" && (d.ended === "no_attempt" || d.ended === "no_password"); } catch { return false; } };
       // A gap spans from when the helper went silent (detail.from) to when it came back (ts).
       const whenOf = e => { if (e.event === "lock_gap") { try { const f = JSON.parse(e.detail).from; if (f && !isNaN(Date.parse(f))) return f; } catch {} } return e.ts; };
       const overlaps = (e, qi) => { const f = Date.parse(whenOf(e)), t = Date.parse(e.ts), s = startOf(qi), en = endOf(qi); return !isNaN(t) && (s === null || t >= s) && (en === null || f <= en); };
@@ -4518,6 +4526,7 @@ export async function onRequest(context) {
         const inc = (incidents.get(r.device_id + "|" + r._q) || []).filter(e => {
           const w = whenOf(e);
           if (!overlaps(e, qi)) return false;
+          if (noAttempt(e)) return false;
           const clean = e.event === "unlock" && reasonOf(e) === "quiz_submitted";
           const unexp = e.event === "unlock" && /"unexpected":true/.test(String(e.detail || ""));
           // Completion time unknown (old Sync tab): the submission itself is the proof (pre-C5 rule).
@@ -4526,17 +4535,17 @@ export async function onRequest(context) {
           // quiz list / a submissions page sends it, and so does a local /unlock call).
           // An exam taken more than once: an unlock whose lock's start is known is matched with the attempt of that
           // lock, the first completion from its start on (60 s for clocks) that no earlier unlock of this computer was
-          // matched with (events come in time order); none = no attempt completed after it began.
+          // matched with (events come in time order); none = the attempt it ended has no completion (yet), as for a first
+          // attempt below.
           const began = beganOf(e);
           const doneAll = submitted && !isNaN(began) ? subAll(key) : [];
-          if (doneAll.length) {
-            const c = doneAll.find(x => x >= began - 60000 && !used.has(x));
-            if (c === undefined) return false;
+          const c = doneAll.find(x => x >= began - 60000 && !used.has(x));
+          if (c !== undefined) {
             const early = Date.parse(w) < c - (clean ? 60000 : 0);
             if (!early) used.add(c);
             return early;
           }
-          if (submitted) return !isNaN(doneAt) && Date.parse(w) < doneAt - (clean ? 60000 : 0);
+          if (submitted && !doneAll.length) return !isNaN(doneAt) && Date.parse(w) < doneAt - (clean ? 60000 : 0);
           // A local unlock the server did not expect stays red when Brightspace has no completion for the
           // student (even if the Sync tab reports no submissions for this quiz); 2 minutes for a report to arrive.
           return !(clean && (nowMs - Date.parse(e.ts) < 120000 || (!subsFor.has(qi) && !unexp)));

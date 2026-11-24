@@ -27,7 +27,7 @@ $BlockFile = Join-Path $Here "blocklist.txt"
 $Policy    = Join-Path $Here "browser-policy.ps1"
 # (no "dia": that name is also the Dia diagram editor; M365Copilot = the Microsoft 365 Copilot app)
 $AiApps = @("chatgpt","claude","copilot","perplexity","ollama","lmstudio","LM Studio","gpt4all","msty","cluely","jan","comet","atlas","notion ai","deepseek","poe","mistral","sider","grammarly",
-            "AnythingLLM","Chatbox","Cherry Studio","M365Copilot",
+            "AnythingLLM","Chatbox","Cherry Studio","M365Copilot","AIDevGallery",
             # local-model chat apps (their servers: $ModelProcs)
             "Msty Studio","Backyard AI","Faraday","Sanctum","Open WebUI","Pinokio","Witsy","Reor","ollama app",
             "grok","kimi","qwen",   # xAI / Kimi / Qwen desktop apps
@@ -53,7 +53,7 @@ $OverlayApps= @("Cluely","InterviewCoder","Interview Coder","LockedInAI","FinalR
                 "HackySack","Juxano","OfferBull","Coadeo","ExtraBrain","Cuebird","TechScreen","Shadecoder","Intrvw","InvisibleAI",
                 "PhantomDesk","PhantomDesk AI","InterviewBee","Ghostcoder","Interview Copilot")
 $ModelProcs = @("ollama","llama-server","llama-cli","llama-run","llamafile","koboldcpp","localai","local-ai","jan","gpt4all","text-generation-webui","vllm",
-                "ollama_llama_server","lms","llama-mtmd-cli","koboldcpp_cu12","koboldcpp_nocuda","cortex","cortex-server","open-webui","lmdeploy","text-generation-launcher","lemonade-server","lemonade-app")
+                "ollama_llama_server","lms","llama-mtmd-cli","koboldcpp_cu12","koboldcpp_nocuda","cortex","cortex-server","open-webui","lmdeploy","text-generation-launcher","lemonade-server","lemonade-app","foundry","Inference.Service.Agent")
 # tor = the Tor Browser's network daemon (Tor resolves names remotely, past the hosts block).
 $VpnApps    = @("nordvpn","expressvpn","surfshark","protonvpn","mullvad","pia","piaservice","Cloudflare WARP","warp-svc","openvpn","wireguard","windscribe","tunnelbear","hssvpn","cyberghost","tor",
                 # proxies and tunnels that look names up remotely (past the hosts block), Tailscale / ZeroTier networks

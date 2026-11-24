@@ -18,7 +18,9 @@ $stage = Join-Path $env:TEMP ("lockqz-msix-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path "$stage\payload", "$stage\Assets", (Split-Path -Parent $Out) | Out-Null
 
 # 1. Launcher exe (.NET Framework compiler that ships with Windows).
-$csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+# (Windows on Arm: the 64-bit compiler may sit in FrameworkArm64; the 32-bit one works everywhere.)
+$csc = @("Framework64","FrameworkArm64","Framework") | ForEach-Object { "$env:WINDIR\Microsoft.NET\$_\v4.0.30319\csc.exe" } | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $csc) { throw ".NET Framework compiler (csc.exe) not found" }
 & $csc /nologo /target:winexe /optimize+ "/out:$stage\LOCKqz.exe" "/win32icon:$PSScriptRoot\lockqz.ico" `
   /r:System.Windows.Forms.dll /r:System.Drawing.dll "$PSScriptRoot\LOCKqz.cs"
 if ($LASTEXITCODE -ne 0) { throw "csc failed" }
@@ -36,7 +38,8 @@ $m = (Get-Content "$PSScriptRoot\AppxManifest.xml.in" -Raw).Replace("@NAME@", $N
 Set-Content "$stage\AppxManifest.xml" $m -Encoding UTF8
 
 # 4. Pack.
-$kits = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\makeappx.exe" | Sort-Object FullName | Select-Object -Last 1
+$kits = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\makeappx.exe" -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -Last 1
+if (-not $kits) { $kits = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\arm64\makeappx.exe" -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -Last 1 }
 if (-not $kits) { throw "Windows SDK (makeappx.exe) not found" }
 if (Test-Path $Out) { Remove-Item $Out -Force }
 & $kits.FullName pack /o /d $stage /p $Out | Out-Null

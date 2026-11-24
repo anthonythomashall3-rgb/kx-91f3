@@ -35,7 +35,7 @@ OVERLAY_APPS=("Cluely" "Interview Coder" "InterviewCoder" "LockedIn AI" "LockedI
               "Interview Copilot")
 LOCAL_MODEL_PROCS=("ollama" "llama-server" "llama-cli" "llama-run" "llama_cpp" "llamafile" "koboldcpp" \
                    "text-generation" "localai" "local-ai" "lm-studio-server" "jan-server" "gpt4all" "mlx_lm" "vllm" \
-                   "lms" "ollama_llama_server" "llama-mtmd-cli" "cortex" "cortex-server" "open-webui" "mlc_llm" "lmdeploy" "sglang" "lemonade-server" "lemonade-app")
+                   "lms" "ollama_llama_server" "llama-mtmd-cli" "cortex" "cortex-server" "open-webui" "mlc_llm" "lmdeploy" "sglang" "lemonade-server" "lemonade-app" "foundry" "Inference.Service.Agent")
 # Model tools that run as "python3 ..." (their process name is python3): matched on their own
 # script/module name in the command line only (extended regex, pkill -f).
 LOCAL_MODEL_CMD_RES=('/bin/mlx_lm[._][a-z_]+( |$)' ' -m mlx_lm([. ]|$)' '/bin/vllm( |$)' ' -m vllm[. ]' \

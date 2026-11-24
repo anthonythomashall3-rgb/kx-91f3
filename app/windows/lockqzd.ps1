@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.6.44"
+$Version = "0.6.45"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = if ($env:LOCKQZ_CONFIG) { $env:LOCKQZ_CONFIG } else { "$env:ProgramData\LOCKqz\config.json" }
@@ -143,11 +143,11 @@ function LQ-ServerReason($data) {
   if (@("quiz_submitted", "quiz_ended") -contains [string]$data.reason) { return [string]$data.reason }
   return "quiz_ended"
 }
-function LQ-InstallDue($rec, [string]$version, $student, [int64]$now) {
-  # C6: the "install" report goes out only when the version or the student changed, or after 24 h.
+function LQ-InstallDue($rec, [string]$version, $student, [int64]$now, [int64]$every = 86400) {
+  # C6: the "install" report goes out only when the version or the student changed, or after $every seconds (24 h).
   if (-not $rec) { return $true }
   $at = [int64]0; [void][int64]::TryParse([string]$rec.at, [ref]$at)
-  return (([string]$rec.version -ne $version) -or ([string]$rec.student -ne [string]$student) -or (($now - $at) -ge 86400) -or ($now -lt $at))
+  return (([string]$rec.version -ne $version) -or ([string]$rec.student -ne [string]$student) -or (($now - $at) -ge $every) -or ($now -lt $at))
 }
 function LQ-UnlockReason($claimed, $requester) {
   # Reason sent with every unlock report. Only the LOCKqz agent may name a quiz-ending reason;
@@ -461,11 +461,13 @@ function Set-Assist($q, $tools) {
   if ($cur -and ($cur.Trim() -eq $new)) { return $false }
   try { [IO.File]::WriteAllText($AssistFile, $new, (New-Object Text.UTF8Encoding($false))); return $true } catch { return $false }
 }
-function Report-Install {
-  # C6: only when the version or the student changed, or 24 h passed (persisted across restarts).
+function Report-Install([int64]$every = 86400) {
+  # C6: only when the version or the student changed, or 24 h passed (persisted across restarts). The 12-hour round
+  # asks with a week: the professor's page counts a computer seen in the last 30 days as ready, and a PC that runs
+  # for weeks without a restart or an app update would otherwise stop saying it is there.
   $rec = $null; try { $rec = Get-Content $InstFile -Raw -ErrorAction Stop | ConvertFrom-Json } catch { }
   $now = [int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-  if (-not (LQ-InstallDue $rec $Version $State.student $now)) { return }
+  if (-not (LQ-InstallDue $rec $Version $State.student $now $every)) { return }
   $r = Report "install" @{ platform="windows"; version=$Version }
   if ($r.code -eq 200) { try { @{ version=$Version; student=$State.student; at=$now } | ConvertTo-Json -Compress | Set-Content -Path $InstFile -Encoding UTF8 } catch { } }
 }
@@ -614,6 +616,7 @@ $watcher.AddScript({
         $got = WLock
         try { if ($State.state -eq "unlocked") { $n = LQ-MergeBlocklist $served (Join-Path $Here "blocklist.txt"); if ($n -gt 0) { Write-Host "blocklist: $n additions from the server" } } } catch { } finally { WUnlockMx $got }
       }
+      try { Report-Install 604800 } catch { }   # still here: once a week (the professor's "ready" counts 30 days)
     }
     # ~hourly until the server knows this device's key
     if (($cycles % 720 -eq 0) -and -not $State.registered) { LQ-Register $Api $Device $Key $State | Out-Null }

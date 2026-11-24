@@ -90,7 +90,9 @@ jobs:
     name: Build + install-test the Mac package
     needs: test
     if: needs.test.outputs.mac == 'true'
-    runs-on: macos-latest
+    # The package holds scripts only (the same package for Apple silicon and Intel). When GitHub has no Apple silicon
+    # machine free ("not acquired by Runner"), "Re-run failed jobs" builds and signs it on an Intel Mac instead.
+    runs-on: ${{ github.run_attempt == 1 && 'macos-latest' || 'macos-15-intel' }}
     outputs:
       signed: ${{ steps.sign.outputs.signed }}
     steps:
@@ -121,11 +123,29 @@ jobs:
           path: /tmp/lockqz-mac.pkg
           if-no-files-found: error
 
+  mac_intel:
+    name: Install-test the Mac package on an Intel Mac (macOS 15)
+    needs: test
+    if: needs.test.outputs.mac == 'true'
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the .pkg, install it, lock/unlock, uninstall (Intel)
+        run: bash app/tests/test_mac_install.sh
+      - name: Programs hidden from screen capture are closed (Intel; real windows, the engine as root)
+        run: bash app/tests/test_mac_hidden.sh
+
   linux:
-    name: Install-test on Linux (real Ubuntu - hosts, nftables, policies, agent tab reading)
+    name: Install-test on Linux, ${{ matrix.arch }} (real Ubuntu - hosts, nftables, policies, agent tab reading)
     needs: test
     if: needs.test.outputs.linux == 'true'
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest, arch: x64 }
+          - { runner: ubuntu-24.04-arm, arch: Arm }
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -184,10 +204,19 @@ jobs:
           if-no-files-found: error
 
   windows:
-    name: Build + install-test the Windows installer
+    name: Build + install-test the Windows installer (${{ matrix.label }})
     needs: test
     if: needs.test.outputs.win == 'true'
-    runs-on: windows-latest
+    # Every kind of Windows PC: Intel / AMD (x64), Windows 11 on Arm (Snapdragon; a Windows 11 desktop image), and the
+    # Windows 10 generation (Server 2022). The installer is built on each and installed for real; x64's is the release.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: windows-latest, label: "x64" }
+          - { runner: windows-11-arm, label: "Windows 11 on Arm" }
+          - { runner: windows-2022, label: "Windows 10 generation" }
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - name: Install Inno Setup
@@ -239,7 +268,14 @@ jobs:
         run: |
           & .\app\tests\test_windows_install.ps1 -Exe "$PWD\app\windows\Output\lockqz-win.exe" -Token $env:LQTOKEN
           if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: The Microsoft Store package on Arm (x64 package, installed and used on Windows 11 on Arm)
+        if: matrix.runner == 'windows-11-arm'
+        shell: powershell
+        run: |
+          & .\app\tests\test_windows_store.ps1 -Shot "$env:RUNNER_TEMP\store\screenshot-arm.png"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
       - uses: actions/upload-artifact@v4
+        if: matrix.runner == 'windows-latest'
         with:
           name: lockqz-win
           path: app/windows/Output/lockqz-win.exe
@@ -308,13 +344,14 @@ jobs:
 
   deploy:
     name: Sign the release + deploy to Cloudflare
-    needs: [test, mac, windows, linux, android]
+    needs: [test, mac, mac_intel, windows, linux, android]
     runs-on: ubuntu-latest
     # Runs when tests passed and each platform build either passed or was skipped (nothing changed).
     if: >-
       always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       needs.test.result == 'success' && needs.test.outputs.deploy == 'true' &&
       (needs.mac.result == 'success' || needs.mac.result == 'skipped') &&
+      (needs.mac_intel.result == 'success' || needs.mac_intel.result == 'skipped') &&
       (needs.windows.result == 'success' || needs.windows.result == 'skipped') &&
       (needs.linux.result == 'success' || needs.linux.result == 'skipped') &&
       (needs.android.result == 'success' || needs.android.result == 'skipped')
