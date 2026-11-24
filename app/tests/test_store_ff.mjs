@@ -39,6 +39,7 @@ const cws = readFileSync(join(ROOT, ".github", "workflows", "cws.yml"), "utf8");
 check("firefox job: unlisted signing with web-ext + AMO key secrets, skipped without them", cws.includes("firefox:") && cws.includes("web-ext@8 sign") && cws.includes("--channel unlisted") && cws.includes("AMO_JWT_ISSUER") && cws.includes("Firefox signing skipped"));
 check("signs the committed, tested package (no rebuild in CI) and keeps the .xpi in dist", cws.includes("unzip -q app/extension-prof/dist/lockqz-prof-firefox.zip") && cws.includes("cp \"$f\" app/extension-prof/dist/lockqz-prof-firefox.xpi"));
 check("then starts the deploy that serves it", cws.includes("gh workflow run release.yml"));
+check("a push of several commits: the version is compared with master before the push (both jobs)", (cws.match(/BASE=HEAD~1; B="\$\{\{ github\.event\.before \}\}"/g) || []).length === 2 && (cws.match(/git show "\$BASE":app\/extension-prof\/manifest\.json/g) || []).length === 2);
 const build = readFileSync(join(APP, "extension-prof", "build.sh"), "utf8");
 check("build.sh keeps a signed .xpi (only the zips are rebuilt)", build.includes("rm -f dist/*.zip") && !/rm -rf build dist/.test(build));
 const man = JSON.parse(readFileSync(join(APP, "extension-prof", "manifest.json"), "utf8"));

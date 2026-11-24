@@ -354,7 +354,7 @@ function Start-Setup { $script:Setups++; $script:SetupAt = [DateTime]::UtcNow }
 $n0 = Get-Date "2026-10-25T12:00:00"
 Check "not started: every 5 min until 90 s before it opens" (((Next-PwCheck $n0 $n0.AddSeconds(3600)) -eq $n0.AddSeconds(300)) -and ((Next-PwCheck $n0 $n0.AddSeconds(200)) -eq $n0.AddSeconds(110)))
 Check "... then every 15 s; unknown start -> 5 min" (((Next-PwCheck $n0 $n0.AddSeconds(60)) -eq $n0.AddSeconds(15)) -and ((Next-PwCheck $n0 $null) -eq $n0.AddSeconds(300)))
-$Quiz = "123-456"; $LastPw = $null; $StartTold = $null; $Capped = @{}; $CapLeft = @{}; $PwNext = [DateTime]::UtcNow; $SetupAt = Get-Date "2000-01-01"
+$Quiz = "123-456"; $LastPw = $null; $StartTold = $null; $Capped = @{}; $CapLeft = @{}; $CapWhy = @{}; $SrvEnds = @("quiz_submitted", "quiz_ended"); $PwNext = [DateTime]::UtcNow; $SetupAt = Get-Date "2000-01-01"
 $r = Handle-Pw ([pscustomobject]@{ password = $null; status = 403; reason = "not started"; start_in = 1200 }) $true ""
 Check "not started -> wait, next ask ~5 min later, told once" (($r -eq "wait") -and (($PwNext - [DateTime]::UtcNow).TotalSeconds -gt 250) -and (@($Msgs | Where-Object { $_ -match "opens at" }).Count -eq 1))
 Check "DST (1 Nov 2026): the password timer is on UTC, so the clock going back an hour never freezes it" ($PwNext.Kind -eq [DateTimeKind]::Utc)

@@ -23,7 +23,10 @@ jobs:
         id: v
         run: |
           NEW=$(node -p "require('./app/extension-prof/manifest.json').version")
-          OLD=$(git show HEAD~1:app/extension-prof/manifest.json 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version" 2>/dev/null || echo none)
+          # Compared with master before this push (a push of several commits may change the version in any of them).
+          BASE=HEAD~1; B="${{ github.event.before }}"
+          if [ -n "$B" ] && [ "$B" != "0000000000000000000000000000000000000000" ] && git fetch -q --depth=1 origin "$B" 2>/dev/null; then BASE="$B"; fi
+          OLD=$(git show "$BASE":app/extension-prof/manifest.json 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version" 2>/dev/null || echo none)
           echo "version $OLD -> $NEW"
           if [ "$NEW" != "$OLD" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then echo "go=1" >> "$GITHUB_OUTPUT"; fi
       - name: Build the package
@@ -54,7 +57,10 @@ jobs:
         id: v
         run: |
           NEW=$(node -p "require('./app/extension-prof/manifest.json').version")
-          OLD=$(git show HEAD~1:app/extension-prof/manifest.json 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version" 2>/dev/null || echo none)
+          # Compared with master before this push (a push of several commits may change the version in any of them).
+          BASE=HEAD~1; B="${{ github.event.before }}"
+          if [ -n "$B" ] && [ "$B" != "0000000000000000000000000000000000000000" ] && git fetch -q --depth=1 origin "$B" 2>/dev/null; then BASE="$B"; fi
+          OLD=$(git show "$BASE":app/extension-prof/manifest.json 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version" 2>/dev/null || echo none)
           echo "version $OLD -> $NEW"
           if [ "$NEW" != "$OLD" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then echo "go=1" >> "$GITHUB_OUTPUT"; fi
       - name: Sign for Firefox (unlisted) and keep the signed package
