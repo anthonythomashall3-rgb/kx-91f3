@@ -39,7 +39,15 @@ Check "task LOCKqz Agent" ($null -ne (Get-ScheduledTask -TaskName 'LOCKqz Agent'
 # 3) daemon + lock/unlock
 $H = @{ 'X-LOCKqz-Token' = $cfg.token }; $B = 'http://127.0.0.1:8787'; $s = $null
 for ($i = 0; $i -lt 30 -and -not $s; $i++) { try { $s = Invoke-RestMethod "$B/status" -Headers $H -TimeoutSec 3 } catch { Start-Sleep 2 } }
+function Port-Owner {
+  # Who listens on the helper's port (empty when nobody): pid, program and command line.
+  $c = @(Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction SilentlyContinue) | Select-Object -First 1
+  if (-not $c) { return "" }
+  $p = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$c.OwningProcess) -ErrorAction SilentlyContinue
+  return ("pid {0} {1} {2}" -f $c.OwningProcess, $(if ($p) { $p.Name } else { "?" }), $(if ($p) { $p.CommandLine } else { "" }))
+}
 Check "daemon answering" ($null -ne $s)
+if (-not $s) { Write-Host "      port 8787: $(Port-Owner)" }
 try { Invoke-RestMethod "$B/lock" -Method Post -Headers $H -Body '{"quiz_id":"ci-store","student":"CI"}' -ContentType 'application/json' -TimeoutSec 90 | Out-Null } catch { Write-Host "      lock: $_" }
 $hosts = Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw
 Check "LOCK puts the block in hosts" ($hosts -match 'LOCKqz START')

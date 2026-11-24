@@ -120,6 +120,13 @@ $uk = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'; $uk32 = 'HKLM
 $innoKey = (Test-Path "$uk\LOCKqz_is1") -or (Test-Path "$uk32\LOCKqz_is1")
 Check "listed once in Installed apps (.exe entry)" ($innoKey -and -not (Test-Path "$uk\LOCKqz") -and -not (Test-Path "$uk32\LOCKqz"))
 
+function Port-Owner {
+  # Who listens on the helper's port (empty when nobody): pid, program and command line.
+  $c = @(Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction SilentlyContinue) | Select-Object -First 1
+  if (-not $c) { return "" }
+  $p = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$c.OwningProcess) -ErrorAction SilentlyContinue
+  return ("pid {0} {1} {2}" -f $c.OwningProcess, $(if ($p) { $p.Name } else { "?" }), $(if ($p) { $p.CommandLine } else { "" }))
+}
 # 6) UNINSTALL
 $un = Get-ChildItem $Dest -Filter 'unins*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
 Check "uninstaller present" ($null -ne $un)
@@ -129,6 +136,8 @@ Check "uninstall removed helper task" ($null -eq (Get-ScheduledTask -TaskName 'L
 Check "uninstall removed agent task" ($null -eq (Get-ScheduledTask -TaskName 'LOCKqz Agent' -ErrorAction SilentlyContinue))
 $hosts = Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw
 Check "hosts clean after uninstall" (-not ($hosts -match 'LOCKqz START'))
+$po = ""; for ($i = 0; $i -lt 10; $i++) { $po = Port-Owner; if (-not $po) { break }; Start-Sleep 1 }
+Check "nothing of LOCKqz still runs after uninstall (its port is free: $(if ($po) { $po } else { 'yes' }))" (-not $po)
 Check "Installed apps entry gone after uninstall" (-not (Test-Path "$uk\LOCKqz_is1") -and -not (Test-Path "$uk32\LOCKqz_is1") -and -not (Test-Path "$uk\LOCKqz"))
 
 if ($fail) { Write-Host "`n$fail CHECK(S) FAILED"; Get-Content install.log -ErrorAction SilentlyContinue | Select-Object -Last 40; exit 1 }

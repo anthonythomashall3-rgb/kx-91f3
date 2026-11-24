@@ -60,6 +60,7 @@ public static class LqzFront {
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   public static void Front(IntPtr h) { keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero); ShowWindow(h, 9); SetForegroundWindow(h); }
   public static string Fg() { IntPtr h = GetForegroundWindow(); uint p = 0; GetWindowThreadProcessId(h, out p); return h.ToString() + " pid " + p; }
+  public static uint FgPid() { uint p = 0; GetWindowThreadProcessId(GetForegroundWindow(), out p); return p; }
 }
 '@
 function Diag-Focus([string]$proc) {
@@ -79,9 +80,21 @@ function Diag-Focus([string]$proc) {
     }
   } catch { Write-Host "  [focus] diagnostics failed: $_" }
 }
+$script:Cleared = @{}
 function Front-Browser([string]$proc) {
   $p = @(Get-Process $proc -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero }) | Select-Object -First 1
-  if ($p) { try { [LqzFront]::Front($p.MainWindowHandle) } catch { } }
+  if (-not $p) { return }
+  # A build machine's first sign-in can leave a Windows prompt in front ("Choose privacy settings for your device"),
+  # which keeps every other window behind it: closed once, the way a student would answer it.
+  try {
+    $fg = [int][LqzFront]::FgPid()
+    $n = if ($fg) { [string](Get-Process -Id $fg -ErrorAction SilentlyContinue).ProcessName } else { "" }
+    $shells = @("explorer","powershell","pwsh","conhost","WindowsTerminal","OpenConsole","Runner.Listener","Runner.Worker","dwm","csrss","winlogon","ShellExperienceHost","StartMenuExperienceHost","SearchHost","TextInputHost","LockApp")
+    if ($n -and ($n -ne $proc) -and ($shells -notcontains $n) -and -not $script:Cleared.ContainsKey($n)) {
+      $script:Cleared[$n] = 1; Write-Host "  (closing $n, a window in front of every other)"; Stop-Process -Id $fg -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 700
+    }
+  } catch { }
+  try { [LqzFront]::Front($p.MainWindowHandle) } catch { }
 }
 $fail = 0
 function Check($ok, $what) { if ($ok) { Write-Host "  ok   $what" } else { Write-Host "  FAIL $what"; $script:fail++ } }

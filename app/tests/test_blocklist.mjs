@@ -323,7 +323,7 @@ console.log("T26 22 Nov: programs hidden from screen capture are closed (never-c
   ["Zoom", "CptHost", "ms-teams", "CiscoCollabHost", "chrome", "msedge", "firefox", "1Password", "Bitwarden", "KeePassXC", "Signal", "nvda", "jfw", "ReadAndWrite", "LockDownBrowser", "obs64"].every(k => winKeep.includes(`"${k}"`))
     ? ok("Windows never closes meeting apps, browsers, password managers, Signal, screen readers, proctoring browsers, recorders") : bad("Windows $KeepApps missing an essential");
   !/"(Slack|Discord|WhatsApp|Telegram|Notion)"/.test(macKeep + winKeep) ? ok("apps LOCKqz closes for their own AI are not on the never-close list") : bad("an AI-closed app is on the never-close list");
-  /models_by_file; hidden_close; siri_off/.test(macX) && /models_by_file\n  hidden_close\n/.test(macX) ? ok("Mac: every lock pass (and the preview) closes hidden programs") : bad("hidden_close not in extra_lock");
+  /models_by_file; hidden_close; siri_off/.test(macX) && /models_by_file\n(  xb_lap [a-z-]+\n)?  hidden_close\n/.test(macX) ? ok("Mac: every lock pass (and the preview) closes hidden programs") : bad("hidden_close not in extra_lock");
   /Close-HiddenApps \(Read-KeepApps \$KeepFile\)/.test(winA) ? ok("Windows: the agent closes hidden programs every 5 s while a quiz is open") : bad("Close-HiddenApps not called");
   const r = JSON.parse(execFileSync("python3", ["-c", `
 import importlib.util,json,sys

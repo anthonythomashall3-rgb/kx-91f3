@@ -81,17 +81,26 @@ siri_on() {
 # pattern from matching the grep that uses it.
 MODEL_FILE_RE='[.](gguf|ggml|safetensors|llamafile)([^A-Za-z0-9]|$)|/[.]ollama/models/|/[.]lmstudio/models/|/[.]cache/lm-studio/|/huggingface/hub/model[s]--'
 MODEL_SKIP_RE='/Google Chrome|/Safari|/Firefox|/Microsoft Edge|/Brave Browser|/Arc[.]app|/Microsoft (Word|Excel|PowerPoint|Outlook|OneNote)|/zoom[.]us|/Microsoft Teams'
-models_by_file() {   # one look at the process table; lsof only for a few big programs
-  local pid kind hit=""
+MF_SEEN="${STATE:-/Library/Application Support/LOCKqz}/models.seen"   # big programs lsof found no model file in: "pid time"
+models_by_file() {   # one look at the process table; lsof only for a few big programs, each at most once a minute
+  local pid kind hit="" now seen at keep=""
+  now="$(date +%s)"; seen="$(cat "$MF_SEEN" 2>/dev/null)"
   while read -r pid kind; do
     case "$pid" in ''|*[!0-9]*) continue ;; esac
     [ "$pid" = "$$" ] && continue
-    if [ "$kind" = args ] || lsof -nP -p "$pid" -Fn 2>/dev/null | grep -qE "^n.*($MODEL_FILE_RE)"; then hit="$hit $pid"; fi
+    if [ "$kind" = args ]; then hit="$hit $pid"; continue; fi
+    # lsof is the slow part of a lock pass (it repeats every 5 s): a big program it found no model file in less than
+    # a minute ago is not looked at again yet.
+    at="$(printf '%s\n' "$seen" | awk -v p="$pid" '$1 == p { print $2; exit }')"
+    case "$at" in ''|*[!0-9]*) at=0 ;; esac
+    if [ "$((now - at))" -ge 0 ] && [ "$((now - at))" -lt 60 ]; then keep="$keep$pid $at"$'\n'; continue; fi
+    if lsof -nP -p "$pid" -Fn 2>/dev/null | grep -qE "^n.*($MODEL_FILE_RE)"; then hit="$hit $pid"; else keep="$keep$pid $now"$'\n'; fi
   done < <(ps -axww -o pid=,rss=,args= 2>/dev/null | awk -v re="$MODEL_FILE_RE" -v skip="$MODEL_SKIP_RE" '
       { pid = $1; rss = $2; a = $0; sub(/^ *[0-9]+ +[0-9]+ +/, "", a) }
       a ~ /^\/(System|usr\/libexec|usr\/sbin)\// { next }
       a ~ re { print pid, "args"; next }
       rss > 1048576 && a !~ skip && big < 6 { big++; print pid, "big" }')
+  [ "$DRYRUN" = "1" ] || printf '%s' "$keep" > "$MF_SEEN" 2>/dev/null || true
   for pid in $hit; do
     if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would close (local model by its files): $pid"; continue; fi
     kill -9 "$pid" 2>/dev/null || true
@@ -548,10 +557,13 @@ extra_lock() {
   # One look at the running programs for all the lists together (this runs every 5 s during a quiz), and one
   # for the python-run model tools.
   _kill_list "blocked program" "${VPN_APPS[@]}" "${VM_APPS[@]}" "${REMOTE_APPS[@]}" "${OVERLAY_APPS[@]}" "${LOCAL_MODEL_PROCS[@]}" "${APPLE_AI_APPS[@]}"
+  xb_lap x-list
   local one="" re; for re in "${LOCAL_MODEL_CMD_RES[@]}" "${VM_CMD_RES[@]}"; do one="${one:+$one|}($re)"; done
   _kill_cmd_res "$one"
   _kill_if_tunnel "${VPN_IF_TUNNEL[@]}"
+  xb_lap x-cmds
   models_by_file
+  xb_lap x-models
   hidden_close
   xb_lap x-kills
   local rc=0 ap=""
