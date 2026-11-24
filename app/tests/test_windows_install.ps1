@@ -36,21 +36,6 @@ Check "daemon answering on 127.0.0.1:8787" ($null -ne $s)
 Check "starts unlocked" ($s.state -eq 'unlocked')
 $rejected = $false; try { Invoke-RestMethod "$B/status" -Headers @{ 'X-LOCKqz-Token' = 'wrong' } -TimeoutSec 3 | Out-Null } catch { $rejected = $true }
 Check "rejects a wrong token" $rejected
-function Http-Holders {
-  # The processes Windows' HTTP service lists for http://127.0.0.1:8787/ (read as the installer and remover read it).
-  $ids = @{}; $q = @(); $ours = $false; $ns = @()
-  try { $ns = @(netsh http show servicestate view=requestq) } catch { }
-  foreach ($l in @($ns + @("END"))) {
-    $l = [string]$l
-    if ($l -match '^\S') { if ($ours) { foreach ($x in $q) { $ids[[int]$x] = 1 } }; $q = @(); $ours = $false }
-    elseif ($l -match '^\s+(\d+)\s*$') { $q += $Matches[1] }
-    elseif ($l -match '(?i)^\s+HTTP://127\.0\.0\.1:8787/\s*$') { $ours = $true }
-  }
-  return @($ids.Keys)
-}
-$helperPids = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" | Where-Object { [string]$_.CommandLine -like "*lockqz-boot.ps1*" } | ForEach-Object { [int]$_.ProcessId })
-$holders = @(Http-Holders)
-Check "Windows' HTTP service names the helper as the holder of its address (helper $($helperPids -join ','); holders $($holders -join ','))" ($helperPids.Count -ge 1 -and @($holders | Where-Object { $helperPids -contains $_ }).Count -ge 1)
 
 # 3) LOCK
 $r = Invoke-RestMethod "$B/lock" -Method Post -Headers $H -Body '{"quiz_id":"ci-test","student":"CI"}' -ContentType 'application/json' -TimeoutSec 90
@@ -140,11 +125,14 @@ function Port-Owner {
   # port ("System", pid 4) for whoever registered an address on it, so name the registering processes too.
   $c = @(Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction SilentlyContinue) | Select-Object -First 1
   if (-not $c) { return "" }
-  $o = @([int]$c.OwningProcess); if ([int]$c.OwningProcess -eq 4) { $o = @(Http-Holders) + @(4) }
-  return (@($o | ForEach-Object {
-    $p = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$_) -ErrorAction SilentlyContinue
-    "pid {0} {1} {2}" -f $_, $(if ($p) { $p.Name } else { "?" }), $(if ($p) { $p.CommandLine } else { "" })
-  }) -join " | ")
+  $p = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$c.OwningProcess) -ErrorAction SilentlyContinue
+  $o = "pid {0} {1} {2}" -f $c.OwningProcess, $(if ($p) { $p.Name } else { "?" }), $(if ($p) { $p.CommandLine } else { "" })
+  if ([int]$c.OwningProcess -eq 4) {
+    # Windows' HTTP service: print its request queues (which process registered which address) for the log.
+    try { $o += " | " + ((@(netsh http show servicestate view=requestq) | Where-Object { [string]$_ -match '\S' }) -join " / ") } catch { }
+    $o += " | PowerShell running a LOCKqz script: " + (@(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" | Where-Object { [string]$_.CommandLine -like "*LOCKqz*" } | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }) -join "; ")
+  }
+  return $o
 }
 # 6) UNINSTALL
 $un = Get-ChildItem $Dest -Filter 'unins*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1

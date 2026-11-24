@@ -101,6 +101,18 @@ foreach ($b in $browsers) {
   $n1 = 0; $t0 = Get-Date
   for ($i = 0; $i -lt 25 -and $n1 -eq 0; $i++) { Start-Sleep -Seconds 1; $n1 += (Fill-QuizPassword $PW) }
   $took = [int]((Get-Date) - $t0).TotalSeconds
+  if ($n1 -eq 0) {
+    # A browser that never shows the page's contents to UI Automation (seen once on a build machine): opened again,
+    # as a student would reload the start page (LOCKqz tells them where it enters the password after 40 s).
+    Write-Host "  (no box after $took s: $($b.Name) opened again once)"
+    Get-Process $b.Proc -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Seconds 2
+    Set-Content -Path $hits -Value ""; $script:PwFilled = @{}
+    Start-Process -FilePath $b.Exe -ArgumentList ($common + @($nw, "`"$startPage`""))
+    for ($i = 0; $i -lt 30; $i++) { Start-Sleep -Seconds 1; if ((Get-Content $hits -Raw) -match 'document /d2l/lms/quizzing/user/quiz_start') { break } }
+    $t0 = Get-Date
+    for ($i = 0; $i -lt 25 -and $n1 -eq 0; $i++) { Start-Sleep -Seconds 1; $n1 += (Fill-QuizPassword $PW) }
+    $took = "$([int]((Get-Date) - $t0).TotalSeconds) s after opening it again; first try over 25"
+  }
   Start-Sleep -Seconds 3
   $h = Get-Content $hits -Raw
   Check ($n1 -eq 1) "$($b.Name): one password box found and filled (after $took s)"

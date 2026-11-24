@@ -324,6 +324,10 @@ function Get-PolicyPlan([bool]$KeepProxy = $false) {
   V "$PolicyRoot\Microsoft\Windows\WindowsCopilot" "TurnOffWindowsCopilot" 1
   V "$PolicyRoot\Microsoft\Windows\WindowsAI" "DisableAIDataAnalysis" 1
   V "$PolicyRoot\Microsoft\Windows\WindowsAI" "DisableClickToDo" 1
+  # The Settings agent (an on-device model that changes settings from a typed sentence) and Paint's Cocreator, Image
+  # Creator and generative fill: Microsoft's WindowsAI policies (Paint's live under CurrentVersion\Policies\Paint).
+  V "$PolicyRoot\Microsoft\Windows\WindowsAI" "DisableSettingsAgent" 1
+  foreach ($pv in @("DisableCocreator","DisableImageCreator","DisableGenerativeFill")) { V "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Paint" $pv 1 }
   # Notepad Write / Rewrite / Summarize (policy DisableAIFeaturesInNotepad, Notepad 11.2503.16+).
   V "$PolicyRoot\WindowsNotepad" "DisableAIFeatures" 1
   # Windows' own on-device models for every other app (Copilot+ PCs on Snapdragon, Intel and AMD: Phi Silica text and

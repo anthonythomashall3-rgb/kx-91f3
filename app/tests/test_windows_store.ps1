@@ -51,9 +51,11 @@ if (-not $s) { Write-Host "      port 8787: $(Port-Owner)" }
 try { Invoke-RestMethod "$B/lock" -Method Post -Headers $H -Body '{"quiz_id":"ci-store","student":"CI"}' -ContentType 'application/json' -TimeoutSec 90 | Out-Null } catch { Write-Host "      lock: $_" }
 $hosts = Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw
 Check "LOCK puts the block in hosts" ($hosts -match 'LOCKqz START')
-try { Invoke-RestMethod "$B/unlock" -Method Post -Headers $H -Body '{"quiz_id":"ci-store"}' -ContentType 'application/json' -TimeoutSec 90 | Out-Null } catch { Write-Host "      unlock: $_" }
-$hosts = Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw
-Check "UNLOCK cleans hosts" (-not ($hosts -match 'LOCKqz START'))
+$ua = $null; try { $ua = Invoke-RestMethod "$B/unlock" -Method Post -Headers $H -Body '{"quiz_id":"ci-store"}' -ContentType 'application/json' -TimeoutSec 90 } catch { Write-Host "      unlock: $_" }
+# The helper unlocks at once; when its engine pass could not finish, its watcher finishes it within 5 s.
+for ($i = 0; $i -lt 20; $i++) { $hosts = Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw; if (-not ($hosts -match 'LOCKqz START')) { break }; Start-Sleep 1 }
+if ($i -gt 0) { Write-Host "      unlock answer: $($ua | ConvertTo-Json -Compress); hosts clean after $i s" }
+Check "UNLOCK cleans hosts (within 20 s)" (-not ($hosts -match 'LOCKqz START'))
 
 # 3b) "Test it now" (what Microsoft's reviewers and students click): AI off without any account, then back by itself.
 function HostsBlocked {

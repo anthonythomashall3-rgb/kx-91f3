@@ -258,6 +258,8 @@ Check "Firefox: GenerativeAI SmartWindow off + built-in VPN off" (((RG-Read "$F\
 $ffb = @(RG-ValueNames "$F\WebsiteFilter\Block" | ForEach-Object { (RG-Read "$F\WebsiteFilter\Block" $_).value })
 Check "Firefox WebsiteFilter has every host (*://*.host/*), <= 1000" ((@($hostsW | Where-Object { $ffb -notcontains ("*://*." + $_ + "/*") }).Count -eq 0) -and ($ffb.Count -le 1000))
 Check "Notepad AI off (WindowsNotepad\DisableAIFeatures = 1)" ((RG-Read "HKLM:\SOFTWARE\Policies\WindowsNotepad" "DisableAIFeatures").value -eq 1)
+$PT = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Paint"
+Check "Paint: Cocreator, Image Creator, generative fill off; Settings agent off" ((@("DisableCocreator","DisableImageCreator","DisableGenerativeFill") | Where-Object { (RG-Read $PT $_).value -ne 1 }).Count -eq 0 -and ((RG-Read "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" "DisableSettingsAgent").value -eq 1))
 $AP = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy"
 Check "Windows' on-device text and image generation for other apps force-denied (AppPrivacy = 2)" (((RG-Read $AP "LetAppsAccessSystemAIModels").value -eq 2) -and ((RG-Read $AP "LetAppsAccessGenerativeAI").value -eq 2))
 $OP1 = "Registry::HKEY_USERS\$SID1\Software\Policies\Microsoft\office\16.0\common\privacy"

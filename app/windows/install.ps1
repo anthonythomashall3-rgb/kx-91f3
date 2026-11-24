@@ -202,28 +202,13 @@ if (-not $StorePackage -and -not $FromExe -and -not (Test-Path "HKLM:\SOFTWARE\M
 }
 
 # A new install: a LOCKqz helper or agent still running here can only be left over from a removed copy (it would keep
-# LOCKqz's local address with an old key). Stop it, so the new helper starts at once. Windows' HTTP service serves the
-# helper's address, so it is asked which process registered http://127.0.0.1:8787/.
+# LOCKqz's local address with an old key). Stop it, so the new helper starts at once.
 if ($Fresh) {
-  $ids = @{}
   foreach ($p in @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue)) {
     $c = [string]$p.CommandLine
-    if ($c -like "*lockqzd.ps1*" -or $c -like "*lockqz-boot.ps1*" -or $c -like "*lockqz-agent.ps1*") { $ids[[int]$p.ProcessId] = 1 }
-  }
-  $q = @(); $ours = $false; $ns = @()
-  try { $ns = @(netsh http show servicestate view=requestq) } catch { }
-  foreach ($l in @($ns + @("END"))) {
-    $l = [string]$l
-    if ($l -match '^\S') { if ($ours) { foreach ($x in $q) { $ids[[int]$x] = 1 } }; $q = @(); $ours = $false }
-    elseif ($l -match '^\s+(\d+)\s*$') { $q += $Matches[1] }
-    elseif ($l -match '(?i)^\s+HTTP://127\.0\.0\.1:8787/\s*$') { $ours = $true }
-  }
-  foreach ($id in @($ids.Keys)) {
-    if ($id -eq $PID) { continue }
-    $p = Get-Process -Id $id -ErrorAction SilentlyContinue
-    if ($p -and (@("powershell", "pwsh") -contains $p.ProcessName)) {
-      Write-Host "stopping a LOCKqz process left over from a removed copy (pid $id)"
-      Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+    if (([int]$p.ProcessId -ne $PID) -and ($c -like "*lockqzd.ps1*" -or $c -like "*lockqz-boot.ps1*" -or $c -like "*lockqz-agent.ps1*")) {
+      Write-Host "stopping a LOCKqz process left over from a removed copy (pid $($p.ProcessId))"
+      Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
     }
   }
 }

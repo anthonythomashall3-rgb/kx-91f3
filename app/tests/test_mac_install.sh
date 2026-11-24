@@ -47,9 +47,12 @@ check "pf anchor loaded" "sudo pfctl -a com.lockqz -sr | grep -q block"
 check "Chrome AI policy on" "[ -f '/Library/Managed Preferences/com.google.Chrome.plist' ]"
 check "status locked" "curl -s -H '$H' $B/status | grep -q '\"engine_locked\": true'"
 
-# One lock pass of the kind that repeats every 5 s during a quiz (the engine itself, timed).
-T0=$(python3 -c 'import time; print(time.time())'); sudo bash "$DEST/lockqz.sh" lock >/dev/null 2>&1
-PASS_S=$(python3 -c "import time; print(round(time.time()-$T0, 1))"); echo "INFO  repeat lock pass took $PASS_S s"
+# One lock pass of the kind that repeats every 5 s during a quiz: the engine itself, timed inside the root shell, as
+# the helper runs it (as root, with no sudo: sudo's own start can wait on a name lookup while the block is on).
+T0=$(python3 -c 'import time; print(time.time())'); sudo true; echo "INFO  sudo itself took $(python3 -c "import time; print(round(time.time()-$T0, 1))") s"
+sudo LOCKQZ_TIMING=1 bash -c 'p() { /usr/bin/perl -MTime::HiRes=time -e "printf q(%.2f), time"; }; echo "TIMING begin $(p)"; bash "$1" lock 2>/dev/null | grep "^TIMING "; echo "TIMING end $(p)"' _ "$DEST/lockqz.sh" > /tmp/pass.t 2>/dev/null
+PASS_S=$(awk '/^TIMING begin/{b=$3} /^TIMING end/{e=$3} END{printf "%.1f", e-b}' /tmp/pass.t)
+echo "INFO  repeat lock pass took $PASS_S s ($(awk '/^TIMING begin/{b=$3} /^TIMING start/{s=$3} /^TIMING prefs/{f=$3} /^TIMING end/{e=$3} END{printf "%.1f s before its first step, %.1f s in its steps, %.1f s after", s-b, f-s, e-f}' /tmp/pass.t))"
 check "the repeat lock pass takes under 10 s on this test machine (it repeats every 5 s during a quiz)" "python3 -c 'import sys; sys.exit(0 if $PASS_S < 10 else 1)'"
 T0=$(python3 -c 'import time; print(time.time())')
 curl -s -m 90 -X POST -H "$H" -H 'Content-Type: application/json' -d '{"quiz_id":"ci-test"}' $B/unlock >/tmp/unlock.json

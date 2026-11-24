@@ -26,25 +26,12 @@ if (-not $admin) {
 }
 
 function LQ-StopAll {
-  # Every PowerShell (Windows PowerShell or 7, any processor) running a LOCKqz script, and whichever one serves
-  # LOCKqz's local address: Windows' HTTP service serves it (the port's owner shows as "System"), so ask that
-  # service which process registered http://127.0.0.1:8787/. (Win PowerShell 5.1 has no .CommandLine: CIM.)
-  $ids = @{}
+  # Every PowerShell (Windows PowerShell or 7, any processor) running a LOCKqz script: the helper (lockqz-boot.ps1 runs
+  # lockqzd.ps1 in its own process), the agent and its setup window. (Win PowerShell 5.1 has no .CommandLine: CIM.)
   foreach ($p in @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'")) {
     $c = [string]$p.CommandLine
-    if ($c -like "*lockqzd.ps1*" -or $c -like "*lockqz-boot.ps1*" -or $c -like "*lockqz-agent.ps1*" -or $c -like "*\LOCKqz\lockqz*.ps1*") { $ids[[int]$p.ProcessId] = 1 }
-  }
-  $q = @(); $ours = $false
-  foreach ($l in @(@(netsh http show servicestate view=requestq) + @("END"))) {
-    $l = [string]$l
-    if ($l -match '^\S') { if ($ours) { foreach ($x in $q) { $ids[[int]$x] = 1 } }; $q = @(); $ours = $false }
-    elseif ($l -match '^\s+(\d+)\s*$') { $q += $Matches[1] }
-    elseif ($l -match '(?i)^\s+HTTP://127\.0\.0\.1:8787/\s*$') { $ours = $true }
-  }
-  foreach ($id in @($ids.Keys)) {
-    if ($id -eq $PID) { continue }
-    $p = Get-Process -Id $id
-    if ($p -and (@("powershell", "pwsh") -contains $p.ProcessName)) { Stop-Process -Id $id -Force }
+    if ([int]$p.ProcessId -eq $PID) { continue }
+    if ($c -like "*lockqzd.ps1*" -or $c -like "*lockqz-boot.ps1*" -or $c -like "*lockqz-agent.ps1*" -or $c -like "*\LOCKqz\lockqz*.ps1*") { Stop-Process -Id $p.ProcessId -Force }
   }
 }
 # STOP the watchers FIRST, so nothing re-locks after we strip the block. The agent (quiz detection) goes
