@@ -54,8 +54,9 @@ lq_pass() {
   PASS_S=$(awk '/^TIMING begin/{b=$3} /^TIMING end/{e=$3} END{printf "%.1f", e-b}' /tmp/pass.t)
   PASS_STEPS=$(awk '/^TIMING /{ if ($2 != "begin" && $2 != "end" && $2 != "start" && p != "") printf "%s %.1f  ", $2, $3 - p; p = $3 }' /tmp/pass.t)
 }
-# The lock restarts macOS's preferences service, and macOS starts a service again at most every 10 s: a pass in the
-# first seconds after a lock waits on it once. The pass that repeats through a quiz is timed 12 s after the lock.
+# The first seconds after a lock are busy (the helper's own first passes, the services the lock restarts), so a pass
+# then can take several times longer on a small test machine. The pass that repeats through a quiz is timed 12 s
+# after the lock; the one right after it is shown too.
 lq_pass; echo "INFO  a pass right after the lock took $PASS_S s ($PASS_STEPS)"
 sleep "$(python3 -c "import time; print(round(max(0.0, 12 - (time.time() - $T_LOCK)), 1))")"
 lq_pass; echo "INFO  repeat lock pass took $PASS_S s ($PASS_STEPS)"

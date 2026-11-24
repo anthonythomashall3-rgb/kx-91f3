@@ -129,6 +129,17 @@ function Shot($name) {
     $bmp.Save("$Out\$name.png"); $g.Dispose(); $bmp.Dispose()
   } catch { }
 }
+function Close-EdgeWelcome([string]$proc) {
+  # Edge's own "welcome / make Edge your default" tab, opened in front of the test's tab on a new build machine (its
+  # policies do not stop it there): closed once, as a student would close it. Only with Edge itself in front.
+  if ($proc -ne "msedge") { return }
+  if (@(Bar-Values | Where-Object { $_ -match '(?i)explore\.microsoft\.com/[^ ]*edge/|edge://welcome|microsoftedgewelcome' }).Count -eq 0) { return }
+  Front-Browser $proc; Start-Sleep -Milliseconds 500
+  $fp = [int][LqzFront]::FgPid()
+  if ((-not $fp) -or ([string](Get-Process -Id $fp -ErrorAction SilentlyContinue).ProcessName -ne "msedge")) { Write-Host "  (Edge's welcome tab is in front, but Edge is not the window in front)"; return }
+  Write-Host "  (closing Edge's welcome tab, in front of the test's tab)"
+  [System.Windows.Forms.SendKeys]::SendWait("^w"); Start-Sleep -Seconds 1
+}
 function Bar-Values {
   # Raw address-bar text of every browser window (what the student sees), read the same way the agent does.
   $vals = @()
@@ -209,6 +220,7 @@ foreach ($b in $browsers) {
   $h = Get-Content $hits -Raw
   Check ($h -match 'iframe /d2l/lms/quizzing/user/quiz_summary') "$($b.Name): the quiz first ran inside the Content frame"
   Check $wasMoved "$($b.Name): the tab now shows the quiz as its own page"
+  Close-EdgeWelcome $b.Proc
   $bars = @(Bar-Values)
   Check (@($bars | Where-Object { $_ -match 'quizzing/user/quiz_summary\.d2l\?qi=77' }).Count -ge 1) "$($b.Name): the address bar shows the quiz URL ($($bars -join ' | '))"
   $log = if (Test-Path "$Out\agent.log") { Get-Content "$Out\agent.log" -Raw } else { "" }
