@@ -523,9 +523,23 @@ hw_keep() {   # hw_keep path name bundle-id keep... (keep entries in lower case)
   done
   return 1
 }
-hidden_close() {   # every lock pass: close what hides its windows from screen capture (see above)
-  local found l pid name path bid lkeep=()
-  found="$(_hw_list)"; [ -n "$found" ] || return 0   # the usual case: nothing hidden, nothing more to do
+HW_ASYNC="${STATE:-/Library/Application Support/LOCKqz}/hidden.list"   # repeat passes: the window list read beside the pass
+hidden_close() {   # every lock pass: close what hides its windows from screen capture (see above). $1 = "async": a repeat pass
+  local found l pid name path bid lkeep=() async=""
+  if [ "${1:-}" = async ] && [ "$DRYRUN" != "1" ]; then
+    # The window list is read in the signed-in user's session, which took seconds on some Macs, and a repeat pass runs
+    # every 5 s while the helper waits for it: the list is read beside the pass, and the pass acts on the newest list
+    # that finished (one pass behind at most). A program is closed only if it still is the one that list named.
+    async=1
+    found="$(cat "$HW_ASYNC.done" 2>/dev/null)"; rm -f "$HW_ASYNC.done" 2>/dev/null
+    if ! { [ -f "$HW_ASYNC.pid" ] && kill -0 "$(cat "$HW_ASYNC.pid" 2>/dev/null)" 2>/dev/null; }; then
+      ( _hw_list > "$HW_ASYNC.tmp" 2>/dev/null; mv -f "$HW_ASYNC.tmp" "$HW_ASYNC.done" ) </dev/null >/dev/null 2>&1 &
+      echo "$!" > "$HW_ASYNC.pid" 2>/dev/null
+    fi
+  else
+    found="$(_hw_list)"
+  fi
+  [ -n "$found" ] || return 0   # the usual case: nothing hidden, nothing more to do
   while IFS= read -r l; do [ -n "$l" ] && lkeep+=("$l"); done < <( { printf '%s\n' "${KEEP_APPS[@]}"
     [ -f "$KEEP_FILE" ] && grep -E '^(id:)?[A-Za-z0-9][A-Za-z0-9 ._&+()-]{1,59}$' "$KEEP_FILE"; } | tr '[:upper:]' '[:lower:]')
   while IFS=$'\t' read -r pid name path bid; do
@@ -533,6 +547,9 @@ hidden_close() {   # every lock pass: close what hides its windows from screen c
     [ "$pid" -le 1 ] || [ "$pid" = "$$" ] && continue
     [ -f "$HW_SKIP" ] && grep -qx "$pid" "$HW_SKIP" 2>/dev/null && continue
     [ -n "$path" ] || path="$(_hw_path "$pid")"
+    if [ -n "$async" ] && [ -n "$path" ]; then   # gone, or another program has that number now: left alone
+      l="$(ps -p "$pid" -o comm= 2>/dev/null)"; [ -n "$l" ] && [ "${l##*/}" = "${path##*/}" ] || continue
+    fi
     hw_keep "$path" "$name" "$bid" "${lkeep[@]}" && continue
     if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would close (hides its windows from screen capture): $name"; continue; fi
     if _hw_kill "$pid"; then xb_say "closed $name ($path): it hides its windows from screen capture"
@@ -564,7 +581,7 @@ extra_lock() {
   xb_lap x-cmds
   models_by_file
   xb_lap x-models
-  hidden_close
+  if [ -f "$XB_APPLIED" ]; then hidden_close async; else hidden_close; fi
   xb_lap x-kills
   local rc=0 ap=""
   # The AirPlay Receiver switch beside the steps below (it asks the signed-in user's settings, the slowest step
@@ -591,7 +608,7 @@ extra_unlock() {
   # VPN/VM/remote/overlay/model apps are left for the student to reopen; only the
   # OS-level Apple Intelligence policy and the proxies must be actively restored.
   local rc=0 ap=""
-  rm -f "$XB_APPLIED" "$HW_SKIP" 2>/dev/null || true
+  rm -f "$XB_APPLIED" "$HW_SKIP" "$HW_ASYNC.done" "$HW_ASYNC.tmp" "$HW_ASYNC.pid" 2>/dev/null || true
   airplay_receiver_restore & ap=$!   # beside the steps below; waited for before this function returns
   apple_intelligence_on || rc=1
   siri_on || rc=1
