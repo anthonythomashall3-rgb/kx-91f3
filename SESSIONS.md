@@ -7,7 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
-- 2026-11-24 05:30 PT — 01UUDg7YHBTs: bug sweep 35, whole repo (server, pages, apps, extension, workers). Holds app/cloudflare/functions/api/[[route]].js, app/cloudflare/public/sync.js, app/tests/test_mailin*.mjs; more named here before editing.
+- 2026-11-24 05:30 PT — 01UUDg7YHBTs: bug sweep 35, whole repo (server, pages, apps, extension, workers). Holds app/cloudflare/functions/api/[[route]].js, app/cloudflare/public/sync.js, app/cloudflare/schema.sql + migrate_048, app/extension-prof (1.0.16), app/mac/lockqz-agent.py, app/windows/lockqz-agent.ps1, app/VERSION + both lockqzd (0.6.44), app/tests (test_sweep35, test_mailin*, test_round2_frontend, test_agent, test_windows_logic, test_blocklist, run_all.sh).
 
 ## Recently finished
 - sweep 34 finished (Claude, 2026-11-23): email limits hold under bursts (codes, support, mail sent on, bank details); live 2a40c23
