@@ -193,6 +193,8 @@ function Seed {
                    "HKLM:\SOFTWARE\Policies\Google\Chrome\URLBlocklist", "HKLM:\SOFTWARE\Policies\Mozilla", "HKLM:\SOFTWARE\Policies\Mozilla\Firefox",
                    "HKLM:\SOFTWARE\Policies\Microsoft", "HKLM:\SOFTWARE\Policies\Microsoft\Windows", "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI",
                    "HKLM:\SOFTWARE\Policies\Google\Chrome\ExtensionInstallAllowlist",
+                   "HKLM:\SOFTWARE\Microsoft", "HKLM:\SOFTWARE\Microsoft\Windows", "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion",
+                   "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies",
                    "Registry::HKEY_USERS", "Registry::HKEY_USERS\$SID1", "Registry::HKEY_USERS\$SID1\Software",
                    "Registry::HKEY_USERS\$SID2", "Registry::HKEY_USERS\$SID2\Software")) { $script:REG[$k] = @{} }
   $script:REG["HKLM:\SOFTWARE\Policies\Google\Chrome\ExtensionInstallAllowlist"]["1"] = @{ kind = "String"; value = "aiextensionaiextensionaiextensio" }

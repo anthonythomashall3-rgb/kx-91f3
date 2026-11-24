@@ -23,6 +23,7 @@ $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BlockFile = Join-Path $Here "blocklist.txt"
 $BackupFile = if ($env:LOCKQZ_POLICY_BACKUP) { $env:LOCKQZ_POLICY_BACKUP } else { "$env:ProgramData\LOCKqz\policy-backup.json" }
 $PolicyRoot = "HKLM:\SOFTWARE\Policies"
+$CvPolicyRoot = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies"   # the older policy root (Paint's live here)
 
 # On Windows all channels of a browser (Beta/Dev/Canary) read the SAME vendor policy key, so this
 # single key per vendor already covers every channel. Chromium + Vivaldi added for breadth.
@@ -327,7 +328,7 @@ function Get-PolicyPlan([bool]$KeepProxy = $false) {
   # The Settings agent (an on-device model that changes settings from a typed sentence) and Paint's Cocreator, Image
   # Creator and generative fill: Microsoft's WindowsAI policies (Paint's live under CurrentVersion\Policies\Paint).
   V "$PolicyRoot\Microsoft\Windows\WindowsAI" "DisableSettingsAgent" 1
-  foreach ($pv in @("DisableCocreator","DisableImageCreator","DisableGenerativeFill")) { V "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Paint" $pv 1 }
+  foreach ($pv in @("DisableCocreator","DisableImageCreator","DisableGenerativeFill")) { V "$CvPolicyRoot\Paint" $pv 1 }
   # Notepad Write / Rewrite / Summarize (policy DisableAIFeaturesInNotepad, Notepad 11.2503.16+).
   V "$PolicyRoot\WindowsNotepad" "DisableAIFeatures" 1
   # Windows' own on-device models for every other app (Copilot+ PCs on Snapdragon, Intel and AMD: Phi Silica text and
@@ -355,6 +356,7 @@ function Get-Ancestors($path) {
   $m = [regex]::Match([string]$path, '^(Registry::HKEY_USERS\\S-1-[0-9-]+\\Software\\Policies)(\\.+)?$')
   if ($m.Success) { $root = $m.Groups[1].Value; $out += $root }
   elseif ($path.StartsWith($PolicyRoot + "\")) { $root = $PolicyRoot }
+  elseif ($path.StartsWith($CvPolicyRoot + "\")) { $root = $CvPolicyRoot }
   else { return $out }
   if ($path.Length -le $root.Length) { return $out }
   $cur = $root
