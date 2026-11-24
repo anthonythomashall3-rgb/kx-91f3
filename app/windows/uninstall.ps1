@@ -25,14 +25,35 @@ if (-not $admin) {
   Fail "Run this in an ELEVATED PowerShell (Run as administrator)."
 }
 
+function LQ-StopAll {
+  # Every PowerShell (Windows PowerShell or 7, any processor) running a LOCKqz script, and whichever one serves
+  # LOCKqz's local address: Windows' HTTP service serves it (the port's owner shows as "System"), so ask that
+  # service which process registered http://127.0.0.1:8787/. (Win PowerShell 5.1 has no .CommandLine: CIM.)
+  $ids = @{}
+  foreach ($p in @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'")) {
+    $c = [string]$p.CommandLine
+    if ($c -like "*lockqzd.ps1*" -or $c -like "*lockqz-boot.ps1*" -or $c -like "*lockqz-agent.ps1*" -or $c -like "*\LOCKqz\lockqz*.ps1*") { $ids[[int]$p.ProcessId] = 1 }
+  }
+  $q = @(); $ours = $false
+  foreach ($l in @(@(netsh http show servicestate view=requestq) + @("END"))) {
+    $l = [string]$l
+    if ($l -match '^\S') { if ($ours) { foreach ($x in $q) { $ids[[int]$x] = 1 } }; $q = @(); $ours = $false }
+    elseif ($l -match '^\s+(\d+)\s*$') { $q += $Matches[1] }
+    elseif ($l -match '(?i)^\s+HTTP://127\.0\.0\.1:8787/\s*$') { $ours = $true }
+  }
+  foreach ($id in @($ids.Keys)) {
+    if ($id -eq $PID) { continue }
+    $p = Get-Process -Id $id
+    if ($p -and (@("powershell", "pwsh") -contains $p.ProcessName)) { Stop-Process -Id $id -Force }
+  }
+}
 # STOP the watchers FIRST, so nothing re-locks after we strip the block. The agent (quiz detection) goes
-# for good; the helper's task is only stopped until the restore below is confirmed.
+# for good; the helper's task is switched off (no trigger or restart can start it again meanwhile) until the
+# restore below is confirmed.
 Stop-ScheduledTask -TaskName "LOCKqz Agent"; Unregister-ScheduledTask -TaskName "LOCKqz Agent" -Confirm:$false
+Disable-ScheduledTask -TaskName "LOCKqz" | Out-Null
 Stop-ScheduledTask -TaskName "LOCKqz"
-# Kill any running helper/agent (Win PowerShell 5.1 has no Get-Process .CommandLine, so use CIM).
-Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
-  Where-Object { $_.CommandLine -like "*lockqzd.ps1*" -or $_.CommandLine -like "*lockqz-boot.ps1*" -or $_.CommandLine -like "*lockqz-agent.ps1*" } |
-  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+LQ-StopAll
 Start-Sleep -Seconds 1
 
 # Now nothing is running to fight us: restore everything (hosts, firewall, and every policy value
@@ -51,10 +72,12 @@ if (-not $done -and (Test-Path "$Dest\policy-backup.json")) {
 if (-not $done) {
   # Keep the scripts and restart the helper: with no agent nothing locks, and the helper finishes an
   # unfinished unlock by itself (at start and every 15 s), so AI never stays blocked.
+  Enable-ScheduledTask -TaskName "LOCKqz" | Out-Null
   Start-ScheduledTask -TaskName "LOCKqz"
   Fail "LOCKqz: the AI block could not be fully removed yet; LOCKqz keeps trying by itself. Restart the computer and remove LOCKqz again."
 }
 Unregister-ScheduledTask -TaskName "LOCKqz" -Confirm:$false
+LQ-StopAll   # once more, now that no task can start anything: nothing of LOCKqz keeps running after removal
 
 # Per-user leftovers: the agent's log in every profile's %APPDATA%\LOCKqz; student.json (the confirmed
 # school email + its proof) is KEPT so a reinstall never asks again (never

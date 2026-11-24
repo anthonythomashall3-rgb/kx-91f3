@@ -174,6 +174,18 @@ console.log("C S mode, on-device AI, local model runners, the weekly report");
   const py = read("app/mac/lockqzd.py"), ps = read("app/windows/lockqzd.ps1");
   check("Mac / Linux helper: the 12-hour round also sends the weekly report", /SEEN_EVERY = 7 \* 86400/.test(py) && /refresh_blocklist\(\)\n\s+threading\.Thread\(target=report_seen, daemon=True\)\.start\(\)/.test(py));
   check("Windows helper: the same", /Report-Install 604800/.test(ps) && /LQ-InstallDue \$rec \$Version \$State\.student \$now \$every/.test(ps));
+  const un = read("app/windows/uninstall.ps1"), ins = read("app/windows/install.ps1"), ti = read("app/tests/test_windows_install.ps1");
+  const sw = un.indexOf("LQ-StopAll\nStart-Sleep"), dis = un.indexOf('Disable-ScheduledTask -TaskName "LOCKqz"'), stp = un.indexOf('Stop-ScheduledTask -TaskName "LOCKqz"\n');
+  check("Windows remover: the helper's task is switched off before it is stopped (no trigger or restart starts it again)", dis > 0 && stp > dis && sw > stp);
+  check("... switched back on only when the restore failed and the helper must finish it", /Enable-ScheduledTask -TaskName "LOCKqz" \| Out-Null\n  Start-ScheduledTask -TaskName "LOCKqz"\n  Fail/.test(un));
+  check("... and a last sweep once the task is gone", /Unregister-ScheduledTask -TaskName "LOCKqz" -Confirm:\$false\nLQ-StopAll/.test(un));
+  const hs = ["if ($l -match '^\\S') { if ($ours) { foreach ($x in $q) { $ids[[int]$x] = 1 } }; $q = @(); $ours = $false }",
+              "elseif ($l -match '^\\s+(\\d+)\\s*$') { $q += $Matches[1] }",
+              "elseif ($l -match '(?i)^\\s+HTTP://127\\.0\\.0\\.1:8787/\\s*$') { $ours = $true }"];
+  check("remover, installer and the Windows test read Windows' HTTP service the same way", hs.every(x => un.includes(x) && ins.includes(x) && ti.includes(x)));
+  check("a new install stops a LOCKqz helper or agent left from a removed copy", /\$Fresh = -not \(Test-Path "\$Dest\\config\.json"\)/.test(ins) && ins.indexOf("if ($Fresh) {") > 0 && ins.indexOf("if ($Fresh) {") < ins.indexOf('Start-ScheduledTask -TaskName "LOCKqz"'));
+  const ag = read("app/windows/lockqz-agent.ps1");
+  check("helper and agent stop by themselves once LOCKqz's files are gone (never during a quiz; 30 s)", /\$State\.state -ne "locked"\) -and -not \(Test-Path -LiteralPath \(Join-Path \$Here "lockqzd\.ps1"\)\) -and -not \(Test-Path -LiteralPath \(Join-Path \$Here "lockqz\.ps1"\)\)/.test(ps) && /\$goneSeen -ge 6/.test(ps) && /\(-not \$Locked\) -and \$PSCommandPath -and/.test(ag) && /TotalSeconds -ge 30\) \{ Log "LOCKqz was removed/.test(ag));
   const v = read("app/VERSION").trim();
   check("versions agree (" + v + ")", py.includes('VERSION = "' + v + '"') && ps.includes('$Version = "' + v + '"'));
 }

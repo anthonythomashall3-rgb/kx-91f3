@@ -536,9 +536,17 @@ $watcher.AddScript({
   }
   $cycles = 0; $lastBeat = 0; $lastSweep = 0; $storeMiss = 0; $script:BeatSecs = 300
   $wallCycle = [int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); $wallWoke = $wallCycle; $wallList = $wallCycle; $wallUpdate = $wallCycle
+  $goneSeen = 0
   while ($true) {
     Start-Sleep -Seconds 5; $cycles++
     $now = [int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    # LOCKqz removed while this helper still runs (the remover stops it first; this is the fallback): stop, so nothing of
+    # LOCKqz keeps its local address until a restart and a new install starts its own helper at once. Never during a
+    # quiz, and only once both scripts have been gone for 30 s (an update replaces one file at a time).
+    if (($State.state -ne "locked") -and -not (Test-Path -LiteralPath (Join-Path $Here "lockqzd.ps1")) -and -not (Test-Path -LiteralPath (Join-Path $Here "lockqz.ps1"))) {
+      $goneSeen++
+      if ($goneSeen -ge 6) { Write-Host "LOCKqzd: LOCKqz was removed from this PC - stopping"; [Environment]::Exit(0) }
+    } else { $goneSeen = 0 }
     # By the clock as well as by cycles: cycles only count time awake, so a laptop that slept for days asks for the
     # list additions and its update when it wakes (20 s after, once the network is back), not days of use later.
     if (($now - $wallCycle) -lt 0 -or ($now - $wallCycle) -ge 60) { $wallWoke = $now }

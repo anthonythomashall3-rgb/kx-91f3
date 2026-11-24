@@ -923,7 +923,13 @@ function Send-Unlock($quiz, $reason) {
     return $ok
   } catch { return $false }
 }
+$GoneAt = $null
 while ($true) {
+  # LOCKqz removed while this agent still runs (the remover stops it first; this is the fallback): stop. Never while a
+  # quiz is locked, and only once both scripts have been gone for 30 s (an update replaces one file at a time).
+  if ((-not $Locked) -and $PSCommandPath -and -not (Test-Path -LiteralPath $PSCommandPath) -and -not (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $PSCommandPath) "lockqzd.ps1"))) {
+    if (-not $GoneAt) { $GoneAt = [DateTime]::UtcNow } elseif (([DateTime]::UtcNow - $GoneAt).TotalSeconds -ge 30) { Log "LOCKqz was removed from this PC - stopping"; exit 0 }
+  } else { $GoneAt = $null }
   try {
     $wins = @(Get-BrowserWindows)
     if ((-not $ReadyTold) -and (@($wins | Where-Object { $_.Url -match '/d2l/' }).Count -gt 0)) { Check-Ready }
