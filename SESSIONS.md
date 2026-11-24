@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-24 07:55 PT — 01UUDg7YHBTs: bug sweep 36 (all of LOCKqz). Holds: app/cloudflare (functions, public, schema, migrations), app/mac, app/windows, app/linux, app/mailin, app/extension-prof, app/tests, .github/workflows, VERSION files.
 
 ## Recently finished
 - 2026-11-24 07:35 PT — 01UUDg7YHBTs: bug sweep 35 finished: apps 0.6.44 + server live (3380559, Release 45417827901 green on every job; its Mac job got a GitHub Apple Silicon runner on the third attempt). An exam taken more than once: Brightspace's submission email counts when Brightspace wrote it (its Date line); every attempt's completion is kept (submissions.ats, migrate_048) and each signed unlock keeps when its lock began, so the live view matches each unlock with its own attempt; the gate sends a later completion again; a quiz turned on from the Sync panel gets its submission address; a released quiz carrying the professor's own password loses only LOCKqz's address. Apps: an attempt turned in is over on the computer (a later visit to the exam's start page ends the moment the student leaves it); a quiz Brightspace says is over locks again 5 s after its pages close. 7 more AI services served. Professor extension 1.0.16 (Chrome Web Store review; Firefox signed). cws.yml compares a push of several commits with master before it. Record: Project doc claude/LOCKqz-bug-sweep-35.md. No files held.
