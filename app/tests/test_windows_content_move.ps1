@@ -6,6 +6,15 @@
 param([string]$Agent = "$PSScriptRoot\..\windows\lockqz-agent.ps1", [string]$Out = "$env:TEMP\lqz-move")
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms, System.Drawing
+# Edge's own welcome, promotion and "make Edge your default" tabs open in front of the test's page on a new build
+# machine: off while this test runs (machine policies it sets itself), put back at its end.
+$EdgePol = "HKLM:\SOFTWARE\Policies\Microsoft\Edge"; $EdgeSet = @()
+try {
+  if (-not (Test-Path $EdgePol)) { New-Item -Path $EdgePol -Force | Out-Null }
+  foreach ($kv in @(@("HideFirstRunExperience", 1), @("PromotionalTabsEnabled", 0), @("DefaultBrowserSettingsCampaignEnabled", 0), @("ShowRecommendationsEnabled", 0))) {
+    if ($null -eq (Get-ItemProperty -Path $EdgePol -Name $kv[0] -ErrorAction SilentlyContinue)) { New-ItemProperty -Path $EdgePol -Name $kv[0] -Value $kv[1] -PropertyType DWord -Force | Out-Null; $EdgeSet += $kv[0] }
+  }
+} catch { Write-Host "  (Edge's welcome tabs could not be turned off: $_)" }
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 
 # --- the agent's functions, unchanged -----------------------------------------------------------
@@ -210,6 +219,7 @@ foreach ($b in $browsers) {
   if ($fail) { Diag-Focus $b.Proc; Dump-Tree $b.Proc }
   Get-Process $b.Proc -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Seconds 2
 }
+foreach ($n in $EdgeSet) { Remove-ItemProperty -Path $EdgePol -Name $n -ErrorAction SilentlyContinue }
 Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue
 if ($fail) { Write-Host "$fail check(s) FAILED"; exit 1 }
 Write-Host "Content-quiz move: all checks passed"
