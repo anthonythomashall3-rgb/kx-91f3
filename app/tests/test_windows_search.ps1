@@ -47,6 +47,9 @@ public static class LqzFront {
   public static void Front(IntPtr h) { keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero); ShowWindow(h, 9); SetForegroundWindow(h); }
   public static string Fg() { IntPtr h = GetForegroundWindow(); uint p = 0; GetWindowThreadProcessId(h, out p); return h.ToString() + " pid " + p; }
   public static uint FgPid() { uint p = 0; GetWindowThreadProcessId(GetForegroundWindow(), out p); return p; }
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, System.Text.StringBuilder s, int n);
+  public static string FgClass() { var b = new System.Text.StringBuilder(256); GetClassName(GetForegroundWindow(), b, 256); return b.ToString(); }
+  public static void MinFg() { ShowWindow(GetForegroundWindow(), 6); }
 }
 '@
 function Diag-Focus([string]$proc) {
@@ -54,7 +57,8 @@ function Diag-Focus([string]$proc) {
   # address bar is asked to take it (the move into the page works only when that is the address bar).
   try {
     $p = @(Get-Process $proc -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero }) | Select-Object -First 1
-    Write-Host ("  [focus] foreground window: {0}; {1} main window {2} pid {3}" -f [LqzFront]::Fg(), $proc, $(if ($p) { $p.MainWindowHandle } else { "-" }), $(if ($p) { $p.Id } else { "-" }))
+    $fp = [int][LqzFront]::FgPid(); $fn = if ($fp) { [string](Get-Process -Id $fp -ErrorAction SilentlyContinue).ProcessName } else { "" }
+    Write-Host ("  [focus] foreground window: {0} ({4}, class {5}); {1} main window {2} pid {3}" -f [LqzFront]::Fg(), $proc, $(if ($p) { $p.MainWindowHandle } else { "-" }), $(if ($p) { $p.Id } else { "-" }), $fn, [LqzFront]::FgClass())
     foreach ($w in $Root.FindAll($TS::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
       if ($BrowserClasses -notcontains $w.Current.ClassName) { continue }
       $e = $w.FindFirst($TS::Descendants, $script:AddressBar); if (-not $e) { continue }
@@ -66,7 +70,7 @@ function Diag-Focus([string]$proc) {
     }
   } catch { Write-Host "  [focus] diagnostics failed: $_" }
 }
-$script:Cleared = @{}
+$script:Cleared = @{}; $script:Escs = 0
 function Front-Browser([string]$proc) {
   $p = @(Get-Process $proc -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero }) | Select-Object -First 1
   if (-not $p) { return }
@@ -78,6 +82,16 @@ function Front-Browser([string]$proc) {
     $shells = @("explorer","powershell","pwsh","conhost","WindowsTerminal","OpenConsole","Runner.Listener","Runner.Worker","dwm","csrss","winlogon","ShellExperienceHost","StartMenuExperienceHost","SearchHost","TextInputHost","LockApp")
     if ($n -and ($n -ne $proc) -and ($shells -notcontains $n) -and -not $script:Cleared.ContainsKey($n)) {
       $script:Cleared[$n] = 1; Write-Host "  (closing $n, a window in front of every other)"; Stop-Process -Id $fg -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 700
+      $fg = [int][LqzFront]::FgPid(); $n = if ($fg) { [string](Get-Process -Id $fg -ErrorAction SilentlyContinue).ProcessName } else { "" }
+    }
+    # An open Start menu or search box keeps the browser behind it too: Escape closes it, as a student would.
+    if ((@("SearchHost","StartMenuExperienceHost","SearchApp","ShellExperienceHost") -contains $n) -and ($script:Escs -lt 6)) {
+      $script:Escs++; Write-Host "  (pressing Escape: $n, the Start menu or search, is in front)"
+      [System.Windows.Forms.SendKeys]::SendWait("{ESC}"); Start-Sleep -Milliseconds 700
+    }
+    # A File Explorer window in front: put it down to the taskbar.
+    if (($n -eq "explorer") -and (@("CabinetWClass","ExploreWClass") -contains [LqzFront]::FgClass()) -and ($script:Escs -lt 6)) {
+      $script:Escs++; Write-Host "  (minimizing a File Explorer window in front)"; [LqzFront]::MinFg(); Start-Sleep -Milliseconds 500
     }
   } catch { }
   try { [LqzFront]::Front($p.MainWindowHandle) } catch { }
