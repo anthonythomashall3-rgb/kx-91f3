@@ -354,6 +354,9 @@
         if (mailsOf(cur.NotificationEmail).some(function (x) { return OURMAIL.test(x); })) extra.NotificationEmail = withMail(cur.NotificationEmail, null);
         try { await writePw(ou, qi, o ? o.password : null, extra); }
         catch (e) { if (e.expired || !("NotificationEmail" in extra)) throw e; delete extra.NotificationEmail; await writePw(ou, qi, o ? o.password : null, extra); }
+      } else if (mailsOf(cur.NotificationEmail).some(function (x) { return OURMAIL.test(x); })) {
+        // The professor's own password is on it now: that stays, and only LOCKqz's submission address goes.
+        try { await writePw(ou, qi, cur.Password || null, { NotificationEmail: withMail(cur.NotificationEmail, null) }); } catch (e) { if (e.expired) throw e; }
       }
       delete GPW[qi]; delete ORIG[qi];
       return "cleared";
@@ -481,11 +484,12 @@
         (await pages("/d2l/api/le/" + LE + "/" + ou + "/quizzes/" + qi + "/attempts/", 100)).forEach(function (a) {
           if (!a || a.UserId == null) return;
           var c0 = [a.Completed, a.TimeCompleted, a.CompletionDate].filter(function (v) { return typeof v === "string" && dt(v) !== null; })[0];   // documented: Completed
-          var u = String(a.UserId), c = c0 || null, b = by[u] = by[u] || { at: null, open: false };
-          if (c) { if (!b.at || dt(c) > dt(b.at)) b.at = c; } else b.open = true;
+          var u = String(a.UserId), c = c0 || null, b = by[u] = by[u] || { at: null, open: false, all: [] };
+          if (c) { if (!b.at || dt(c) > dt(b.at)) b.at = c; if (b.all.length < 20) b.all.push(c); } else b.open = true;
         });
       } catch (e) { if (e.expired) throw e; return []; }
-      return Object.keys(by).filter(function (u) { return by[u].at && !by[u].open; }).map(function (u) { return { id: u, completed: by[u].at }; });
+      // all: every attempt's completion time (an exam taken more than once), so each unlock is matched with its attempt.
+      return Object.keys(by).filter(function (u) { return by[u].at && !by[u].open; }).map(function (u) { return { id: u, completed: by[u].at, all: by[u].all }; });
     }
     // A student enrolled after the last Sync is not in LOCKqz's class list yet (and no re-sync runs while
     // a gate is on): match their confirmed email against Brightspace's own class list, read here at most
@@ -508,12 +512,13 @@
       // server's start check and quiz end follow (/gate on keeps the gate's accommodation list).
       if (g.datesNew) { var nd = g.datesNew;
         if ((await lqres("/gate", { ou: ou, qi: qi, on: true, start: nd.StartDate, end: nd.EndDate })).ok && g.datesNew === nd) g.datesNew = null; }
-      // Confirm real submissions to the server, throttled to once per ~20s; each student sent once.
+      // Confirm real submissions to the server, throttled to once per ~20s; each student sent again only when Brightspace
+      // shows a later completion (another attempt).
       if (!g.nextSub || Date.now() >= g.nextSub) {
         g.nextSub = Date.now() + 20000; g.subsSent = g.subsSent || {};
-        var subs = (await submittedUsers(ou, qi)).filter(function (s) { return !g.subsSent[s.id]; });
+        var subs = (await submittedUsers(ou, qi)).filter(function (s) { return g.subsSent[s.id] !== s.completed; });
         if (subs.length && (await lqres("/submitted", { ou: ou, qi: qi, quiz: ou + "-" + qi, users: subs, user_ids: subs.map(function (s) { return s.id; }) })).ok)
-          subs.forEach(function (s) { g.subsSent[s.id] = true; });
+          subs.forEach(function (s) { g.subsSent[s.id] = s.completed; });
       }
       var want = {}, revoke = {};
       // Admitted the moment they lock once the quiz has started per Brightspace's own (fresh) start date.
@@ -670,7 +675,7 @@
           if (!cb.checked && GATES[qi]) await stopGate(ou, qi, gst);   // turning LOCKqz off: stop its gate first
           var r = await lq("/protect", { ou: ou, qi: qi, on: cb.checked });
           if (cb.checked) PW[String(qi)] = r.password;
-          var status = cb.checked ? await protect(ou, qi, r.password) : await release(ou, qi, r.clear, origOf(r));
+          var status = cb.checked ? await protect(ou, qi, r.password, r.mail) : await release(ou, qi, r.clear, origOf(r));
           if (!cb.checked) delete PW[String(qi)];
           await lq("/sync-result", { results: [{ ou: ou, qi: qi, status: status }] });
           st.style.color = cb.checked ? "#1a7f37" : "#888"; st.textContent = cb.checked ? "protected" : "";

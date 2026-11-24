@@ -112,7 +112,8 @@ const AI_DOMAINS = [
   "relevanceai.com","botpress.com","mem.ai","gauth.com","answersai.com","leetcodewizard.io","studio.nebius.com",
   "croxyproxy.com","croxy.network","croxyproxy.rocks","proxysite.com","kproxy.com","proxyium.com","4everproxy.com","hidester.com","blockaway.net","proxyorb.com","plainproxies.com","vpnbook.com","hide.me","shell.cloud.google.com","ssh.cloud.google.com","ide.cloud.google.com","console.cloud.google.com","github.dev","gitpod.io","codesandbox.io","csb.app","stackblitz.com","kaggle.com","deepnote.com","lightning.ai","mybinder.org","studiolab.sagemaker.aws","shell.azure.com","portal.azure.com","console.aws.amazon.com","windows365.microsoft.com","windows.cloud.microsoft","clients.amazonworkspaces.com","devtunnels.ms","gradio.live","val.run","val.town","streamlit.app","ai.cloudflare.com","playground.ai.cloudflare.com","gateway.ai.cloudflare.com","api.cloudflare.com","dash.cloudflare.com","chatbase.co","www.chatbase.co","docsbot.ai","chatling.ai","voiceflow.com","creator.voiceflow.com","general-runtime.voiceflow.com","stack-ai.com","www.stack-ai.com","mindstudio.ai","app.mindstudio.ai","agent.ai","gumloop.com","typebot.co","typebot.io","landbot.io","zapier.app","chatbots.zapier.com","agents.zapier.com","app.n8n.cloud","customgpt.ai","app.customgpt.ai","botsonic.com","elevenlabs.io","11.ai","question.ai","www.question.ai",
   "arena.ai","ppq.ai","nanogpt.com","librechat.ai","kluster.ai","globe.engineer","hark.com","hume.ai","sesame.com","thea.study","scholar.0xpi.com","hkchat.app","hkchat.hk","hkgai.net","kortix.com","kortix.ai","suna.so","atoms.dev","mgx.dev","marscode.com","lingma.aliyun.com","qoder.com","codebuddy.ai","roomote.dev","orchids.app","tempo.new","heyboss.ai","heyboss.xyz","macaly.com","capacity.so","affine.pro","otter.ai","fireflies.ai","rows.com","napkin.ai","beautiful.ai",
-  "subcue.ai","accounts.subcue.ai","ctrlpotato.com","clapassist.com","offerinai.com","lastroundai.com","app.lastroundai.com","linkjob.ai","craqly.com","sigmeet.ai","aissence.ai","camcue.app","ghostpilotai.com","pluely.com","wittro.com","api.minimax.chat","api.hunyuan.cloud.tencent.com","upstage.ai","api.upstage.ai","friendli.ai","api.friendli.ai","api.studio.nebius.ai","api.chatanywhere.tech","api.chatanywhere.org"
+  "subcue.ai","accounts.subcue.ai","ctrlpotato.com","clapassist.com","offerinai.com","lastroundai.com","app.lastroundai.com","linkjob.ai","craqly.com","sigmeet.ai","aissence.ai","camcue.app","ghostpilotai.com","pluely.com","wittro.com","api.minimax.chat","api.hunyuan.cloud.tencent.com","upstage.ai","api.upstage.ai","friendli.ai","api.friendli.ai","api.studio.nebius.ai","api.chatanywhere.tech","api.chatanywhere.org",
+  "unstuckstudy.com","askcodi.com","monic.ai","revisely.com","docalysis.com","elicit.org","chatthing.ai"
 ];
 // Additions to the apps' own never-close list: during a quiz the apps close any program that hides its windows from
 // screen capture, except Apple's and Windows' own code and the programs people need beside a quiz (their KEEP_APPS).
@@ -871,6 +872,12 @@ export async function onRequest(context) {
     }
     const out = new Map(); for (const o of ous.map(String)) if (snapCache.get(o)) out.set(o, snapCache.get(o)); return out;
   }
+  // submissions.ats (migrate_048): every completion time Brightspace reported for a student's attempts at a quiz (a JSON
+  // list of ISO times, oldest first, at most 20), beside `at` (the latest). The live view matches each unlock with the
+  // attempt it ended, so a student who takes an exam twice is never shown as having left the first attempt early.
+  const atsWith = (ats, ...more) => { let a = []; try { a = JSON.parse(ats || "[]"); } catch {}
+    const ms = [...(Array.isArray(a) ? a : []), ...more.flat()].map(x => Date.parse(String(x || ""))).filter(x => !isNaN(x));
+    return JSON.stringify([...new Set(ms)].sort((x, y) => x - y).slice(-20).map(x => new Date(x).toISOString())); };
   const vt = v => String(v||"0").split(".").map(n => parseInt(n,10)||0);
   const newerOrSame = (a, b) => { const x = vt(a), y = vt(b); for (let i = 0; i < 3; i++) if ((x[i]||0) !== (y[i]||0)) return (x[i]||0) > (y[i]||0); return true; };
   // The helper was silent longer than the live window and is back: record the gap (writes nothing
@@ -883,12 +890,13 @@ export async function onRequest(context) {
   // in that list, this lock began before the end, and the end passed (+15 min, the helper's cap grace).
   // Never for a non-gated quiz: the server cannot see Brightspace special access there (makeup exams,
   // extended end dates), and bs_quizzes.end_date may be stale. A stopped gate (gated=0) never ends one.
-  async function serverUnlock(dev, device_id, qid, anyEnd = false) {
+  async function serverUnlock(dev, device_id, qid, anyEnd = false, out = null) {
     const [ou, qi] = qid.split("-");
     const em = dev && dev.student && (!codesOn || Number(dev.student_verified) === 1) ? String(dev.student).toLowerCase() : null;
     const r = await db.prepare("SELECT b.end_date AS end_date, b.over_min AS over_min, q.gated AS gated, q.sa_keep AS sa_keep, (SELECT locked_at FROM locks WHERE device_id=? AND quiz_id=?) AS locked_at, r.user_id AS uid, (SELECT s.at FROM submissions s WHERE s.ou=? AND s.qi=? AND s.user_id=r.user_id) AS sub_at FROM (SELECT 1) one LEFT JOIN bs_quizzes b ON b.ou=? AND b.qi=? LEFT JOIN quizzes q ON q.ou=? AND q.qi=? LEFT JOIN roster r ON r.ou=? AND r.email=?")
       .bind(device_id, qid, ou, qi, ou, qi, ou, qi, ou, em).first();
     if (!r) return null;
+    if (out) out.began = r.locked_at || null;   // when this lock began (the unlock's event keeps it: /live)
     if (r.sub_at && r.locked_at && Date.parse(r.sub_at) >= Date.parse(r.locked_at)) return "quiz_submitted";
     const end = r.end_date ? Date.parse(r.end_date) : NaN, began = r.locked_at ? Date.parse(r.locked_at) : NaN;
     // An attempt begun before the end may run on (time limit x accommodation): only after the latest end.
@@ -1193,8 +1201,9 @@ export async function onRequest(context) {
       const st = mailStudent(`${m.subject || ""}\n${m.body || ""}`, ros);
       if (st) {
         state = "done"; uid = String(st.user_id); n++;
-        const at = m.at || now();
-        await db.prepare("INSERT INTO submissions (ou,qi,user_id,at) VALUES (?,?,?,?) ON CONFLICT(ou,qi,user_id) DO UPDATE SET at=excluded.at WHERE submissions.at IS NULL OR submissions.at < excluded.at").bind(ou, qi, uid, at).run();
+        const at = m.at || now(), had = await db.prepare("SELECT at, ats FROM submissions WHERE ou=? AND qi=? AND user_id=?").bind(ou, qi, uid).first();
+        await db.prepare("INSERT INTO submissions (ou,qi,user_id,at,ats) VALUES (?,?,?,?,?) ON CONFLICT(ou,qi,user_id) DO UPDATE SET at=CASE WHEN submissions.at IS NULL OR submissions.at < excluded.at THEN excluded.at ELSE submissions.at END, ats=excluded.ats")
+          .bind(ou, qi, uid, at, atsWith(had && had.ats, had && had.at, at)).run();
         try { await mailinNoLqz(ou, qi, st, at); } catch {}
       }
       await db.prepare("UPDATE mailin SET state=?, user_id=?, body=CASE WHEN ?='done' THEN NULL ELSE body END WHERE id=?").bind(state, uid, state, m.id).run();
@@ -2279,8 +2288,13 @@ export async function onRequest(context) {
       if (!mailinOn()) return json({ ok: false, off: true });
       const m = /^(?:lqz-|[^+@\s]+\+)(\d{1,12})-(\d{1,12})-([0-9a-f]{12})@/i.exec(String(body.to || "").trim());
       if (!m || !sameHex(m[3].toLowerCase(), await mailTok(m[1], m[2]))) return json({ error: "not a quiz address" }, 404);
-      // The time it arrived (always after the lock that began before the submission; the email's own date has whole seconds).
-      const r = await db.prepare("INSERT INTO mailin (ou,qi,at,sender,subject,body,state) VALUES (?,?,?,?,?,?,'new')").bind(m[1], m[2], now(),
+      // When Brightspace wrote it: its Date line (whole seconds, so the end of that second), never later than its arrival.
+      // An email that reaches LOCKqz late (Brightspace's mail queue, or its server trying again after LOCKqz did not
+      // answer) still counts for the attempt it is about, never for an attempt the student began after it. No Date
+      // line it can read: the time it arrived.
+      const got = Date.now(), dms = Date.parse(String(body.date || "").slice(0, 100));
+      const at = new Date(Number.isFinite(dms) && dms > 0 ? Math.min(got, dms + 999) : got).toISOString();
+      const r = await db.prepare("INSERT INTO mailin (ou,qi,at,sender,subject,body,state) VALUES (?,?,?,?,?,?,'new')").bind(m[1], m[2], at,
         str(body.from, 200), str(body.subject, 300), String(body.text || "").slice(0, 8000)).run();
       const n = await mailinRun({ id: r.meta.last_row_id });
       return json({ ok: true, found: n > 0 });
@@ -2477,8 +2491,8 @@ export async function onRequest(context) {
       let hold = false;
       if (ev === "unlock" && v.ok && detail && typeof detail === "object" && typeof quiz_id === "string" && /^\d+-\d+$/.test(quiz_id) && detail.reason !== "cap" && detail.reason !== "quiz_submitted_server" && detail.reason !== "quiz_ended") {
         if (detail.ask === true) { try { const [o0, q0] = quiz_id.split("-"); await mailinRun({ ou: o0, qi: q0 }); } catch {} }   // a submission email not read yet
-        const why = await serverUnlock(v.dev, v.id, quiz_id, true);
-        detailObj = { ...detail, ...(why ? { expected: why } : { unexpected: true }) };
+        const lk = {}, why = await serverUnlock(v.dev, v.id, quiz_id, true, lk);
+        detailObj = { ...detail, ...(why ? { expected: why } : { unexpected: true }), ...(lk.began ? { began: lk.began } : {}) };
         // 29 Oct 2026: a helper that ASKS (detail.ask) keeps the block until the server can vouch for the end:
         // Brightspace's submission (Sync tab) or the quiz end. While the gate is running the professor is
         // proctoring and the Sync tab reports submissions within a round, so an unlock the server cannot
@@ -2511,6 +2525,11 @@ export async function onRequest(context) {
             if (!skipLog && await db.prepare("SELECT 1 FROM events WHERE device_id=? AND quiz_id=? AND event='unlock_held' AND ts>? LIMIT 1").bind(v.id, quiz_id, new Date(Date.now() - 600000).toISOString()).first()) skipLog = true;
           }
         }
+      }
+      // Every signed unlock of a quiz keeps when the lock it ends began (the live view matches it with that attempt).
+      if (ev === "unlock" && v.ok && qidOk && !hold && !(detailObj && typeof detailObj === "object" && detailObj.began)) {
+        const b = (await db.prepare("SELECT locked_at FROM locks WHERE device_id=? AND quiz_id=?").bind(v.id, qidOk).first())?.locked_at;
+        if (b && detailObj && typeof detailObj === "object" && !Array.isArray(detailObj)) detailObj = { ...detailObj, began: b };
       }
       const detailStr = detailObj ? JSON.stringify(detailObj).slice(0, 2000) : null;
       // A developer-mode lock claim is logged as "dev_lock", so /live and /password find the few claims
@@ -4091,11 +4110,14 @@ export async function onRequest(context) {
       if (!/^\d+$/.test(ou) || !/^\d+$/.test(qi)) return json({ error:"bad quiz" }, 400);
       if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this course can protect its quizzes." }, 403);
       const ex = await db.prepare("SELECT q.quiz_id AS quiz_id, q.password AS password, (SELECT password FROM pending_clear WHERE ou=? AND qi=?) AS pc FROM (SELECT 1) one LEFT JOIN quizzes q ON q.qi=? AND q.ou=?").bind(ou, qi, qi, ou).first();
+      // Turned on from the Sync panel: its submission address goes on with the password, by the Sync's own rule (an
+      // exam that is not over, in a class LOCKqz is on for), not only at the next Sync.
+      const mailOf = async () => !mailinOn() ? {} : (await db.prepare("SELECT 1 AS x FROM (SELECT 1) one LEFT JOIN bs_quizzes b ON b.ou=? AND b.qi=? WHERE NOT EXISTS (SELECT 1 FROM course_off co WHERE co.ou=?) AND (b.end_date IS NULL OR b.end_date='' OR b.end_date>?)").bind(ou, qi, ou, now()).first()) ? { mail: await quizMail(ou, qi) } : {};
       if (body.on) {
         if (ex && ex.quiz_id) {
           await db.batch([db.prepare("DELETE FROM pending_clear WHERE ou=? AND qi=?").bind(ou, qi), db.prepare("DELETE FROM lockqz_off WHERE ou=? AND qi=?").bind(ou, qi),
             db.prepare("UPDATE quizzes SET lock_id=? WHERE qi=? AND ou=? AND lock_id IS NOT ?").bind(`${ou}-${qi}`, qi, ou, `${ou}-${qi}`)]);
-          return json({ ou, qi, on:true, password: ex.password });
+          return json({ ou, qi, on:true, password: ex.password, ...(await mailOf()) });
         }
         // I-H2: turned off and on again before a Sync removed our password from Brightspace -> reuse
         // that password (it is what Brightspace still holds). Idempotent: a double click adds no row.
@@ -4105,7 +4127,7 @@ export async function onRequest(context) {
           db.prepare("INSERT INTO quizzes (quiz_id,title,url,password,created_at,qi,teacher_id,lock_id,ou) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(ou,qi) DO NOTHING").bind(rid(8), bq?.name||null, null, password, now(), qi, me.id, `${ou}-${qi}`, ou),
           db.prepare("DELETE FROM pending_clear WHERE ou=? AND qi=?").bind(ou, qi), db.prepare("DELETE FROM lockqz_off WHERE ou=? AND qi=?").bind(ou, qi)]);
         const now2 = await db.prepare("SELECT password FROM quizzes WHERE ou=? AND qi=?").bind(ou, qi).first();
-        return json({ ou, qi, on:true, password: now2 ? now2.password : password });
+        return json({ ou, qi, on:true, password: now2 ? now2.password : password, ...(await mailOf()) });
       }
       if (ex && ex.quiz_id) {
         await db.batch([db.prepare("INSERT OR REPLACE INTO pending_clear (ou,qi,password) VALUES (?,?,?)").bind(ou, qi, ex.password),
@@ -4175,14 +4197,20 @@ export async function onRequest(context) {
       // C5: {users:[{id, completed:"<ISO>"}]} carries Brightspace's completion time (stored in `at`;
       // Brightspace's time always wins, a later one = a later attempt). The old {user_ids:[...]}/{ids:[...]}
       // shape has no time: at stays NULL ("submitted, time unknown" -> the pre-C5 rule applies on /live).
-      const soon = Date.now() + 300000;
+      const soon = Date.now() + 300000, okAt = x => { const c = Date.parse(String(x || "")); return !isNaN(c) && c <= soon ? new Date(c).toISOString() : null; };
+      // users[].all (sync.js from 24 Nov 2026): every attempt's completion time; each one is kept (submissions.ats).
       const users = (Array.isArray(body.users) ? body.users : []).filter(u => u && typeof u === "object" && /^\d+$/.test(String(u.id ?? ""))).slice(0, 3000)
-        .map(u => { const c = Date.parse(String(u.completed || "")); return [String(u.id), !isNaN(c) && c <= soon ? new Date(c).toISOString() : null]; });
-      const timed = new Map(users.filter(u => u[1]).map(u => [u[0], u[1]]));
+        .map(u => [String(u.id), okAt(u.completed), (Array.isArray(u.all) ? u.all : []).slice(0, 20).map(okAt).filter(Boolean)]);
+      const timed = new Map(users.filter(u => u[1]).map(u => [u[0], [u[1], u[2]]]));
       const plain = new Set([...users.filter(u => !u[1]).map(u => u[0]), ...(Array.isArray(body.user_ids) ? body.user_ids : Array.isArray(body.ids) ? body.ids : []).map(String).filter(x => /^\d+$/.test(x)).slice(0, 3000)]);
       timed.forEach((_, k) => plain.delete(k));
+      // The times already known for these students (another attempt, Brightspace's own email) stay in the list.
+      const had = new Map();
+      for (const part of chunk([...timed.keys()], 90))
+        for (const x of (await db.prepare("SELECT user_id, at, ats FROM submissions WHERE ou=? AND qi=? AND user_id IN (SELECT value FROM json_each(?))").bind(ou, qi, JSON.stringify(part)).all()).results || []) had.set(String(x.user_id), x);
       await runBatches(db, [
-        ...multiInsert(db, "INSERT INTO submissions (ou,qi,user_id,at)", 4, [...timed].map(([u, c]) => [ou, qi, u, c]), "ON CONFLICT(ou,qi,user_id) DO UPDATE SET at=excluded.at WHERE submissions.at IS NOT excluded.at"),
+        ...multiInsert(db, "INSERT INTO submissions (ou,qi,user_id,at,ats)", 5, [...timed].map(([u, [c, all]]) => { const h = had.get(u); return [ou, qi, u, c, atsWith(h && h.ats, h && h.at, all, c)]; }),
+          "ON CONFLICT(ou,qi,user_id) DO UPDATE SET at=excluded.at, ats=excluded.ats WHERE submissions.at IS NOT excluded.at OR submissions.ats IS NOT excluded.ats"),
         ...multiInsert(db, "INSERT OR IGNORE INTO submissions (ou,qi,user_id,at)", 4, [...plain].map(u => [ou, qi, u, null]))]);
       return json({ ok: true, count: timed.size + plain.size });
     }
@@ -4464,11 +4492,21 @@ export async function onRequest(context) {
       // Clean: the agent's own "quiz_submitted" unlock (only while the Sync tab is not reporting
       // submissions for this quiz, or for 2 minutes until its report arrives). The helper's failsafe
       // cap is red only inside the window before submission; after the window it is not flagged.
-      const subs = new Map(((await db.prepare(`SELECT qi,user_id,at FROM submissions WHERE ou=?${exact ? " AND qi=?" : ""}`).bind(_ou0, ...(exact ? [quiz.split("-")[1]] : [])).all()).results).map(x => [String(x.qi) + ":" + String(x.user_id), x.at]));
+      const subRows = (await db.prepare(`SELECT qi,user_id,at,ats FROM submissions WHERE ou=?${exact ? " AND qi=?" : ""}`).bind(_ou0, ...(exact ? [quiz.split("-")[1]] : [])).all()).results;
+      const subs = new Map(subRows.map(x => [String(x.qi) + ":" + String(x.user_id), x.at]));
+      // Every attempt's completion (ms, oldest first): an unlock is matched with the attempt of the lock it ended. Read
+      // only for a student whose unlocks need it, once (CPU: Workers Free).
+      const subAts = new Map(subRows.filter(x => x.ats).map(x => [String(x.qi) + ":" + String(x.user_id), x.ats])), allMemo = new Map();
+      const subAll = key => { if (allMemo.has(key)) return allMemo.get(key);
+        let a = []; try { a = JSON.parse(subAts.get(key) || "[]"); } catch {}
+        const ms = new Set(); for (const t of [...(Array.isArray(a) ? a : []), subs.get(key)]) { const x = Date.parse(String(t || "")); if (!isNaN(x)) ms.add(x); }
+        const out = [...ms].sort((x, y) => x - y); allMemo.set(key, out); return out; };
       const subsFor = new Set([...subs.keys()].map(x => x.split(":")[0]));
       const reasonOf = e => { let d = null; try { d = JSON.parse(e.detail); } catch { d = e.detail; }
         const r = d && typeof d === "object" ? d.reason : (typeof d === "string" ? d : null);
         return typeof r === "string" && r ? r.slice(0, 40) : null; };
+      // When the lock an unlock ended began (its event keeps it from 24 Nov 2026), in ms; NaN when not known.
+      const beganOf = e => { if (e.event !== "unlock") return NaN; try { const d = JSON.parse(e.detail); return d && typeof d === "object" && d.began ? Date.parse(d.began) : NaN; } catch { return NaN; } };
       // A gap spans from when the helper went silent (detail.from) to when it came back (ts).
       const whenOf = e => { if (e.event === "lock_gap") { try { const f = JSON.parse(e.detail).from; if (f && !isNaN(Date.parse(f))) return f; } catch {} } return e.ts; };
       const overlaps = (e, qi) => { const f = Date.parse(whenOf(e)), t = Date.parse(e.ts), s = startOf(qi), en = endOf(qi); return !isNaN(t) && (s === null || t >= s) && (en === null || f <= en); };
@@ -4476,7 +4514,7 @@ export async function onRequest(context) {
         const qi = r._q.split("-")[1];
         const key = qi + ":" + String(r.user_id);
         const submitted = !!(r.user_id && subs.has(key));
-        const doneAt = submitted ? Date.parse(subs.get(key)) : NaN;
+        const doneAt = submitted ? Date.parse(subs.get(key)) : NaN, used = new Set();
         const inc = (incidents.get(r.device_id + "|" + r._q) || []).filter(e => {
           const w = whenOf(e);
           if (!overlaps(e, qi)) return false;
@@ -4486,6 +4524,18 @@ export async function onRequest(context) {
           // A "quiz_submitted" unlock is clean only if it came AFTER Brightspace's completion time (60 s
           // slack for clocks): the reason is chosen by the student's own agent (any navigation to the
           // quiz list / a submissions page sends it, and so does a local /unlock call).
+          // An exam taken more than once: an unlock whose lock's start is known is matched with the attempt of that
+          // lock, the first completion from its start on (60 s for clocks) that no earlier unlock of this computer was
+          // matched with (events come in time order); none = no attempt completed after it began.
+          const began = beganOf(e);
+          const doneAll = submitted && !isNaN(began) ? subAll(key) : [];
+          if (doneAll.length) {
+            const c = doneAll.find(x => x >= began - 60000 && !used.has(x));
+            if (c === undefined) return false;
+            const early = Date.parse(w) < c - (clean ? 60000 : 0);
+            if (!early) used.add(c);
+            return early;
+          }
           if (submitted) return !isNaN(doneAt) && Date.parse(w) < doneAt - (clean ? 60000 : 0);
           // A local unlock the server did not expect stays red when Brightspace has no completion for the
           // student (even if the Sync tab reports no submissions for this quiz); 2 minutes for a report to arrive.

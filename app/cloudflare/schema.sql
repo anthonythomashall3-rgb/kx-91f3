@@ -141,7 +141,7 @@ CREATE TABLE IF NOT EXISTS pay_codes (teacher_id TEXT PRIMARY KEY, code TEXT UNI
 -- Server-confirmed Brightspace submissions (migrate_017): a trusted Sync session reports who
 -- actually submitted, so a forced client unlock cannot masquerade as a clean submit.
 -- at = Brightspace's completion time when the Sync tab sends it (C5), else when it was reported.
-CREATE TABLE IF NOT EXISTS submissions (ou TEXT, qi TEXT, user_id TEXT, at TEXT, PRIMARY KEY (ou, qi, user_id));
+CREATE TABLE IF NOT EXISTS submissions (ou TEXT, qi TEXT, user_id TEXT, at TEXT, ats TEXT, PRIMARY KEY (ou, qi, user_id));
 CREATE TABLE IF NOT EXISTS pay_codes_students (email TEXT PRIMARY KEY, code TEXT UNIQUE);
 -- Students deleted on request (admin /forget): the Sync never imports their class-list rows again (migrate_022).
 CREATE TABLE IF NOT EXISTS forgotten (email TEXT PRIMARY KEY, at TEXT);

@@ -273,7 +273,11 @@ miss24.length === 0 ? ok(`all ${need24.length} 17-Nov entries served (AI_DOMAINS
 const need25 = ["subcue.ai", "accounts.subcue.ai", "ctrlpotato.com", "clapassist.com", "offerinai.com", "lastroundai.com", "app.lastroundai.com", "linkjob.ai", "craqly.com", "sigmeet.ai", "aissence.ai", "camcue.app", "ghostpilotai.com", "pluely.com", "wittro.com", "api.minimax.chat", "api.hunyuan.cloud.tencent.com", "upstage.ai", "api.upstage.ai", "friendli.ai", "api.friendli.ai", "api.studio.nebius.ai", "api.chatanywhere.tech", "api.chatanywhere.org"];
 const miss25 = need25.filter(d => !(served || []).includes(d));
 miss25.length === 0 ? ok(`all ${need25.length} 22-Nov entries served (AI_DOMAINS)`) : bad("missing: " + miss25.join(", "));
-const stray = ahead.filter(d => !need22.includes(d) && !need23.includes(d) && !need24.includes(d) && !need25.includes(d));
+// 24 Nov: study AIs that chat with course files, an AI coding gateway, a chatbot builder, served ahead of the next app version.
+const need26 = ["unstuckstudy.com", "askcodi.com", "monic.ai", "revisely.com", "docalysis.com", "elicit.org", "chatthing.ai"];
+const miss26 = need26.filter(d => !(served || []).includes(d));
+miss26.length === 0 ? ok(`all ${need26.length} 24-Nov entries served (AI_DOMAINS)`) : bad("missing: " + miss26.join(", "));
+const stray = ahead.filter(d => !need22.includes(d) && !need23.includes(d) && !need24.includes(d) && !need25.includes(d) && !need26.includes(d));
 stray.length === 0 ? ok("every entry served ahead of blocklist.txt is one of these") : bad("served but in no blocklist and not listed here: " + stray.join(", "));
 need22.every(d => mac.includes(d) === win.includes(d)) ? ok("both blocklists agree on them") : bad("the two blocklists differ on the 11 Nov entries");
 

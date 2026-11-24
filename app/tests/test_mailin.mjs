@@ -3,11 +3,13 @@
 //   M2 POST /mailin keeps an email only for a real quiz address, finds the one student it is about, records the
 //      submission (the Sync's own row), keeps the text only when nobody was found
 //   M3 a computer that holds AI off after leaving the exam gets it back at its next ask
+//   M3b an email that arrives late counts when Brightspace wrote it (its Date line), never for an attempt begun after it
 //   M4 a student none of whose computers locked for the quiz: the professor is told once; not for a locked student,
 //      one let in, or a quiz LOCKqz does not protect
 //   M5 /watch reads what a blip left unread; MAILIN_ON off = nothing changes
 //   M6 the address only on an exam that is not over, in a class LOCKqz is on for
 //   M7 POST /mailfwd: an email to support@ or the catch-all the mailbox turned away, sent on with the Worker's key
+//   M8 a quiz turned on from the Sync panel gets its address at once (the /protect answer)
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync, writeFileSync, mkdtempSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -153,6 +155,28 @@ console.log("M3 a computer holding AI off gets it back once Brightspace's email 
   check("an email left unread: the held computer's next ask reads it and lets AI back", !r.data?.hold && !!sub("9105"), JSON.stringify(r.data));
 }
 
+console.log("M3b an email that arrives late counts when Brightspace wrote it, never for an attempt begun after it");
+{
+  run("DELETE FROM submissions WHERE ou='700' AND qi='1' AND user_id='9102'");
+  const d = await device("jmunoz@usc.edu");
+  await lock(d); gotPw(d);   // attempt 2 begins now
+  const late = Date.now() - 5 * 60000;
+  let r = await call("/mailin", { to: addr("700", "1"), from: "noreply@d2l.com", subject: "Quiz Submission Notification", text: "José Muñoz has completed Exam 1.", date: new Date(late).toUTCString() });
+  const at = Date.parse((sub("9102") || {}).at || "");
+  check("attempt 1's email, written 5 minutes ago, arrives now: recorded at its own time (the end of its Date second)", r.data?.found === true && at >= late - 1000 && at <= late + 1000, `${sub("9102")?.at}`);
+  r = await call("/report", { event: "heartbeat", quiz_id: "700-1" }, { dev: d });
+  check("... the computer locked for attempt 2 is not told to unlock", r.status === 200 && !r.data?.unlock, JSON.stringify(r.data));
+  r = await ask(d, "quiz_left");
+  check("... and its ask is held (AI stays off for attempt 2)", r.data?.hold === true, JSON.stringify(r.data));
+  r = await call("/mailin", { to: addr("700", "1"), from: "noreply@d2l.com", subject: "Quiz Submission Notification", text: "José Muñoz has completed Exam 1.", date: new Date(Date.now() + 2000).toUTCString() });
+  check("attempt 2's own email: AI back at the next ask", !(await ask(d, "quiz_left")).data?.hold);
+  r = await call("/mailin", { to: addr("700", "1"), from: "noreply@d2l.com", subject: "Quiz Submission", text: "Sam Lee (slee1) completed Exam 1", date: new Date(Date.now() + 3 * H).toUTCString() });
+  check("a Date line in the future: never later than its arrival", Date.parse(sub("9103").at) <= Date.now(), sub("9103").at);
+  run("DELETE FROM submissions WHERE ou='700' AND qi='1' AND user_id='9105'");
+  r = await call("/mailin", { to: addr("700", "1"), from: "noreply@d2l.com", subject: "Quiz Submission", text: "Ava Kim completed Exam 1", date: "not a date" });
+  check("no Date line it can read: the time it arrived", Math.abs(Date.parse(sub("9105").at) - Date.now()) < 60000, sub("9105").at);
+}
+
 console.log("M4 a student none of whose computers locked for the quiz: the professor is told once");
 {
   sent.length = 0;
@@ -200,6 +224,23 @@ console.log("M6 the address goes only on an exam that is not over, in a class LO
   run("DELETE FROM course_off WHERE ou='700'");
   r = await syncAll();
   check("... turned on again: the upcoming exam has it again", row("1") && row("1").mail === addr("700", "1"));
+}
+
+console.log("M8 a quiz turned on from the Sync panel gets its submission address at once");
+{
+  let r = await call("/protect", { ou: "700", qi: "4", on: true }, { teacher: P });
+  check("an exam not over: the answer carries its address (the panel puts it on with the password)", r.status === 200 && r.data?.mail === addr("700", "4"), JSON.stringify(r.data));
+  r = await call("/protect", { ou: "700", qi: "4", on: true }, { teacher: P });
+  check("... turned on again (already protected): the same", r.data?.mail === addr("700", "4"), JSON.stringify(r.data));
+  r = await call("/protect", { ou: "700", qi: "3", on: true }, { teacher: P });
+  check("a past exam: no address", r.status === 200 && !("mail" in (r.data || {})), JSON.stringify(r.data));
+  run("INSERT OR REPLACE INTO course_off (ou, teacher_id, at) VALUES ('700', 'p', ?)", iso(Date.now()));
+  r = await call("/protect", { ou: "700", qi: "4", on: true }, { teacher: P });
+  check("a class turned off: no address", !("mail" in (r.data || {})), JSON.stringify(r.data));
+  run("DELETE FROM course_off WHERE ou='700'");
+  env.MAILIN_ON = "0"; r = await call("/protect", { ou: "700", qi: "4", on: true }, { teacher: P }); env.MAILIN_ON = "1";
+  check("MAILIN_ON off: no address", !("mail" in (r.data || {})));
+  check("the Sync panel's own switch passes it on", /protect\(ou, qi, r\.password, r\.mail\)/.test(readFileSync(join(CF, "public", "sync.js"), "utf8")));
 }
 
 console.log("M7 an email the mailbox turned away for a while: LOCKqz sends it on, only with the Worker's key");

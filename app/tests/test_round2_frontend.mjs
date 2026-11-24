@@ -131,7 +131,7 @@ async function world({ courses, seed = true } = {}) {
 }
 
 // ---- a Brightspace tab; run() = one click on the LOCKqz Sync bookmark ----
-function syncTab(w, { ls = { "XSRF.Token": "csrf" }, ahead = 0 } = {}) {
+function syncTab(w, { ls = { "XSRF.Token": "csrf" }, ahead = 0, clock = null } = {}) {
   const timers = [], boxes = [];
   const newBox = () => {
     const els = {};
@@ -154,7 +154,8 @@ function syncTab(w, { ls = { "XSRF.Token": "csrf" }, ahead = 0 } = {}) {
     fetch: (url, opt) => (url = String(url).replace("https://lockqz.com/api", API), 0) || String(url).startsWith(API) ? w.fetchApi(url, opt) : w.brightspace(url, opt),
     setInterval: fn => { timers.push(fn); return timers.length; }, clearInterval: i => { timers[i - 1] = null; },
     confirm: () => true, URL, Request, Response, console, setTimeout };
-  if (ahead) ctx.Date = class extends Date { constructor(...a) { if (a.length) super(...a); else super(Date.now() + ahead); } static now() { return Date.now() + ahead; } };   // this tab's clock runs ahead
+  const off = () => clock ? clock.ms : ahead;   // clock: { ms } a test may move on while the tab runs
+  if (ahead || clock) ctx.Date = class extends Date { constructor(...a) { if (a.length) super(...a); else super(Date.now() + off()); } static now() { return Date.now() + off(); } };   // this tab's clock runs ahead
   vm.createContext(ctx);
   const t = { boxes,
     run: async () => { await vm.runInContext(SYNC_SRC, ctx); await w.idle(); await sleep(20); await w.idle(); },
@@ -259,6 +260,21 @@ console.log("F7 / C5 real QuizAttemptData: Completed is a UTCDateTime -> submiss
   check("F7 /submitted posted for Al (completed), not Bo (in progress)", sent.length === 1 && JSON.stringify(sent[0].user_ids || sent[0].users.map(u => u.id)) === '["4001"]', JSON.stringify(sent));
   check("C5 shape {quiz, users:[{id, completed}]}", sent[0] && sent[0].quiz === `${OU}-${QI}` && sent[0].users?.[0]?.completed === "2026-10-25T10:30:00.000Z", JSON.stringify(sent[0]));
   check("F7 server holds Al's submission", !!w.q("SELECT 1 AS x FROM submissions WHERE qi=? AND user_id='4001'", String(QI)));
+}
+
+console.log("F7b an exam taken again during the gate: the later completion is sent too, with every attempt's time");
+{
+  w = await world(); const clock = { ms: 0 }; t = syncTab(w, { clock }); await t.run(); await w.lock(w.AL);
+  w.BS.attempts[QI] = [{ AttemptId: 1, QuizId: QI, UserId: 4001, AttemptNumber: 1, Started: "2026-10-25T10:00:00.000Z", Completed: "2026-10-25T10:30:00.000Z" }];
+  await t.start();
+  w.BS.attempts[QI].push({ AttemptId: 3, QuizId: QI, UserId: 4001, AttemptNumber: 2, Started: "2026-10-25T10:40:00.000Z", Completed: "2026-10-25T11:00:00.000Z" });
+  clock.ms += 25000; await t.tick();
+  const sent = w.apiCalls.filter(c => c.path === "/submitted").map(c => c.body);
+  check("F7b Al's second attempt: sent again, its completion the latest, both attempts' times with it", sent.length === 2 && sent[1].users?.[0]?.completed === "2026-10-25T11:00:00.000Z" && JSON.stringify(sent[1].users[0].all) === '["2026-10-25T10:30:00.000Z","2026-10-25T11:00:00.000Z"]', JSON.stringify(sent));
+  const s = w.q("SELECT at, ats FROM submissions WHERE qi=? AND user_id='4001'", String(QI));
+  check("F7b server: `at` the latest, both times kept", s && s.at === "2026-10-25T11:00:00.000Z" && JSON.parse(s.ats || "[]").length === 2, JSON.stringify(s));
+  clock.ms += 25000; await t.tick();
+  check("F7b nothing new in Brightspace: not sent again", w.apiCalls.filter(c => c.path === "/submitted").length === 2);
 }
 
 console.log("F8 professor with 90 active staff courses: the current (newest) one is read");

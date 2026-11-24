@@ -4,6 +4,7 @@
 //   S2 a second Sync changes nothing (no write)
 //   S3 a Brightspace that refuses a list: the password still goes on, the professor's own address stays alone
 //   S4 a quiz LOCKqz lets go of: only LOCKqz's address is taken away
+//   S5 ... also when the professor's own password is on it by then (that password stays)
 import vm from "node:vm";
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
@@ -153,6 +154,12 @@ await api("/protect", { ou: String(OU), qi: "112", on: false }, { "X-LOCKqz-Teac
 OFF += 2 * 3600000; await runSync();
 check("Quiz 2 released: its password gone, the professor's own address kept, LOCKqz's gone", !pwOf(112) && bq(112).NotificationEmail === "prof@usc.edu", JSON.stringify([pwOf(112), bq(112).NotificationEmail]));
 check("Quiz 1 untouched", bq(111).NotificationEmail === ours(111) && /^LQ-/.test(pwOf(111) || ""));
+
+console.log("S5 the professor put their own password on a quiz, then LOCKqz lets go of it: their password stays, LOCKqz's address goes");
+bq(111).Password = "MyOwnPw1";
+await api("/protect", { ou: String(OU), qi: "111", on: false }, { "X-LOCKqz-Teacher": PROF });
+OFF += 2 * 3600000; await runSync();
+check("Quiz 1: the professor's own password kept, LOCKqz's address gone", pwOf(111) === "MyOwnPw1" && !bq(111).NotificationEmail, JSON.stringify([pwOf(111), bq(111).NotificationEmail]));
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
