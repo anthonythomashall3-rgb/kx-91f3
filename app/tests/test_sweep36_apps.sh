@@ -37,7 +37,7 @@ check "the clean one stays remembered" 'grep -qE "^888 [0-9]+$" "$TMP/state/mode
 rm -f "$TMP/state/models.seen" "$TMP/lsof.calls"; run 1
 check "a dry run looks but writes nothing" '[ ! -e "$TMP/state/models.seen" ] && [ "$(grep -c . "$TMP/lsof.calls")" = 2 ]'
 echo "H a repeat pass reads the hidden-window list beside the pass (it can take seconds) and acts on the newest one"
-cp "$(command -v sleep)" "$TMP/lqzhide"; "$TMP/lqzhide" 300 & HP=$!
+cp "$(command -v bash)" "$TMP/lqzhide"; "$TMP/lqzhide" -c 'sleep 300; :' >/dev/null 2>&1 & HP=$!   # a real program file named lqzhide (sleep can be a multi-call binary)
 cat > "$TMP/hw.sh" <<EOP
 _hw_list() { sleep 3; printf '%s\t%s\t%s\t%s\n' "$HP" "LQHide" "$TMP/lqzhide" ""; }
 _hw_kill() { kill -TERM "\$1" 2>/dev/null; sleep 0.2; ! kill -0 "\$1" 2>/dev/null; }
@@ -50,12 +50,12 @@ sleep 4
 check "... the list it started finished" '[ -s "$TMP/state/hidden.list.done" ]'
 hw async
 check "the next repeat pass closes the program that list named" '! kill -0 "$HP" 2>/dev/null && grep -q "closed LQHide" "$TMP/hw.out"'
-"$TMP/lqzhide" 300 & HP2=$!
+"$TMP/lqzhide" -c 'sleep 300; :' >/dev/null 2>&1 & HP2=$!
 printf '%s\t%s\t%s\t%s\n' "$HP2" "LQHide" "$TMP/other-program" "" > "$TMP/state/hidden.list.done"
 hw async
 check "a number that now belongs to another program is left alone" 'kill -0 "$HP2" 2>/dev/null'
 kill "$HP2" 2>/dev/null
-"$TMP/lqzhide" 300 & HP3=$!
+"$TMP/lqzhide" -c 'sleep 300; :' >/dev/null 2>&1 & HP3=$!
 sed -i.bak "s/\"\$HP\"/\"$HP3\"/" "$TMP/hw.sh"; sed -i.bak "s/^_hw_list() { sleep 3; printf '%s\\\\t%s\\\\t%s\\\\t%s\\\\n' \"[0-9]*\"/_hw_list() { sleep 3; printf '%s\\\\t%s\\\\t%s\\\\t%s\\\\n' \"$HP3\"/" "$TMP/hw.sh"
 rm -f "$TMP/state/hidden.list.done"; hw
 check "the first pass of a quiz still reads the list and closes at once" '! kill -0 "$HP3" 2>/dev/null'

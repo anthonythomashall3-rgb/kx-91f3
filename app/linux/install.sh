@@ -29,7 +29,15 @@ while [ $# -gt 0 ]; do case "$1" in
   --api) API="$2"; shift 2;; --student) STUDENT="$2"; shift 2;; --fetch-only) FETCH_ONLY="$2"; shift 2;; *) shift;;
 esac; done
 [ -n "$FETCH_ONLY" ] || [ "$(id -u)" = 0 ] || { echo "Run with sudo:  sudo bash install.sh"; exit 1; }
-command -v python3 >/dev/null 2>&1 || { echo "LOCKqz: python3 is needed (sudo apt install python3)."; exit 1; }
+if ! command -v python3 >/dev/null 2>&1; then
+  # The install command for this computer's own package manager.
+  if command -v apt-get >/dev/null 2>&1; then PYI="sudo apt install python3"
+  elif command -v dnf >/dev/null 2>&1; then PYI="sudo dnf install python3"
+  elif command -v pacman >/dev/null 2>&1; then PYI="sudo pacman -S python"
+  elif command -v zypper >/dev/null 2>&1; then PYI="sudo zypper install python3"
+  else PYI="install python3 with your package manager"; fi
+  echo "LOCKqz: python3 is needed ($PYI), then run this again."; exit 1
+fi
 command -v systemctl >/dev/null 2>&1 || { echo "LOCKqz: systemd is needed."; exit 1; }
 
 # Remote mode: nothing next to this script -> fetch the signed release from the site.
