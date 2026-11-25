@@ -149,6 +149,26 @@ $TS   = [System.Windows.Automation.TreeScope]
 $CT   = [System.Windows.Automation.ControlType]
 $AE   = [System.Windows.Automation.AutomationElement]
 $script:Moved = @{}
+function Wait-Focus($e, [int]$ms) {
+  # $true once the keyboard focus is on $e, looked at every 100 ms for up to $ms (a slow PC moves it late).
+  for ($t = 0; $t -le $ms; $t += 100) {
+    try { $f = [System.Windows.Automation.AutomationElement]::FocusedElement; if ($f -and [System.Windows.Automation.Automation]::Compare($f, $e)) { return $true } } catch { }
+    Start-Sleep -Milliseconds 100
+  }
+  return $false
+}
+function Type-Address($edit, $vp, [string]$to) {
+  # Into that window's own address bar: focus, the address, Enter - only while the address bar really holds the
+  # keyboard focus. Nothing is typed before the focus is there, and what was typed is taken back if the focus left,
+  # so an address bar never keeps an address it did not open. -> $true when Enter was pressed.
+  $orig = [string]$vp.Current.Value
+  $edit.SetFocus()
+  if (-not (Wait-Focus $edit 1500)) { return $false }
+  $vp.SetValue($to); Start-Sleep -Milliseconds 100
+  if (-not (Wait-Focus $edit 500)) { try { $vp.SetValue($orig) } catch { }; return $false }
+  [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+  return $true
+}
 function Move-ToQuiz($edit, [string]$url) {
   # Types the quiz URL into that window's own address bar (UI Automation) and presses Enter, only when
   # the address bar really has the keyboard focus; at most once every 10 s per URL.
@@ -158,11 +178,7 @@ function Move-ToQuiz($edit, [string]$url) {
   try {
     $vp = $null
     if (-not $edit.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { return $false }
-    $edit.SetFocus(); Start-Sleep -Milliseconds 150
-    $vp.SetValue($url); Start-Sleep -Milliseconds 100
-    $f = [System.Windows.Automation.AutomationElement]::FocusedElement
-    if (-not $f -or -not [System.Windows.Automation.Automation]::Compare($f, $edit)) { return $false }
-    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+    if (-not (Type-Address $edit $vp $url)) { return $false }
     Log "quiz opened from Content: moved to its own page ($(Lock-Id $url))"
     return $true
   } catch { return $false }
@@ -245,11 +261,7 @@ function Move-ToSearch($edit, [string]$from, [string]$to) {
     $vp = $null
     if (-not $edit.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) { return $false }
     $script:SearchMoved[$from] = $now
-    $edit.SetFocus(); Start-Sleep -Milliseconds 150
-    $vp.SetValue($to); Start-Sleep -Milliseconds 100
-    $f = [System.Windows.Automation.AutomationElement]::FocusedElement
-    if (-not $f -or -not [System.Windows.Automation.Automation]::Compare($f, $edit)) { return $false }
-    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+    if (-not (Type-Address $edit $vp $to)) { return $false }
     Log "web search sent to Google's Web results (no AI answer)"
     return $true
   } catch { return $false }

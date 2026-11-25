@@ -21,7 +21,7 @@ New-Item -ItemType Directory -Force -Path $Out | Out-Null
 $errs = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $Agent).Path, [ref]$null, [ref]$errs)
 if ($errs) { throw "agent does not parse: $errs" }
-$want = 'Log','Url-Path','Url-Query','Url-Host','Inner-Url','Is-QuizPath','Is-Quiz','Is-Leaving','Lock-Id','Move-ToQuiz','Query-Map','Rewrite-Search','Is-Foreground','Move-ToSearch','Get-BrowserWindows'
+$want = 'Log','Url-Path','Url-Query','Url-Host','Inner-Url','Is-QuizPath','Is-Quiz','Is-Leaving','Lock-Id','Wait-Focus','Type-Address','Move-ToQuiz','Query-Map','Rewrite-Search','Is-Foreground','Move-ToSearch','Get-BrowserWindows'
 $got = @()
 foreach ($f in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
   if ($want -contains $f.Name) { . ([scriptblock]::Create($f.Extent.Text)); $got += $f.Name }

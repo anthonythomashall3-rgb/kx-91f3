@@ -21,7 +21,7 @@ New-Item -ItemType Directory -Force -Path $Out | Out-Null
 $errs = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $Agent).Path, [ref]$null, [ref]$errs)
 if ($errs) { throw "agent does not parse: $errs" }
-$want = 'Log','Url-Path','Url-Query','Inner-Url','Is-QuizPath','Is-Quiz','Is-Leaving','Lock-Id','Move-ToQuiz','Get-BrowserWindows'
+$want = 'Log','Url-Path','Url-Query','Inner-Url','Is-QuizPath','Is-Quiz','Is-Leaving','Lock-Id','Wait-Focus','Type-Address','Move-ToQuiz','Get-BrowserWindows'
 $got = @()
 foreach ($f in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
   if ($want -contains $f.Name) { . ([scriptblock]::Create($f.Extent.Text)); $got += $f.Name }
@@ -196,7 +196,8 @@ foreach ($b in $browsers) {
   Start-Process -FilePath $b.Exe -ArgumentList ($common + @($nw, "`"$contentFile`""))
   # Wait for the page itself (a cold first browser start on a slow runner can take well over 12 s), then
   # a few more seconds so a wrong move of this non-quiz page would have time to show up.
-  for ($i = 0; $i -lt 30; $i++) { Start-Sleep -Seconds 1; [void](Get-BrowserWindows); if ((Get-Content $hits -Raw) -match 'document /d2l/le/content/123/fullscreen/457/') { break } }
+  for ($i = 0; $i -lt 60; $i++) { Start-Sleep -Seconds 1; [void](Get-BrowserWindows); if ((Get-Content $hits -Raw) -match 'document /d2l/le/content/123/fullscreen/457/') { break } }
+  if ($i -ge 20) { Write-Host "  ($($b.Name) took $i s to load the first page)" }
   for ($i = 0; $i -lt 6; $i++) { Start-Sleep -Seconds 1; [void](Get-BrowserWindows) }
   $h = Get-Content $hits -Raw
   Check ($h -match 'document /d2l/le/content/123/fullscreen/457/') "$($b.Name): the Content page loaded"
