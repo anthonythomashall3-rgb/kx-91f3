@@ -305,6 +305,11 @@ def api_only(h):
 API_ONLY = re.compile(r"(api\d*|api-inference|inference|bedrock-runtime|bedrock-mantle|aiplatform|generativelanguage|dashscope"
                       r"|dashscope-intl|copilot-proxy|router|integrate|appsgenaiserver-pa|grazie|llm|models|dns|doh)(\.[a-z0-9-]+){2,}")
 
+def firefox_blocks(extra, hosts):
+    """Firefox WebsiteFilter patterns for the blocklist: one per entry, as on Windows. In Firefox's match
+    patterns *.host also matches host itself, so *://*.huggingface.co/chat* covers huggingface.co/chat."""
+    return ["*://*.%s*" % e for e in extra] + ["*://*.%s/*" % h for h in hosts]
+
 def _union(a, b):
     a = a if isinstance(a, list) else []
     return list(dict.fromkeys(list(a) + list(b)))
@@ -418,8 +423,7 @@ def lock():
         if "URLBlocklist" in pol:   # Chromium: <= 1000 entries (ours ~330)
             pol["URLBlocklist"] = _union(pol["URLBlocklist"], extra + hosts)
         if "WebsiteFilter" in pol:  # Firefox: <= 1000 entries each list
-            pol["WebsiteFilter"]["Block"] = _union(pol["WebsiteFilter"]["Block"],
-                [p for e in extra for p in ("*://%s*" % e, "*://*.%s*" % e)] + ["*://*.%s/*" % h for h in hosts])
+            pol["WebsiteFilter"]["Block"] = _union(pol["WebsiteFilter"]["Block"], firefox_blocks(extra, hosts))
         try: changed = write(d, pol, merge) or changed
         except Exception as e:
             failed = True; print("LOCKqz policy: %s: %s" % (d, e), file=sys.stderr)

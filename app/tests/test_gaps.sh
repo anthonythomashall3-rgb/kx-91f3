@@ -12,8 +12,8 @@ check(){ if eval "$2"; then ok "$1"; else bad "$1"; fi; }
 
 echo "G1 messaging apps whose AI bots cannot be separated: closed + their web hosts blocked (Mac, Windows, served list)"
 for a in WhatsApp Telegram Discord Messenger; do
-  check "Mac closes $a" 'grep -A12 "^AI_APPS=" "$MAC/lockqz.sh" | grep -q "\"$a\""'
-  check "Windows closes $a" 'grep -A8 "^\$AiApps *=" "$WIN/lockqz.ps1" | grep -qi "\"$a\""'
+  check "Mac closes $a" 'sed -n "/^AI_APPS=(/,/\")/p" "$MAC/lockqz.sh" | grep -q "\"$a\""'
+  check "Windows closes $a" 'sed -n "/^\$AiApps *=/,/\")/p" "$WIN/lockqz.ps1" | grep -qi "\"$a\""'
 done
 for h in web.whatsapp.com web.telegram.org discord.com messenger.com; do
   check "$h in mac blocklist" 'grep -qx "$h" "$MAC/blocklist.txt"'

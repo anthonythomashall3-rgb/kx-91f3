@@ -88,8 +88,7 @@ def lock():
         except Exception as e: failed = True; print("LOCKqz policy: %s: %s" % (path, e), file=sys.stderr)
     ff = m.firefox_policy()
     ff["DisablePrivateBrowsing"] = True           # private windows are not in the session store
-    ff["WebsiteFilter"]["Block"] = m._union(ff["WebsiteFilter"]["Block"],
-        [p for e in extra for p in ("*://%s*" % e, "*://*.%s*" % e)] + ["*://*.%s/*" % h for h in hosts])
+    ff["WebsiteFilter"]["Block"] = m._union(ff["WebsiteFilter"]["Block"], m.firefox_blocks(extra, hosts))
     os.makedirs(BACKUP, exist_ok=True)
     for path in firefox_targets():
         try:

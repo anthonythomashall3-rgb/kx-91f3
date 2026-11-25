@@ -29,7 +29,9 @@ if [ -f "$HERE/extra-block.sh" ]; then source "$HERE/extra-block.sh"   # VPN/VM/
 else extra_lock(){ :; }; extra_unlock(){ :; }; fi   # core lock still works if the file is missing
 
 # Raycast stays on the list: its AI chat is built into the same app (no separate process to close).
-# Not MacWhisper: on-device speech-to-text only, not an answer tool.
+# Not MacWhisper: on-device speech-to-text only, not an answer tool. Wispr Flow, Superwhisper and OpenWhispr
+# are closed: their AI modes rewrite selected text or answer with a language model. Granola, Limitless and
+# Rewind have an "Ask AI" chat; LobeHub (LobeChat) is a chat app for any model.
 AI_APPS=("ChatGPT" "Claude" "Copilot" "Perplexity" "Ollama" "LM Studio" \
          "GPT4All" "Msty" "Cluely" "Google Gemini" "Jan" "Pieces" "MacGPT" \
          "Dia" "Comet" "ChatGPT Atlas" "Atlas" "Raycast" "Notion AI" \
@@ -39,6 +41,7 @@ AI_APPS=("ChatGPT" "Claude" "Copilot" "Perplexity" "Ollama" "LM Studio" \
          "Open WebUI" "Pinokio" "Witsy" "Reor" \
          "Grok" "Kimi" "Qwen" "Microsoft 365 Copilot" \
          "Codex" "Doubao" "QuillBot" "Elephas" "Highlight" "Fellou" "BrowserOS" "Opera Neon" \
+         "Wispr Flow" "Superwhisper" "OpenWhispr" "Granola" "Limitless" "Rewind" "LobeHub" "LobeChat" \
          "Notion" "Notion Mail" "Notion Calendar" "Canva" "Slack" "Evernote" "Goodnotes" "GoodNotes" \
          "WhatsApp" "Telegram" "Discord" "Messenger")   # local-model chat apps (their servers: extra-block.sh); notes apps whose AI cannot be separated (owner, 28 Oct); messaging apps whose AI bots cannot be separated (Meta AI, Telegram/Discord bots; owner, 28 Oct); xAI / Kimi / Qwen / M365 Copilot desktop apps
 

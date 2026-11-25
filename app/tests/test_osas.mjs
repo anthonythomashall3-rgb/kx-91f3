@@ -251,7 +251,8 @@ console.log("O10 accessibility: what LOCKqz closes never includes assistive tech
 const MAC = join(HERE, "..", "mac"), WINP = join(HERE, "..", "windows");
 const killSrc = readFileSync(join(MAC, "lockqz.sh"), "utf8") + readFileSync(join(MAC, "extra-block.sh"), "utf8") + readFileSync(join(WINP, "lockqz.ps1"), "utf8");
 const AT = /voiceover|nvda|jaws|narrator|magnif|dictation|voice ?control|voice ?access|read&write|readwrite|texthelp|kurzweil|zoomtext|(?<!VMware )fusion|dragon|speechify|naturalreader|spoken|livecaption|osk|switch control|textedit/i;
-const killed = [...killSrc.matchAll(/^(?:AI_APPS|VM_APPS|REMOTE_APPS|OVERLAY_APPS|LOCAL_MODEL_PROCS|VPN_APPS|APPLE_AI_APPS)=\(([^)]*)\)|^\$(?:AiApps|VmApps|RemoteApps|OverlayApps|ModelProcs|VpnApps)\s*=\s*@\(([^)]*)\)/gms)].map(m => m[1] || m[2]).join(" ");
+// comments stripped first: a comment inside an array (with its own parentheses) must not end the list early
+const killed = [...killSrc.replace(/(^|\s)#[^\n]*/g, "$1").matchAll(/^(?:AI_APPS|VM_APPS|REMOTE_APPS|OVERLAY_APPS|LOCAL_MODEL_PROCS|VPN_APPS|APPLE_AI_APPS)=\(([^)]*)\)|^\$(?:AiApps|VmApps|RemoteApps|OverlayApps|ModelProcs|VpnApps)\s*=\s*@\(([^)]*)\)/gms)].map(m => m[1] || m[2]).join(" ");
 check("no screen reader / dictation / magnifier / Read&Write / Kurzweil in any kill list", !AT.test(killed), (killed.match(AT) || [""])[0]);
 const bl = readFileSync(join(MAC, "blocklist.txt"), "utf8") + readFileSync(join(WINP, "blocklist.txt"), "utf8");
 check("no assistive-technology domain blocked (texthelp, kurzweiledu, freedomscientific, nvaccess, speech.platform.bing)", !/texthelp|kurzweil|freedomscientific|nvaccess|speech\.platform|everway|donjohnston|equatio/i.test(bl));

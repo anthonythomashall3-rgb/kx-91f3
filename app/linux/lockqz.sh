@@ -33,6 +33,7 @@ is_locked() { hosts_is_locked "$HOSTS"; }
 AI_APPS=(chatgpt ChatGPT claude Claude claude-desktop copilot perplexity ollama "LM Studio" lm-studio lmstudio gpt4all msty jan Jan
          anythingllm AnythingLLM chatbox Chatbox cherry-studio "Cherry Studio" open-webui pinokio witsy reor
          deepseek poe mistral grok kimi qwen codex doubao quillbot cursor-ai-chat highlight fellou browseros
+         open-whispr OpenWhispr lobehub-desktop LobeHub
          notion Notion notion-app canva slack Slack evernote
          whatsapp WhatsApp whatsapp-desktop telegram-desktop Telegram telegram discord Discord messenger Messenger)
 LOCAL_MODEL_PROCS=(ollama llama-server llama-cli llama-run llamafile koboldcpp localai local-ai lm-studio-server jan-server gpt4all

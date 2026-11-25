@@ -74,6 +74,7 @@ run "Brightspace's own submission email (Sync): LOCKqz's address beside the prof
 run "Brightspace's own submission email (Email Worker): the email read (multipart, quoted-printable, its links) and handed to the API" node --no-warnings test_mailin_worker.mjs
 run "Sweep 35: an exam taken more than once - each unlock matched with its own attempt; every attempt's time kept" node --no-warnings test_sweep35.mjs
 run "Sweep 36: a look at an exam's start page is not red; a later attempt's early unlock is; every kind of computer tested" node --no-warnings test_sweep36.mjs
+run "API: every path, every caller, every odd body answers without a crash (fuzz)" node --no-warnings test_api_fuzz.mjs
 run "26 Oct fixes: one Stripe checkout per code, overpayments carried, unexpected local unlocks red, course password retired" node --no-warnings test_oct26_fixes.mjs
 run "Helper hardening: fast user switching, per-user tokens, Windows monotonic cap, local-model apps" bash test_helper_hardening.sh
 run "Scale guard: no API query reads a whole big table (every statement planned against the real schema)" node --no-warnings test_scale_indexes.mjs

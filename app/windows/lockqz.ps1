@@ -32,6 +32,7 @@ $AiApps = @("chatgpt","claude","copilot","perplexity","ollama","lmstudio","LM St
             "Msty Studio","Backyard AI","Faraday","Sanctum","Open WebUI","Pinokio","Witsy","Reor","ollama app",
             "grok","kimi","qwen",   # xAI / Kimi / Qwen desktop apps
             "codex","doubao","quillbot","highlight","fellou","browseros","raycast",
+            "Wispr Flow","superwhisper","OpenWhispr","Granola","Limitless","LobeHub","LobeChat",   # AI writing by voice with answer modes, meeting assistants with an Ask AI chat, a chat app
             "Notion","Notion Mail","Notion Calendar","Canva","slack","Evernote","GoodNotes",
             "WhatsApp","Telegram","Discord","Messenger")   # messaging apps whose AI bots cannot be separated (Meta AI, Telegram/Discord bots; owner, 28 Oct). OpenAI Codex, Doubao, QuillBot, Highlight AI, AI browsers, Raycast AI
 # Non-browser routes to AI or a human helper, all closed during the quiz:

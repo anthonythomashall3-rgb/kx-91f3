@@ -78,7 +78,8 @@ for p in ollama ollama_llama_server llama-server lms koboldcpp llamafile; do
 chk "Mac: llama.cpp python server matched by its module" 'grep -A2 "^LOCAL_MODEL_CMD_RES=" "$MAC/extra-block.sh" | grep -q "llama_cpp"'
 for p in ollama ollama_llama_server "ollama app" llama-server lms lmstudio gpt4all jan msty koboldcpp; do
   chk "Windows close list: $p" 'grep -E "^\\\$(AiApps|ModelProcs) *=" -A3 "$WIN/lockqz.ps1" | grep -qi "\"$p\""'; done
-LISTS="$(grep -A8 '^AI_APPS=' "$MAC/lockqz.sh"; grep -A3 '^LOCAL_MODEL_PROCS=' "$MAC/extra-block.sh"; grep -E '^\$(AiApps|ModelProcs) *=' -A3 "$WIN/lockqz.ps1")"
+# whole lists: each runs from its name to the line that closes it (a quote, then the closing parenthesis)
+LISTS="$(sed -n '/^AI_APPS=(/,/")/p' "$MAC/lockqz.sh"; sed -n '/^LOCAL_MODEL_PROCS=(/,/")/p' "$MAC/extra-block.sh"; sed -n -E '/^\$(AiApps|ModelProcs) *=/,/"[)]/p' "$WIN/lockqz.ps1")"
 for x in VoiceOver "Voice Control" Dictation Narrator NVDA JAWS Dragon ZoomText Kurzweil "Read&Write" MacWhisper Magnifier; do
   chk "accessibility tool untouched: $x" '! printf "%s" "$LISTS" | grep -qi "\"$x\""'; done
 chk "Mac kill lists still parse" 'bash -n "$MAC/lockqz.sh" && bash -n "$MAC/extra-block.sh"'
