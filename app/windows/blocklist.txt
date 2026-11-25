@@ -1053,3 +1053,12 @@ app.limitless.ai
 rewind.ai
 lobehub.com
 lobechat.com
+# 25 Nov 2026 (sweep 38, part 2): more AI voice typing whose modes rewrite, answer or hand off to an AI
+# (Aqua Voice, Willow, Spokenly, VoiceInk's Assistant mode, Monologue, BossAI)
+withaqua.com
+aquavoice.com
+willowvoice.com
+spokenly.app
+tryvoiceink.com
+monologue.to
+bossai.tech

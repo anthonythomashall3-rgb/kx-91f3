@@ -114,7 +114,8 @@ const AI_DOMAINS = [
   "arena.ai","ppq.ai","nanogpt.com","librechat.ai","kluster.ai","globe.engineer","hark.com","hume.ai","sesame.com","thea.study","scholar.0xpi.com","hkchat.app","hkchat.hk","hkgai.net","kortix.com","kortix.ai","suna.so","atoms.dev","mgx.dev","marscode.com","lingma.aliyun.com","qoder.com","codebuddy.ai","roomote.dev","orchids.app","tempo.new","heyboss.ai","heyboss.xyz","macaly.com","capacity.so","affine.pro","otter.ai","fireflies.ai","rows.com","napkin.ai","beautiful.ai",
   "subcue.ai","accounts.subcue.ai","ctrlpotato.com","clapassist.com","offerinai.com","lastroundai.com","app.lastroundai.com","linkjob.ai","craqly.com","sigmeet.ai","aissence.ai","camcue.app","ghostpilotai.com","pluely.com","wittro.com","api.minimax.chat","api.hunyuan.cloud.tencent.com","upstage.ai","api.upstage.ai","friendli.ai","api.friendli.ai","api.studio.nebius.ai","api.chatanywhere.tech","api.chatanywhere.org",
   "unstuckstudy.com","askcodi.com","monic.ai","revisely.com","docalysis.com","elicit.org","chatthing.ai",
-  "wisprflow.ai","api.wisprflow.ai","api-east.wisprflow.ai","wisprflow.com","openwhispr.com","api.openwhispr.com","superwhisper.com","granola.ai","api.granola.ai","app.granola.ai","public-api.granola.ai","limitless.ai","api.limitless.ai","app.limitless.ai","rewind.ai","lobehub.com","lobechat.com"
+  "wisprflow.ai","api.wisprflow.ai","api-east.wisprflow.ai","wisprflow.com","openwhispr.com","api.openwhispr.com","superwhisper.com","granola.ai","api.granola.ai","app.granola.ai","public-api.granola.ai","limitless.ai","api.limitless.ai","app.limitless.ai","rewind.ai","lobehub.com","lobechat.com",
+  "withaqua.com","aquavoice.com","willowvoice.com","spokenly.app","tryvoiceink.com","monologue.to","bossai.tech"
 ];
 // Additions to the apps' own never-close list: during a quiz the apps close any program that hides its windows from
 // screen capture, except Apple's and Windows' own code and the programs people need beside a quiz (their KEEP_APPS).
