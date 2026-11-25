@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-25 05:25 PT — 01UUDg7YHBTs: bug sweep 38 (all of LOCKqz). Holds: app/cloudflare (functions, public, schema, migrations), app/mac, app/windows, app/linux, app/mailin, app/extension-prof, app/watch, app/tests, .github/workflows, VERSION files.
 
 ## Recently finished
 - 2026-11-24 17:40 PT — 01UUDg7YHBTs: bug sweep 37 finished: apps 0.6.47 + server live (592d8ff, Release 45524416664 green on every job). Windows: a browser LOCKqz cannot turn the AI off in (any browser registered for the Start menu other than Chrome, Edge, Brave, Vivaldi and the Firefox family, and the DuckDuckGo app) never holds a quiz and is closed while a quiz is locked, matched by its program file, as on Mac; the lock note names the browsers closed for the whole quiz apart from the ones to reopen (Mac too). Windows: typing into a browser's address bar (Content quiz to its own page, search to Google's Web results) waits for the keyboard focus and never leaves a half-typed address. Windows helper: stops by itself after LOCKqz's removal only when fully unlocked.
