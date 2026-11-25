@@ -52,6 +52,33 @@ Check "nothing else on this computer was closed" (@($closed | Where-Object { $_ 
 Check "a Microsoft-signed program counts as Windows' own; the unsigned test program does not" (((Signer-Kept "$env:WINDIR\System32\notepad.exe") -or (Signer-Kept "$env:WINDIR\explorer.exe")) -and -not (Signer-Kept $exe))
 foreach ($p in @($s, $k)) { try { if (-not $p.HasExited) { $p.Kill() } } catch { } }
 
+# A browser LOCKqz cannot police (registered for the Start menu, outside Chrome, Edge, Brave, Vivaldi and the Firefox
+# family) is closed while locked, by its program file: the quiz's own browser and a program with the same file name
+# somewhere else stay open.
+foreach ($st in $ast.EndBlock.Statements) {
+  if (($st -is [System.Management.Automation.Language.FunctionDefinitionAst] -and @("Registered-Browsers", "Close-Unpoliced", "Browser-Name", "Join-Names") -contains $st.Name) -or
+      ($st -is [System.Management.Automation.Language.AssignmentStatementAst] -and @('$FirefoxFamily', '$NoPolicy', '$Policed', '$UnpolicedApps') -contains $st.Left.Extent.Text)) { . ([ScriptBlock]::Create($st.Extent.Text)) }
+}
+$bdir = Join-Path $Out "UnpolicedBrowser"; $odir = Join-Path $Out "SameName"
+New-Item -ItemType Directory -Force -Path $bdir, $odir | Out-Null
+$bexe = Join-Path $bdir "LQBrowserTest.exe"; $oexe = Join-Path $odir "LQBrowserTest.exe"
+Copy-Item $exe $bexe -Force; Copy-Item $exe $oexe -Force
+$rk = "HKCU:\SOFTWARE\Clients\StartMenuInternet\LQBrowserTest"
+New-Item -Path "$rk\shell\open\command" -Force | Out-Null
+Set-Item -Path $rk -Value "LQ Test Browser"; Set-Item -Path "$rk\shell\open\command" -Value "`"$bexe`" --single-argument %1"
+$b1 = Start-Process $bexe -ArgumentList "shown" -PassThru; $o1 = Start-Process $oexe -ArgumentList "shown" -PassThru
+Start-Sleep -Seconds 3
+$script:RegBrowsers = $null
+$none = @(Close-Unpoliced "LQBrowserTest")
+Check "the quiz's own browser is never closed" (($none.Count -eq 0) -and -not $b1.HasExited)
+Check "it is named as the student knows it ($(Browser-Name 'LQBrowserTest'))" ((Browser-Name "LQBrowserTest") -eq "LQ Test Browser")
+$names = @(Close-Unpoliced "chrome"); Start-Sleep -Seconds 1
+Check "a registered browser LOCKqz cannot police is closed while locked ($($names -join ', '))" ($b1.HasExited -and ($names -contains "LQ Test Browser"))
+Check "a program with the same file name somewhere else stays open" (-not $o1.HasExited)
+Check "Chrome, Edge, Brave, Vivaldi and Firefox are policed, never closed by this" ((@("chrome", "msedge", "brave", "vivaldi", "firefox") | Where-Object { $Policed -notcontains $_ }).Count -eq 0)
+Remove-Item -Path $rk -Recurse -Force -ErrorAction SilentlyContinue
+foreach ($p in @($b1, $o1)) { try { if (-not $p.HasExited) { $p.Kill() } } catch { } }
+
 Write-Host ""
 Write-Host "RESULT: $pass passed, $fail failed"
 if ($fail) { exit 1 }

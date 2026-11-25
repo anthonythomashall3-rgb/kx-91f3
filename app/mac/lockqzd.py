@@ -36,7 +36,7 @@ KEEPFILE = os.environ.get("LOCKQZ_KEEP_FILE") or os.path.join(os.path.dirname(BL
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.6.46"
+VERSION = "0.6.47"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 

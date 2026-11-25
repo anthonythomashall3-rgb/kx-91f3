@@ -700,7 +700,17 @@ killed, msgs = [], []
 A.dialog = lambda m, *a, **k: msgs.append(m); A.close_pids = lambda pids: killed.extend(pids) or bool(pids)
 A.ps_procs = lambda: procs
 g, h = agent(); T(g, [tab(ATT)])
-ok("lock message says Firefox and Opera were closed") if any("Firefox and Opera were closed" in m for m in msgs) and {p for p, _ in killed} >= {11, 12, 13} else bad("msgs %r killed %r" % (msgs, killed))
+ok("lock message: Firefox closed (reopen it), Opera closed for the quiz (use it after)") if any("Firefox was closed for the quiz so its AI stays off. You can reopen it" in m and "Opera was closed: it cannot turn its AI off during a quiz. Use it again after the quiz." in m for m in msgs) and {p for p, _ in killed} >= {11, 12, 13} else bad("msgs %r killed %r" % (msgs, killed))
+# 24 Nov (sweep 37): a browser no policy reaches (here a DuckDuckGo app that handles web links) is closed at lock and named
+import tempfile as _tf, plistlib as _pl
+_d = _tf.mkdtemp(); _app = os.path.join(_d, "DuckDuckGo.app"); os.makedirs(os.path.join(_app, "Contents", "MacOS"))
+with open(os.path.join(_app, "Contents", "Info.plist"), "wb") as _f:
+    _pl.dump({"CFBundleIdentifier": "com.duckduckgo.macos.browser", "CFBundleURLTypes": [{"CFBundleURLSchemes": ["http", "https"]}]}, _f)
+procs.append((16, 5, os.path.join(_app, "Contents", "MacOS", "DuckDuckGo")))
+killed[:], msgs[:] = [], []
+g, h = agent(); T(g, [tab(ATT)])
+ok("an unpoliced browser (DuckDuckGo) is closed at lock and named in the note") if 16 in {p for p, _ in killed} and any("DuckDuckGo" in m and "cannot turn" in m for m in msgs) else bad("msgs %r killed %r" % (msgs, killed))
+procs.pop()
 g, h = agent(); msgs[:] = []; T(g, [("Opera", 0, 0, ATT)])
 ok("quiz in Opera: student told to open it in another browser") if any("Open this quiz in Chrome, Safari, Edge or Firefox" in m for m in msgs) else bad("no Opera warning: %r" % msgs)
 ok("(10 Nov) quiz in Opera: not locked, no password asked (Opera's AI cannot be turned off)") if not g.locked and not any(p in ("/lock", "/password") for (p, _) in h.calls) else bad("calls %r" % h.calls)

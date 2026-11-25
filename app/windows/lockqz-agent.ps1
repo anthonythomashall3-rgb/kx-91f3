@@ -400,6 +400,68 @@ function Show-Message($text) {
 # A closed Firefox reopens with its tabs (it restores the session after a forced close).
 $FirefoxFamily = @("firefox","librewolf","waterfox","floorp","zen","mullvadbrowser")
 $NoPolicy = @("opera","opera_gx","opera_crashreporter")
+# Browsers LOCKqz turns the AI off in: the policy keys of browser-policy.ps1 (Chrome and the Chromium builds that run as
+# chrome, Edge, Brave, Vivaldi) and the Firefox family. Every other browser registered on this PC (the Start menu's
+# Internet programs: antivirus "secure browsers" and other Chromium rebrands, Yandex, Arc ...) and the DuckDuckGo app
+# keep their AI features, AI extensions and AI search answers: no quiz is taken in them (like Opera), and they are
+# closed while locked, never the browser the quiz is in.
+$Policed = @("chrome","msedge","brave","vivaldi") + $FirefoxFamily
+$UnpolicedApps = @("DuckDuckGo")
+$script:RegBrowsers = $null; $script:RegBrowsersAt = [DateTime]::MinValue
+function Registered-Browsers {
+  # program file (lower case) -> display name of every browser registered for the Start menu (this PC and this user),
+  # read at most every 10 minutes.
+  if ($script:RegBrowsers -and (([DateTime]::UtcNow - $script:RegBrowsersAt).TotalMinutes -lt 10)) { return $script:RegBrowsers }
+  $m = @{}
+  foreach ($root in @("HKLM:\SOFTWARE\Clients\StartMenuInternet", "HKLM:\SOFTWARE\WOW6432Node\Clients\StartMenuInternet", "HKCU:\SOFTWARE\Clients\StartMenuInternet")) {
+    foreach ($k in @(Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue)) {
+      try {
+        $cmd = [string](Get-ItemProperty -LiteralPath (Join-Path $k.PSPath "shell\open\command") -ErrorAction Stop).'(default)'
+        $exe = if ($cmd -match '^\s*"([^"]+?\.exe)"') { $Matches[1] } elseif ($cmd -match '^\s*([^\s"]+?\.exe)') { $Matches[1] } else { "" }
+        if ($exe) {
+          $nm = [string](Get-ItemProperty -LiteralPath $k.PSPath -ErrorAction SilentlyContinue).'(default)'
+          $m[$exe.ToLowerInvariant()] = $(if ($nm) { $nm } else { [string]$k.PSChildName })
+        }
+      } catch { }
+    }
+  }
+  $script:RegBrowsers = $m; $script:RegBrowsersAt = [DateTime]::UtcNow
+  return $m
+}
+function Browser-Name([string]$proc) {
+  # What the student calls a browser LOCKqz cannot police: its Start menu name, else its program's product name.
+  if ($NoPolicy -contains $proc) { return "Opera" }
+  $reg = Registered-Browsers
+  foreach ($p in @(Get-Process -Name $proc -ErrorAction SilentlyContinue)) {
+    $path = ""; try { $path = [string]$p.Path } catch { }
+    if ($path -and $reg.ContainsKey($path.ToLowerInvariant())) { return [string]$reg[$path.ToLowerInvariant()] }
+    try { if ($p.Product) { return [string]$p.Product } } catch { }
+  }
+  return $(if ($proc) { $proc } else { "This browser" })
+}
+function Close-Unpoliced([string]$keep) {
+  # The running browsers without LOCKqz's policies (registered ones matched by their program file, so another
+  # program with the same file name is never touched), never $keep: asked to close, then forced. -> their names.
+  $reg = Registered-Browsers
+  $cand = @($UnpolicedApps)
+  foreach ($exe in @($reg.Keys)) { $b = [IO.Path]::GetFileNameWithoutExtension($exe); if ($cand -notcontains $b) { $cand += $b } }
+  $ps = @(); $names = @()
+  foreach ($p in @(Get-Process -Name $cand -ErrorAction SilentlyContinue)) {
+    $n = [string]$p.ProcessName
+    if (($n -eq $keep) -or ($Policed -contains $n) -or ($NoPolicy -contains $n) -or ($n -eq "iexplore")) { continue }
+    $label = $null
+    if ($UnpolicedApps -contains $n) { $label = $n }
+    else { $path = ""; try { $path = [string]$p.Path } catch { }; if ($path -and $reg.ContainsKey($path.ToLowerInvariant())) { $label = [string]$reg[$path.ToLowerInvariant()] } }
+    if (-not $label) { continue }
+    $ps += $p; if ($names -notcontains $label) { $names += $label }
+  }
+  if ($ps.Count -eq 0) { return @() }
+  foreach ($p in $ps) { try { [void]$p.CloseMainWindow() } catch { } }
+  Start-Sleep -Seconds 3
+  foreach ($p in $ps) { try { if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } } catch { } }
+  return @($names)
+}
+function Join-Names($names) { $n = @($names); if ($n.Count -gt 1) { (($n[0..($n.Count - 2)]) -join ", ") + " and " + $n[-1] } else { [string]($n -join "") } }
 function Restart-QuizFirefox([string]$name, [datetime]$lockedAt) {
   # The exam is open in a Firefox (or fork) that was already running when this lock began: it reads the quiz policies
   # (its AI, encrypted DNS and built-in VPN off, AI sites blocked) only when it starts, so it is restarted once, now
@@ -748,7 +810,7 @@ function Close-HiddenApps($keep) {
   }
   return $closed
 }
-$HiddenAt = [DateTime]::MinValue
+$HiddenAt = [DateTime]::MinValue; $UnpolAt = [DateTime]::MinValue; $script:UnpolTold = $false
 
 # ---- main loop ----
 $Locked = $false; $Quiz = $null; $QuizTab = $null; $QuizTitle = $null; $QuizUrl = $null; $QuizProc = ""
@@ -903,7 +965,7 @@ function Handle-Pw($pr, [bool]$first, [string]$note) {
   $script:PwNext = $now.AddSeconds(15)
   return $null
 }
-function Clear-Quiz { $script:Locked = $false; $script:Quiz = $null; $script:QuizTab = $null; $script:QuizTitle = $null; $script:QuizUrl = $null; $script:QuizProc = ""; $script:MissingSince = $null; $script:OperaWarned = $false }
+function Clear-Quiz { $script:Locked = $false; $script:Quiz = $null; $script:QuizTab = $null; $script:QuizTitle = $null; $script:QuizUrl = $null; $script:QuizProc = ""; $script:MissingSince = $null; $script:OperaWarned = $false; $script:UnpolTold = $false }
 $script:HoldTold = $null
 $HoldText = "AI stays off: this exam was not turned in on this computer.`n`nGo back to the exam and submit it. AI comes back the moment it is submitted. If you did submit, AI comes back by itself once Brightspace shows it, or when the exam ends."
 function Attempt-Over([string]$quiz) {
@@ -933,9 +995,10 @@ while ($true) {
   try {
     $wins = @(Get-BrowserWindows)
     if ((-not $ReadyTold) -and (@($wins | Where-Object { $_.Url -match '/d2l/' }).Count -gt 0)) { Check-Ready }
-    # A quiz open in Opera and in another browser: the other browser's window counts (Opera gets no lock).
+    # A quiz open in Opera (or another browser LOCKqz cannot police) and in another browser: the other browser's window
+    # counts (no lock in the first).
     $qws = @($wins | Where-Object { Is-Quiz $_.Url })
-    $quizWin = (@($qws | Where-Object { $NoPolicy -notcontains [string]$_.Proc }) + @($qws | Where-Object { $NoPolicy -contains [string]$_.Proc })) | Select-Object -First 1
+    $quizWin = (@($qws | Where-Object { $Policed -contains [string]$_.Proc }) + @($qws | Where-Object { $Policed -notcontains [string]$_.Proc })) | Select-Object -First 1
     $openId = if ($quizWin) { Lock-Id $quizWin.Url } else { $null }
     Step-Caps $openId $(if ($quizWin) { $quizWin.Url } else { "" })
     if (-not $Verified) {
@@ -953,12 +1016,13 @@ while ($true) {
       }
     }
     if (-not $Locked) {
-      if ($quizWin -and ($NoPolicy -contains [string]$quizWin.Proc) -and -not $Capped.ContainsKey($openId) -and -not (NoLock-Now ([string]$openId))) {
-        # Opera has no policy layer (its Aria AI and built-in VPN stay on): a quiz open in Opera is neither locked
-        # nor given its password; the student is told once to open it in another browser.
+      if ($quizWin -and ($Policed -notcontains [string]$quizWin.Proc) -and -not $Capped.ContainsKey($openId) -and -not (NoLock-Now ([string]$openId))) {
+        # Opera has no policy layer (its Aria AI and built-in VPN stay on), nor has any browser outside $Policed: a quiz
+        # open there is neither locked nor given its password; the student is told once to open it in another browser.
         $NoLock[[string]$openId] = [DateTime]::UtcNow.AddSeconds(20)
-        if ($script:OperaToldQuiz -ne [string]$openId) { $script:OperaToldQuiz = [string]$openId; Show-Message "Opera cannot turn its AI off during a quiz.`n`nOpen this quiz in Chrome, Edge or Firefox to take it." }
-        Log "quiz $openId is open in Opera (no AI policy) - not locked, no password"
+        $bn = Browser-Name ([string]$quizWin.Proc)
+        if ($script:OperaToldQuiz -ne [string]$openId) { $script:OperaToldQuiz = [string]$openId; Show-Message "$bn cannot turn its AI off during a quiz.`n`nOpen this quiz in Chrome, Edge or Firefox to take it." }
+        Log "quiz $openId is open in $bn (no AI policy) - not locked, no password"
       } elseif ($quizWin -and -not $Capped.ContainsKey($openId) -and -not (NoLock-Now ([string]$openId))) {
         $Pending = $null
         $Quiz = $openId
@@ -980,13 +1044,15 @@ while ($true) {
           if (-not $script:Seen.ContainsKey([string]$Quiz)) { $script:Seen[[string]$Quiz] = @{ attempt = $false; sub = $false; rt = $true; at = $nowL } }
           $script:Seen[[string]$Quiz].sub = $false; $script:AttWin = @{}
           $restarted = ($FirefoxFamily -contains $QuizProc) -and (Restart-QuizFirefox $QuizProc $lockedAt)
-          $closed = @()
+          $closed = @(); $kept = @()   # $kept: closed for the whole quiz (no policy), not to be reopened before it ends
           if (Close-Browsers $FirefoxFamily $QuizProc) { $closed += "Firefox" }
-          if (Close-Browsers $NoPolicy $QuizProc) { $closed += "Opera"; $OperaWarned = $true }
+          if (Close-Browsers $NoPolicy $QuizProc) { $kept += "Opera"; $OperaWarned = $true }
+          $un = @(Close-Unpoliced $QuizProc); if ($un.Count) { $kept += $un; $script:UnpolTold = $true }
           # Brave reads its quiz policies (Leo, Tor windows, VPN off) only when it starts: close it once.
           if (Close-Browsers @("brave") $QuizProc) { $closed += "Brave" }
           $rnote = if ($restarted) { "`n`nFirefox was restarted for the exam so its AI stays off. Your tabs come back." } else { "" }
-          $note = $rnote + $(if ($closed.Count -gt 1) { "`n`n" + (($closed[0..($closed.Count-2)]) -join ", ") + " and " + $closed[-1] + " were closed for the quiz so their AI stays off. You can reopen them; your tabs come back." } elseif ($closed.Count) { "`n`n" + $closed[0] + " was closed for the quiz so its AI stays off. You can reopen it; your tabs come back." } else { "" })
+          $note = $rnote + $(if ($closed.Count -gt 1) { "`n`n" + (Join-Names $closed) + " were closed for the quiz so their AI stays off. You can reopen them; your tabs come back." } elseif ($closed.Count) { "`n`n" + $closed[0] + " was closed for the quiz so its AI stays off. You can reopen it; your tabs come back." } else { "" })
+          $note += $(if ($kept.Count -gt 1) { "`n`n" + (Join-Names $kept) + " were closed: they cannot turn their AI off during a quiz. Use them again after the quiz." } elseif ($kept.Count) { "`n`n" + $kept[0] + " was closed: it cannot turn its AI off during a quiz. Use it again after the quiz." } else { "" })
           $LastPw = $null; $StartTold = $null; $script:PayShown = $false; $script:PaySince = $null; $res = $null
           $script:PwFilled = @{}; $script:PwEntered = $false; $script:PwTold = $false; $script:PwSince = $null
           for ($i = 0; ($i -lt 3) -and (-not $res); $i++) {
@@ -1029,6 +1095,15 @@ while ($true) {
         if (([DateTime]::UtcNow - $HiddenAt).TotalSeconds -ge 5) { $HiddenAt = [DateTime]::UtcNow; try { Close-HiddenApps (Read-KeepApps $KeepFile) | Out-Null } catch { } }
         # Opera reopened during the quiz (no policy layer, built-in VPN) -> closed again.
         if (Close-Browsers $NoPolicy $QuizProc) { if (-not $OperaWarned) { $OperaWarned = $true; Show-Message "Opera was closed: it cannot turn its AI off during a quiz. Use it again after the quiz." } }
+        # A browser LOCKqz cannot police, opened during the quiz -> closed, every 5 s.
+        if (([DateTime]::UtcNow - $UnpolAt).TotalSeconds -ge 5) {
+          $UnpolAt = [DateTime]::UtcNow; $un = @()
+          try { $un = @(Close-Unpoliced $QuizProc) } catch { }
+          if ($un.Count -and -not $script:UnpolTold) {
+            $script:UnpolTold = $true
+            Show-Message ((Join-Names $un) + $(if ($un.Count -gt 1) { " were closed: they cannot turn their AI off during a quiz. Use them again after the quiz." } else { " was closed: it cannot turn its AI off during a quiz. Use it again after the quiz." }))
+          }
+        }
         # Gated quizzes change password every 5 min: until the attempt starts, re-check and hand over a new
         # one. A quiz that has not opened yet is asked on the slower C2 schedule ($PwNext).
         $pwRes = $null

@@ -182,7 +182,7 @@ console.log("C S mode, on-device AI, local model runners, the weekly report");
   check("remover stops every PowerShell running a LOCKqz script (5.1 or 7)", /Name='powershell\.exe' OR Name='pwsh\.exe'/.test(un) && /lockqz-boot\.ps1\*" -or \$c -like "\*lockqz-agent\.ps1\*"/.test(un) && !/netsh http/.test(un) && !/netsh http/.test(ins));
   check("a new install stops a LOCKqz helper or agent left from a removed copy", /\$Fresh = -not \(Test-Path "\$Dest\\config\.json"\)/.test(ins) && ins.indexOf("if ($Fresh) {") > 0 && ins.indexOf("if ($Fresh) {") < ins.indexOf('Start-ScheduledTask -TaskName "LOCKqz"'));
   const ag = read("app/windows/lockqz-agent.ps1");
-  check("helper and agent stop by themselves once LOCKqz's files are gone (never during a quiz; 30 s)", /\$State\.state -ne "locked"\) -and -not \(Test-Path -LiteralPath \(Join-Path \$Here "lockqzd\.ps1"\)\) -and -not \(Test-Path -LiteralPath \(Join-Path \$Here "lockqz\.ps1"\)\)/.test(ps) && /\$goneSeen -ge 6/.test(ps) && /\(-not \$Locked\) -and \$PSCommandPath -and/.test(ag) && /TotalSeconds -ge 30\) \{ Log "LOCKqz was removed/.test(ag));
+  check("helper and agent stop by themselves once LOCKqz's files are gone (only when unlocked; 30 s)", /\$State\.state -eq "unlocked"\) -and -not \(Test-Path -LiteralPath \(Join-Path \$Here "lockqzd\.ps1"\)\) -and -not \(Test-Path -LiteralPath \(Join-Path \$Here "lockqz\.ps1"\)\)/.test(ps) && /\$goneSeen -ge 6/.test(ps) && /\(-not \$Locked\) -and \$PSCommandPath -and/.test(ag) && /TotalSeconds -ge 30\) \{ Log "LOCKqz was removed/.test(ag));
   const v = read("app/VERSION").trim();
   check("versions agree (" + v + ")", py.includes('VERSION = "' + v + '"') && ps.includes('$Version = "' + v + '"'));
 }

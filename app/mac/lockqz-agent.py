@@ -548,6 +548,17 @@ def unpoliced_browser_pids(procs, keep_app, denied=()):
         if (web and bid not in POLICED_IDS) or m.group(1) in denied: out.append((pid, m.group(1)))
     return out
 
+def join_names(names):
+    names = list(names)
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+def closed_note(names):
+    """The note for browsers closed for the whole quiz (no policy reaches them); '' for none."""
+    names = [str(n).replace("other:", "") for n in names]
+    if not names: return ""
+    if len(names) == 1: return "\n\n%s was closed: it cannot turn its AI off during a quiz. Use it again after the quiz." % names[0]
+    return "\n\n%s were closed: they cannot turn their AI off during a quiz. Use them again after the quiz." % join_names(names)
+
 RESTART_APPS = ("Brave Browser",)   # read new policies (Leo, Tor windows, VPN off) only when they start
 def restart_pids(procs, keep_app):
     """Main processes of browsers closed once at lock so their quiz policies apply on reopen."""
@@ -937,18 +948,23 @@ class Agent:
             log("api %s failed: %s" % (path, e)); return None
 
     def close_for_quiz(self, app):
-        """At lock: close Firefox (and forks) and the Opera family - they cannot switch their AI off while
-        running - except the browser the quiz is in. -> note for the student ('' when nothing closed)."""
+        """At lock: close Firefox (and forks) and Brave, which read their quiz policies only when they start, and the
+        browsers no policy reaches (the Opera family, any other browser LOCKqz cannot police) - except the browser the
+        quiz is in. -> note for the student ('' when nothing closed)."""
         procs = ps_procs()
         g, o, b = gecko_pids(procs, app), no_policy_pids(procs, app), restart_pids(procs, app)
-        close_pids(g + o + b)
+        u = unpoliced_browser_pids(procs, app, set(_denied))
+        close_pids(g + o + b + u)
         self.opera_check = time.time() + 5   # give the closed ones time to exit before re-checking
-        if o: self.opera_warned = True       # the lock note already says so
-        names = (["Firefox"] if g else []) + (["Opera"] if o else []) + (["Brave"] if b else [])
-        if not names: return ""
+        if o or u: self.opera_warned = True  # the lock note already says so
+        names = (["Firefox"] if g else []) + (["Brave"] if b else [])
+        kept = (["Opera"] if o else []) + sorted(set(n for _, n in u) - {"Opera"})
+        note = ""
         if len(names) == 1:
-            return "\n\n%s was closed for the quiz so its AI stays off. You can reopen it; your tabs come back." % names[0]
-        return "\n\n%s were closed for the quiz so their AI stays off. You can reopen them; your tabs come back." % (", ".join(names[:-1]) + " and " + names[-1])
+            note += "\n\n%s was closed for the quiz so its AI stays off. You can reopen it; your tabs come back." % names[0]
+        elif names:
+            note += "\n\n%s were closed for the quiz so their AI stays off. You can reopen them; your tabs come back." % join_names(names)
+        return note + closed_note(kept)
 
     def restart_quiz_gecko(self, app):
         """The exam is open in a Firefox (or fork) that was already running when this lock began: it reads the quiz
@@ -1521,7 +1537,11 @@ class Agent:
                 o = no_policy_pids(procs, self.quiz_app) + unpoliced_browser_pids(procs, self.quiz_app, set(_denied))
                 if close_pids(o) and not self.opera_warned:
                     self.opera_warned = True
-                    dialog("Opera was closed: it cannot turn its AI off during a quiz. Use it again after the quiz.")
+                    seen = []
+                    for _, n in o:
+                        n = str(n).replace("other:", "")
+                        if n not in seen: seen.append(n)
+                    dialog(closed_note(seen).strip())
         # Report to the server ONLY while the helper is unreachable (proof for "helper killed"); while the
         # helper answers, its own signed pings say everything -> no routine agent traffic (free plan).
         if not getattr(self, "helper_ok", True) and now - self.last_beat > BEAT:
