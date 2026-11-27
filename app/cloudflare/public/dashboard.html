@@ -78,6 +78,7 @@
   ul.list li{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid #efece6}
   ul.list .grow{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:3px}
   ul.list .t{font-size:15px;font-weight:600}ul.list .d{font-size:13px;color:#6b6861}
+  @media(max-width:600px){ul.list li.ex{flex-wrap:wrap}ul.list li.ex .grow{flex:1 1 100%}ul.list li.ex .sw{margin-left:auto}}
   .dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;background:var(--off)}
   .dot.ok{background:var(--ok)}.dot.warn{background:#d97706}.dot.red{background:var(--usc)}
   .st{font-size:13px;font-weight:500;color:#6b6861;white-space:nowrap}.st.ok{color:var(--ok)}.st.warn{color:var(--warn)}.st.red{color:var(--usc);font-weight:700}
@@ -303,6 +304,15 @@ const BS_ORIGINS = ["https://brightspace.usc.edu", "https://usc.brightspace.com"
 const BS_HOME = "https://brightspace.usc.edu/d2l/home";
 // The server's REQUIRE_GATE (from /bs): on = the exam runs through the professor's browser, so it stays open on exam day.
 const GATE = () => BS.auto_gate !== false;
+// The reminder switch says what is really sent: one reminder 2 days before (EXAM_REMIND_3H = "0") or two; a class that waits
+// for its professor's own first email (MAIL_HOLD) says its reminders start after it.
+const REMIND_TXT = c => `Remind students without LOCKqz by email ${BS.remind_3h === false ? "2 days before each exam" : "2 days and again 3 hours before each exam"}${c && c.held ? " · starts after you email your students" : ""}`;
+// "Sun, Dec 6, 12:00 – 3:00 PM": an exam that starts and ends on the same day shows its day once.
+const span = q => { if (!q.start_date) return "no start date"; const a = new Date(q.start_date), b = q.end_date ? new Date(q.end_date) : null;
+  if (!b) return when(q.start_date);
+  if (a.toDateString() !== b.toDateString()) return when(q.start_date) + " – " + when(q.end_date);
+  const t = d => d.toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}), ta = t(a), tb = t(b), am = / ?[AP]M$/i, same = (ta.match(am)||[""])[0] === (tb.match(am)||[""])[0];
+  return a.toLocaleDateString([], {weekday:"short",month:"short",day:"numeric"}) + ", " + (same ? ta.replace(am, "") : ta) + " – " + tb; };
 let BSWIN = null, SYNCWAIT = null, SYNCMSG = "";
 const SYNCBTN = prime => `<button class="btn${prime?" prime":""}" onclick="syncNow()">Sync now</button><span class="syncst muted">${syncHtml(SYNCMSG)}${SYNCHELPON ? SYNCHELP() : ""}</span>`;
 // While a sync runs, the status shows the red lock loader (with how long it should take); otherwise plain text.
@@ -489,7 +499,7 @@ function viewHome(){
       <div class="nx">${s.next ? `Next exam: <b>${esc(s.next.name)}</b> · ${when(s.next.start_date)}` : s.cur.length ? `${s.cur.length} upcoming exam${s.cur.length===1?"":"s"}` : (s.on ? "No upcoming exams · new ones are protected by themselves" : "No upcoming exams · LOCKqz is off")}</div>
       ${s.missing.length ? `<div class="note warn"><span><b>${s.ready} of ${c.students.length}</b> student${c.students.length===1?"":"s"} ready${s.next?" for "+esc(s.next.name):""}${s.unpaid.length?" · "+s.unpaid.length+" installed, not paid":""}.</span>${mailBtns(c,s)}</div>`
         : `<div class="note ok"><span>${c.students.length?`<b>${s.ready} of ${c.students.length}</b> student${c.students.length===1?"":"s"} ready. Every student has LOCKqz.`:"No students on the Brightspace roster yet."}</span>${mailBtns(c,s)}</div>`}
-      ${BS.mail_on ? `<label class="rem"><input type="checkbox" data-ou="${esc(c.ou)}"${c.reminders===false?"":" checked"} onchange="setReminders(this.dataset.ou,this.checked,this)"> Remind students without LOCKqz by email 2 days and again 3 hours before each exam</label>` : ""}
+      ${BS.mail_on ? `<label class="rem"><input type="checkbox" data-ou="${esc(c.ou)}"${c.reminders===false?"":" checked"} onchange="setReminders(this.dataset.ou,this.checked,this)"> ${REMIND_TXT(c)}</label>` : ""}
     </article>`;
   });
   h += `</section>`;
@@ -576,7 +586,7 @@ function showAddresses(list){
 }
 async function setReminders(ou, on, cb){ if (cb) cb.disabled = true; const d = await post("/class-mail", { ou, reminders: on }); if (d.error) { alert(d.error); if (cb) cb.checked = !on; }
   else { const c = BS.courses.find(x=>x.ou===ou); if (c) c.reminders = on; } if (cb) cb.disabled = false; }
-// The email button, on EVERY class (Anthony, 27 Oct): to the students who still need LOCKqz when there are
+// The email button, on EVERY class (owner, 27 Oct): to the students who still need LOCKqz when there are
 // any ("Remind the N who aren't ready"), otherwise to the whole class ("Email students").
 function mailBtns(c,s){
   const kind = s.missing.length ? "missing" : "all";
@@ -608,16 +618,16 @@ function viewClass(ou){
   if(c.roster_hidden) return `${BACK('', 'All classes')}
   <div class="band"><div><h1 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-.015em">${esc(cname(c))}</h1><p class="sub">${esc(c.code||"")}${c.code?" · ":""}from Brightspace, updated ${ago(c.synced_at)}</p></div></div>
   <div class="note warn"><span>${HIDDEN_TXT()}</span></div>
-  <section class="card"><div class="hrow"><h2>Exams</h2></div><ul class="list">${s.cur.map(q=>`<li><div class="grow"><span class="t">${esc(q.name)}</span><span class="d">${q.active===0?"hidden in Brightspace · ":""}${q.start_date?when(q.start_date):"no start date"}${q.end_date?" – "+when(q.end_date):""}</span></div></li>`).join("") || `<li class="d">No upcoming exams in Brightspace.</li>`}</ul></section>`;
+  <section class="card"><div class="hrow"><h2>Exams</h2></div><ul class="list">${s.cur.map(q=>`<li><div class="grow"><span class="t">${esc(q.name)}</span><span class="d">${q.active===0?"hidden in Brightspace · ":""}${span(q)}</span></div></li>`).join("") || `<li class="d">No upcoming exams in Brightspace.</li>`}</ul></section>`;
   const row = q => { const on=!!q.password, p = pend(q), lv = `#live/${esc(ou)}-${esc(q.qi)}`;
-    return `<li><div class="grow"><span class="t" style="color:${on?'var(--ink)':'#6b6861'}">${esc(q.name)}</span><span class="d">${q.active===0?"hidden in Brightspace · ":""}${q.start_date?when(q.start_date):"no start date"}${q.end_date?" – "+when(q.end_date):""}${live(q)?` · <a href="${lv}">in progress — watch</a>`:on?` · <a href="${lv}">watch live</a>`:""}</span></div>
+    return `<li class="ex"><div class="grow"><span class="t" style="color:${on?'var(--ink)':'#6b6861'}">${esc(q.name)}</span><span class="d">${q.active===0?"hidden in Brightspace · ":""}${span(q)}${live(q)?` · <a href="${lv}">in progress — watch</a>`:on?` · <a href="${lv}">watch live</a>`:""}</span></div>
       <button class="sw" aria-pressed="${on}" aria-label="Protect this exam" data-ou="${esc(ou)}" data-qi="${esc(q.qi)}" onclick="this.disabled=true;setQuiz(this.dataset.ou,this.dataset.qi,${!on})"><b class="st ${p?'warn':on?'ok':''}" style="min-width:110px;text-align:right">${on?(p?"Waiting for Brightspace":"Protected"):(p?"Off · 1 click left":"Not protected")}</b><i></i></button></li>`; };
   return `${BACK('', 'All classes')}
   <div class="band"><div><h1 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-.015em">${esc(cname(c))}</h1><p class="sub">${esc(c.code||"")}${c.code?" · ":""}${pl(c.students.length, "student")} · from Brightspace, updated ${ago(c.synced_at)}</p></div>
     <button class="sw" aria-pressed="${s.on}" aria-label="LOCKqz on for this class" data-ou="${esc(ou)}" onclick="setClass(this.dataset.ou,${!s.on})"><b>LOCKqz ${s.on?"on":"off"}</b><i></i></button></div>
   <div class="two">
     <section class="card"><div class="hrow"><h2>Exams</h2><span>${c.off ? "LOCKqz is off for this class" : "every exam starts protected"}</span></div>
-      ${s.cur.length && s.on ? `<p class="muted" style="margin:6px 0 0">Nothing to do. LOCKqz sets the password and, while your browser is open, lets in students who have LOCKqz.</p>` : ""}
+      ${s.cur.length && s.on ? `<p class="muted" style="margin:6px 0 0">${GATE() ? "Nothing to do. LOCKqz sets the password and, while your browser is open, lets in students who have LOCKqz." : "Nothing to do. LOCKqz sets the password. Only students with LOCKqz can open the exam."}</p>` : ""}
       <ul class="list">${s.cur.map(row).join("") || `<li class="d">No upcoming exams in Brightspace.</li>`}</ul>
       ${past.length ? `<details class="past"><summary>${past.length} past</summary><ul class="list">${past.map(q=>`<li><div class="grow"><span class="t" style="color:#6b6861">${esc(q.name)}</span><span class="d">${q.end_date?"ended "+when(q.end_date):q.due_date?"due "+when(q.due_date):""}</span></div>${protPast(q)}</li>`).join("")}</ul></details>` : ""}
     </section>
@@ -668,7 +678,7 @@ function viewLive(id){
   <div class="counts" id="lcounts"></div>
   <div id="lcode"></div>
   <section class="card" style="padding:8px 24px 12px"><ul class="list" id="lrows"><li class="d">${lqL("Loading live status", "This takes about 2 seconds")}</li></ul></section>
-  <p class="foot">Students without a fresh LOCKqz lock cannot open this exam while the gate is on. Everything here is kept in the activity log.</p>
+  <p class="foot">${GATE() ? "Students without a fresh LOCKqz lock cannot open this exam while the gate is on." : "Students without LOCKqz cannot open this exam."} Everything here is kept in the activity log.</p>
   ${BACKUP_CARD}`;
 }
 async function loadLive(id){
@@ -799,8 +809,8 @@ const CLOCK_FIX = "Open script.google.com, project LOCKqz payments, Triggers: th
 async function loadTeachers(){ const d = await get("/teachers"); const tb=document.querySelector("#teachers tbody"); if(!tb) return; tb.innerHTML=""; const today=laDay();
   if(d.error){ tb.innerHTML=`<tr><td colspan="11" class="err">${esc(d.error)}</td></tr>`; return; }
   const OK = '<b style="color:#1a7f37">✓</b> ', NO = '<span class="muted">Not yet</span>';
-  (d.teachers||[]).forEach(t=>{ const on = t.active_until && t.active_until>=today;
-    tb.insertAdjacentHTML("beforeend",`<tr style="${on?'':'color:#888'}"><td>${esc(t.email)}</td><td>${esc(t.name||"")}</td><td>${when(t.created_at)}</td><td>${t.ext_seen?OK+esc(ago(t.ext_seen)):NO}</td><td>${t.classes?OK+t.classes+(t.classes>1?" classes":" class")+(t.verified||t.role==="admin"?"":" · not verified"):NO}</td><td>${t.mailed_at?OK+esc(when(t.mailed_at)):NO}</td><td>${t.protected?OK+t.protected:NO}</td><td>${on?esc(t.active_until):"<b style='color:#990000'>off</b>"}</td><td>${t.paid_sections||0}</td><td>${esc(t.memo||"")}</td><td style="white-space:nowrap"><button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" onclick="secAdmin(this.dataset.email)">Sections</button> <input type="date" id="d_${esc(t.id)}" value="${esc(t.active_until||semEnd())}" style="padding:4px"> <button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" data-id="${esc(t.id)}" onclick="activate(this.dataset.email,this.dataset.id)">Activate</button> <button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" onclick="deactivate(this.dataset.email)">Off</button> <button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" onclick="resetPw(this.dataset.email)">Reset pw</button></td></tr>`); }); }
+  (d.teachers||[]).forEach(t=>{ const on = !!t.free || t.role==="admin" || (t.active_until && t.active_until>=today);
+    tb.insertAdjacentHTML("beforeend",`<tr style="${on?'':'color:#888'}"><td>${esc(t.email)}</td><td>${esc(t.name||"")}</td><td>${when(t.created_at)}</td><td>${t.ext_seen?OK+esc(ago(t.ext_seen)):NO}</td><td>${t.classes?OK+t.classes+(t.classes>1?" classes":" class")+(t.verified||t.role==="admin"?"":" · not verified"):NO}</td><td>${t.mailed_at?OK+esc(when(t.mailed_at)):NO}</td><td>${t.protected?OK+t.protected:NO}</td><td>${t.free?(t.free==="forever"?"free forever":"free (trial)"):on?esc(t.active_until):"<b style='color:#990000'>off</b>"}</td><td>${t.paid_sections||0}</td><td>${esc(t.memo||"")}</td><td style="white-space:nowrap"><button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" onclick="secAdmin(this.dataset.email)">Sections</button> <input type="date" id="d_${esc(t.id)}" value="${esc(t.active_until||semEnd())}" style="padding:4px"> <button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" data-id="${esc(t.id)}" onclick="activate(this.dataset.email,this.dataset.id)">Activate</button> <button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" onclick="deactivate(this.dataset.email)">Off</button> <button class="btn" style="min-height:32px;padding:4px 10px" data-email="${esc(t.email)}" onclick="resetPw(this.dataset.email)">Reset pw</button></td></tr>`); }); }
 // ---- per-section payment ($1,000 per section per semester, Venmo) ----
 let PAY=null, PAYSEL=null, PAYAT=0;
 const termName = t => { t=String(t||""); return (({1:"Spring",2:"Summer",3:"Fall"})[t.slice(4)]||"")+" "+t.slice(0,4); };

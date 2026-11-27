@@ -995,15 +995,24 @@ export async function onRequest(context) {
                          OR ((mt.verified=1 OR mt.vouched=1) AND (COALESCE(mt.active_until,'')>=? OR EXISTS (SELECT 1 FROM paid_sections mp WHERE mp.teacher_id=mt.id AND mp.until>=?)${ex.length ? ` OR lower(mt.email) IN (${placeholders(ex.length)})` : ""})))))`);
       args.push(d, d, ...ex);
     }
-    if (hold.length) {
-      const ph = placeholders(hold.length);
-      parts.push(`(NOT (EXISTS (SELECT 1 FROM roster mh WHERE mh.email IN (${ph}) AND mh.ou=${col})
-              OR EXISTS (SELECT 1 FROM teacher_courses mhc JOIN teachers mht ON mht.id=mhc.teacher_id WHERE mhc.ou=${col} AND lower(mht.email) IN (${ph})))
-            OR EXISTS (SELECT 1 FROM mail_sent mm WHERE mm.ou=${col} AND mm.kind='prof' AND mm.day='first'))`);
-      args.push(...hold, ...hold);
-    }
+    if (hold.length) { const h = heldSql(col); parts.push(`NOT ${h.sql}`); args.push(...h.args); }
     return { sql: "(" + parts.join(" AND ") + ")", args };
   };
+  // A class held for a MAIL_HOLD professor: its class list names one of them, or one of them synced it, and no
+  // professor has pressed Email students for it yet (mail_sent ou / 'prof' / 'first'). null when MAIL_HOLD is empty.
+  // openSql keeps such a class from automatic student email; /bs tells the dashboard (its reminders wait).
+  const heldSql = col => { const hold = mailHold(); if (!hold.length) return null; const ph = placeholders(hold.length);
+    return { sql: `((EXISTS (SELECT 1 FROM roster mh WHERE mh.email IN (${ph}) AND mh.ou=${col})
+              OR EXISTS (SELECT 1 FROM teacher_courses mhc JOIN teachers mht ON mht.id=mhc.teacher_id WHERE mhc.ou=${col} AND lower(mht.email) IN (${ph})))
+            AND NOT EXISTS (SELECT 1 FROM mail_sent mm WHERE mm.ou=${col} AND mm.kind='prof' AND mm.day='first'))`, args: [...hold, ...hold] }; };
+  // The classes among `list` held that way (none when MAIL_HOLD is empty).
+  async function heldOus(list) {
+    const ous = [...new Set(list.map(String))].filter(o => /^\d+$/.test(o)), h = heldSql("o.value"), out = new Set();
+    if (!h || !ous.length) return out;
+    for (const part of chunk(ous, 90))
+      (await db.prepare(`SELECT o.value AS ou FROM json_each(?) o WHERE ${h.sql}`).bind(JSON.stringify(part), ...h.args).all()).results.forEach(r => out.add(String(r.ou)));
+    return out;
+  }
   // The classes among `list` that may get automatic student email (all of them when openSql is null).
   async function openOus(list) {
     const ous = [...new Set(list.map(String))].filter(o => /^\d+$/.test(o)), op = openSql("o.value");
@@ -1280,10 +1289,10 @@ export async function onRequest(context) {
     // Co-taught course: another trusted instructor of it who is active (or has paid sections) keeps
     // its quizzes protected (I-M8). One query for all unpaid courses.
     const unpaidOus = [...new Set(qs.map(q => String(q.ou)).filter(o => !paidSet.has(o)))];
-    const covered = new Set();
+    const covered = new Set(), ex = [...exemptSet(env)];   // a co-teacher who never pays (FREE_FOREVER / FEE_EXEMPT) counts as active
     for (const part of chunk(unpaidOus, 90))
-      (await db.prepare(`SELECT DISTINCT r.ou AS ou FROM roster r JOIN teachers te ON te.email=r.email AND te.bs_user_id=r.user_id WHERE r.ou IN (${placeholders(part.length)}) AND te.id<>? AND (te.role='admin' OR (te.verified=1 AND (te.active_until>=? OR EXISTS (SELECT 1 FROM paid_sections ps WHERE ps.teacher_id=te.id AND ps.until>=?)))) AND ${INSTR_SQL} AND ${TRUSTED_TC}`)
-        .bind(...part, t.id, laToday(), laToday()).all()).results.forEach(x => covered.add(String(x.ou)));
+      (await db.prepare(`SELECT DISTINCT r.ou AS ou FROM roster r JOIN teachers te ON te.email=r.email AND te.bs_user_id=r.user_id WHERE r.ou IN (${placeholders(part.length)}) AND te.id<>? AND (te.role='admin' OR (te.verified=1 AND (te.active_until>=? OR EXISTS (SELECT 1 FROM paid_sections ps WHERE ps.teacher_id=te.id AND ps.until>=?)${ex.length ? ` OR lower(te.email) IN (${placeholders(ex.length)})` : ""}))) AND ${INSTR_SQL} AND ${TRUSTED_TC}`)
+        .bind(...part, t.id, laToday(), laToday(), ...ex).all()).results.forEach(x => covered.add(String(x.ou)));
     const st = [];
     for (const q of qs) {
       const ou = String(q.ou);
@@ -3009,7 +3018,8 @@ export async function onRequest(context) {
       // Set-up progress per professor (the dashboard's 3 steps): extension check-in, Brightspace classes (+ verified),
       // students emailed, protected exams.
       const r = await db.prepare("SELECT t.id,t.email,t.name,t.role,t.created_at,t.active_until,t.verified,t.ext_seen,(SELECT COUNT(*) FROM paid_sections ps WHERE ps.teacher_id=t.id AND ps.until>=?) AS paid_sections,(SELECT code FROM pay_codes pc WHERE pc.teacher_id=t.id) AS memo,(SELECT COUNT(*) FROM teacher_courses tc WHERE tc.teacher_id=t.id AND COALESCE(tc.in_sync,1)=1) AS classes,(SELECT MAX(tc.synced_at) FROM teacher_courses tc WHERE tc.teacher_id=t.id) AS synced_at,(SELECT MAX(ms.at) FROM teacher_courses tc JOIN mail_sent ms ON ms.ou=tc.ou WHERE tc.teacher_id=t.id AND ms.kind IN ('all','missing')) AS mailed_at,(SELECT COUNT(*) FROM quizzes q WHERE q.teacher_id=t.id) AS protected FROM teachers t ORDER BY t.created_at DESC").bind(laToday()).all();
-      return json({ teachers: r.results });
+      // free: "forever" (FREE_FOREVER) or "trial" (FEE_EXEMPT) -- such an account never needs a date to stay on.
+      return json({ teachers: r.results.map(t => ({ ...t, free: isForever(env, t.email) ? "forever" : isExempt(env, t.email) ? "trial" : null })) });
     }
     // Admin only: turn a teacher on (after payment) until a date, or off.
     if (p === "/activate" && request.method === "POST") {
@@ -4319,7 +4329,10 @@ export async function onRequest(context) {
       // Installed but this term's fee not paid -> "Installed · not paid", never counted ready (the gate's rule).
       const paidSet = feeOn() ? await paidEmails([...new Set(devs.map(d => String(d.who || "").toLowerCase()))]) : null;
       const adminEmails = new Set(((await db.prepare("SELECT lower(email) AS e FROM teachers WHERE role='admin'").all()).results).map(x => x.e));
-      return json({ mail_on: mailOn(env), auto_gate: gateRequired(), courses: cs.map(c => ({ ...c, roster_hidden: !own.has(String(c.ou)), off: offOus.has(String(c.ou)), mailed_at: mailedAt.get(String(c.ou)) || null, reminders: !remOff.has(String(c.ou)),
+      // remind_3h: the second reminder (3 hours before) is sent too (EXAM_REMIND_3H). held: the class waits for the professor's
+      // own first email before any automatic student email (MAIL_HOLD), so its reminders have not started.
+      const held = await heldOus(ownList);
+      return json({ mail_on: mailOn(env), auto_gate: gateRequired(), remind_3h: remind3h(env), courses: cs.map(c => ({ ...c, roster_hidden: !own.has(String(c.ou)), off: offOus.has(String(c.ou)), mailed_at: mailedAt.get(String(c.ou)) || null, reminders: !remOff.has(String(c.ou)), held: held.has(String(c.ou)),
         // Everyone LOCKqz locks: Learners AND TAs (any non-instructor role). The admin is the one
         // exempt person (developer mode), so he is never listed as someone who must install.
         students: roster.filter(r => r.ou === c.ou && takesQuizzes(r.role) && !adminEmails.has((r.email||"").toLowerCase())).map(r => {
