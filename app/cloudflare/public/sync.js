@@ -179,11 +179,114 @@
         ((dt(sa.StartDate) === dt(q.StartDate) && dt(sa.DueDate) === dt(q.DueDate)) || (dt(sa.StartDate) === null && dt(sa.DueDate) === null)); });
     };
 
+    // ---- passwords into / out of Brightspace (the quick first step below and step 3 use these) ----
+    // What the SERVER confirms it saved (C3): orig_password_saved / orig_hidden_saved. A row with neither
+    // saved -> null (nothing known yet), so saveOrig still saves the professor's settings first.
+    var origOf = function (row) {
+      if (!row) return null;
+      var pwS = row.orig_password_saved === true, hS = row.orig_hidden_saved === true || (row.orig_hidden_saved === undefined && row.orig_hidden != null);
+      return pwS || hS ? { password: pwS ? (row.orig_password || null) : null, hidden: hS ? !!row.orig_hidden : false, pwSaved: pwS, hiddenSaved: hS } : null;
+    };
+    var rt = function (o) { var t = o && o.Text; return { Text: { Content: (t && (t.Html || t.Text)) || "", Type: (t && t.Html) ? "Html" : "Text" }, IsDisplayed: !!(o && o.IsDisplayed) }; };
+    var quizUrl = function (ou, qi) { return "/d2l/api/le/" + LE + "/" + ou + "/quizzes/" + qi; };
+    async function writePw(ou, qi, pw, extra) {
+      var cur = await get(quizUrl(ou, qi));
+      var w = Object.assign({}, cur, { Instructions: rt(cur.Instructions), Description: rt(cur.Description), Header: rt(cur.Header), Footer: rt(cur.Footer), Password: pw }, extra || {});
+      w.NumberOfAttemptsAllowed = (cur.AttemptsAllowed && !cur.AttemptsAllowed.IsUnlimited) ? cur.AttemptsAllowed.NumberOfAttemptsAllowed : null;
+      delete w.AttemptsAllowed; delete w.QuizId; delete w.ActivityId;
+      if (!w.RestrictIPAddressRange || !w.RestrictIPAddressRange.length) w.RestrictIPAddressRange = null;
+      var r = await put(quizUrl(ou, qi), w);
+      if (!r.ok) throw new Error("Brightspace " + r.status + ": " + (await r.text()).slice(0, 140));
+      var after = await get(quizUrl(ou, qi));
+      if ((after.Password || null) !== (pw || null)) throw new Error("password did not stick");
+      return after;
+    }
+    // Ours = the fixed LOCKqz password, or a gate code (LQ- + 10 hex, or the last one this tab wrote).
+    var ROT = /^LQ-[0-9A-F]{10}$/;
+    var isGate = function (p, qi) { return !!p && (ROT.test(p) || p === GPW[qi] || (GATES[qi] && GATES[qi].written === p)); };
+    var ours = function (p, qi) { return !!p && (isGate(p, qi) || p === PW[String(qi)] || /^LQ-[A-HJ-NP-Z2-9]{8}$/.test(p)); };
+    // Save the professor's own password / hidden setting ONCE, before LOCKqz first changes the quiz.
+    // Skipped only for what the server has confirmed saved (ORIG[qi].pwSaved / hiddenSaved); a failed
+    // save throws, so LOCKqz never overwrites a setting it could not save first.
+    async function saveOrig(ou, qi, cur) {
+      qi = String(qi);
+      var o = { password: ours(cur.Password, qi) ? null : (cur.Password || null), hidden: !!cur.AllowOnlyUsersWithSpecialAccess && !isGate(cur.Password, qi) };
+      var k = ORIG[qi] || {}, item = { ou: String(ou), qi: qi, status: "orig" };
+      if (!k.pwSaved && o.password != null) item.orig_password = o.password;
+      if (!k.hiddenSaved && o.hidden) item.orig_hidden = true;
+      var sent = "orig_password" in item || "orig_hidden" in item;
+      if (sent) await lq("/sync-result", { results: [item] });
+      ORIG[qi] = { password: k.pwSaved ? k.password : o.password, hidden: k.hiddenSaved ? !!k.hidden : o.hidden,
+                   pwSaved: !!k.pwSaved || "orig_password" in item, hiddenSaved: !!k.hiddenSaved || "orig_hidden" in item };
+    }
+    // Brightspace's submission email: LOCKqz's own address for the quiz (from the server) is added to the quiz's
+    // Notification Email, beside the professor's own (a list separated by commas), and only it is taken away again.
+    // A Brightspace that refuses the list leaves the professor's own setting as it was (the password still goes on).
+    var OURMAIL = /^(?:lqz-|[^+@\s]+\+)\d+-\d+-[0-9a-f]{12}@(?:[a-z0-9-]+\.)*lockqz\.com$/i;
+    var mailsOf = function (v) { return String(v || "").split(/[,;]/).map(function (x) { return x.trim(); }).filter(Boolean); };
+    var withMail = function (v, mail) { var a = mailsOf(v).filter(function (x) { return !OURMAIL.test(x); }); if (mail) a.push(mail); return a.length ? a.join(", ") : null; };
+    // The same addresses, however Brightspace writes the list back (";" or "," with or without spaces, capitals): no
+    // new write then.
+    var sameMails = function (a, b) { return mailsOf(a).join(",").toLowerCase() === mailsOf(b).join(",").toLowerCase(); };
+    async function protect(ou, qi, pw, mail) {    // put LOCKqz's password (and its submission address) on the quiz
+      var cur = await get(quizUrl(ou, qi));
+      var ne = mail ? withMail(cur.NotificationEmail, mail) : (cur.NotificationEmail || null);
+      if (sameMails(ne, cur.NotificationEmail)) ne = cur.NotificationEmail || null;
+      if (cur.Password === pw && ne === (cur.NotificationEmail || null)) return "already";
+      await saveOrig(ou, qi, cur);
+      if (ne !== (cur.NotificationEmail || null)) {
+        try { await writePw(ou, qi, pw, { NotificationEmail: ne }); return "set"; } catch (e) { if (e.expired) throw e; }
+        if (cur.Password === pw) return "already";
+      }
+      await writePw(ou, qi, pw); return "set";
+    }
+    async function release(ou, qi, oldPw, orig) {      // remove ONLY our password; put the professor's own settings back
+      qi = String(qi);
+      var cur = await get(quizUrl(ou, qi)), o = orig || ORIG[qi] || null;
+      var mine = !!cur.Password && (cur.Password === oldPw || ours(cur.Password, qi));
+      if (mine) {
+        var extra = {};
+        if (o) extra.AllowOnlyUsersWithSpecialAccess = !!o.hidden;
+        else if (isGate(cur.Password, qi)) extra.AllowOnlyUsersWithSpecialAccess = false;   // our gate hid it
+        if (mailsOf(cur.NotificationEmail).some(function (x) { return OURMAIL.test(x); })) extra.NotificationEmail = withMail(cur.NotificationEmail, null);
+        try { await writePw(ou, qi, o ? o.password : null, extra); }
+        catch (e) { if (e.expired || !("NotificationEmail" in extra)) throw e; delete extra.NotificationEmail; await writePw(ou, qi, o ? o.password : null, extra); }
+      } else if (mailsOf(cur.NotificationEmail).some(function (x) { return OURMAIL.test(x); })) {
+        // The professor's own password is on it now: that stays, and only LOCKqz's submission address goes.
+        try { await writePw(ou, qi, cur.Password || null, { NotificationEmail: withMail(cur.NotificationEmail, null) }); } catch (e) { if (e.expired) throw e; }
+      }
+      delete GPW[qi]; delete ORIG[qi];
+      return "cleared";
+    }
+    var PW = {};   // qi -> current LOCKqz password, filled when protected
+    function pw_of(qi) { return PW[String(qi)]; }
+
     // ---- 1. read Brightspace ----
     wait("Reading your Brightspace courses", "This usually takes under a minute");
     var vers = await get("/d2l/api/versions/");
     var ver = function (c) { var v = vers.filter(function (x) { return x.ProductCode === c; })[0]; return v ? v.LatestVersion : null; };
     var LE = ver("le"), LP = ver("lp");
+    // Asked for (a switch on the dashboard, Sync now, the extension's own Sync tab): what Brightspace does not have
+    // yet goes in first, in seconds, before the whole read below (which follows as always and finds it done). Only
+    // what Brightspace took is reported here; anything it refused is tried again, and reported, by step 3.
+    if (ASKED) {
+      var qk = await lqres("/sync-state", { host: location.host }), qd0 = qk.ok && qk.data && qk.data.quick ? qk.data : null;
+      var qp = qd0 ? (qd0.protect || []).filter(function (x) { return Number(x.gated) !== 1; }) : [], qc = qd0 ? (qd0.clear || []) : [], qr = [];
+      if (qp.length || qc.length) {
+        wait("Putting your changes into Brightspace", "A few seconds");
+        qp.concat(qc).forEach(function (r) { var o = origOf(r); if (o) ORIG[String(r.qi)] = o; });
+        qp.forEach(function (x) { PW[String(x.qi)] = x.password; });
+        for (var kq = 0; kq < qp.length; kq++) {
+          try { qr.push({ ou: qp[kq].ou, qi: qp[kq].qi, status: await protect(qp[kq].ou, qp[kq].qi, qp[kq].password, qp[kq].mail) }); } catch (e) { if (e.expired) throw e; }
+        }
+        for (var kc = 0; kc < qc.length; kc++) {
+          try { qr.push({ ou: qc[kc].ou, qi: qc[kc].qi, status: await release(qc[kc].ou, qc[kc].qi, qc[kc].password, origOf(qc[kc])) }); } catch (e) { if (e.expired) throw e; }
+        }
+        // The dashboard shows it at once ("changed": it reads LOCKqz again); the full Sync's "synced" comes later.
+        if (qr.length && (await lqres("/sync-result", { results: qr })).ok) tell({ lqz: "changed", quick: true });
+        wait("Reading your Brightspace courses", "This usually takes under a minute");
+      }
+    }
     var me = await get("/d2l/api/lp/" + LP + "/users/whoami");
     // Newest courses first and active ones only, so a long teaching history never pushes this term out.
     var items = [], bm = "", sortQ = "&isActive=true&sortBy=-StartDate";
@@ -280,90 +383,10 @@
     }
     var state = await lq("/sync", { host: location.host, whoami: who, courses: sendCourses });
     AUTOGATE = !!(state && state.auto_gate);
-    // What the SERVER confirms it saved (C3): orig_password_saved / orig_hidden_saved. A row with neither
-    // saved -> null (nothing known yet), so saveOrig still saves the professor's settings first.
-    var origOf = function (row) {
-      if (!row) return null;
-      var pwS = row.orig_password_saved === true, hS = row.orig_hidden_saved === true || (row.orig_hidden_saved === undefined && row.orig_hidden != null);
-      return pwS || hS ? { password: pwS ? (row.orig_password || null) : null, hidden: hS ? !!row.orig_hidden : false, pwSaved: pwS, hiddenSaved: hS } : null;
-    };
     (state.protect || []).concat(state.clear || []).forEach(function (r) { var o = origOf(r); if (o) ORIG[String(r.qi)] = o; });
 
     // ---- 3. passwords into / out of Brightspace ----
-    var rt = function (o) { var t = o && o.Text; return { Text: { Content: (t && (t.Html || t.Text)) || "", Type: (t && t.Html) ? "Html" : "Text" }, IsDisplayed: !!(o && o.IsDisplayed) }; };
-    var quizUrl = function (ou, qi) { return "/d2l/api/le/" + LE + "/" + ou + "/quizzes/" + qi; };
-    async function writePw(ou, qi, pw, extra) {
-      var cur = await get(quizUrl(ou, qi));
-      var w = Object.assign({}, cur, { Instructions: rt(cur.Instructions), Description: rt(cur.Description), Header: rt(cur.Header), Footer: rt(cur.Footer), Password: pw }, extra || {});
-      w.NumberOfAttemptsAllowed = (cur.AttemptsAllowed && !cur.AttemptsAllowed.IsUnlimited) ? cur.AttemptsAllowed.NumberOfAttemptsAllowed : null;
-      delete w.AttemptsAllowed; delete w.QuizId; delete w.ActivityId;
-      if (!w.RestrictIPAddressRange || !w.RestrictIPAddressRange.length) w.RestrictIPAddressRange = null;
-      var r = await put(quizUrl(ou, qi), w);
-      if (!r.ok) throw new Error("Brightspace " + r.status + ": " + (await r.text()).slice(0, 140));
-      var after = await get(quizUrl(ou, qi));
-      if ((after.Password || null) !== (pw || null)) throw new Error("password did not stick");
-      return after;
-    }
-    // Ours = the fixed LOCKqz password, or a gate code (LQ- + 10 hex, or the last one this tab wrote).
-    var ROT = /^LQ-[0-9A-F]{10}$/;
-    var isGate = function (p, qi) { return !!p && (ROT.test(p) || p === GPW[qi] || (GATES[qi] && GATES[qi].written === p)); };
-    var ours = function (p, qi) { return !!p && (isGate(p, qi) || p === PW[String(qi)] || /^LQ-[A-HJ-NP-Z2-9]{8}$/.test(p)); };
-    // Save the professor's own password / hidden setting ONCE, before LOCKqz first changes the quiz.
-    // Skipped only for what the server has confirmed saved (ORIG[qi].pwSaved / hiddenSaved); a failed
-    // save throws, so LOCKqz never overwrites a setting it could not save first.
-    async function saveOrig(ou, qi, cur) {
-      qi = String(qi);
-      var o = { password: ours(cur.Password, qi) ? null : (cur.Password || null), hidden: !!cur.AllowOnlyUsersWithSpecialAccess && !isGate(cur.Password, qi) };
-      var k = ORIG[qi] || {}, item = { ou: String(ou), qi: qi, status: "orig" };
-      if (!k.pwSaved && o.password != null) item.orig_password = o.password;
-      if (!k.hiddenSaved && o.hidden) item.orig_hidden = true;
-      var sent = "orig_password" in item || "orig_hidden" in item;
-      if (sent) await lq("/sync-result", { results: [item] });
-      ORIG[qi] = { password: k.pwSaved ? k.password : o.password, hidden: k.hiddenSaved ? !!k.hidden : o.hidden,
-                   pwSaved: !!k.pwSaved || "orig_password" in item, hiddenSaved: !!k.hiddenSaved || "orig_hidden" in item };
-    }
-    // Brightspace's submission email: LOCKqz's own address for the quiz (from the server) is added to the quiz's
-    // Notification Email, beside the professor's own (a list separated by commas), and only it is taken away again.
-    // A Brightspace that refuses the list leaves the professor's own setting as it was (the password still goes on).
-    var OURMAIL = /^(?:lqz-|[^+@\s]+\+)\d+-\d+-[0-9a-f]{12}@(?:[a-z0-9-]+\.)*lockqz\.com$/i;
-    var mailsOf = function (v) { return String(v || "").split(/[,;]/).map(function (x) { return x.trim(); }).filter(Boolean); };
-    var withMail = function (v, mail) { var a = mailsOf(v).filter(function (x) { return !OURMAIL.test(x); }); if (mail) a.push(mail); return a.length ? a.join(", ") : null; };
-    // The same addresses, however Brightspace writes the list back (";" or "," with or without spaces, capitals): no
-    // new write then.
-    var sameMails = function (a, b) { return mailsOf(a).join(",").toLowerCase() === mailsOf(b).join(",").toLowerCase(); };
-    async function protect(ou, qi, pw, mail) {    // put LOCKqz's password (and its submission address) on the quiz
-      var cur = await get(quizUrl(ou, qi));
-      var ne = mail ? withMail(cur.NotificationEmail, mail) : (cur.NotificationEmail || null);
-      if (sameMails(ne, cur.NotificationEmail)) ne = cur.NotificationEmail || null;
-      if (cur.Password === pw && ne === (cur.NotificationEmail || null)) return "already";
-      await saveOrig(ou, qi, cur);
-      if (ne !== (cur.NotificationEmail || null)) {
-        try { await writePw(ou, qi, pw, { NotificationEmail: ne }); return "set"; } catch (e) { if (e.expired) throw e; }
-        if (cur.Password === pw) return "already";
-      }
-      await writePw(ou, qi, pw); return "set";
-    }
-    async function release(ou, qi, oldPw, orig) {      // remove ONLY our password; put the professor's own settings back
-      qi = String(qi);
-      var cur = await get(quizUrl(ou, qi)), o = orig || ORIG[qi] || null;
-      var mine = !!cur.Password && (cur.Password === oldPw || ours(cur.Password, qi));
-      if (mine) {
-        var extra = {};
-        if (o) extra.AllowOnlyUsersWithSpecialAccess = !!o.hidden;
-        else if (isGate(cur.Password, qi)) extra.AllowOnlyUsersWithSpecialAccess = false;   // our gate hid it
-        if (mailsOf(cur.NotificationEmail).some(function (x) { return OURMAIL.test(x); })) extra.NotificationEmail = withMail(cur.NotificationEmail, null);
-        try { await writePw(ou, qi, o ? o.password : null, extra); }
-        catch (e) { if (e.expired || !("NotificationEmail" in extra)) throw e; delete extra.NotificationEmail; await writePw(ou, qi, o ? o.password : null, extra); }
-      } else if (mailsOf(cur.NotificationEmail).some(function (x) { return OURMAIL.test(x); })) {
-        // The professor's own password is on it now: that stays, and only LOCKqz's submission address goes.
-        try { await writePw(ou, qi, cur.Password || null, { NotificationEmail: withMail(cur.NotificationEmail, null) }); } catch (e) { if (e.expired) throw e; }
-      }
-      delete GPW[qi]; delete ORIG[qi];
-      return "cleared";
-    }
-    var PW = {};   // qi -> current LOCKqz password, filled when protected
     (state.protect || []).forEach(function (p) { PW[String(p.qi)] = p.password; });
-    function pw_of(qi) { return PW[String(qi)]; }
     var results = [], errors = [];
     var todo = (state.protect || []).length + (state.clear || []).length, done = 0;
     for (var i = 0; i < (state.protect || []).length; i++) {

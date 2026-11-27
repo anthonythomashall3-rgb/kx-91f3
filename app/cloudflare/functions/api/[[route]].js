@@ -877,7 +877,7 @@ export async function onRequest(context) {
   // Not /bs (every class list with student emails: FERPA) and not /synckey (would let a leaked key rotate
   // itself and lock the professor's real bookmark out): the Sync tab never calls either; the dashboard
   // uses the session token.
-  const SYNC_OK = new Set(["/sync","/sync-result","/protect","/class","/gate","/rotating","/rotated","/submitted","/live","/me","/ext-seen","/ext-status"]);
+  const SYNC_OK = new Set(["/sync","/sync-state","/sync-result","/protect","/class","/gate","/rotating","/rotated","/submitted","/live","/me","/ext-seen","/ext-status"]);
   const teacher = () => !!me;
   const mine = (col="teacher_id") => me.admin ? { sql:"1=1", args:[] } : { sql:`${col}=?`, args:[me.id] };
   // Only the INSTRUCTOR of a course (named Instructor on a roster an admin or verified professor synced)
@@ -4031,6 +4031,22 @@ export async function onRequest(context) {
       // fee: what students pay this semester (the Sync panel's Send email names it), null while the fee is off.
       return json({ ...(add.length || released ? await bsState(mineA) : pre), auto_gate: gateRequired(), ous: A, class_off: [...offSet], fee: stuFee() });
     }
+    // The Sync's first step when the dashboard asked (a switch there, or Sync now): only what Brightspace does not
+    // have yet (exams switched on whose LOCKqz password is not confirmed there, and passwords waiting to come off), from
+    // what LOCKqz holds, with no Brightspace upload. The change then reaches Brightspace in seconds; the full Sync
+    // follows as always. Same classes and rows as /sync's answer (the classes this account's last Sync listed that it
+    // instructs).
+    if (p === "/sync-state" && request.method === "POST") {
+      const host = String(body.host || "").trim().toLowerCase();
+      if (host && !bsHosts(env).includes(host)) return json({ error: "LOCKqz is not set up for this school yet.", reason: "other_school" }, 403);
+      const cs = (await db.prepare("SELECT ou FROM teacher_courses WHERE teacher_id=? AND COALESCE(in_sync,1)<>0 LIMIT 200").bind(me.id).all()).results.map(r => String(r.ou));
+      const mineA = [...await trustedOus(cs)];
+      if (!mineA.length) return json({ protect: [], clear: [], quick: true });
+      const st = await bsState(mineA), set = new Set();
+      for (const part of chunk(mineA, 98))
+        (await db.prepare(`SELECT ou,qi FROM bs_quizzes WHERE ou IN (${placeholders(part.length)}) AND bs_password_is_ours=1`).bind(...part).all()).results.forEach(r => set.add(String(r.ou) + "-" + String(r.qi)));
+      return json({ protect: st.protect.filter(r => !set.has(String(r.ou) + "-" + String(r.qi))).slice(0, 40), clear: st.clear.slice(0, 40), quick: true });
+    }
     if (p === "/sync-result" && request.method === "POST") {
       const list = (Array.isArray(body.results) ? body.results : []).slice(0, 1000).filter(r => r && typeof r === "object");
       const okOus = await trustedOus(list.map(r => String(r.ou || "")));   // only the course's trusted instructor
@@ -4047,12 +4063,17 @@ export async function onRequest(context) {
             st.push(db.prepare("UPDATE bs_quizzes SET orig=json_set(COALESCE(orig,'{}'),'$.hidden',json(?)) WHERE ou=? AND qi=? AND json_type(COALESCE(orig,'{}'),'$.hidden') IS NULL").bind(r.orig_hidden ? "true" : "false", ou, qi));
         }
         if (r.status === "set" || r.status === "already")
-          st.push(db.prepare("UPDATE bs_quizzes SET prot_at=CASE WHEN COALESCE(bs_password_is_ours,0)=1 AND prot_at IS NOT NULL THEN prot_at ELSE ? END, unprot_at=NULL, bs_password_is_ours=1, bs_has_password=1 WHERE ou=? AND qi=? AND NOT (COALESCE(bs_password_is_ours,0)=1 AND COALESCE(bs_has_password,0)=1 AND prot_at IS NOT NULL AND unprot_at IS NULL)").bind(now(), ou, qi));
+          st.push(db.prepare("UPDATE bs_quizzes SET prot_at=CASE WHEN COALESCE(bs_password_is_ours,0)=1 AND prot_at IS NOT NULL THEN prot_at ELSE ? END, unprot_at=NULL, bs_password_is_ours=1, bs_has_password=1, sync_err=NULL WHERE ou=? AND qi=? AND NOT (COALESCE(bs_password_is_ours,0)=1 AND COALESCE(bs_has_password,0)=1 AND prot_at IS NOT NULL AND unprot_at IS NULL AND sync_err IS NULL)").bind(now(), ou, qi));
         else if (r.status === "cleared") {
           st.push(db.prepare("DELETE FROM pending_clear WHERE ou=? AND qi=?").bind(ou, qi));
-          st.push(db.prepare("UPDATE bs_quizzes SET unprot_at=CASE WHEN COALESCE(bs_password_is_ours,0)=1 THEN ? ELSE unprot_at END, bs_password_is_ours=0, orig=NULL WHERE ou=? AND qi=? AND (COALESCE(bs_password_is_ours,0)<>0 OR orig IS NOT NULL)").bind(now(), ou, qi));
-        } else if (r.status === "error")
-          st.push(db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(null, null, `${ou}-${qi}`, "brightspace_sync_error", String(r.msg||"").slice(0,300), now()));
+          st.push(db.prepare("UPDATE bs_quizzes SET unprot_at=CASE WHEN COALESCE(bs_password_is_ours,0)=1 THEN ? ELSE unprot_at END, bs_password_is_ours=0, orig=NULL, sync_err=NULL WHERE ou=? AND qi=? AND (COALESCE(bs_password_is_ours,0)<>0 OR orig IS NOT NULL OR sync_err IS NOT NULL)").bind(now(), ou, qi));
+        } else if (r.status === "error") {
+          // What Brightspace answered is kept on the exam (sync_err) until it takes the change: the dashboard shows
+          // "Brightspace refused" for it instead of waiting.
+          const msg = String(r.msg||"").slice(0,300);
+          st.push(db.prepare("INSERT INTO events (device_id,student,quiz_id,event,detail,ts) VALUES (?,?,?,?,?,?)").bind(null, null, `${ou}-${qi}`, "brightspace_sync_error", msg, now()));
+          st.push(db.prepare("UPDATE bs_quizzes SET sync_err=? WHERE ou=? AND qi=? AND sync_err IS NOT ?").bind(msg || "error", ou, qi, msg || "error"));
+        }
       }
       await runBatches(db, st);
       return json({ ok:true });
@@ -4176,6 +4197,7 @@ export async function onRequest(context) {
       const ou = String(body.ou||""), qi = String(body.qi||"");
       if (!/^\d+$/.test(ou) || !/^\d+$/.test(qi)) return json({ error:"bad quiz" }, 400);
       if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this course can protect its quizzes." }, 403);
+      await db.prepare("UPDATE bs_quizzes SET sync_err=NULL WHERE ou=? AND qi=? AND sync_err IS NOT NULL").bind(ou, qi).run();   // a new change: Brightspace's last answer no longer applies
       const ex = await db.prepare("SELECT q.quiz_id AS quiz_id, q.password AS password, (SELECT password FROM pending_clear WHERE ou=? AND qi=?) AS pc FROM (SELECT 1) one LEFT JOIN quizzes q ON q.qi=? AND q.ou=?").bind(ou, qi, qi, ou).first();
       // Turned on from the Sync panel: its submission address goes on with the password, by the Sync's own rule (an
       // exam that is not over, in a class LOCKqz is on for), not only at the next Sync.
@@ -4387,7 +4409,7 @@ export async function onRequest(context) {
       }
       // Two plain reads matched here (the LEFT JOIN + ORDER BY read ~4 rows per quiz).
       const lq = new Map((await db.prepare(`SELECT ou,qi,password,lock_id,gated FROM quizzes WHERE ou IN (${sub}) AND qi IS NOT NULL`).bind(me.id).all()).results.map(q => [String(q.ou) + "\u0000" + String(q.qi), q]));
-      const bq = (await db.prepare(`SELECT ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours,orig,prot_at,unprot_at FROM bs_quizzes WHERE ou IN (${sub})`).bind(me.id).all()).results;
+      const bq = (await db.prepare(`SELECT ou,qi,name,active,start_date,end_date,due_date,bs_has_password,bs_password_is_ours,orig,prot_at,unprot_at,sync_err FROM bs_quizzes WHERE ou IN (${sub})`).bind(me.id).all()).results;
       bq.sort((a, b) => binCmp(a.name, b.name));   // the Sync panel's order (sync.js byName)
       const qz = bq.map(b => { const q = lq.get(String(b.ou) + "\u0000" + String(b.qi)); return { ...b, password: q ? q.password : null, lock_id: q ? q.lock_id : null, gated: q ? q.gated : null }; })
         .map(q => own.has(String(q.ou)) ? withOrig(q) : withOrig({ ...q, orig: null, password: null, lock_id: null, gated: null }));

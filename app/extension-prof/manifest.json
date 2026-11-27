@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LOCKqz for Professors",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "description": "Syncs your LOCKqz classes and exams with Brightspace by itself. On a student's computer, enters the exam's LOCKqz password.",
   "homepage_url": "https://professor.lockqz.com",
   "icons": {

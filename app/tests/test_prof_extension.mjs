@@ -10,6 +10,8 @@
 //   E6 a quiet background panel never gates; exam over -> the extension closes its exam tab
 //   E7 the packaged sync.js / lq.js are the site's own (no drift)
 //   E8 another school's Brightspace: the professor connects its address in the popup; the extension syncs there
+//   E9 an exam's switch on the class page goes into Brightspace in seconds through the extension (the Sync's quick
+//      first step, before its full read): "Saving…", then the new state; never "Waiting for Brightspace"
 // Original header of the test this one is built from:
 // The dashboard's "Sync now" button, end to end in a REAL Chromium: the real dashboard page and the real
 // sync.js, served at their real addresses (prof.lockqz.pages.dev, brightspace.usc.edu) by request
@@ -138,6 +140,7 @@ const server = createServer({ key: readFileSync(join(tmp, "k.pem")), cert: readF
     if ((host === "prof.lockqz.pages.dev" || host === "professor.lockqz.com") && u.pathname === "/lq.js") return send(200, "application/javascript", LQ_JS);
     if ((host === "brightspace.usc.edu" || host === SCHOOL) && (u.pathname.startsWith("/d2l/api/") || u.pathname === "/d2l/lp/auth/xsrf-tokens")) {
       if (host === SCHOOL) schoolCalls.push(u.pathname);
+      if (BS.slow && /\/(classlist\/paged|quizzes)\/$/.test(u.pathname)) await new Promise(r => setTimeout(r, BS.slow));   // a slow full read
       const r = brightspace(u, req.method, body.toString()); return send(r.status, r.contentType, r.body, host === SCHOOL ? { "Access-Control-Allow-Origin": "*" } : {});
     }
     if (host === "brightspace.usc.edu" || host === SCHOOL) return send(200, "text/html", "<!doctype html><title>Homepage - Brightspace</title><h1>Brightspace</h1>");
@@ -274,6 +277,38 @@ console.log("E6 exam over: the extension closes its exam tab once the gate has s
 await sw.evaluate(() => chrome.storage.local.set({ schedule: [], gates: 0, gateSeen: 0 }));
 await sw.evaluate(() => serial(tick));
 check("exam tab closed", await waitFor(() => bsTabs().length === 0), bsTabs().length);
+check("no page errors on the dashboard", errors.length === 0, errors.join(" | "));
+
+console.log("E9 an exam's switch goes into Brightspace in seconds through the extension");
+{
+  // No exam near (E5's exam moved out): no exam tab.
+  BS.quizzes[0].StartDate = new Date(Date.now() + 5 * 86400e3).toISOString(); BS.quizzes[0].EndDate = new Date(Date.now() + 6 * 86400e3).toISOString();
+  const q2 = quiz(222, "Final"); q2.StartDate = new Date(Date.now() + 5 * 86400e3).toISOString(); q2.EndDate = new Date(Date.now() + 6 * 86400e3).toISOString(); BS.quizzes.push(q2);
+  const b9 = syncs();
+  await dash.evaluate(() => { location.hash = ""; }); await dash.click("button:has-text('Sync now')");
+  check("a new exam is protected by itself at the Sync", await waitFor(() => syncs() >= b9 + 1 && /^LQ-/.test(q2.Password || ""), 30000), q2.Password);
+  await sw.evaluate(() => serial(tick));
+  check("its Sync tab closed (no exam tab either)", await waitFor(() => bsTabs().length === 0), bsTabs().length);
+  await dash.evaluate(() => { location.hash = "class/98765"; });
+  const lab = () => dash.evaluate(() => { const b = document.querySelector('b.st[data-st="98765|222"]'); return b ? b.textContent : ""; });
+  check("its switch says Protected", await waitFor(async () => (await lab()) === "Protected", 15000), await lab());
+  await dash.evaluate(() => { window.__seen = 0; new MutationObserver(() => { if (/Waiting for Brightspace/.test(document.body.innerText)) window.__seen++; }).observe(document.body, { subtree: true, childList: true, characterData: true }); });
+  for (const [on, want] of [[false, "Not protected"], [true, "Protected"]]) {
+    await waitFor(() => bsTabs().length === 0);
+    BS.slow = 5000; const s0 = syncs(), c0 = lqCalls.length;
+    await dash.click('button.sw[data-qi="222"]');
+    check(`switched ${on ? "on" : "off"}: Saving… at once`, await waitFor(async () => (await lab()) === "Saving…", 3000), await lab());
+    check(`then '${want}' within seconds, before the full Sync's upload`, await waitFor(async () => (await lab()) === want, 15000) && syncs() === s0, `${await lab()} full syncs: ${syncs() - s0}`);
+    check("Brightspace matches", on ? /^LQ-/.test(q2.Password || "") : !q2.Password, q2.Password);
+    check("the quick step asked LOCKqz only for what Brightspace does not have", lqCalls.slice(c0).includes("/sync-state"), lqCalls.slice(c0).join(","));
+    check("the full Sync follows and its tab closes", await waitFor(() => syncs() === s0 + 1, 40000) && await waitFor(() => bsTabs().length === 0, 15000), `${syncs() - s0} ${bsTabs().length}`);
+    BS.slow = 0;
+    check(`still '${want}' after it`, (await lab()) === want, await lab());
+  }
+  check("never 'Waiting for Brightspace'", (await dash.evaluate(() => window.__seen)) === 0);
+  BS.quizzes.splice(BS.quizzes.indexOf(q2), 1);
+  await dash.evaluate(() => { location.hash = ""; });
+}
 check("no page errors on the dashboard", errors.length === 0, errors.join(" | "));
 
 console.log("E8 another school's Brightspace");

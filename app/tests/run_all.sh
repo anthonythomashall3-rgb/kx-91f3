@@ -92,6 +92,7 @@ run "Sync panel = dashboard (same classes, same on/off, class switch + Send emai
 run "Professor zero-effort: default on, password rewrite, HTML emails + cron reminders + T-70 check-in, popup/field lock/notices" node --no-warnings test_prof_zero_effort.mjs
 run "Past exams: 'was protected' only on proof from Brightspace (prot_at / unprot_at)" node --no-warnings test_protected_history.mjs
 run "Status truth: ready/installed, protected counts, live labels, check-in, agent ready notice" node --no-warnings test_status_truth.mjs
+run "Exam switch status: Saving… while a change goes in, Brightspace refused (why), the Sync's quick first step (/sync-state)" node --no-warnings test_switch_status.mjs
 run "Wrong-computer guard on the student installers (Mac file on Windows and vice versa)" node --no-warnings test_download_guard.mjs
 run "OSAS accommodations + quiz timing (extra time, makeups, mid-gate special access, DST, assistive tools)" node --no-warnings test_osas.mjs
 run "Virtual machines: no password inside a VM/emulator, live view + gate, admin exempt, clients carry it" node --no-warnings test_vm.mjs

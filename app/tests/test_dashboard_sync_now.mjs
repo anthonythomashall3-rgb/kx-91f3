@@ -8,6 +8,10 @@
 //   S3 the button now syncs through that tab (no bookmark click), and the dashboard says "Synced just now."
 //   S4 after the dashboard is reloaded, the button still finds the Brightspace tab and syncs
 //   S5 a professor change on the dashboard is sent to Brightspace by the button (quiz password removed)
+//   S7 an exam's switch on the class page: "Saving…" at once, "Protected" within seconds (the Sync's quick first
+//      step, before its full read of Brightspace), never "Waiting for Brightspace"
+//   S8 Brightspace refuses a change: the switch says "Brightspace refused" (why, on hover), no retry loop; Sync now
+//      puts it right once Brightspace takes it
 import { createRequire } from "node:module";
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
@@ -65,7 +69,7 @@ function brightspace(u, method, body) {
   const one = p.match(/\/quizzes\/(\d+)$/);
   if (one) {
     const q = BS.quizzes.find(x => String(x.QuizId) === one[1]); if (!q) return J({}, 404);
-    if (method === "PUT") { Object.assign(q, JSON.parse(body)); return J({}); }
+    if (method === "PUT") { if (BS.refuse) return { status: 403, contentType: "text/plain", body: "Not Authorized" }; Object.assign(q, JSON.parse(body)); return J({}); }
     return J(q);
   }
   if (/\/specialaccess\/$/.test(p)) return J({ Objects: [], Next: null });
@@ -93,7 +97,10 @@ await context.route("**/*", async route => {
     }
     if ((u.host === "prof.lockqz.pages.dev" || u.host === "professor.lockqz.com") && u.pathname === "/dashboard") return route.fulfill({ status: 200, contentType: "text/html", body: DASH_HTML });
     if ((u.host === "prof.lockqz.pages.dev" || u.host === "professor.lockqz.com") && u.pathname === "/sync.js") return route.fulfill({ status: 200, contentType: "application/javascript", body: SYNC_JS });
-    if (u.host === "brightspace.usc.edu" && u.pathname.startsWith("/d2l/api/")) return route.fulfill(brightspace(u, req.method(), req.postData()));
+    if (u.host === "brightspace.usc.edu" && u.pathname.startsWith("/d2l/api/")) {
+      if (BS.slow && /\/(classlist\/paged|quizzes)\/$/.test(u.pathname)) await new Promise(r => setTimeout(r, BS.slow));   // a slow full read
+      return route.fulfill(brightspace(u, req.method(), req.postData()));
+    }
     if (u.host === "brightspace.usc.edu" && u.pathname === "/d2l/lp/auth/xsrf-tokens") return route.fulfill(brightspace(u, req.method()));
     if (u.host === "brightspace.usc.edu") return route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>Homepage - USC Brightspace</title><h1>Brightspace</h1>" });
   } catch (e) { console.log("route error", u.href, e.message); return route.fulfill({ status: 500, body: String(e) }); }
@@ -183,6 +190,45 @@ await dash2.click("button:has-text('Sync now')");
 check("a sync ran", await waitFor(() => syncs() === b6 + 1), lqCalls.join(","));
 check("'Synced just now.' there too", await waitFor(async () => /Synced just now\./.test(await dash2.evaluate(() => [...document.querySelectorAll(".syncst")].map(e => e.textContent).join(" ")))));
 check("no extra Brightspace tab", context.pages().length === tabs6, context.pages().length);
+
+console.log("S7 an exam's switch on the class page: Saving… at once, Protected within seconds");
+await dash.bringToFront();
+await dash.evaluate(() => { location.hash = "class/98765"; });
+await dash.waitForSelector('b.st[data-st="98765|111"]', { timeout: 15000 });
+const lab = () => dash.evaluate(() => { const b = document.querySelector('b.st[data-st="98765|111"]'); return b ? b.textContent : ""; });
+check("the exam is off before", (await lab()) === "Not protected", await lab());
+await dash.evaluate(() => { window.__seen = 0; new MutationObserver(() => { if (/Waiting for Brightspace/.test(document.body.innerText)) window.__seen++; }).observe(document.body, { subtree: true, childList: true, characterData: true }); });
+BS.slow = 4000; const s7 = syncs(), c7 = lqCalls.length;
+await dash.click('button.sw[data-qi="111"]');
+check("Saving… at once", await waitFor(async () => (await lab()) === "Saving…", 3000), await lab());
+check("Protected within seconds, before the full Sync's upload", await waitFor(async () => (await lab()) === "Protected", 12000) && syncs() === s7, `${await lab()} full syncs: ${syncs() - s7}`);
+check("the quick step asked LOCKqz for what Brightspace does not have yet", lqCalls.slice(c7).includes("/sync-state"), lqCalls.slice(c7).join(","));
+check("Brightspace has LOCKqz's password", /^LQ-/.test(BS.quizzes[0].Password || ""), BS.quizzes[0].Password);
+check("the full Sync follows", await waitFor(() => syncs() === s7 + 1, 30000), syncs() - s7);
+await dash.waitForTimeout(1500);
+check("still Protected after it", (await lab()) === "Protected", await lab());
+check("never 'Waiting for Brightspace'", (await dash.evaluate(() => window.__seen)) === 0);
+BS.slow = 0;
+
+console.log("S8 Brightspace refuses a change: the switch says so; Sync now puts it right once Brightspace takes it");
+await dash.waitForTimeout(1500);
+BS.refuse = true; const s8 = syncs();
+await dash.click('button.sw[data-qi="111"]');   // off
+check("Saving… at once", await waitFor(async () => (await lab()) === "Saving…", 3000), await lab());
+check("then 'Brightspace refused' (not waiting forever)", await waitFor(async () => (await lab()) === "Brightspace refused", 30000), await lab());
+const why = await dash.evaluate(() => document.querySelector('b.st[data-st="98765|111"]').title);
+check("why, on hover", /did not let your account change this exam/.test(why), why);
+const errOf = () => (sqlite.prepare("SELECT sync_err FROM bs_quizzes WHERE ou=? AND qi='111'").get(String(OU)) || {}).sync_err || "";
+check("LOCKqz keeps what Brightspace answered", /^Brightspace 403/.test(errOf()), errOf());
+check("the class page offers Sync now", await dash.isVisible('.pendnote button:has-text("Sync now")'));
+await dash.waitForTimeout(3000);
+check("one Sync only (no retry loop for a refused exam)", syncs() === s8 + 1, syncs() - s8);
+BS.refuse = false;
+await dash.click('.pendnote button:has-text("Sync now")');
+check("Brightspace takes it: Not protected", await waitFor(async () => (await lab()) === "Not protected", 30000), await lab());
+check("Brightspace's password is gone", !BS.quizzes[0].Password, BS.quizzes[0].Password);
+check("what Brightspace answered is forgotten", !errOf(), errOf());
+check("no page errors on the dashboard", errors.length === 0, errors.join(" | "));
 
 await browser.close();
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);

@@ -141,9 +141,13 @@ bs = (await api("/bs", undefined, T)).data;
 const q501 = bs.courses[0].quizzes.find(q => String(q.qi) === "501");
 const DASH = readFileSync(join(CF, "public", "dashboard.html"), "utf8");
 const pend = q => q.password ? !q.bs_password_is_ours : !!q.bs_password_is_ours;
-const rowLabel = q => { const on = !!q.password, p = pend(q); return on ? (p ? "Waiting for Brightspace" : "Protected") : (p ? "Off · 1 click left" : "Not protected"); };
+// The row's words come from rowSt (dashboard.html), run here as the page runs it (not syncing).
+const rowSt = new Function("pend", "syncing", "refusedWhy", DASH.slice(DASH.indexOf("function rowSt("), DASH.indexOf("\nconst stHtml")) + "; return rowSt;")(pend, () => false, m => m);
+const rowLabel = q => rowSt(q)[1];
 check("dashboard row for it is not 'Protected'", q501 && !!q501.password && Number(q501.bs_password_is_ours) === 0 && !/^Protected/.test(rowLabel(q501)), JSON.stringify(q501));
-check("dashboard row labels in the source match", DASH.includes(`\${on?(p?"Waiting for Brightspace":"Protected"):(p?"Off · 1 click left":"Not protected")}`));
+check("dashboard row labels: Protected only when Brightspace matches; Saving… while a sync runs; no 'Waiting for Brightspace'", rowLabel({ password: "LQ-A", bs_password_is_ours: 1 }) === "Protected" && rowLabel({ password: "LQ-A", bs_password_is_ours: 0 }) === "On · 1 click left"
+  && rowLabel({ password: null, bs_password_is_ours: 1 }) === "Off · 1 click left" && rowLabel({ password: null, bs_password_is_ours: 0 }) === "Not protected" && rowLabel({ password: "LQ-A", bs_password_is_ours: 0, sync_err: "Brightspace 403: no" }) === "Brightspace refused"
+  && DASH.includes('if (syncing()) return ["", "Saving…"];') && !DASH.includes("Waiting for Brightspace"));
 await doSync([Q({ start: inH(240), end: inH(242), has_password: true, lq_password: true })]);
 check("LOCKqz's password back -> ours 1, new prot_at, unprot_at cleared", Number(row().ours) === 1 && !!row().prot_at && !row().unprot_at, JSON.stringify(row()));
 const SYNC = readFileSync(join(CF, "public", "sync.js"), "utf8");

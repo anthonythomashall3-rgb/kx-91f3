@@ -301,7 +301,7 @@ async function boot(){
   $("login").classList.add("hide"); $("app").classList.remove("hide"); $("menu").classList.remove("hide");
   $("who").insertAdjacentHTML("afterbegin", esc(m.name||m.email));
   if(m.admin) $("m-admin").classList.remove("hide");
-  applyAll(R); route();
+  applyAll(R); route(); autoPush();
   if(m.trial && (m.admin || welcomed()) && typeof lqWelcome === "function") lqWel(m);
   if(!AUTO) AUTO = setInterval(autoRefresh, 900000);
 }
@@ -327,9 +327,10 @@ async function autoRefresh(){ if(!shown() || !["","class","connect"].includes(vi
   LAST = Date.now(); const [b,m] = await Promise.all([get("/bs"), ME.verified && !ME.admin ? {} : get("/me")]); LOADERR = b.error || "";
   if(m.email) ME = m;   // an unverified professor's banner clears once their Sync verifies them; the admin's clock note stays current
   if(!b.error) BS = b.courses ? b : { courses: [] };
-  if(!busy()) route(); }
+  if(!busy()) route(); else paintRows(); }
+// A Sync that finished while this tab was hidden: read again the moment it is shown.
 document.addEventListener("visibilitychange", ()=>{ if(!shown() || !ME) return; const h=location.hash.replace(/^#/,"").split("/");
-  if(h[0]==="live" && h[1]) loadLive(h[1]); else if(Date.now()-LAST > 900000) autoRefresh(); });
+  if(h[0]==="live" && h[1]) loadLive(h[1]); else if(STALE || Date.now()-LAST > 900000) { STALE = false; autoRefresh(); } });
 function nav(h){ location.hash = h; }
 window.addEventListener("hashchange", route);
 
@@ -388,14 +389,21 @@ function askSync(w){ BS_ORIGINS.forEach(o => { try { w.postMessage({ lqz: "sync"
 // After a switch here: the open LOCKqz Sync tab puts the change into Brightspace and redraws its panel, so
 // Brightspace, the panel and this page agree within seconds. Several clicks in a row = one sync. No Sync
 // tab open: the "One more click" note stays (nothing opens by itself).
-let PUSHN = 0;
-function pushSync(){ if (typeof setTimeout !== "function") return; const n = ++PUSHN;
-  setTimeout(() => { if (n === PUSHN && ((BSWIN && !BSWIN.closed) || EXT()) && !SYNCWAIT) syncNow(); }, 2500); }
+// While a change is on its way (PUSHWAIT) or a sync runs (SYNCWAIT), the exam's switch says "Saving…".
+let PUSHN = 0, PUSHWAIT = false, RESYNC = 0, STALE = false, AUTOPUSHED = false;
+const canSync = () => (BSWIN && !BSWIN.closed) || EXT();
+const syncing = () => !!SYNCWAIT || PUSHWAIT;
+function pushSync(){ if (typeof setTimeout !== "function") return; const n = ++PUSHN; RESYNC = 0; PUSHWAIT = canSync();
+  setTimeout(() => { if (n !== PUSHN) return; PUSHWAIT = false; if (canSync() && !SYNCWAIT) syncNow(); repaint(); }, 1200); }
+// The dashboard opened with a change Brightspace does not have yet (made on a phone, or before a sign-in) and the
+// extension here: it goes in by itself, once.
+function autoPush(){ if (AUTOPUSHED || !ME || !EXT() || !BS || !BS.courses || !waitingAny()) return;
+  AUTOPUSHED = true; pushSync(); repaint(); }
 function syncNow(){
   if (SYNCWAIT) return;
   if (EXT()) {   // the extension finds (or opens) a Brightspace tab by itself
     syncMsg("Syncing…"); window.postMessage({ lqz: "ext-sync" }, location.origin);
-    SYNCWAIT = setTimeout(() => { SYNCWAIT = null; syncMsg("Brightspace didn't answer.", true); }, 180000);
+    SYNCWAIT = setTimeout(() => { SYNCWAIT = null; syncMsg("Brightspace didn't answer.", true); repaint(); }, 180000);
     return;
   }
   let w = BSWIN && !BSWIN.closed ? BSWIN : null;
@@ -410,26 +418,33 @@ function syncNow(){
     }
   }
   syncMsg("Syncing…"); askSync(w);
-  SYNCWAIT = setTimeout(() => { SYNCWAIT = null; syncMsg("Brightspace didn't answer. Once:", true); }, BSWIN ? 180000 : 10000);
+  SYNCWAIT = setTimeout(() => { SYNCWAIT = null; syncMsg("Brightspace didn't answer. Once:", true); repaint(); }, BSWIN ? 180000 : 10000);
 }
 window.addEventListener("message", async e => {
   if (!e.data || typeof e.data !== "object" || !e.source) return;
   const fromExt = e.source === window && e.origin === location.origin && e.data.lqzExt === 1;   // relayed by the extension
   if (!fromExt && !BS_ORIGINS.includes(e.origin)) return;
   const m = e.data, src = fromExt ? null : e.source;
-  if (fromExt && m.lqz === "ext-hello") { postKey(); if (shown() && ME && !busy() && ["", "connect"].includes(viewName())) route(); return; }   // the set-up step "Add LOCKqz" goes the moment the extension is here
+  if (fromExt && m.lqz === "ext-hello") { postKey(); if (shown() && ME && !busy() && ["", "connect"].includes(viewName())) route(); autoPush(); return; }   // the set-up step "Add LOCKqz" goes the moment the extension is here
   if (m.lqz === "hello") { if (src) BSWIN = src; return; }
   // A switch flipped on the Sync panel: show it here at once.
-  if (m.lqz === "changed") { if (src) BSWIN = src; if (shown() && ME && !SAVING) { await refresh(); if (!busy()) route(); } return; }
+  // (also the Sync's quick first step: a change from here is in Brightspace)
+  if (m.lqz === "changed") { if (src) BSWIN = src; if (shown() && ME && !SAVING) { await refresh(); repaint(); } else if (ME) STALE = true; return; }
   if (m.lqz === "synced") {
     if (src) BSWIN = src; const asked = !!SYNCWAIT; clearTimeout(SYNCWAIT); SYNCWAIT = null;
-    if (shown() && ME) { await refresh(); route(); }
-    if (asked) syncMsg(m.ok ? "Synced just now." : `Synced, but ${Number(m.errors)||0} quiz(zes) could not be updated: see the Brightspace tab.`);
+    if (shown() && ME) {
+      await refresh();
+      // A change made while that Sync was already past it: once more, by itself (an exam Brightspace refused is not).
+      if (asked && RESYNC < 1 && canSync() && waitingAny()) { RESYNC++; syncNow(); repaint(); return; }
+      route();
+    } else if (ME) STALE = true;
+    if (asked) syncMsg(m.ok ? "Synced just now." : `Synced, but ${Number(m.errors)||0} exam${Number(m.errors)===1?"":"s"} could not be changed in Brightspace.`);
     return;
   }
   if ((m.lqz === "failed" || m.lqz === "busy") && SYNCWAIT) {
     clearTimeout(SYNCWAIT); SYNCWAIT = null;
     syncMsg(m.lqz === "busy" ? String(m.why || "Brightspace is busy.").slice(0, 160) : "Sync failed: " + String(m.error || "").slice(0, 160));
+    repaint();
   }
 });
 // A dashboard opened from the Sync panel: tell that Brightspace tab it is here.
@@ -456,7 +471,28 @@ function protPast(q){
   const bits = [(!isNaN(st) && on > st) || isNaN(st) ? "from " + when(q.prot_at) : "", !isNaN(off) && off < en ? "until " + when(q.unprot_at) : ""].filter(Boolean).join(" ");
   return `<span class="st warn" title="LOCKqz's password was not on this exam for the whole time it was open">partly protected${bits ? " · " + bits : ""}</span>`;
 }
-const pendingSync = () => BS.courses.some(c => c.quizzes.some(pend));
+// Only classes this account protects (a class Brightspace lists someone else as the instructor of is never waiting on it).
+const pendingSync = () => BS.courses.some(c => !c.roster_hidden && c.quizzes.some(pend));
+// Waiting for a sync that can put it right: pending, and not an exam Brightspace refused.
+const waitingAny = () => BS.courses.some(c => !c.roster_hidden && c.quizzes.some(q => pend(q) && !q.sync_err));
+// The exam switch's words. Brightspace matches: Protected / Not protected. A change on its way: Saving…. Brightspace
+// refused it (why, on hover), or no sync from this browser: what is left.
+function refusedWhy(m){ m = String(m || "");
+  return /did not stick/i.test(m) ? "Brightspace did not keep LOCKqz's password on this exam." : /\b40[13]\b/.test(m) ? "Brightspace did not let your account change this exam."
+    : /\b404\b/.test(m) ? "Brightspace could not find this exam." : "Brightspace did not take the change" + (m ? ": " + m.slice(0, 120) : "."); }
+function rowSt(q){ const on = !!q.password;
+  if (!pend(q)) return on ? ["ok", "Protected"] : ["", "Not protected"];
+  if (syncing()) return ["", "Saving…"];
+  if (q.sync_err) return ["warn", "Brightspace refused", refusedWhy(q.sync_err)];
+  return ["warn", on ? "On · 1 click left" : "Off · 1 click left"]; }
+const stHtml = (ou, q) => { const [k, t, why] = rowSt(q); return `<b class="st ${k}" data-st="${esc(ou)}|${esc(q.qi)}"${why ? ` title="${esc(why)}"` : ""} style="min-width:110px;text-align:right">${t}</b>`; };
+// A change of sync state only: the switches' words and the "One more click" note, in place.
+function paintRows(){
+  document.querySelectorAll("b.st[data-st]").forEach(b => { const [ou, qi] = b.dataset.st.split("|"), c = BS.courses.find(x => String(x.ou) === ou), q = c && c.quizzes.find(x => String(x.qi) === qi);
+    if (!q) return; const [k, t, why] = rowSt(q); b.className = "st " + k; b.textContent = t; if (why) b.title = why; else b.removeAttribute("title"); });
+  document.querySelectorAll(".pendnote").forEach(n => { const c = n.dataset.ou ? BS.courses.find(x => String(x.ou) === n.dataset.ou) : null;
+    n.classList.toggle("hide", syncing() || !(n.dataset.ou ? !!c && c.quizzes.some(pend) : pendingSync())); }); }
+const repaint = () => { if (shown() && ME && !busy() && ["", "class"].includes(viewName())) route(); else paintRows(); };
 // Ready = what LOCKqz's /password would admit (server: live, confirmed device + fee paid). An older server
 // sends only "installed".
 const isReady = s => s.ready !== undefined ? !!s.ready : !!s.installed;
@@ -501,7 +537,7 @@ function viewHome(){
   // mine = classes this account protects; a hidden class (Brightspace lists someone else as its instructor) is listed only.
   const all = BS.courses.map(classStats), mine = all.filter((s,i)=>!BS.courses[i].roster_hidden);
   const exams = mine.reduce((n,s)=>n+s.cur.length,0), prot = mine.reduce((n,s)=>n+s.prot.length,0), students = BS.courses.reduce((n,c)=>n+c.students.length,0);
-  const setN = mine.reduce((n,s)=>n+s.set.length,0), waitN = mine.reduce((n,s)=>n+s.waiting,0);
+  const sy = syncing(), setN = mine.reduce((n,s)=>n+s.set.length+(sy?s.waiting:0),0), waitN = sy ? 0 : mine.reduce((n,s)=>n+s.waiting,0);   // being saved: counted as on
   const allOn = mine.every(s=>s.on), allOff = prot===0 && !mine.some(s=>s.on);
   const synced = oldestSync();
   const inprog = mine.flatMap(s=>s.inprog.map(q=>({q, c: BS.courses[all.indexOf(s)]})));
@@ -519,7 +555,7 @@ function viewHome(){
     .filter(x => x.q.start_date && Date.parse(x.q.start_date) - now() < 24*3600e3 && (!x.q.end_date || Date.parse(x.q.end_date) > now()))
     .sort((a,b) => Date.parse(a.q.start_date) - Date.parse(b.q.start_date))[0];
   if (soon && GATE()) h += `<div class="note warn examday"><span><b>${esc(soon.q.name)}</b> ${Date.parse(soon.q.start_date) <= now() ? "is in progress" : "starts " + when(soon.q.start_date)} · ${esc(cname(soon.c))}.<br><b>Keep ${BROWSER_NAME} open and signed in to Brightspace until it ends.</b> If ${BROWSER_NAME} is closed, students wait at the start.</span>${EXT() ? "" : EXTBTN()}</div>`;
-  if(pendingSync()) h += `<div class="note warn"><span>One more click to send these changes to Brightspace.</span><button class="btn warn" onclick="syncNow()">Sync now</button></div>`;
+  if(pendingSync()) h += PENDNOTE();
   inprog.forEach(({q,c}) => h += `<div class="note ok"><span style="display:flex;align-items:center;gap:10px"><span class="pulse"></span><b>${esc(q.name)}</b> is in progress · ${esc(cname(c))}</span><a class="btn ok" href="#live/${esc(c.ou)}-${esc(q.qi)}">Watch live</a></div>`);
   h += `<section aria-label="Your classes" style="display:flex;flex-direction:column;gap:16px"><h2 class="eyebrow">Your classes</h2>`;
   BS.courses.forEach((c,i) => {
@@ -633,7 +669,7 @@ function mailBtns(c,s){
     : `<button class="btn mailbtn" data-ou="${esc(c.ou)}" data-kind="all" onclick="emailClass(this.dataset.ou,this.dataset.kind,this)">Email students</button>`);
 }
 // Change, then re-draw from the server (so the page shows what is really saved), then say what failed.
-async function after(results){ await refresh(); route(); pushSync(); const bad = results.filter(d=>d && d.error);
+async function after(results){ await refresh(); pushSync(); route(); const bad = results.filter(d=>d && d.error);
   if(bad.length) alert(bad.length===1 ? bad[0].error : `${bad.length} exams were not changed: ${bad[0].error}`); }
 let SAVING = false;   // one change at a time: a double click never sends the same switch twice
 const once = f => async (...a) => { if(SAVING) return; SAVING = true; try { await f(...a); } finally { SAVING = false; } };
@@ -648,6 +684,8 @@ async function delLegacy(id){ if(confirm("Remove this quiz from LOCKqz?")) await
 // ---- CLASS ----
 // A class this account cannot protect: Brightspace lists someone else as its instructor.
 const HIDDEN_TXT = () => "Only this class's instructor can turn LOCKqz on for it.";
+// Home has its own sync status line (beside its Sync now); a class page's note carries one.
+const PENDNOTE = (st, ou) => `<div class="note warn pendnote${syncing() ? " hide" : ""}"${ou ? ` data-ou="${esc(ou)}"` : ""}><span>One more click to send these changes to Brightspace.${st ? `<span class="syncst muted" style="display:block">${SYNCMSG === "Syncing…" ? "" : syncHtml(SYNCMSG)}${SYNCHELPON ? SYNCHELP() : ""}</span>` : ""}</span><button class="btn warn" onclick="syncNow()">Sync now</button></div>`;
 function viewClass(ou){
   const c = BS.courses.find(x=>x.ou===ou); if(!c) return viewHome();
   const s = classStats(c), past = c.quizzes.filter(q=>ended(q) && Number(q.gated) !== 1);
@@ -655,15 +693,16 @@ function viewClass(ou){
   <div class="band"><div><h1 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-.015em">${esc(cname(c))}</h1><p class="sub">${esc(c.code||"")}${c.code?" · ":""}from Brightspace, updated ${ago(c.synced_at)}</p></div></div>
   <div class="note warn"><span>${HIDDEN_TXT()}</span></div>
   <section class="card"><div class="hrow"><h2>Exams</h2></div><ul class="list">${s.cur.map(q=>`<li><div class="grow"><span class="t">${esc(q.name)}</span><span class="d">${q.active===0?"hidden in Brightspace · ":""}${span(q)}</span></div></li>`).join("") || `<li class="d">No upcoming exams in Brightspace.</li>`}</ul></section>`;
-  const row = q => { const on=!!q.password, p = pend(q), lv = `#live/${esc(ou)}-${esc(q.qi)}`;
+  const row = q => { const on=!!q.password, lv = `#live/${esc(ou)}-${esc(q.qi)}`;
     return `<li class="ex"><div class="grow"><span class="t" style="color:${on?'var(--ink)':'#6b6861'}">${esc(q.name)}</span><span class="d">${q.active===0?"hidden in Brightspace · ":""}${span(q)}${live(q)?` · <a href="${lv}">in progress — watch</a>`:on?` · <a href="${lv}">watch live</a>`:""}</span>${rulePill(c,q)}</div>
-      <button class="sw" aria-pressed="${on}" aria-label="Protect this exam" data-ou="${esc(ou)}" data-qi="${esc(q.qi)}" onclick="this.disabled=true;setQuiz(this.dataset.ou,this.dataset.qi,${!on})"><b class="st ${p?'warn':on?'ok':''}" style="min-width:110px;text-align:right">${on?(p?"Waiting for Brightspace":"Protected"):(p?"Off · 1 click left":"Not protected")}</b><i></i></button></li>`; };
+      <button class="sw" aria-pressed="${on}" aria-label="Protect this exam" data-ou="${esc(ou)}" data-qi="${esc(q.qi)}" onclick="this.disabled=true;setQuiz(this.dataset.ou,this.dataset.qi,${!on})">${stHtml(ou, q)}<i></i></button></li>`; };
   return `${BACK('', 'All classes')}
   <div class="band"><div><h1 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-.015em">${esc(cname(c))}</h1><p class="sub">${esc(c.code||"")}${c.code?" · ":""}${pl(c.students.length, "student")} · from Brightspace, updated ${ago(c.synced_at)}</p></div>
     <button class="sw" aria-pressed="${s.on}" aria-label="LOCKqz on for this class" data-ou="${esc(ou)}" onclick="setClass(this.dataset.ou,${!s.on})"><b>LOCKqz ${s.on?"on":"off"}</b><i></i></button></div>
   <div class="two">
     <section class="card"><div class="hrow"><h2>Exams</h2><span>${c.off ? "LOCKqz is off for this class" : "every exam starts protected"}</span></div>
       ${s.cur.length && s.on ? `<p class="muted" style="margin:6px 0 0">${GATE() ? "Nothing to do. LOCKqz sets the password and, while your browser is open, lets in students who have LOCKqz." : "Nothing to do. LOCKqz sets the password. Only students with LOCKqz can open the exam."}</p>` : ""}
+      ${c.quizzes.some(pend) ? PENDNOTE(true, ou) : ""}
       <ul class="list">${s.cur.map(row).join("") || `<li class="d">No upcoming exams in Brightspace.</li>`}</ul>
       ${past.length ? `<details class="past"><summary>${past.length} past</summary><ul class="list">${past.map(q=>`<li><div class="grow"><span class="t" style="color:#6b6861">${esc(q.name)}</span><span class="d">${q.end_date?"ended "+when(q.end_date):q.due_date?"due "+when(q.due_date):""}</span></div>${protPast(q)}</li>`).join("")}</ul></details>` : ""}
     </section>
