@@ -1,0 +1,89 @@
+name: Microsoft Store catch-up
+
+# Each Release sends its Windows version to the Microsoft Store. While Microsoft is still certifying the version
+# before it, the Store takes no new submission, and nothing sent the newer version later: Store installs and the
+# download page's Store button stayed one version behind until the next Windows change. This looks every 6 hours
+# and sends the live version once the Store can take it. The same marker as the Release (cache key store-sent-<VERSION
+# hash>) means a version is never sent twice, so a certification in progress is never restarted.
+# Free: the look is one small Linux job; the Windows job runs only when the Store is behind and the version unsent.
+
+on:
+  schedule:
+    - cron: "41 */6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: store-catchup
+  cancel-in-progress: false
+
+jobs:
+  look:
+    name: Is the Store behind the live version?
+    runs-on: ubuntu-latest
+    outputs:
+      behind: ${{ steps.s.outputs.behind }}
+      commit: ${{ steps.s.outputs.commit }}
+      version: ${{ steps.s.outputs.version }}
+    steps:
+      - id: s
+        run: |
+          st=$(curl -fsS -m 20 -A "LOCKqz/ci" https://lockqz.pages.dev/api/store || true)
+          ver=$(curl -fsS -m 20 -A "LOCKqz/ci" https://lockqz.pages.dev/api/version || true)
+          cur=$(printf '%s' "$st" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("current") or "")' 2>/dev/null || true)
+          have=$(printf '%s' "$st" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("store_version") or "")' 2>/dev/null || true)
+          live=$(printf '%s' "$ver" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("api") or "")' 2>/dev/null || true)
+          echo "live version: $cur (commit $live) - Microsoft Store: ${have:-unknown}"
+          # Only on a clear answer: both versions known, and they differ.
+          if [ -n "$cur" ] && [ -n "$have" ] && [ -n "$live" ] && [ "$cur" != "$have" ] && [ "$cur" != "dev" ]; then
+            echo "behind=true" >> "$GITHUB_OUTPUT"; echo "commit=$live" >> "$GITHUB_OUTPUT"; echo "version=$cur" >> "$GITHUB_OUTPUT"
+          else echo "behind=false" >> "$GITHUB_OUTPUT"; fi
+
+  send:
+    name: Send the live version to the Microsoft Store
+    needs: look
+    if: needs.look.outputs.behind == 'true' && vars.MSIX_NAME != ''
+    runs-on: windows-latest
+    env:
+      HAS_STORE: ${{ secrets.STORE_CLIENT_SECRET != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ needs.look.outputs.commit }}" }
+      - name: The checked-out version is the live one
+        id: same
+        shell: pwsh
+        run: |
+          $v = (Get-Content app/VERSION -Raw).Trim()
+          if ($v -ne "${{ needs.look.outputs.version }}") { Write-Host "commit has $v, live is ${{ needs.look.outputs.version }} - nothing to send"; "go=false" >> $env:GITHUB_OUTPUT }
+          elseif ($env:HAS_STORE -ne "true") { Write-Host "no Store credentials - nothing to send"; "go=false" >> $env:GITHUB_OUTPUT }
+          else { "go=true" >> $env:GITHUB_OUTPUT }
+      - name: Was this version already sent to the Store?
+        id: sent
+        if: steps.same.outputs.go == 'true'
+        uses: actions/cache@v4
+        with:
+          path: store-sent
+          key: store-sent-${{ hashFiles('app/VERSION') }}
+      - name: Store upload package
+        if: steps.same.outputs.go == 'true' && steps.sent.outputs.cache-hit != 'true'
+        shell: powershell
+        run: |
+          & .\app\windows\store\build-msix.ps1 -Name "${{ vars.MSIX_NAME }}" -Publisher "${{ vars.MSIX_PUBLISHER }}" -PublisherDisplay "${{ vars.MSIX_PUBLISHER_DISPLAY }}" -Out "$env:RUNNER_TEMP\store\lockqz-store.msix"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Microsoft Store Developer CLI
+        if: steps.same.outputs.go == 'true' && steps.sent.outputs.cache-hit != 'true'
+        uses: microsoft/microsoft-store-apppublisher@v1.1
+      - name: Submit to the Microsoft Store
+        if: steps.same.outputs.go == 'true' && steps.sent.outputs.cache-hit != 'true'
+        shell: pwsh
+        env:
+          STORE_TENANT_ID: ${{ secrets.STORE_TENANT_ID }}
+          STORE_SELLER_ID: ${{ secrets.STORE_SELLER_ID }}
+          STORE_CLIENT_ID: ${{ secrets.STORE_CLIENT_ID }}
+          STORE_CLIENT_SECRET: ${{ secrets.STORE_CLIENT_SECRET }}
+        run: |
+          $v = (Get-Content app/VERSION -Raw).Trim()
+          msstore reconfigure --tenantId $env:STORE_TENANT_ID --sellerId $env:STORE_SELLER_ID --clientId $env:STORE_CLIENT_ID --clientSecret $env:STORE_CLIENT_SECRET
+          msstore publish "$env:RUNNER_TEMP\store\lockqz-store.msix" -id 9P7D1114N2LJ -v
+          if ($LASTEXITCODE -eq 0) { New-Item -ItemType Directory -Force store-sent | Out-Null; Set-Content store-sent/version $v; Write-Host "$v sent to the Microsoft Store" }   # the marker, saved when the job ends
+          else { Write-Host "::warning::the Store did not take $v yet (a submission may still be in certification) - the next look tries again" }
+          exit 0
