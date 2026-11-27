@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-27 10:00 PT — 01UUDg7coV: bug sweep 39 (all of LOCKqz) and a plan for professors choosing what a quiz allows. Holds: app/cloudflare (functions, public, schema, migrations), app/mac, app/windows, app/linux, app/mailin, app/extension-prof, app/watch, app/tests, .github/workflows, VERSION files.
 
 ## Recently finished
 - 2026-11-25 06:40 PT — 01UUDg7YHBTs: bug sweep 38 finished: apps 0.6.49 + server live (73a4684, Release 45632331680 green on every job; 0.6.48, d822cc9, Release 45628731663 before it). During a quiz LOCKqz closes AI voice typing (Wispr Flow, Superwhisper, OpenWhispr, Aqua Voice, Willow, VoiceInk, Spokenly, Monologue, BossAI), AI meeting assistants with an Ask AI chat (Granola, Limitless, Rewind) and LobeHub, and blocks their sites; the computer's own dictation and every assistive tool stay open. Firefox on Mac and Linux: one filter pattern per site path, as on Windows (Chromium 926, Firefox 928 of 1000). The apps' blocklist and the server's list are the same 939 entries again. New test test_api_fuzz.mjs: every API path, every kind of caller, odd bodies.
