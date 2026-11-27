@@ -122,8 +122,8 @@ FREE_FOREVER = "dbristow@usc.edu,dbristow@marshall.usc.edu,huutienn@usc.edu,jsco
 # computer LOCKqz is locking. Nothing has to stay open on the professor's side on exam day.
 REQUIRE_GATE = "0"
 # Exam rules (27 Nov 2026): the professor chooses what students may use in each exam (dashboard: the pill under the
-# exam), and /password sends those rules to the app. "0" until every app understands them, then "1".
-RULES_ON = "0"
+# exam), and /password sends those rules to the app (apps 0.6.50 on; older ones keep AI blocked and ignore them).
+RULES_ON = "1"
 
 # Brightspace's own submission email (22 Nov 2026): the Sync adds LOCKqz's address for each protected quiz
 # (quiz+<ou>-<qi>-<tok>@lockqz.com) to its Notification Email, beside the professor's own; LOCKqz's Email Worker
