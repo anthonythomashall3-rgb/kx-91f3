@@ -62,12 +62,18 @@ check("server's never-close names and always-open sites = the catalog's", JSON.s
   && JSON.stringify(arr("RULE_BASE")) === JSON.stringify(cat.base_allow));
 let winCat = null; try { winCat = readFileSync(join(APP, "windows", "rules-catalog.json"), "utf8"); } catch {}
 check("Windows ships the same catalog file", winCat === readFileSync(join(APP, "mac", "rules-catalog.json"), "utf8"));
+let andCat = null; try { andCat = readFileSync(join(APP, "android", "app", "src", "main", "assets", "rules-catalog.json"), "utf8"); } catch {}
+check("Android ships the same catalog file (an asset of the app)", andCat === readFileSync(join(APP, "mac", "rules-catalog.json"), "utf8"));
+check("every row names its Android apps (a list, maybe empty) and only package names", catKeys.every(k => Array.isArray(cat.rows[k].android) && cat.rows[k].android.every(p => /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$/.test(p))));
 check("the catalog is plain ASCII (Windows PowerShell 5.1 reads it)", /^[\x00-\x7f]*$/.test(readFileSync(join(APP, "mac", "rules-catalog.json"), "utf8")));
 const aiList = readFileSync(join(APP, "mac", "blocklist.txt"), "utf8").split("\n").map(l => l.trim()).filter(l => l && !l.startsWith("#"));
 const allowedOnes = catKeys.filter(k => cat.rows[k].default === "allow").flatMap(k => [...cat.rows[k].hosts, ...cat.rows[k].paths, ...cat.rows[k].web]);
 check("no row that starts allowed opens a site on the AI list", !allowedOnes.some(x => aiList.includes(x)), allowedOnes.filter(x => aiList.includes(x)).join(","));
 check("base sites never on the AI list", !cat.base_allow.some(x => aiList.includes(x)));
 check("a catalog name that a row closes is never a system name or a browser", !catKeys.flatMap(k => [...cat.rows[k].mac, ...cat.rows[k].win, ...cat.rows[k].linux]).some(n => cat.never_close.includes(n.toLowerCase())));
+
+const vars = (readFileSync(join(CF, "wrangler.toml"), "utf8").split(/^\[vars\]$/m)[1] || "").split(/^\[/m)[0].split("\n").filter(l => /^[A-Z_0-9]+\s*=/.test(l)).length;
+check(`wrangler.toml holds at most 48 variables (${vars}): Workers Free takes 64 per Worker with the 16 secrets`, vars > 30 && vars <= 48, String(vars));
 
 // ---- setup: a class, its professor, two exams, a student's computer ----
 const OU = "302972", day = 86400e3;

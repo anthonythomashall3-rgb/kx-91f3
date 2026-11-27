@@ -57,4 +57,35 @@ class UnitTests {
         val content = "https://usc.brightspace.com/d2l/le/content/123/fullscreen/777/ViewLocation?location=%2Fd2l%2Flms%2Fquizzing%2Fuser%2Fattempt%2Fquiz_start_frame_auto.d2l%3Fou%3D123%26qi%3D456"
         assertEquals(attempt.replace("&isprv=0", ""), c.innerUrl(content)); assertTrue(c.isQuiz(c.innerUrl(content)))
     }
+
+    // Exam rules (27 Nov 2026): the professor's rules -> this exam's DNS list, apps and open sites (catalog = the computers' file).
+    private fun cat() = org.json.JSONObject(java.io.File("src/main/assets/rules-catalog.json").readText())
+    private fun rules(b: List<String>, allow: List<String> = emptyList(), block: List<String> = emptyList()) = org.json.JSONObject()
+        .put("label", "Custom").put("b", org.json.JSONArray(b)).put("allow", org.json.JSONArray(allow)).put("block", org.json.JSONArray(block))
+    private val off = listOf("solvers", "text", "chat", "email", "calls", "youtube", "social", "homework", "writing", "translate")
+    @Test fun rulesDefaultBlocksMessaging() {
+        val e = Rules.exam(cat(), rules(off), listOf("chatgpt.com", "slack.com", "quizlet.com"), "usc.brightspace.com")!!
+        assertTrue("zoom.us" in e.hosts && "mail.google.com" in e.hosts && "chatgpt.com" in e.hosts && "slack.com" in e.hosts)
+        assertTrue("com.whatsapp" in e.close && "us.zoom.videomeetings" in e.close && "com.google.android.gm" in e.close)
+        assertTrue("com.microsoft.office.word" in e.keep); assertNull(e.web); assertTrue(e.search)
+    }
+    @Test fun rulesAllowedRowLeavesTheLists() {
+        val e = Rules.exam(cat(), rules(off - "chat" - "homework"), listOf("chatgpt.com", "slack.com", "quizlet.com"), "")!!
+        assertFalse("slack.com" in e.hosts); assertFalse("quizlet.com" in e.hosts); assertTrue("chatgpt.com" in e.hosts)
+        assertTrue("com.Slack" in e.keep && "com.discord" in e.keep); assertFalse("com.discord" in e.close)
+    }
+    @Test fun rulesNotesOnlyOpensOnlyTheExamsSites() {
+        val e = Rules.exam(cat(), rules(off + listOf("search", "wiki", "web"), allow = listOf("https://www.investopedia.com/terms", "x.com")), listOf("chatgpt.com"), "lms.other.edu")!!
+        assertFalse(e.search); assertTrue("bing.com" in e.hosts)
+        assertTrue(Rules.opens(e, "usc.brightspace.com/d2l/home", "")); assertTrue(Rules.opens(e, "https://lms.other.edu/d2l/x", "lms.other.edu"))
+        assertTrue(Rules.opens(e, "docs.google.com/document/d/1/edit", "")); assertTrue(Rules.opens(e, "https://www.investopedia.com/terms/b/bond.asp", ""))
+        assertFalse(Rules.opens(e, "https://www.nytimes.com/", "")); assertFalse(Rules.opens(e, "x.com/home", "")); assertFalse(Rules.opens(e, "en.wikipedia.org/wiki/Bond", ""))
+        assertTrue(Rules.isSearch("https://www.google.com/search?q=x")); assertFalse(Rules.isSearch("docs.google.com/document/d/1"))
+    }
+    @Test fun rulesTypedNeverTheSystemOrTheExam() {
+        val e = Rules.exam(cat(), rules(off, block = listOf("Spotify", "Chrome", "khanacademy.org", "brightspace.com", "google.com")), emptyList(), "")!!
+        assertTrue("spotify" in e.typed); assertFalse("chrome" in e.typed)
+        assertTrue("khanacademy.org" in e.hosts); assertFalse("brightspace.com" in e.hosts); assertFalse("google.com" in e.hosts)
+    }
+    @Test fun noRulesMeansLockqzAsAlways() { assertNull(Rules.exam(cat(), null, listOf("chatgpt.com"), "")) }
 }

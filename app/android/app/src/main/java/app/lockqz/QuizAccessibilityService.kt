@@ -92,6 +92,10 @@ class QuizAccessibilityService : AccessibilityService() {
     private val browsers = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()   // every app that opens https links
     @Volatile private var otherProfileTold = false
     @Volatile private var pdnsTold = false               // Private DNS already reported for this lock
+    @Volatile private var exam: Rules.Exam? = null       // the professor's rules for the locked exam (null: LOCKqz's own lists)
+    @Volatile private var lastBack = 0L
+    private val labels = java.util.concurrent.ConcurrentHashMap<String, String>()   // package -> app name ("" = a system app)
+    private val catalog: JSONObject? by lazy { try { JSONObject(assets.open("rules-catalog.json").bufferedReader().use { it.readText() }) } catch (_: Exception) { null } }
 
     override fun onServiceConnected() {
         instance = this
@@ -115,10 +119,15 @@ class QuizAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(e: AccessibilityEvent) {
         val pkg = e.packageName?.toString() ?: return
         if (quiz != null && e.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            if (pkg in AI_APPS || (pkg in browsers && pkg !in URL_BARS && pkg != packageName)) {
-                // an AI app, or a browser LOCKqz cannot read (proxy browsers render AI sites on their servers)
+            // The professor's rules: an allowed row's apps stay open (a chat app the professor allows), a blocked row's go
+            // home, and so does an app the professor named (never one of the phone's own).
+            val ex = exam
+            val ai = pkg in AI_APPS && (ex == null || pkg !in ex.keep)
+            val shut = ex != null && pkg != packageName && (pkg in ex.close || typedApp(pkg, ex))
+            if (ai || shut || (pkg in browsers && pkg !in URL_BARS && pkg != packageName)) {
+                // an AI app, an app not open in this exam, or a browser LOCKqz cannot read (proxy browsers render AI sites on their servers)
                 performGlobalAction(GLOBAL_ACTION_HOME)
-                main.post { Toast.makeText(this, if (pkg in AI_APPS) "LOCKqz: AI is off during your quiz" else "LOCKqz: use Chrome, Firefox, Samsung Internet, Edge or Brave during the quiz", Toast.LENGTH_SHORT).show() }
+                main.post { Toast.makeText(this, if (ai) "LOCKqz: AI is off during your quiz" else if (shut) "LOCKqz: this app is not open during your exam" else "LOCKqz: use Chrome, Firefox, Samsung Internet, Edge or Brave during the quiz", Toast.LENGTH_SHORT).show() }
                 return
             }
             if (pkg == "com.google.android.googlequicksearchbox") { performGlobalAction(GLOBAL_ACTION_BACK); return }   // Assistant / Gemini overlay, Circle to Search
@@ -127,7 +136,41 @@ class QuizAccessibilityService : AccessibilityService() {
         val root = rootInActiveWindow ?: return
         val url = readUrl(root, barId) ?: return
         onUrl(url)
+        // The professor's rules: with all other websites blocked, a page the exam does not open goes back (so does a Google
+        // search when web search is blocked). Never while the student is typing in the address bar.
+        val ex = exam
+        if (quiz != null && ex != null && !barFocused(root, barId)) {
+            val u = innerUrl(url); val now = System.currentTimeMillis()
+            if ((!Rules.opens(ex, u, quizHost()) || (!ex.search && Rules.isSearch(u))) && !isQuizPage(u) && now - lastBack > 1500) {
+                lastBack = now; performGlobalAction(GLOBAL_ACTION_BACK)
+                main.post { Toast.makeText(this, "LOCKqz: this site is not open during your exam", Toast.LENGTH_SHORT).show() }
+                return
+            }
+        }
         if (quiz != null && pwShown != null) fillPassword(root, url)
+    }
+
+    private fun barFocused(root: AccessibilityNodeInfo, id: String): Boolean =
+        try { root.findAccessibilityNodeInfosByViewId(id).any { it.isFocused } } catch (_: Exception) { false }
+    private fun hostOf(u: String): String = try { java.net.URI(if ("://" in u.take(12)) u else "https://$u").host?.lowercase() ?: "" } catch (_: Exception) { "" }
+    private fun quizHost(): String = hostOf(quizUrl ?: "")
+    /** An app the professor named in "Also block" (by its name on the phone); never one of the phone's own apps. */
+    private fun typedApp(pkg: String, ex: Rules.Exam): Boolean {
+        if (ex.typed.isEmpty()) return false
+        val name = labels.getOrPut(pkg) {
+            try {
+                val ai = packageManager.getApplicationInfo(pkg, 0)
+                if ((ai.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0) "" else packageManager.getApplicationLabel(ai).toString().lowercase()
+            } catch (_: Exception) { "" }
+        }
+        return name.isNotEmpty() && name in ex.typed
+    }
+    /** The professor's rules for this exam -> this exam's DNS list and apps; none: LOCKqz's own lists as always. */
+    private fun applyRules(r: JSONObject?, url: String) {
+        val cat = catalog
+        val e = if (cat != null && r != null) Rules.exam(cat, r, Api.blocklist(this), hostOf(innerUrl(url))) else null
+        exam = e
+        DnsVpnService.setBlocklist(e?.hosts ?: Api.blocklist(this))
     }
 
     private fun readUrl(root: AccessibilityNodeInfo, id: String): String? {
@@ -175,7 +218,7 @@ class QuizAccessibilityService : AccessibilityService() {
         if (!Api.verified(this) && Api.student(this) == null) { notify("Finish LOCKqz setup", "Open LOCKqz and confirm your school email to get quiz passwords."); return }
         if (!DnsVpnService.running) { try { DnsVpnService.start(this) } catch (e: Exception) { Log.w(TAG, "vpn start: $e") }; Thread.sleep(1500) }
         if (!DnsVpnService.running) { notifyOnce("vpn", "LOCKqz is off", "Open LOCKqz and allow the AI block (VPN) to get the quiz password."); return }
-        DnsVpnService.setBlocklist(Api.blocklist(this))
+        DnsVpnService.setBlocklist(Api.blocklist(this)); exam = null   // another exam's rules never carry over
         DnsVpnService.locked = true; quiz = id; quizUrl = url; lastSeen = System.currentTimeMillis(); missingSince = 0; pwShown = null; held = false; holdUntil = 0; askFailSince = 0; pwNext = 0; pdnsTold = false
         pwFilledAt = 0; pwTold = false; pwNoted = false
         getSharedPreferences("lockqz", Context.MODE_PRIVATE).edit().putString("locked_quiz", id).apply()
@@ -215,6 +258,7 @@ class QuizAccessibilityService : AccessibilityService() {
         val (code, j) = Api.password(this, url)
         val pw = j?.optString("password", "")?.takeIf { it.isNotEmpty() && code == 200 }
         if (pw != null) {
+            if (quiz == id) applyRules(j?.optJSONObject("rules"), url)
             if (pwShown != pw) { pwShown = pw; showPassword(pw) }
             return
         }
@@ -312,6 +356,7 @@ class QuizAccessibilityService : AccessibilityService() {
 
     private fun unlockNow(id: String, reason: String, report: Boolean) {
         quiz = null; quizUrl = null; pwShown = null; held = false; holdUntil = 0; askFailSince = 0   // the next quiz's 10-minute wait starts fresh
+        exam = null   // the professor's rules end with the exam
         DnsVpnService.locked = false
         getSharedPreferences("lockqz", Context.MODE_PRIVATE).edit().remove("locked_quiz").apply()
         Log.i(TAG, "unlocked $id ($reason)")
