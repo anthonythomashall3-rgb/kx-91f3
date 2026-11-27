@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-27 15:10 PT — 01UUDg7coV: exam switch status ("Waiting for Brightspace"): app/cloudflare/public/dashboard.html, sync.js, functions/api/[[route]].js, schema.sql + new migration, app/extension-prof/*, tests touching those.
 
 ## Recently finished
 - 2026-11-27 14:25 PT — 01UUDg7coV: exam rules finished: apps 0.6.50 (Mac, Windows, Linux, Android, Store package) + server live (499e30f, Release 46073546033 green on every job), RULES_ON on. The class page's pill under each exam opens "What can students use?": Notes + internet (default: no AI, no messaging), Notes only, Custom (40 rows, typed sites and programs); the class's rule or one exam's. Catalog: app/mac/rules-catalog.json (same file in app/windows and the Android assets; tests check). Workers Free takes 64 variables (vars + 16 secrets): wrangler.toml holds 48 now, a test keeps it there.
