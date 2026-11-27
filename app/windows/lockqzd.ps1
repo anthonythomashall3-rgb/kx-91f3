@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.6.49"
+$Version = "0.6.50"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = if ($env:LOCKQZ_CONFIG) { $env:LOCKQZ_CONFIG } else { "$env:ProgramData\LOCKqz\config.json" }
@@ -461,6 +461,29 @@ function Set-Assist($q, $tools) {
   if ($cur -and ($cur.Trim() -eq $new)) { return $false }
   try { [IO.File]::WriteAllText($AssistFile, $new, (New-Object Text.UTF8Encoding($false))); return $true } catch { return $false }
 }
+# Exam rules (27 Nov 2026): what the professor lets students use in this exam (server's /password answer): row keys, the
+# professor's own sites and programs, and the quiz's own site. Same admin-only folder; the engine (lockqz.ps1) turns it
+# into this exam's lists, and removes it at every unlock; a new quiz drops it here. No rules from the server: LOCKqz
+# locks as before.
+$RulesFile = if ($env:LOCKQZ_RULES) { $env:LOCKQZ_RULES } else { "$env:ProgramData\LOCKqz\rules.json" }
+function LQ-Cut($list, [int]$n, [int]$w) { @($list) | Where-Object { $_ -is [string] } | ForEach-Object { if ($_.Length -gt $w) { $_.Substring(0, $w) } else { $_ } } | Select-Object -First $n }
+function LQ-RulesRecord($q, $rules, [string]$url) {
+  if (($null -eq $rules) -or ($null -eq $rules.b)) { return $null }
+  $h = ""; try { $h = ([Uri]$url).Host.ToLower() } catch { }
+  if ($h -notmatch '^[a-z0-9-]+(\.[a-z0-9-]+)+$') { $h = "" }
+  $lbl = [string]$rules.label; if ($lbl.Length -gt 40) { $lbl = $lbl.Substring(0, 40) }
+  $b = [object[]]@(@(LQ-Cut $rules.b 60 20) | Where-Object { $_ -cmatch '^[a-z]{2,20}$' })
+  return [ordered]@{ quiz_id = [string]$q; rules = [ordered]@{ label = $lbl; b = $b; allow = [object[]]@(LQ-Cut $rules.allow 20 100); block = [object[]]@(LQ-Cut $rules.block 20 60) }; quiz_host = $h }
+}
+function Set-Rules($q, $rules, [string]$url = "") {
+  # Write (or remove: no rules) this quiz's rules. -> $true when they changed.
+  $rec = LQ-RulesRecord $q $rules $url
+  if ($null -eq $rec) { if (Test-Path -LiteralPath $RulesFile) { Remove-Item -LiteralPath $RulesFile -Force -ErrorAction SilentlyContinue; return $true }; return $false }
+  $new = ($rec | ConvertTo-Json -Compress -Depth 5)
+  $cur = $null; try { $cur = Get-Content -LiteralPath $RulesFile -Raw -ErrorAction Stop } catch { }
+  if ($cur -and ($cur.Trim() -eq $new)) { return $false }
+  try { [IO.File]::WriteAllText($RulesFile, $new, (New-Object Text.UTF8Encoding($false))); return $true } catch { return $false }
+}
 function Report-Install([int64]$every = 86400) {
   # C6: only when the version or the student changed, or 24 h passed (persisted across restarts). The 12-hour round
   # asks with a week: the professor's page counts a computer seen in the last 30 days as ready, and a PC that runs
@@ -730,7 +753,7 @@ while ($listener.IsListening) {
         $State.locked_since=[int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); $State.applied=$false
         $State.cap_at = [int64]$State.locked_since + 60 * [int64]$State.max_minutes; $State.end_known = $false
         $State.mono_since = [int64]([Diagnostics.Stopwatch]::GetTimestamp() / [Diagnostics.Stopwatch]::Frequency)
-        Set-Assist $null @() | Out-Null   # another quiz's allowance never carries over
+        Set-Assist $null @() | Out-Null; Set-Rules $null $null | Out-Null   # another quiz's allowance and rules never carry over
         $State.release_pending = $false; $State.hold_until = $null; $State.ask_fail_since = $null   # nor another quiz's hold
       }
       if ($State.capped_quiz -eq $body.quiz_id) { $State.capped_quiz = $null; $State.capped_at = 0; $State.capped_reason = $null }
@@ -850,6 +873,7 @@ while ($listener.IsListening) {
           if ($r.data) { $pw = $r.data.password; $pay = $r.data.pay; $why = [string]$r.data.reason }
           $out = @{ password = $pw; status = $r.code; pay = $pay }
           if ($r.data -and ($null -ne $r.data.recheck)) { $out.recheck = $r.data.recheck }   # gated: next code change
+          if ($r.data -and $r.data.rules -and ($r.data.rules.label -is [string])) { $out.exam = $r.data.rules.label }   # the agent says what stays open
           if (($r.code -eq 0) -or ($r.code -eq 502) -or ($r.code -eq 503)) { $out.error = "server_busy" }   # agent backs off
           $nowS = [int64][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
           if (($r.code -eq 200) -and $pw) {
@@ -861,8 +885,13 @@ while ($listener.IsListening) {
               $c = [Math]::Min([int64]$State.locked_since + 60 * $CapCeilMin, [Math]::Max([int64]$State.cap_at, [int64]$State.locked_since + 60 * $CapMin))
               $State.cap_at = $c; $State.end_known = $false; $State.max_minutes = [int](($c - [int64]$State.locked_since) / 60); Save-Lock
             }
-            # The professor's assistive-tool allowance: only those extensions may run (browser policy now).
-            if ((Set-Assist $State.quiz_id $r.data.assist) -and ($State.state -eq "locked")) { Policy-Relock }
+            # The professor's assistive-tool allowance: only those extensions may run (browser policy now). The
+            # professor's rules for this exam: the engine rebuilds this exam's lists (hosts, programs), then the policy.
+            $ach = Set-Assist $State.quiz_id $r.data.assist
+            $rch = Set-Rules $State.quiz_id $r.data.rules $u
+            if ($State.state -eq "locked") {
+              if ($rch) { Engine "lock" | Out-Null; Policy-Relock } elseif ($ach) { Policy-Relock }
+            }
           } elseif (($r.code -eq 403) -and ($why -eq "not started")) {
             $st = LQ-ParseIso $r.data.start
             $out.reason = $why; $out.start = $r.data.start

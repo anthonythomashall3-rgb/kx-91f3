@@ -76,6 +76,8 @@ run "Sweep 35: an exam taken more than once - each unlock matched with its own a
 run "Sweep 36: a look at an exam's start page is not red; a later attempt's early unlock is; every kind of computer tested" node --no-warnings test_sweep36.mjs
 run "API: every path, every caller, every odd body answers without a crash (fuzz)" node --no-warnings test_api_fuzz.mjs
 run "Sweep 39: the professor's pages say what is really sent and needed (reminders, one password, same-day exams, phone rows, free accounts); Store catch-up" node --no-warnings test_sweep39.mjs
+run "Exam rules: what students may use in each exam (one list of rows everywhere, saving, /bs, /password, the dashboard pill and panel)" node --no-warnings test_rules.mjs
+run "Exam rules on the Mac and Linux: this exam's lists, browser policy, engines, agent (Safari), helper" python3 test_rules_apps.py
 run "26 Oct fixes: one Stripe checkout per code, overpayments carried, unexpected local unlocks red, course password retired" node --no-warnings test_oct26_fixes.mjs
 run "Helper hardening: fast user switching, per-user tokens, Windows monotonic cap, local-model apps" bash test_helper_hardening.sh
 run "Scale guard: no API query reads a whole big table (every statement planned against the real schema)" node --no-warnings test_scale_indexes.mjs
@@ -123,6 +125,7 @@ run "Download page on a Mac: Apple-signed installer = one download, command one 
 if command -v xvfb-run >/dev/null 2>&1 && [ "$(id -u)" = 0 ]; then run "Real Chromium loads the quiz policy (AI refused, Web search + notes allowed, extensions off)" xvfb-run -a node --no-warnings test_chrome_policy_real.mjs; fi
 if command -v pwsh >/dev/null 2>&1; then
   run "Windows agent/engine logic (titles, unlock retry, policy restore)" pwsh -NoProfile -File test_windows_logic.ps1
+  run "Windows exam rules: this exam's lists the same as the Mac's, programs closed and kept, browser lists, helper" pwsh -NoProfile -File test_windows_rules.ps1
   run "Sweep 28 (Windows): what the agent saw of the attempt, the exam's Firefox restarted, offline never counts, more closed" pwsh -NoProfile -File test_windows_sweep28.ps1
 fi
 if command -v pwsh >/dev/null 2>&1; then

@@ -24,6 +24,7 @@ M = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(M)
 # ---------- paths ----------
 M.SYS_CONF = os.environ.get("LOCKQZ_CONFIG") or os.path.join(HERE, "config.json")
 M.TOKEN_DIR = os.environ.get("LOCKQZ_TOKEN_DIR") or "/var/lib/lockqz/tokens"
+M.EXAM_DIR = os.environ.get("LOCKQZ_EXAM_DIR") or os.path.dirname(M.TOKEN_DIR)   # this exam's lists (the engine's $STATE)
 M.USER_DIR = os.path.expanduser("~/.config/lockqz")
 M.READY_FLAG = os.path.join(M.USER_DIR, "ready-shown")
 M.USER_CONF = os.path.join(M.USER_DIR, "student.json")

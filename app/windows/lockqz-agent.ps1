@@ -897,10 +897,14 @@ function Step-Pw([datetime]$now) {
     Show-Message "LOCKqz has the quiz password ready. Open the quiz's start page (the one with Start Quiz) in Chrome, Edge or Firefox: LOCKqz enters it there."
   }
 }
+# What the student is told at the lock about the professor's rules for this exam (the server's names for them).
+$ExamNote = @{ "Notes + internet" = "`n`nMessaging apps are closed until you submit."; "Notes only" = "`n`nOnly Brightspace and your notes and files are open until you submit."
+               "Custom" = "`n`nYour professor chose what else is open until you submit." }
 function Handle-Pw($pr, [bool]$first, [string]$note) {
   # Acts on the helper's /password answer -> "pw" | "pay" | "wait" | "other" | $null (nothing yet), and
   # sets when the next check may run ($PwNext).
   $now = [DateTime]::UtcNow
+  if ($pr -and ($pr.exam -is [string]) -and $ExamNote.ContainsKey($pr.exam)) { $note = $note + $ExamNote[$pr.exam] }
   if ($pr -and $pr.password) {
     $rc = 15; if ($null -ne $pr.recheck) { $rc = [Math]::Max(15, [Math]::Min(360, [int]$pr.recheck)) }   # gated: next code change
     $pw = [string]$pr.password; $script:PwNext = $now.AddSeconds($rc)

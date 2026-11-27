@@ -265,22 +265,60 @@ def parse_blocklist(lines):
         else: hosts.add(h)
     return hosts, paths
 
-def blocked_tab(url, hosts, paths):
+def blocked_tab(url, hosts, paths, exam=None):
     """True when an open tab is an AI site from the blocklist (it is sent to about:blank at lock, so a
     chat page loaded before the quiz cannot keep talking over its open connection). Google search
-    pages are left to rewrite_search (plain web results), never blanked."""
+    pages are left to rewrite_search (plain web results), never blanked - unless the professor's rules
+    block web search. exam = this exam's rules (exam_view): with all other websites blocked, a site that
+    is not open for the exam is blanked too (Safari has no policy layer: this is its block)."""
     try: u = urllib.parse.urlsplit(str(url or ""))
     except Exception: return False
     if u.scheme not in ("http", "https", "wss", "ws"): return False
     h = (u.hostname or "").lower()
     if not h: return False
-    if re.match(r"^(www\.)?google\.[a-z.]+$", h) and (u.path in ("/search", "/webhp", "/") or u.path.startswith("/search")): return False
+    ex = exam or {}
+    if re.match(r"^(www\.)?google\.[a-z.]+$", h) and (u.path in ("/search", "/webhp", "/") or u.path.startswith("/search")): return ex.get("search") is False
     hs = h[4:] if h.startswith("www.") else h
+    path = (u.path or "/").lower()
     for d in hosts:
         if h == d or h.endswith("." + d) or hs == d: return True
     for d, p in paths:
-        if (h == d or hs == d or h.endswith("." + d)) and (u.path or "/").lower().startswith(p): return True
+        if (h == d or hs == d or h.endswith("." + d)) and path.startswith(p): return True
+    web = ex.get("web")
+    if web is not None:
+        return not any((h == d or h.endswith("." + d) or hs == d) and path.startswith(p) for d, p in web)
     return False
+
+# Exam rules (27 Nov 2026): the lists the engine (root) built for this exam from the professor's rules, in the helper's
+# folder: exam-blocklist.txt in place of the AI list, exam.json for web search and the open sites. Used only when owned
+# by root and writable by no one else (EXAM_OWNER: tests).
+EXAM_DIR = os.environ.get("LOCKQZ_EXAM_DIR") or "/Library/Application Support/LOCKqz"
+EXAM_OWNER = 0
+
+def _exam_file(p):
+    try: st = os.stat(p)
+    except Exception: return False
+    return st.st_uid == EXAM_OWNER and not (st.st_mode & 0o022)
+
+# What the student is told at the lock about the professor's rules (the server's names for them).
+EXAM_NOTE = {"Notes + internet": "\n\nMessaging apps are closed until you submit.",
+             "Notes only": "\n\nOnly Brightspace and your notes and files are open until you submit.",
+             "Custom": "\n\nYour professor chose what else is open until you submit."}
+
+def exam_view(ex, quiz_url=""):
+    """exam.json -> {"search": bool, "web": [(host, path prefix)] or None}; the quiz's own site always stays open."""
+    ex = ex if isinstance(ex, dict) else {}
+    out = {"search": ex.get("search") is not False, "web": None}
+    if isinstance(ex.get("web"), list):
+        w = []
+        for e in ex["web"]:
+            if not isinstance(e, str): continue
+            d, _, p = e.lower().partition("/")
+            if re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", d): w.append((d, "/" + p))
+        q = (urllib.parse.urlsplit(quiz_url).hostname or "").lower() if quiz_url else ""
+        if q: w.append((q, "/"))
+        out["web"] = w
+    return out
 
 def lz4_block(src):
     dst, i, n = bytearray(), 0, len(src)
@@ -838,17 +876,23 @@ class Agent:
         self.hand = None   # the password hand-over to the quiz tab (see HAND_APPS)
         self.pw, self.pw_next, self.start_told = None, 0.0, None   # next /password check; "opens at" shown for
         self.quiz_app, self.opera_warned = None, False             # browser holding the quiz
-        self.bl, self.bl_mtime = (set(), []), None                 # AI blocklist (hosts, host/path)
+        self.bl, self.bl_mtime = (set(), [], None), None           # AI blocklist (hosts, host/path, exam rules)
         self.seen, self.att_tabs = {}, {}   # per quiz: what this computer saw of its attempt (sent with an unlock)
         self.restart_wait = 0.0             # the quiz's own Firefox is being restarted: its page may be gone until then
 
     def blocklist(self):
-        p = os.path.join(HERE, "blocklist.txt")
+        """(hosts, host/paths, exam rules) for blanking tabs: this exam's lists when the professor's rules apply."""
+        el, ej = os.path.join(EXAM_DIR, "exam-blocklist.txt"), os.path.join(EXAM_DIR, "exam.json")
+        ex = _exam_file(el) and _exam_file(ej)
+        p = el if ex else os.path.join(HERE, "blocklist.txt")
         try:
-            m = os.path.getmtime(p)
+            m = (p, os.path.getmtime(p), os.path.getmtime(ej) if ex else 0, getattr(self, "url", None))
             if m != self.bl_mtime:
-                with open(p) as f: self.bl = parse_blocklist(f.readlines())
-                self.bl_mtime = m
+                with open(p) as f: hosts, paths = parse_blocklist(f.readlines())
+                view = None
+                if ex:
+                    with open(ej) as f: view = exam_view(json.load(f), getattr(self, "url", None) or "")
+                self.bl, self.bl_mtime = (hosts, paths, view), m
         except Exception:
             pass
         return self.bl
@@ -997,6 +1041,7 @@ class Agent:
         every 15 s from 90 s before it opens)."""
         r = r if isinstance(r, dict) else {}
         pw, reason = r.get("password"), r.get("reason")
+        note = note + EXAM_NOTE.get(r.get("exam") if isinstance(r.get("exam"), str) else "", "")
         if pw:
             changed, had = pw != self.pw, self.pw
             # Gated quiz: the server says when the code can next change (older servers: every 15 s).
@@ -1517,14 +1562,14 @@ class Agent:
         if not dev:
             # AI tabs opened before the quiz (an open chat keeps its connection past the hosts block) go
             # to about:blank; AI-answer searches go to plain Google web results.
-            hosts, paths = self.blocklist()
+            hosts, paths, exr = (tuple(self.blocklist()) + (None,))[:3]
             for (app, wi, ti, u) in tabs:
                 if wi < 0: continue
-                new = "about:blank" if blocked_tab(u, hosts, paths) else rewrite_search(u)
+                new = "about:blank" if blocked_tab(u, hosts, paths, exr) else rewrite_search(u)
                 if new: set_tab_url(app, wi, ti, new, u)
             # Firefox family: the AI-free results of a new search open in a new tab of that browser.
             gk = set((a, u) for (a, wi, _, u) in tabs if wi < 0)
-            todo = new_gecko_searches(tabs, getattr(self, "gecko_seen", gk), lambda u: blocked_tab(u, hosts, paths))
+            todo = new_gecko_searches(tabs, getattr(self, "gecko_seen", gk), lambda u: blocked_tab(u, hosts, paths, exr))
             self.gecko_seen = gk
             if todo:
                 procs = ps_procs()

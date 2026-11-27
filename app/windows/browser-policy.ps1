@@ -21,6 +21,14 @@ $ErrorActionPreference = "SilentlyContinue"
 
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BlockFile = Join-Path $Here "blocklist.txt"
+# Exam rules (27 Nov 2026): this exam's lists as the engine (lockqz.ps1) built them from the professor's rules, in this
+# admin-only folder: exam-blocklist.txt in place of blocklist.txt; exam.json says whether web search and translators are
+# open and, when all other websites are blocked, which sites are. No exam files: the policy as always.
+$ExamDir = if ($env:LOCKQZ_EXAM_DIR) { $env:LOCKQZ_EXAM_DIR } else { $Here }
+$Exam = $null
+if ((Test-Path -LiteralPath (Join-Path $ExamDir "exam.json")) -and (Test-Path -LiteralPath (Join-Path $ExamDir "exam-blocklist.txt"))) {
+  try { $Exam = Get-Content -LiteralPath (Join-Path $ExamDir "exam.json") -Raw -ErrorAction Stop | ConvertFrom-Json; $BlockFile = Join-Path $ExamDir "exam-blocklist.txt" } catch { $Exam = $null }
+}
 $BackupFile = if ($env:LOCKQZ_POLICY_BACKUP) { $env:LOCKQZ_POLICY_BACKUP } else { "$env:ProgramData\LOCKqz\policy-backup.json" }
 $PolicyRoot = "HKLM:\SOFTWARE\Policies"
 $CvPolicyRoot = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies"   # the older policy root (Paint's live here)
@@ -243,6 +251,51 @@ function Test-KeepProxy {
   if (-not $any) { return $false }
   return (-not (Test-DirectInternet))
 }
+function Get-ExamWeb {
+  # The sites open when the professor blocked all other websites (lower case hosts and host/paths), $null when not.
+  if ((-not $Exam) -or ($null -eq $Exam.web)) { return $null }
+  return ,@(@($Exam.web) | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLower() } |
+    Where-Object { ($_ -cmatch '^[a-z0-9-]+(\.[a-z0-9-]+)+$') -or ($_ -cmatch '^[a-z0-9.-]+\.[a-z]{2,}/[a-z0-9._~%/-]*$') })
+}
+function Get-FfWebExceptions($web) {
+  # Firefox: an exception beats every block, so an open site with a blocked part under it (an AI page, a blocked
+  # row's page) is not opened there at all; a host/path is opened as exactly that path.
+  $blocked = New-Object System.Collections.ArrayList
+  foreach ($l in [IO.File]::ReadAllLines($BlockFile)) { $b = $l.Trim().ToLower(); if ($b -and -not $b.StartsWith("#")) { $i = $b.IndexOf("/"); if ($i -lt 0) { [void]$blocked.Add(@($b, "")) } else { [void]$blocked.Add(@($b.Substring(0, $i), $b.Substring($i + 1))) } } }
+  $out = New-Object System.Collections.ArrayList
+  foreach ($w in $web) {
+    $i = $w.IndexOf("/"); $wh = $w; $wp = ""; if ($i -ge 0) { $wh = $w.Substring(0, $i); $wp = $w.Substring($i + 1) }
+    $hit = $false
+    foreach ($b in $blocked) {
+      if (-not $b[0].EndsWith($wh)) { continue }
+      if ((($b[0] -eq $wh) -or $b[0].EndsWith("." + $wh)) -and ((-not $wp) -or (($b[0] -eq $wh) -and ("/" + $b[1]).StartsWith("/" + $wp)))) { $hit = $true; break }
+    }
+    if ($hit) { continue }
+    if ($i -ge 0) { [void]$out.Add("*://*." + $w + "*") } else { [void]$out.Add("*://*." + $w + "/*") }
+  }
+  return ,@($out)
+}
+function Get-ExamLists($cBlock, $fBlock) {
+  # The professor's rules on the browser lists: no web search = no Google "Web" results either; all other websites
+  # blocked = "*" (Chromium; the AI list stays more specific, so it stays blocked) / <all_urls> (Firefox) with the open
+  # sites (and local files) as the exceptions.
+  $r = @{ cBlock = @($cBlock); cAllow = @($SearchAllow); fBlock = @($fBlock); fAllow = @($FfAllow); translate = $true; prefs = $FfPrefs }
+  if (-not $Exam) { return $r }
+  if ($Exam.search -eq $false) { $r.cAllow = @(); $r.fAllow = @() }
+  if ($Exam.translate -eq $false) {
+    $r.translate = $false
+    $p = [ordered]@{}; foreach ($k in $FfPrefs.Keys) { $p[$k] = $FfPrefs[$k] }; $p["browser.translations.enable"] = $false; $r.prefs = $p
+  }
+  $web = Get-ExamWeb
+  if ($null -ne $web) {
+    $r.cBlock = @(@("*") + @($cBlock) | Select-Object -Unique)
+    $r.cAllow = @(@($r.cAllow) + @($web) + @("file://*") | Select-Object -Unique)
+    $r.fBlock = @(@("<all_urls>") + @($fBlock) | Select-Object -Unique)
+    $exc = Get-FfWebExceptions $web
+    $r.fAllow = @(@($r.fAllow) + @($exc) + @("file:///*") | Select-Object -Unique)
+  }
+  return $r
+}
 function Get-PolicyPlan([bool]$KeepProxy = $false) {
   # Every change LOCKqz makes, as data: @{ op = "v"; path; name; value; kind } | @{ op = "list"; path; items }
   # | @{ op = "rlist"; path; items } (list REPLACED for the quiz, restored after) | @{ op = "ffprefs"; path; name; prefs }.
@@ -250,6 +303,7 @@ function Get-PolicyPlan([bool]$KeepProxy = $false) {
   $hosts = Get-HostEntries
   $cBlock = @($SearchBlock + @("javascript://*", "view-source:*") + $paths + $hosts | Select-Object -Unique)
   $fBlock = @($FfBlock + @($paths | ForEach-Object { "*://*." + $_ + "*" }) + @($hosts | ForEach-Object { "*://*." + $_ + "/*" }) | Select-Object -Unique)
+  $ex = Get-ExamLists $cBlock $fBlock   # the professor's rules for this exam (none: the lists as they are)
   $plan = New-Object System.Collections.ArrayList
   function V($p, $n, $v, $k = "DWord") { [void]$plan.Add(@{ op = "v"; path = $p; name = $n; value = $v; kind = $k }) }
   function L($p, $items) { [void]$plan.Add(@{ op = "list"; path = $p; items = @($items) }) }
@@ -282,8 +336,9 @@ function Get-PolicyPlan([bool]$KeepProxy = $false) {
     V $root "DefaultSearchProviderName" "Google (Web)" "String"
     V $root "DefaultSearchProviderSearchURL" "https://www.google.com/search?udm=14&q={searchTerms}" "String"
     V $root "DefaultSearchProviderSuggestURL" "https://www.google.com/complete/search?output=chrome&q={searchTerms}" "String"
-    L "$root\URLBlocklist" $cBlock
-    L "$root\URLAllowlist" $SearchAllow
+    L "$root\URLBlocklist" $ex.cBlock
+    L "$root\URLAllowlist" $ex.cAllow
+    if (-not $ex.translate) { V $root "TranslateEnabled" 0 }
     # Chromium only DISABLES blocklisted extensions and re-enables them when the entry is removed.
     L "$root\ExtensionInstallBlocklist" @("*")
     # Only the fixed safe list is exempt during the quiz (an existing allowlist could exempt an AI
@@ -309,8 +364,8 @@ function Get-PolicyPlan([bool]$KeepProxy = $false) {
   if (-not $KeepProxy) { V "$Firefox\Proxy" "Mode" "none" "String"; V "$Firefox\Proxy" "Locked" 1 }
   V $Firefox "IPProtectionAvailable" 0   # Firefox's built-in VPN (149+)
   V $Firefox "DisableDeveloperTools" 1
-  L "$Firefox\WebsiteFilter\Block" $fBlock
-  L "$Firefox\WebsiteFilter\Exceptions" $FfAllow
+  L "$Firefox\WebsiteFilter\Block" $ex.fBlock
+  L "$Firefox\WebsiteFilter\Exceptions" $ex.fAllow
   # GenerativeAI (Firefox 144+): chatbot, link previews, smart tab groups, Smart Window off.
   # Firefox IGNORES GenerativeAI when AIControls is set, so AIControls repeats the chatbot + Smart Window.
   foreach ($n in @("Enabled","Chatbot","LinkPreviews","TabGroups","SmartWindow")) { V "$Firefox\GenerativeAI" $n 0 }
@@ -321,7 +376,7 @@ function Get-PolicyPlan([bool]$KeepProxy = $false) {
     V "$Firefox\AIControls\$f" "Value" "blocked" "String"
     V "$Firefox\AIControls\$f" "Locked" 1
   }
-  [void]$plan.Add(@{ op = "ffprefs"; path = $Firefox; name = "Preferences"; prefs = $FfPrefs })
+  [void]$plan.Add(@{ op = "ffprefs"; path = $Firefox; name = "Preferences"; prefs = $ex.prefs })
   V "$PolicyRoot\Microsoft\Windows\WindowsCopilot" "TurnOffWindowsCopilot" 1
   V "$PolicyRoot\Microsoft\Windows\WindowsAI" "DisableAIDataAnalysis" 1
   V "$PolicyRoot\Microsoft\Windows\WindowsAI" "DisableClickToDo" 1
@@ -522,11 +577,12 @@ function Get-FirefoxFamilyDirs {
 function FirefoxPoliciesJson([string]$existing, [bool]$KeepProxy = $false) {
   $paths = Get-PathEntries
   $hosts = Get-HostEntries
-  $prefs = @{}; foreach ($k in $FfPrefs.Keys) { $prefs[$k] = @{ Value = $FfPrefs[$k]; Status = "locked" } }
+  $ex = Get-ExamLists @() @(@($FfBlock + @($paths | ForEach-Object { "*://*." + $_ + "*" }) + @($hosts | ForEach-Object { "*://*." + $_ + "/*" })) | Select-Object -Unique)
+  $prefs = @{}; foreach ($k in $ex.prefs.Keys) { $prefs[$k] = @{ Value = $ex.prefs[$k]; Status = "locked" } }
   $ours = @{
       DNSOverHTTPS = @{ Enabled = $false; Locked = $true }
       IPProtectionAvailable = $false
-      WebsiteFilter = @{ Block = @(@($FfBlock + @($paths | ForEach-Object { "*://*." + $_ + "*" }) + @($hosts | ForEach-Object { "*://*." + $_ + "/*" })) | Select-Object -Unique); Exceptions = $FfAllow }
+      WebsiteFilter = @{ Block = @($ex.fBlock); Exceptions = @($ex.fAllow) }
       GenerativeAI = @{ Enabled = $false; Chatbot = $false; LinkPreviews = $false; TabGroups = $false; SmartWindow = $false; Locked = $true }
       AIControls = @{ SidebarChatbot = @{ Value = "blocked"; Locked = $true }; SmartWindow = @{ Value = "blocked"; Locked = $true } }
       Preferences = $prefs

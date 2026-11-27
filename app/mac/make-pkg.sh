@@ -23,6 +23,7 @@ mkdir -p "$ROOT/$DESTREL"
 cp "$APP/lockqz.sh" "$APP/lockqzd.py" "$APP/lockqz-agent.py" "$APP/browser-policy.py" "$APP/blocklist.txt" "$APP/com.lockqz.pf.conf" "$ROOT/$DESTREL/"
 [ -f "$APP/lockqz-core.sh" ] && cp "$APP/lockqz-core.sh" "$ROOT/$DESTREL/" || true
 cp "$APP/extra-block.sh" "$ROOT/$DESTREL/"   # VPN/VM/remote/overlay/model/Apple Intelligence blockers (sourced by lockqz.sh)
+cp "$APP/rules.py" "$APP/rules-catalog.json" "$ROOT/$DESTREL/"   # the professor's exam rules -> this exam's lists
 cp "$APP/ensure-python.sh" "$APP/lockqz-boot.sh" "$APP/update.pub" "$APP/install.sh" "$APP/uninstall.sh" "$ROOT/$DESTREL/"   # python repair, launchd entry, release key, (un)installer
 chmod 755 "$ROOT/$DESTREL"/*.sh "$ROOT/$DESTREL"/*.py
 VERSION="$(tr -d '[:space:]' < "$APP/../VERSION" 2>/dev/null || echo 0.0.0)"

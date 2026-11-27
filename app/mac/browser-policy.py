@@ -92,6 +92,69 @@ ASSIST_EXTENSIONS = {"readwrite": ["inoeonmfapjbbkmdafoankkfajkcphgd"], "equatio
 # removed at unlock. Owned by root or ignored.
 ASSIST_FILE = os.environ.get("LOCKQZ_ASSIST_FILE") or os.path.join(os.path.dirname(BACKUP), "assist.json")
 
+# Exam rules (27 Nov 2026): what the engine built from the professor's rules for this exam (exam.json, root-owned; the
+# engine names it in LOCKQZ_EXAM and hands this exam's blocklist as LOCKQZ_BLOCKLIST). None: no rules, policy as always.
+EXAM_FILE = os.environ.get("LOCKQZ_EXAM") or ""
+
+def exam():
+    """{"web": [sites] or None, "search": bool, "translate": bool, ...} for this exam, {} without rules."""
+    if not EXAM_FILE: return {}
+    try:
+        st = os.stat(EXAM_FILE)
+        if os.geteuid() == 0 and (st.st_uid != 0 or st.st_mode & 0o022): return {}
+        with open(EXAM_FILE) as f: d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception: return {}
+
+def _web(ex):
+    """The sites a browser may open when the professor blocked all other websites ([] = none), None when not."""
+    w = ex.get("web") if isinstance(ex, dict) else None
+    if not isinstance(w, list): return None
+    return [x.lower() for x in w if isinstance(x, str) and (re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", x.lower()) or
+            re.fullmatch(r"[a-z0-9.-]+\.[a-z]{2,}/[a-z0-9._~%/-]*", x.lower()))]
+
+def exam_chromium(p, ex):
+    """The professor's rules on a Chromium policy: no web search (no Google "Web" results either), no translation,
+    and with all other websites blocked only the open sites ("*" blocked; a listed AI page stays blocked: the most
+    specific entry wins in Chromium, and the AI list is more specific than any open site)."""
+    if not ex: return
+    if ex.get("search") is False: p["URLAllowlist"] = [x for x in p.get("URLAllowlist", []) if x not in SEARCH_ALLOW]
+    if ex.get("translate") is False: p["TranslateEnabled"] = False
+    web = _web(ex)
+    if web is not None:
+        p["URLBlocklist"] = _union(["*"], p.get("URLBlocklist", []))
+        p["URLAllowlist"] = _union(p.get("URLAllowlist", []), web + ["file://*"])
+
+def exam_firefox(pol, ex, blocked):
+    """The same on a Firefox policy. Firefox's exceptions beat every block, so a site whose part is blocked (an AI page
+    under it, a blocked row's page) is not opened there at all. blocked = this exam's blocklist entries."""
+    if not ex: return
+    wf = pol["WebsiteFilter"]
+    if ex.get("search") is False: wf["Exceptions"] = []
+    if ex.get("translate") is False: pol["Preferences"]["browser.translations.enable"] = {"Value": False, "Status": "locked"}
+    web = _web(ex)
+    if web is None: return
+    def inside(b, w):   # blocklist entry b is the open site w or a part of it
+        bh, _, bp = b.partition("/"); wh, _, wp = w.partition("/")
+        return (bh == wh or bh.endswith("." + wh)) and (not wp or (bh == wh and ("/" + bp).startswith("/" + wp)))
+    exc = []
+    for w in web:
+        if any(inside(b, w) for b in blocked): continue
+        exc.append("*://*.%s*" % w if "/" in w else "*://*.%s/*" % w)
+    wf["Block"] = _union(["<all_urls>"], wf["Block"])
+    wf["Exceptions"] = _union(wf["Exceptions"], exc + ["file:///*"])
+
+def all_entries():
+    """Every entry of this exam's blocklist (hosts and host/paths), lower case."""
+    out = []
+    try:
+        with open(BLOCKLIST) as f:
+            for l in f:
+                l = l.strip().lower()
+                if l and not l.startswith("#") and " " not in l: out.append(l)
+    except Exception: pass
+    return out
+
 def assist_extensions():
     """Extra extension ids allowed for this student's locked quiz (professor's allowance), [] if none."""
     try:
@@ -415,6 +478,7 @@ def _candidates():
 
 def lock():
     changed, failed, extra, hosts = False, False, path_entries(), host_entries()
+    ex = exam(); blocked = all_entries() if ex else []
     jobs = [(d, chromium_policy(d), merge_chromium) for d in CHROMIUM] + \
            [(d, firefox_policy(), merge_firefox) for d in firefox_family_ids()] + \
            [(OFFICE, office_policy(), merge_plain)] + \
@@ -422,8 +486,10 @@ def lock():
     for d, pol, merge in jobs:
         if "URLBlocklist" in pol:   # Chromium: <= 1000 entries (ours ~330)
             pol["URLBlocklist"] = _union(pol["URLBlocklist"], extra + hosts)
+            exam_chromium(pol, ex)
         if "WebsiteFilter" in pol:  # Firefox: <= 1000 entries each list
             pol["WebsiteFilter"]["Block"] = _union(pol["WebsiteFilter"]["Block"], firefox_blocks(extra, hosts))
+            exam_firefox(pol, ex, blocked)
         try: changed = write(d, pol, merge) or changed
         except Exception as e:
             failed = True; print("LOCKqz policy: %s: %s" % (d, e), file=sys.stderr)

@@ -77,9 +77,11 @@ def _bkey(p): return hashlib.sha256(p.encode()).hexdigest()[:16] + ".json"
 def lock():
     m = _mac(); failed = False
     extra, hosts = m.path_entries(), m.host_entries()
+    ex = m.exam(); blocked = m.all_entries() if ex else []   # the professor's rules for this exam (none: as always)
     for path, pid in chromium_targets():
         pol = m.chromium_policy(pid)
         pol["URLBlocklist"] = m._union(pol["URLBlocklist"], extra + hosts)
+        m.exam_chromium(pol, ex)
         pol["IncognitoModeAvailability"] = 1      # no incognito: the session file cannot see those tabs
         pol["BrowserGuestModeEnabled"] = False
         pol["BrowserAddPersonEnabled"] = False
@@ -89,6 +91,7 @@ def lock():
     ff = m.firefox_policy()
     ff["DisablePrivateBrowsing"] = True           # private windows are not in the session store
     ff["WebsiteFilter"]["Block"] = m._union(ff["WebsiteFilter"]["Block"], m.firefox_blocks(extra, hosts))
+    m.exam_firefox(ff, ex, blocked)
     os.makedirs(BACKUP, exist_ok=True)
     for path in firefox_targets():
         try:

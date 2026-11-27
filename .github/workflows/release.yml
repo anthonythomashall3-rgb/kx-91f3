@@ -71,7 +71,7 @@ jobs:
           echo "$files" | grep -qE "$common|^app/windows/|^app/tests/test_windows_" && echo "win=true" >> "$GITHUB_OUTPUT" || echo "win=false" >> "$GITHUB_OUTPUT"
           # Linux shares lockqzd.py / lockqz-agent.py / browser-policy.py / lockqz-core.sh / blocklist.txt with the Mac.
           echo "$files" | grep -qE "^app/android/|^app/VERSION$|^\.github/" && echo "android=true" >> "$GITHUB_OUTPUT" || echo "android=false" >> "$GITHUB_OUTPUT"
-          echo "$files" | grep -qE "$common|^app/linux/|^app/mac/(lockqzd\.py|lockqz-agent\.py|browser-policy\.py|lockqz-core\.sh|blocklist\.txt)$|^app/tests/test_linux_" && echo "linux=true" >> "$GITHUB_OUTPUT" || echo "linux=false" >> "$GITHUB_OUTPUT"
+          echo "$files" | grep -qE "$common|^app/linux/|^app/mac/(lockqzd\.py|lockqz-agent\.py|browser-policy\.py|lockqz-core\.sh|blocklist\.txt|rules\.py|rules-catalog\.json)$|^app/tests/test_linux_" && echo "linux=true" >> "$GITHUB_OUTPUT" || echo "linux=false" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         if: steps.chg.outputs.deploy == 'true'
         with: { node-version: 22 }

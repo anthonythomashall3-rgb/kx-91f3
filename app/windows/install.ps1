@@ -137,7 +137,7 @@ Write-Host "== installing LOCKqz helper =="
 # The .exe installer already unpacks into $Dest and runs this script from there; copying a
 # file onto itself throws, so only copy when installing from a separate folder.
 if ((Resolve-Path $Here).Path.TrimEnd('\') -ne (Resolve-Path $Dest).Path.TrimEnd('\')) {
-  foreach ($f in "lockqz.ps1","lockqzd.ps1","lockqz-boot.ps1","blocklist.txt","browser-policy.ps1","lockqz-agent.ps1","install.ps1","uninstall.ps1","update.pub.xml") {
+  foreach ($f in "lockqz.ps1","lockqzd.ps1","lockqz-boot.ps1","blocklist.txt","browser-policy.ps1","lockqz-agent.ps1","install.ps1","uninstall.ps1","update.pub.xml","rules-catalog.json") {
     Copy-Item (Join-Path $Here $f) $Dest -Force
   }
 }

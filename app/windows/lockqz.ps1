@@ -129,6 +129,97 @@ $Latin1 = [Text.Encoding]::GetEncoding(28591)
 function Get-Domains {
   Get-Content $BlockFile | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith("#") }
 }
+# Exam rules (27 Nov 2026): what the professor lets students use in this exam. lockqzd.ps1 writes rules.json (this
+# admin-only folder) from the server's answer; Build-Exam turns it and rules-catalog.json (the Mac's file) into this
+# exam's lists: exam-blocklist.txt in place of blocklist.txt (hosts file; browser-policy.ps1 reads it too),
+# exam-apps.txt (programs closed / kept open / typed by the professor), exam.json (browser policy). No rules, or rules
+# that cannot be read: LOCKqz locks exactly as without them.
+$RulesFile = if ($env:LOCKQZ_RULES) { $env:LOCKQZ_RULES } else { "$StateDir\rules.json" }
+$ExamDir   = if ($env:LOCKQZ_EXAM_DIR) { $env:LOCKQZ_EXAM_DIR } else { $StateDir }
+$Catalog   = Join-Path $Here "rules-catalog.json"
+$ExamApps  = @()
+function LQ-Host([string]$v) {
+  # A site typed by the professor -> its host ("https://www.x.com/a" -> "x.com"), "" when it is not a site.
+  $s = ($v.Trim().ToLower() -replace '^[a-z][a-z0-9+.-]*://', '')
+  $s = (($s -split '[/?#]', 2)[0] -replace ':\d+$', '').TrimEnd('.')
+  if ($s.StartsWith("www.")) { $s = $s.Substring(4) }
+  if (($s.Length -le 100) -and ($s -cmatch '^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z][a-z0-9-]+$')) { return $s }
+  return ""
+}
+function LQ-Under([string]$h, [string]$d) { return (($h -eq $d) -or $h.EndsWith("." + $d)) }
+function Build-Exam([string]$rulesFile, [string]$blockFile, [string]$catalogFile) {
+  # -> @{ list; apps; exam } for this exam, $null when the rules or the catalog cannot be read. Same result as
+  # app/mac/rules.py build: an allowed row's own entries leave the list (no other entry ever does), a blocked row's
+  # entries and the professor's blocked sites join it (never Brightspace, sign-in or LOCKqz).
+  try { $cat = Get-Content -LiteralPath $catalogFile -Raw -ErrorAction Stop | ConvertFrom-Json } catch { return $null }
+  try { $rec = Get-Content -LiteralPath $rulesFile -Raw -ErrorAction Stop | ConvertFrom-Json } catch { return $null }
+  if ((-not $cat) -or (-not $cat.rows) -or (-not $rec)) { return $null }
+  $r = $rec; if ($rec.rules) { $r = $rec.rules }
+  if ($null -eq $r.b) { return $null }
+  $keys = @($cat.rows.PSObject.Properties | ForEach-Object { $_.Name })
+  $b = @{}; foreach ($k in @($r.b)) { if ($keys -ccontains [string]$k) { $b[[string]$k] = $true } }
+  $allowed = @($keys | Where-Object { -not $b.ContainsKey($_) }); $blocked = @($keys | Where-Object { $b.ContainsKey($_) })
+  $row = { param($k, $f) @(@($cat.rows.$k.$f) | Where-Object { $_ } | ForEach-Object { [string]$_ }) }
+  $gone = New-Object 'System.Collections.Generic.HashSet[string]'
+  foreach ($k in $allowed) { foreach ($e in @(& $row $k "hosts") + @(& $row $k "paths")) { [void]$gone.Add($e.ToLower()) } }
+  $have = New-Object 'System.Collections.Generic.HashSet[string]'
+  $list = New-Object System.Collections.ArrayList
+  foreach ($l in [IO.File]::ReadAllLines($blockFile)) { $e = $l.Trim().ToLower(); if ($e -and -not $e.StartsWith("#") -and -not $e.Contains(" ") -and -not $gone.Contains($e) -and $have.Add($e)) { [void]$list.Add($e) } }
+  $add = New-Object System.Collections.ArrayList
+  foreach ($k in $blocked) { foreach ($e in @(& $row $k "hosts") + @(& $row $k "paths")) { [void]$add.Add($e.ToLower()) } }
+  if ($b.ContainsKey("search")) { foreach ($e in @($cat.search_hosts)) { [void]$add.Add(([string]$e).ToLower()) } }
+  $keepSites = @(@($cat.base_allow) | ForEach-Object { ([string]$_).Split("/")[0] })
+  $typedIn = @(@($r.block) | Where-Object { $_ -is [string] } | Select-Object -First 20)
+  foreach ($x in $typedIn) {
+    $h = ""; if ($x -notmatch '\.exe$') { $h = LQ-Host $x }
+    if ($h -and -not @($keepSites | Where-Object { (LQ-Under $_ $h) -or (LQ-Under $h $_) }).Count) { [void]$add.Add($h) }
+  }
+  foreach ($e in $add) { if ((($e -cmatch '^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z][a-z0-9-]+$') -or ($e -cmatch '^[a-z0-9.-]+\.[a-z]{2,}/[a-z0-9._~%/-]*$')) -and $have.Add($e)) { [void]$list.Add($e) } }
+  $never = @(@($cat.never_close) | ForEach-Object { ([string]$_).ToLower() })
+  $apps = New-Object System.Collections.ArrayList
+  foreach ($k in $blocked) { foreach ($n in @(& $row $k "win")) { [void]$apps.Add(@("close", $n)) } }
+  foreach ($k in $allowed) { foreach ($n in @(& $row $k "win")) { [void]$apps.Add(@("keep", $n)) } }
+  foreach ($x in $typedIn) {
+    $n = $x; if ($x -match '\.(app|exe)$') { $n = $x -replace '\.(app|exe)$', '' } elseif (LQ-Host $x) { continue }
+    if (($n -cmatch "^[A-Za-z0-9][A-Za-z0-9 ._&+()'-]{0,59}$") -and ($never -notcontains $n.ToLower())) { [void]$apps.Add(@("typed", $n)) }
+  }
+  $web = $null
+  if ($b.ContainsKey("web")) {
+    $bh = @($list | Where-Object { -not $_.Contains("/") })
+    $allowIn = @(@($r.allow) | Where-Object { $_ -is [string] } | ForEach-Object { LQ-Host $_ } | Where-Object { $_ } | Select-Object -First 20)
+    $web = New-Object System.Collections.ArrayList
+    $cand = @(@($cat.base_allow) | ForEach-Object { [string]$_ })
+    foreach ($k in $allowed) { $cand += @(& $row $k "hosts") + @(& $row $k "paths") + @(& $row $k "web") }
+    $qh = [string]$rec.quiz_host; if ($qh -cmatch '^[a-z0-9-]+(\.[a-z0-9-]+)+$') { $cand += $qh }
+    foreach ($e in (@($cand) + @($allowIn))) {
+      $e = $e.ToLower(); if ($web -contains $e) { continue }
+      if (($allowIn -contains $e) -and @($bh | Where-Object { LQ-Under ($e.Split("/")[0]) $_ }).Count) { continue }   # a typed site never opens a blocked one
+      [void]$web.Add($e)
+    }
+  }
+  $lbl = [string]$r.label; if ($lbl.Length -gt 40) { $lbl = $lbl.Substring(0, 40) }
+  $exam = [ordered]@{ v = 1; label = $lbl; b = [object[]]@($blocked | Sort-Object); web = $null; search = (-not $b.ContainsKey("search")); translate = (-not $b.ContainsKey("translate")) }
+  if ($null -ne $web) { $exam["web"] = [object[]]@($web) }
+  return @{ list = @($list); apps = @($apps); exam = $exam }
+}
+function LQ-WriteIfChanged([string]$path, [string]$text) {
+  $cur = $null; try { $cur = [IO.File]::ReadAllText($path) } catch { }
+  if ($cur -ne $text) { [IO.File]::WriteAllText($path, $text, (New-Object Text.UTF8Encoding($false))) }
+}
+function Use-Exam {
+  # This exam's lists from the professor's rules (written only when they changed), before every layer reads them;
+  # none: the exam files go and LOCKqz locks as always.
+  $f = @("exam.json", "exam-blocklist.txt", "exam-apps.txt") | ForEach-Object { Join-Path $ExamDir $_ }
+  $e = $null; if (Test-Path -LiteralPath $RulesFile) { $e = Build-Exam $RulesFile (Join-Path $Here "blocklist.txt") $Catalog }
+  if (-not $e) { foreach ($x in $f) { Remove-Item -LiteralPath $x -Force -ErrorAction SilentlyContinue }; return }
+  try {
+    LQ-WriteIfChanged $f[1] ((@($e.list) -join "`n") + "`n")
+    LQ-WriteIfChanged $f[2] ((@($e.apps | ForEach-Object { $_[0] + "`t" + $_[1] }) -join "`n") + "`n")
+    LQ-WriteIfChanged $f[0] ($e.exam | ConvertTo-Json -Compress -Depth 4)
+    $script:BlockFile = $f[1]; $script:ExamApps = @($e.apps)
+  } catch { foreach ($x in $f) { Remove-Item -LiteralPath $x -Force -ErrorAction SilentlyContinue } }
+}
+function Clear-Exam { foreach ($n in @("exam.json", "exam-blocklist.txt", "exam-apps.txt")) { Remove-Item -LiteralPath (Join-Path $ExamDir $n) -Force -ErrorAction SilentlyContinue } }
 function Get-HostsLines($domains) {
   # A path entry (site.com/chat) can't be a hosts entry; browser-policy.ps1 blocks those URLs.
   $lines = @($MarkStart)
@@ -181,9 +272,15 @@ function Kill-AiAndTools {
   $want = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
   $wild = @()
   foreach ($a in $all) { if ($a -match '[*?\[]') { $wild += $a } else { [void]$want.Add([string]$a) } }
+  # Exam rules: the blocked rows' programs close too; an allowed row keeps its programs open (a chat app the professor
+  # allows); a program the professor typed closes only when it is not one of Windows' own.
+  $typed = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+  foreach ($x in @($ExamApps)) { if ($x[0] -eq "close") { [void]$want.Add([string]$x[1]) } elseif ($x[0] -eq "typed") { [void]$typed.Add([string]$x[1]) } }
+  foreach ($x in @($ExamApps)) { if ($x[0] -eq "keep") { [void]$want.Remove([string]$x[1]) } }
   foreach ($p in @(Get-Process -ErrorAction SilentlyContinue)) {
     $n = [string]$p.ProcessName; $hit = $want.Contains($n)
     if (-not $hit) { foreach ($w in $wild) { if ($n -like $w) { $hit = $true; break } } }
+    if ((-not $hit) -and $typed.Contains($n)) { try { $hit = [bool]($p.Path -and ($p.Path -notlike "$env:WINDIR\*")) } catch { } }
     if ($hit) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; continue }
     # A local model under any program name: a big program (over 1 GB in memory, not a browser or Office) whose
     # command line names a model file (llama.cpp -m x.gguf, MLX / transformers weights) or whose program file is
@@ -362,6 +459,7 @@ function Policy-Wait($h, $verb) {
 $script:LqSw = [Diagnostics.Stopwatch]::StartNew()
 function Lap([string]$n) { if ($env:LOCKQZ_TIMING) { Write-Host ("TIMING {0,-10} {1,6:N1} s" -f $n, $script:LqSw.Elapsed.TotalSeconds) } }
 function Do-Lock {
+  Use-Exam   # this exam's lists (the professor's rules), before every layer below reads them
   if ((Is-Locked) -and -not (Block-Intact)) {
     # Markers kept, AI lines deleted (admin edit): rewrite the block whole.
     $wrote = Write-Hosts ((Remove-Block (Read-Hosts)) + ((Get-HostsLines (Get-Domains)) -join "`r`n") + "`r`n") $false
@@ -413,8 +511,10 @@ function Do-Lock {
 
 function Do-Unlock {
   $wrote = $true
-  # The professor's per-quiz assistive-tool allowance ends with the lock (every unlock path runs here).
+  # The professor's per-quiz assistive-tool allowance and exam rules end with the lock (every unlock path runs here).
   Remove-Item -LiteralPath "$StateDir\assist.json" -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $RulesFile -Force -ErrorAction SilentlyContinue
+  Clear-Exam
   Lap "start"
   # Restores exactly the policy values that were there before the quiz (nothing if none were changed): started
   # now, beside the steps below.

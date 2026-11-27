@@ -24,6 +24,25 @@ STATUS="$STATE/status.json"
 WARM_IPS="${WARM_IPS:-$STATE/warm_ips}"
 WARM_MAX_AGE=43200
 source "$HERE/lockqz-core.sh"
+# Exam rules (27 Nov 2026): what the professor lets students use in this exam. The helper writes rules.json (root-only)
+# from the server's answer; rules.py (shared with the Mac) turns it into this exam's lists in $STATE. No rules: LOCKqz
+# locks exactly as without them.
+RULES="${LOCKQZ_RULES:-$STATE/rules.json}"
+EXAM_APPS=""
+exam_rules() {   # exam_rules [build]
+  local base="$BLOCKLIST"
+  if [ -f "$RULES" ] && [ -f "$HERE/rules.py" ]; then
+    if [ "${1:-}" = build ]; then
+      /usr/bin/env python3 "$HERE/rules.py" build "$RULES" "$base" "$STATE" linux >/dev/null 2>&1 || exam_clear
+    fi
+    if [ -s "$STATE/exam.json" ] && [ -s "$STATE/exam-blocklist.txt" ]; then
+      BLOCKLIST="$STATE/exam-blocklist.txt"; EXAM_APPS="$STATE/exam-apps.txt"; export LOCKQZ_EXAM="$STATE/exam.json"
+    fi
+  elif [ "${1:-}" = build ]; then exam_clear
+  fi
+  export LOCKQZ_BLOCKLIST="$BLOCKLIST"
+}
+exam_clear() { rm -f "$STATE/exam.json" "$STATE/exam-blocklist.txt" "$STATE/exam-apps.txt" 2>/dev/null || true; }
 
 say() { echo "LOCKqz: $*"; }
 need_root() { [ "$DRYRUN" = "1" ] && return; [ "$(id -u)" -eq 0 ] || { echo "LOCKqz: must run as root (or LOCKQZ_DRYRUN=1 to preview)." >&2; exit 1; }; }
@@ -106,10 +125,39 @@ models_by_file() {
     kill -9 "$pid" 2>/dev/null || true
   done
 }
+# Exam rules: the programs the blocked rows close; AI-list programs an allowed row keeps open (a chat app the
+# professor allows); programs the professor typed (only a signed-in person's own, never the system's).
+exam_apps() {   # -> EX_CLOSE / EX_KEEP / EX_TYPED
+  EX_CLOSE=(); EX_KEEP="|"; EX_TYPED=()
+  [ -n "$EXAM_APPS" ] && [ -f "$EXAM_APPS" ] || return 0
+  local t a
+  while IFS=$'\t' read -r t a; do
+    [ -n "$a" ] || continue
+    case "$t" in close) EX_CLOSE+=("$a") ;; keep) EX_KEEP="$EX_KEEP$(printf '%s' "$a" | tr '[:upper:]' '[:lower:]')|" ;; typed) EX_TYPED+=("$a") ;; esac
+  done < "$EXAM_APPS"
+}
+kept() {   # the names not kept open by an allowed row (no case)
+  [ "$EX_KEEP" = "|" ] && { printf '%s\n' "$@"; return 0; }
+  local n l; for n in "$@"; do l="$(printf '%s' "$n" | tr '[:upper:]' '[:lower:]')"; case "$EX_KEEP" in *"|$l|"*) ;; *) printf '%s\n' "$n" ;; esac; done; }
+close_typed() {
+  local a="$1" pid u
+  case "$a" in */*|.*) return 0 ;; esac
+  for pid in $(pgrep -x -- "$a" 2>/dev/null); do
+    u="$(ps -o uid= -p "$pid" 2>/dev/null | tr -d ' ')"
+    case "$u" in ''|*[!0-9]*) continue ;; esac
+    [ "$u" -ge 1000 ] || continue
+    if [ "$DRYRUN" = "1" ]; then echo "    [dry-run] would close (professor's list): $a"; continue; fi
+    kill "$pid" 2>/dev/null || true
+  done
+}
 close_apps() {
   [ "${LOCKQZ_NO_KILL:-0}" = 1 ] && return 0   # tests on a shared machine: never signal real processes
   models_by_file
-  _kill_list "AI app" "${AI_APPS[@]}"
+  exam_apps
+  local ai=() n
+  while IFS= read -r n; do [ -n "$n" ] && ai+=("$n"); done < <(kept "${AI_APPS[@]}")
+  _kill_list "AI app" ${ai[@]+"${ai[@]}"} ${EX_CLOSE[@]+"${EX_CLOSE[@]}"}
+  for n in ${EX_TYPED[@]+"${EX_TYPED[@]}"}; do close_typed "$n"; done
   _kill_list "local-model" "${LOCAL_MODEL_PROCS[@]}"; _kill_cmd_res "${LOCAL_MODEL_CMD_RES[@]}"
   _kill_list "VPN" "${VPN_APPS[@]}"; _kill_list "VM" "${VM_APPS[@]}"
   _kill_list "remote-desktop" "${REMOTE_APPS[@]}"; _kill_list "overlay" "${OVERLAY_APPS[@]}"
@@ -334,18 +382,22 @@ wild_off() {
 do_lock() {
   need_root
   if [ "$DRYRUN" = "1" ]; then
+    [ -s "$STATE/exam.json" ] && exam_rules
     say "[dry-run] would blackhole $(domains_from "$BLOCKLIST" | wc -l | tr -d ' ') domains, load nftables, flush DNS, write browser policies, close AI apps."
     close_apps; return 0
   fi
-  local already=0 rc=0; is_locked && already=1
+  local already=0 rc=0 changed=0; is_locked && already=1
   mkdir -p "$STATE"; [ -f "$BACKUP" ] || cp "$HOSTS" "$BACKUP" 2>/dev/null || true
+  exam_rules build   # this exam's lists (the professor's rules), before every layer below reads them
   chattr -i "$HOSTS" 2>/dev/null || true
+  [ "$already" = 1 ] && ! hosts_block_intact "$HOSTS" "$BLOCKLIST" && changed=1   # the exam's rules arrived or changed
   hosts_add_block "$HOSTS" "$BLOCKLIST" || rc=1
   is_locked || rc=1
   fw_on || rc=1
   policy lock || rc=1
   wild_on || true
   [ "$already" = 0 ] && { flush_dns; stop_services; }
+  [ "$changed" = 1 ] && flush_dns
   close_apps
   warm_apply
   write_status locked
@@ -365,12 +417,14 @@ do_unlock() {
   warm_clear
   flush_dns
   [ "$rc" = 0 ] && start_services
+  [ "$rc" = 0 ] && exam_clear   # the exam's lists end with it
   write_status unlocked
   [ "$rc" = 0 ] && say "UNLOCKED." || say "UNLOCK INCOMPLETE (a layer is still in place; will retry)."
   return $rc
 }
 do_status() {
   # LOCKED only while the hosts block is complete (same rule as the Mac): an edited block is put back by the next lock pass.
+  exam_rules   # this exam's list, as the last lock pass built it
   if hosts_block_intact "$HOSTS" "$BLOCKLIST"; then say "LOCKED"; else say "unlocked"; fi
   [ -f "$STATUS" ] && cat "$STATUS"
   return 0

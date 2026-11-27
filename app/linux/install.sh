@@ -23,7 +23,7 @@ r4BD1aDvg2xUpWn+sRxdskQPvbL0fC59hhGmkM7dLRat9Q08h2TDdxnVnpcTDjms
 /ewkWcV1hOiMr8LxliOQpaNDRucB6ZRIcookWq+pzpoLAgMBAAE=
 -----END PUBLIC KEY-----
 PEM
-FILES=(lockqz.sh lockqz-core.sh lockqzd.py lockqz-agent.py agent-mac.py browser-policy.py policy-mac.py blocklist.txt install.sh uninstall.sh update.pub)
+FILES=(lockqz.sh lockqz-core.sh lockqzd.py lockqz-agent.py agent-mac.py browser-policy.py policy-mac.py blocklist.txt install.sh uninstall.sh update.pub rules.py rules-catalog.json)
 
 while [ $# -gt 0 ]; do case "$1" in
   --api) API="$2"; shift 2;; --student) STUDENT="$2"; shift 2;; --fetch-only) FETCH_ONLY="$2"; shift 2;; *) shift;;
@@ -85,6 +85,8 @@ for f in "${FILES[@]}"; do [ -f "$APP/$f" ] && cp "$APP/$f" "$DEST/$f"; done
 [ -f "$DEST/lockqz-core.sh" ] || cp "$APP/../mac/lockqz-core.sh" "$DEST/lockqz-core.sh"
 [ -f "$DEST/blocklist.txt" ] || cp "$APP/../mac/blocklist.txt" "$DEST/blocklist.txt"
 [ -f "$DEST/update.pub" ]    || cp "$APP/../mac/update.pub" "$DEST/update.pub"
+[ -f "$APP/rules.py" ] || cp "$APP/../mac/rules.py" "$DEST/rules.py"
+[ -f "$APP/rules-catalog.json" ] || cp "$APP/../mac/rules-catalog.json" "$DEST/rules-catalog.json"
 chown -R root:root "$DEST"; chmod -R go-w "$DEST"; chmod 755 "$DEST"/*.sh "$DEST"/*.py
 python3 - "$DEST/config.json" "$API" "$DEVICE" "$STUDENT" <<'PY'
 import json,sys

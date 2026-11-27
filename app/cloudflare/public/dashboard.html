@@ -79,6 +79,42 @@
   ul.list .grow{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:3px}
   ul.list .t{font-size:15px;font-weight:600}ul.list .d{font-size:13px;color:#6b6861}
   @media(max-width:600px){ul.list li.ex{flex-wrap:wrap}ul.list li.ex .grow{flex:1 1 100%}ul.list li.ex .sw{margin-left:auto}}
+  /* Exam rules: the pill under an exam and its panel (what students can use) */
+  .rp{align-self:flex-start;display:inline-flex;align-items:center;gap:7px;white-space:nowrap;margin-top:6px;padding:0 12px;min-height:40px;border:1px solid #d9d5cc;border-radius:999px;background:#faf9f6;font-size:13px;font-weight:600;color:var(--ink)}
+  .rp:hover{background:#f1efe9}.rp .x{font-weight:500;color:var(--mute)}
+  .lqr{position:fixed;inset:0;background:rgba(20,18,14,.45);z-index:60;overflow:auto;padding:4vh 12px}
+  .lqr .pan{max-width:560px;margin:0 auto 4vh;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 40px rgba(20,18,14,.16);padding:24px 28px;display:flex;flex-direction:column;gap:18px}
+  .lqr .eb{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6b6861}
+  .lqr h2{margin:0;font-size:22px;font-weight:700;letter-spacing:-.01em;line-height:1.25}
+  .lqr .ai{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--mute)}
+  .lqr .ch{display:flex;align-items:center;gap:12px;width:100%;min-height:64px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:#fff;text-align:left}
+  .lqr .ch[aria-checked=true]{padding:11px 13px;border:2px solid var(--usc);background:#fff8f8}
+  .lqr .ring{width:20px;height:20px;flex-shrink:0;box-sizing:border-box;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid #b9b5ab}
+  .lqr .ch[aria-checked=true] .ring{border-color:var(--usc)}.lqr .ch[aria-checked=true] .ring::after{content:"";width:10px;height:10px;border-radius:50%;background:var(--usc)}
+  .lqr .ct{display:flex;flex-direction:column;gap:2px;flex:1 1 auto;min-width:0}.lqr .ct b{font-size:15px}.lqr .ct span{font-size:13px;color:var(--mute)}
+  .lqr .def{font-size:12px;font-weight:600;color:var(--mute);background:#f1efe9;border-radius:6px;padding:2px 8px}
+  .lqr input[type=search],.lqr input[type=text]{width:100%;min-height:44px;box-sizing:border-box;padding:0 12px;border:1px solid #cfccc4;border-radius:10px;font:inherit;font-size:15px}
+  .lqr .grp{border:1px solid #ebe8e1;border-radius:12px;overflow:hidden}
+  .lqr .gh{display:flex;align-items:center;gap:10px;width:100%;min-height:48px;padding:0 14px;background:#faf9f6;text-align:left}
+  .lqr .gh b{flex:1 1 auto;font-size:14px}.lqr .gh span{font-size:12.5px;color:var(--mute)}.lqr .gh svg{flex-shrink:0;transition:transform .15s}.lqr .gh[aria-expanded=true] svg{transform:rotate(180deg)}
+  .lqr .rw{display:flex;align-items:center;gap:12px;padding:10px 14px;border-top:1px solid #efece6}
+  .lqr .rt{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px}.lqr .rt b{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:14px}
+  .lqr .rt span{font-size:12.5px;color:#6b6861}.lqr .rt .w{font-weight:500;color:var(--warn)}
+  .lqr .tag{font-size:11px;font-weight:600;line-height:18px;color:#6a4a00;background:var(--warnbg);border:1px solid var(--warnline);border-radius:5px;padding:0 6px}
+  .lqr .seg{display:flex;flex-shrink:0;border:1px solid #d9d5cc;border-radius:10px;overflow:hidden}
+  .lqr .seg button{min-height:44px;padding:0 12px;font-size:13px;font-weight:600;color:var(--mute);background:#fff}
+  .lqr .seg button.b[aria-pressed=true]{background:var(--usc);color:#fff}.lqr .seg button.a[aria-pressed=true]{background:var(--ok);color:#fff}
+  .lqr .add{display:flex;gap:8px}.lqr .add input{flex:1 1 auto;min-width:0}
+  .lqr .chips{display:flex;flex-wrap:wrap;gap:6px}.lqr .chip{display:inline-flex;align-items:center;padding-left:12px;border-radius:999px;font-size:13px;font-weight:600}
+  .lqr .chip.a{background:var(--okbg);color:#0f5a25}.lqr .chip.b{background:#fff1f1;color:var(--usc)}
+  .lqr .chip button{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;font-size:16px;color:inherit}
+  .lqr .box{display:flex;flex-direction:column;gap:10px;padding:14px 16px;border-radius:12px}
+  .lqr .box.o{background:#f1faf3;border:1px solid #bfe3c9}.lqr .box.k{background:#f6f5f2;border:1px solid #ebe8e1}
+  .lqr .box .h{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#6b6861}.lqr .box.o .h{color:#0f5a25}
+  .lqr .box .i{display:flex;align-items:flex-start;gap:10px}.lqr .box .i div{display:flex;flex-direction:column;gap:1px}.lqr .box .i b{font-size:14px}.lqr .box .i span{font-size:12.5px;color:#6b6861}
+  .lqr .all{display:flex;align-items:center;gap:10px;min-height:44px;font-size:14px;cursor:pointer}.lqr .all input{width:18px;height:18px;margin:0;accent-color:var(--usc)}
+  .lqr .foot{display:flex;align-items:center;justify-content:flex-end;gap:10px}.lqr .foot .m{margin-right:auto;font-size:14px;font-weight:600;color:var(--usc)}
+  @media(max-width:600px){.lqr .pan{padding:18px 16px}.lqr .rw{padding:10px 10px}.lqr .seg button{padding:0 9px}}
   .dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;background:var(--off)}
   .dot.ok{background:var(--ok)}.dot.warn{background:#d97706}.dot.red{background:var(--usc)}
   .st{font-size:13px;font-weight:500;color:#6b6861;white-space:nowrap}.st.ok{color:var(--ok)}.st.warn{color:var(--warn)}.st.red{color:var(--usc);font-weight:700}
@@ -620,7 +656,7 @@ function viewClass(ou){
   <div class="note warn"><span>${HIDDEN_TXT()}</span></div>
   <section class="card"><div class="hrow"><h2>Exams</h2></div><ul class="list">${s.cur.map(q=>`<li><div class="grow"><span class="t">${esc(q.name)}</span><span class="d">${q.active===0?"hidden in Brightspace · ":""}${span(q)}</span></div></li>`).join("") || `<li class="d">No upcoming exams in Brightspace.</li>`}</ul></section>`;
   const row = q => { const on=!!q.password, p = pend(q), lv = `#live/${esc(ou)}-${esc(q.qi)}`;
-    return `<li class="ex"><div class="grow"><span class="t" style="color:${on?'var(--ink)':'#6b6861'}">${esc(q.name)}</span><span class="d">${q.active===0?"hidden in Brightspace · ":""}${span(q)}${live(q)?` · <a href="${lv}">in progress — watch</a>`:on?` · <a href="${lv}">watch live</a>`:""}</span></div>
+    return `<li class="ex"><div class="grow"><span class="t" style="color:${on?'var(--ink)':'#6b6861'}">${esc(q.name)}</span><span class="d">${q.active===0?"hidden in Brightspace · ":""}${span(q)}${live(q)?` · <a href="${lv}">in progress — watch</a>`:on?` · <a href="${lv}">watch live</a>`:""}</span>${rulePill(c,q)}</div>
       <button class="sw" aria-pressed="${on}" aria-label="Protect this exam" data-ou="${esc(ou)}" data-qi="${esc(q.qi)}" onclick="this.disabled=true;setQuiz(this.dataset.ou,this.dataset.qi,${!on})"><b class="st ${p?'warn':on?'ok':''}" style="min-width:110px;text-align:right">${on?(p?"Waiting for Brightspace":"Protected"):(p?"Off · 1 click left":"Not protected")}</b><i></i></button></li>`; };
   return `${BACK('', 'All classes')}
   <div class="band"><div><h1 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-.015em">${esc(cname(c))}</h1><p class="sub">${esc(c.code||"")}${c.code?" · ":""}${pl(c.students.length, "student")} · from Brightspace, updated ${ago(c.synced_at)}</p></div>
@@ -648,6 +684,156 @@ const oldestSync = () => BS.courses.length ? (BS.courses.map(c=>c.synced_at||"")
 // otherwise off while locked; screen readers, dictation, zoom and text-to-speech apps always keep working.
 const ASSIST = {readwrite:"Read&Write", equatio:"Equatio", cowriter:"Co:Writer", snapread:"Snap&Read", readaloud:"Read Aloud"};
 const assistBox = (ou, x) => !x.email ? "" : `<details class="as" style="font-size:12px;color:var(--muted,#777)"><summary>Assistive tools${(x.assist||[]).length?": "+esc((x.assist||[]).map(k=>ASSIST[k]||k).join(", ")):""}</summary>${Object.keys(ASSIST).map(k=>`<label style="margin-right:10px;white-space:nowrap"><input type="checkbox" data-ou="${esc(ou)}" data-em="${esc(x.email)}" data-tool="${k}"${(x.assist||[]).includes(k)?" checked":""} onchange="setAssist(this)"> ${esc(ASSIST[k])}</label>`).join("")}</details>`;
+// ---- EXAM RULES ---- What students can use in an exam beside Brightspace (owner, 27 Nov 2026). The professor picks one
+// of three choices or sets each row; AI is always blocked and has no row. Row keys = mac/rules-catalog.json (each app maps
+// a row to its own programs and addresses). Messaging and the rows with AI inside start blocked.
+const RG = [
+  { id: "docs", t: "Documents and spreadsheets", rows: [
+    { k: "word", t: "Word", d: "Desktop and web · Copilot stays off" }, { k: "excel", t: "Excel", d: "Desktop and web · Copilot stays off" },
+    { k: "powerpoint", t: "PowerPoint", d: "Desktop and web · Copilot stays off" }, { k: "gdocs", t: "Google Docs", d: "Gemini stays off" },
+    { k: "gsheets", t: "Google Sheets", d: "Gemini stays off" }, { k: "gslides", t: "Google Slides", d: "Gemini stays off" },
+    { k: "iwork", t: "Pages, Numbers, Keynote", d: "Apple Intelligence stays off" } ] },
+  { id: "files", t: "Files and cloud storage", rows: [
+    { k: "gdrive", t: "Google Drive", d: "Gemini stays off" }, { k: "onedrive", t: "OneDrive and SharePoint", d: "Copilot stays off" },
+    { k: "icloud", t: "iCloud Drive", d: "" }, { k: "dropbox", t: "Dropbox", d: "Dropbox AI stays off" }, { k: "box", t: "Box", d: "Box AI stays off" } ] },
+  { id: "notes", t: "Notes", rows: [
+    { k: "applenotes", t: "Apple Notes", d: "Apple Intelligence stays off" }, { k: "onenote", t: "OneNote", d: "Copilot stays off" },
+    { k: "obsidian", t: "Obsidian", d: "" }, { k: "plainnotes", t: "Simplenote, Joplin", d: "" }, { k: "sticky", t: "Sticky notes", d: "Stickies, Sticky Notes" } ] },
+  { id: "read", t: "Reading and textbooks", rows: [
+    { k: "pdf", t: "PDF readers", d: "Preview, Adobe Acrobat · Acrobat AI stays off" },
+    { k: "ebooks", t: "E-textbooks", d: "VitalSource, RedShelf, Kindle, Pearson, McGraw Hill, Cengage · their AI stays off" } ] },
+  { id: "math", t: "Math and calculators", rows: [
+    { k: "calc", t: "Calculator", d: "The computer's own" }, { k: "desmos", t: "Desmos", d: "Graphing calculator" }, { k: "geogebra", t: "GeoGebra", d: "" },
+    { k: "solvers", t: "Math solvers", d: "Wolfram|Alpha, Symbolab, Mathway, Photomath", ai: true } ] },
+  { id: "code", t: "Coding and data", rows: [
+    { k: "python", t: "Python and Jupyter", d: "" }, { k: "rstudio", t: "RStudio", d: "" }, { k: "matlab", t: "MATLAB", d: "" },
+    { k: "stats", t: "Stata, SPSS, SAS", d: "" }, { k: "vscode", t: "VS Code", d: "AI add-ons stay off" } ] },
+  { id: "web", t: "Websites", rows: [
+    { k: "search", t: "Web search", d: "Google, Bing · AI answers stay off" }, { k: "wiki", t: "Wikipedia", d: "" },
+    { k: "web", t: "All other websites", d: "Any site that is not AI" } ] },
+  { id: "msg", t: "Messaging", rows: [
+    { k: "text", t: "Texting", d: "Messages, WhatsApp, Signal, Telegram" }, { k: "chat", t: "Chat apps", d: "Discord, Slack, Messenger, GroupMe, WeChat" },
+    { k: "email", t: "Email", d: "Gmail, Outlook, Mail" }, { k: "calls", t: "Video calls", d: "Zoom, Teams, FaceTime, Google Meet", n: "Allow for an exam watched over Zoom." } ] },
+  { id: "ai", t: "Apps and sites with AI inside", rows: [
+    { k: "youtube", t: "YouTube", d: "Videos", ai: true }, { k: "social", t: "Social media", d: "Instagram, TikTok, Facebook, Snapchat, Reddit, X", ai: true },
+    { k: "homework", t: "Homework help", d: "Chegg, Course Hero, Quizlet, Studocu", ai: true }, { k: "writing", t: "Writing helpers", d: "Grammarly, QuillBot", ai: true },
+    { k: "translate", t: "Translators", d: "Google Translate, DeepL", ai: true } ] } ];
+const RKEYS = RG.flatMap(g => g.rows.map(r => r.k));
+const ROFF = RG.flatMap(g => g.rows.filter(r => g.id === "msg" || r.ai).map(r => r.k));
+const RPRE = { open: ROFF, notes: [...ROFF, "search", "wiki", "web"] };
+const RLBL = { open: "Notes + internet", notes: "Notes only", custom: "Custom" };
+const RSUB = { open: "Everything except AI and messaging.", notes: "Brightspace, notes, files and textbooks. No other websites.", custom: "Pick each app and website." };
+const ROPEN = [["Brightspace", "The exam itself"], ["Files on the computer", "Finder, File Explorer, downloads"], ["Accessibility tools", "Screen readers, the computer's own dictation, zoom"]];
+const RALWAYS = [["AI chat and AI websites", "ChatGPT, Claude, Gemini, Copilot, Perplexity"], ["AI inside apps and browsers", "Copilot in Word, Gemini in Docs, Apple Intelligence"],
+  ["AI note apps", "Notion, Evernote, Goodnotes, Otter"], ["Cheating tools", "Hidden screen overlays, remote control, virtual machines, VPNs"]];
+// A site or program typed in "Also allow / Also block" that is a row: that row's switch moves instead.
+const RSITES = { youtube: ["youtube.com", "youtu.be"], social: ["instagram.com", "tiktok.com", "facebook.com", "snapchat.com", "reddit.com", "x.com", "twitter.com", "threads.net"],
+  homework: ["chegg.com", "coursehero.com", "quizlet.com", "studocu.com", "knowunity.com", "brainly.com"], writing: ["grammarly.com", "quillbot.com"],
+  translate: ["translate.google.com", "deepl.com"], solvers: ["wolframalpha.com", "symbolab.com", "mathway.com", "photomath.com"],
+  text: ["messages.google.com", "whatsapp.com", "telegram.org", "signal.org"], chat: ["discord.com", "slack.com", "messenger.com", "groupme.com", "wechat.com"],
+  email: ["mail.google.com", "gmail.com", "outlook.live.com", "outlook.office.com", "mail.yahoo.com"], calls: ["zoom.us", "teams.microsoft.com", "meet.google.com", "facetime.apple.com", "webex.com"],
+  wiki: ["wikipedia.org"], desmos: ["desmos.com"], geogebra: ["geogebra.org"], gdrive: ["drive.google.com"], onedrive: ["onedrive.live.com", "sharepoint.com"],
+  dropbox: ["dropbox.com"], box: ["box.com"], gdocs: ["docs.google.com"], search: ["google.com", "bing.com", "duckduckgo.com"],
+  ebooks: ["vitalsource.com", "redshelf.com", "pearson.com", "mheducation.com", "cengage.com"], vscode: ["vscode.dev"], rstudio: ["posit.cloud"] };
+const RNAMES = { zoom: "calls", teams: "calls", facetime: "calls", webex: "calls", skype: "calls", slack: "chat", discord: "chat", messenger: "chat", groupme: "chat", wechat: "chat",
+  messages: "text", imessage: "text", whatsapp: "text", signal: "text", telegram: "text", outlook: "email", gmail: "email", mail: "email", grammarly: "writing", quillbot: "writing",
+  deepl: "translate", "google translate": "translate", wolfram: "solvers", "wolfram alpha": "solvers", symbolab: "solvers", mathway: "solvers", photomath: "solvers",
+  jupyter: "python", anaconda: "python", pycharm: "python", stata: "stats", spss: "stats", sas: "stats", acrobat: "pdf", preview: "pdf", kindle: "ebooks", vitalsource: "ebooks" };
+const rHost = v => { let h = String(v || "").trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, "").replace(/[/?#].*$/, "").replace(/:\d+$/, ""); if (h.startsWith("www.")) h = h.slice(4);
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z][a-z0-9-]+$/.test(h) ? h : ""; };
+const rRowOf = v => { const h = rHost(v), n = String(v || "").trim().toLowerCase().replace(/\.(app|exe)$/, "");
+  if (h) { for (const k in RSITES) if (RSITES[k].some(d => h === d || h.endsWith("." + d))) return k; return ""; }
+  if (RNAMES[n]) return RNAMES[n];
+  const r = RG.flatMap(g => g.rows).find(r => r.t.toLowerCase() === n || r.t.toLowerCase().split(/,\s*| and /).includes(n)); return r ? r.k : ""; };
+// The rule an exam follows: its own, else its class's, else the default.
+const ruleFor = (c, q) => q.rules || c.rules || { p: "open", b: RPRE.open, allow: [], block: [] };
+const rulePill = (c, q) => !BS.rules_on || !q.password ? "" : `<button type="button" class="rp" data-ou="${esc(c.ou)}" data-qi="${esc(q.qi)}" onclick="openRules(this.dataset.ou,this.dataset.qi)" aria-label="What students can use in ${esc(q.name)}: ${esc(RLBL[ruleFor(c, q).p] || "Custom")}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#990000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>${esc(RLBL[ruleFor(c, q).p] || "Custom")}${q.rules ? ` <span class="x">· this exam</span>` : ""}<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b6861" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></button>`;
+let RS = null;   // the open panel
+function openRules(ou, qi){
+  const c = BS.courses.find(x => String(x.ou) === String(ou)), q = c && c.quizzes.find(x => String(x.qi) === String(qi)); if (!q) return;
+  const r = ruleFor(c, q);
+  RS = { ou: String(ou), qi: String(qi), exam: q.name, cls: cname(c), p: RLBL[r.p] ? r.p : "custom", b: new Set(r.b || []), allow: [...(r.allow || [])], block: [...(r.block || [])],
+    all: !q.rules, own: c.quizzes.filter(x => x.rules && String(x.qi) !== String(qi)).map(x => x.name), q: "", shut: {}, msg: "", busy: false, back: document.activeElement };
+  const w = document.createElement("div"); w.className = "lqr"; w.id = "lqrules";
+  w.addEventListener("click", e => { if (e.target === w) return closeRules(); const t = e.target.closest("[data-act]"); if (t) rAct(t.dataset.act, t.dataset.v, t); });
+  w.addEventListener("keydown", e => { if (e.key === "Escape") closeRules();
+    if (e.key === "Enter" && (e.target.id === "lqr-allow" || e.target.id === "lqr-block")) { e.preventDefault(); rAct(e.target.id === "lqr-allow" ? "addA" : "addB"); } });
+  w.addEventListener("input", e => { if (e.target.id === "lqr-find") { RS.q = e.target.value; rDraw("groups"); } });
+  document.body.appendChild(w); rDraw(); w.querySelector(".pan").focus();
+}
+function closeRules(){ const w = $("lqrules"); if (w) w.remove(); const b = RS && RS.back; RS = null; if (b && b.focus) try { b.focus(); } catch {} }
+function rSet(k, v){ if (v) RS.b.add(k); else RS.b.delete(k); RS.p = "custom"; RS.msg = ""; }
+function rAdd(which){
+  const inp = $(which === "a" ? "lqr-allow" : "lqr-block"), v = String(inp.value || "").trim(); if (!v) return;
+  const row = rRowOf(v);
+  if (row) { rSet(row, which === "b"); const g = RG.find(g => g.rows.some(r => r.k === row)); if (g) RS.shut[g.id] = false; }
+  else if (which === "a") { const h = rHost(v); if (!h) { RS.msg = "Type a website, like investopedia.com."; return rDraw(); } if (!RS.allow.includes(h)) RS.allow.push(h); RS.p = "custom"; }
+  else { const h = rHost(v) || v; if (!RS.block.some(x => x.toLowerCase() === h.toLowerCase())) RS.block.push(h); RS.p = "custom"; }
+  inp.value = ""; RS.msg = ""; rDraw(); const n = $(which === "a" ? "lqr-allow" : "lqr-block"); if (n) n.focus();
+}
+async function rSave(){
+  if (RS.busy) return; RS.busy = true; RS.msg = ""; rDraw("foot");
+  const d = await post("/rules", { ou: RS.ou, qi: RS.qi, all: RS.all, rules: { p: RS.p, b: RKEYS.filter(k => RS.b.has(k)), allow: RS.allow, block: RS.block } });
+  if (!RS) return;
+  if (d.error) { RS.busy = false; RS.msg = d.error; return rDraw("foot"); }
+  closeRules(); await refresh(); route();
+}
+function rAct(a, v, el){
+  if (a === "pick") { RS.p = v; if (v !== "custom") { RS.b = new Set(RPRE[v]); RS.allow = []; RS.block = []; } RS.msg = ""; return rDraw(); }
+  if (a === "blk") { rSet(v, true); return rDraw(); }
+  if (a === "alw") { rSet(v, false); return rDraw(); }
+  if (a === "grp") { RS.shut[v] = !RS.shut[v]; return rDraw("groups"); }
+  if (a === "addA") return rAdd("a");
+  if (a === "addB") return rAdd("b");
+  if (a === "rmA") { RS.allow = RS.allow.filter(x => x !== v); return rDraw(); }
+  if (a === "rmB") { RS.block = RS.block.filter(x => x !== v); return rDraw(); }
+  if (a === "all") { RS.all = el.checked; return rDraw("foot"); }
+  if (a === "cancel") return closeRules();
+  if (a === "save") return rSave();
+}
+const rIco = { lock: `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#990000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:2px"><path d="M8 11V7a4 4 0 0 1 8 0v4"></path><rect x="5" y="11" width="14" height="10" rx="2" fill="#990000"></rect></svg>`,
+  ok: `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1a7f37" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:3px"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>`,
+  chev: `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b6861" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>` };
+function rGroups(){
+  const q = RS.q.trim().toLowerCase(), out = [];
+  for (const g of RG) {
+    const rows = g.rows.filter(r => !q || (r.t + " " + r.d).toLowerCase().includes(q)); if (!rows.length) continue;
+    const nB = g.rows.filter(r => RS.b.has(r.k)).length, nA = g.rows.length - nB, open = q ? true : !RS.shut[g.id];
+    out.push(`<div class="grp"><button type="button" class="gh" data-act="grp" data-v="${g.id}" aria-expanded="${open}"><b>${esc(g.t)}</b><span>${nB === 0 ? "all allowed" : nA === 0 ? "all blocked" : `${nA} allowed · ${nB} blocked`}</span>${rIco.chev}</button>${open ? rows.map(r => { const bl = RS.b.has(r.k);
+      return `<div class="rw"><div class="rt"><b>${esc(r.t)}${r.ai ? `<span class="tag">AI inside</span>` : ""}</b>${r.d ? `<span>${esc(r.d)}</span>` : ""}${r.n ? `<span>${esc(r.n)}</span>` : ""}${r.ai && !bl ? `<span class="w">Its AI works too.</span>` : ""}</div>
+        <div class="seg" role="group" aria-label="${esc(r.t)}"><button type="button" class="b" data-act="blk" data-v="${r.k}" aria-pressed="${bl}">Blocked</button><button type="button" class="a" data-act="alw" data-v="${r.k}" aria-pressed="${!bl}">Allowed</button></div></div>`; }).join("") : ""}</div>`);
+  }
+  return out.join("") || `<div class="sub">Not in the list: add it below.</div>`;
+}
+function rFoot(){
+  return `<label class="all"><input type="checkbox" data-act="all"${RS.all ? " checked" : ""}>Use for every exam in ${esc(RS.cls)}</label>
+    ${RS.all && RS.own.length ? `<div class="sub" style="margin-top:-12px">Ends the own rules of ${esc(RS.own.join(", "))}.</div>` : ""}
+    <div class="foot">${RS.msg ? `<span class="m" role="alert">${esc(RS.msg)}</span>` : ""}<button type="button" class="btn" data-act="cancel">Cancel</button><button type="button" class="btn prime" data-act="save"${RS.busy ? " disabled" : ""}>${RS.busy ? "Saving…" : "Save"}</button></div>`;
+}
+function rDraw(part){
+  const w = $("lqrules"); if (!w || !RS) return;
+  if (part === "groups") { const g = w.querySelector("#lqr-groups"); if (g) { g.innerHTML = rGroups(); return; } }
+  if (part === "foot") { const f = w.querySelector("#lqr-foot"); if (f) { f.innerHTML = rFoot(); return; } }
+  const keepA = $("lqr-allow") ? $("lqr-allow").value : "", keepB = $("lqr-block") ? $("lqr-block").value : "";
+  const cust = RS.p === "custom";
+  w.innerHTML = `<div class="pan" role="dialog" aria-modal="true" aria-labelledby="lqr-h" tabindex="-1">
+    <div style="display:flex;flex-direction:column;gap:6px"><div class="eb">${esc(RS.exam)}</div><h2 id="lqr-h">What can students use?</h2><div class="ai">${rIco.lock}AI is always blocked.</div></div>
+    <div role="radiogroup" aria-label="What students can use" style="display:flex;flex-direction:column;gap:8px">${["open", "notes", "custom"].map(k => `<button type="button" class="ch" role="radio" aria-checked="${RS.p === k}" data-act="pick" data-v="${k}"><span class="ring" aria-hidden="true"></span><span class="ct"><b>${RLBL[k]}</b><span>${RSUB[k]}</span></span>${k === "open" ? `<span class="def">Default</span>` : ""}</button>`).join("")}</div>
+    ${cust ? `<div style="display:flex;flex-direction:column;gap:14px">
+      <input id="lqr-find" type="search" placeholder="Find an app or website" aria-label="Find an app or website" value="${esc(RS.q)}">
+      <div id="lqr-groups" style="display:flex;flex-direction:column;gap:14px">${rGroups()}</div>
+      <div style="display:flex;flex-direction:column;gap:8px"><label for="lqr-allow" style="font-size:14px;font-weight:600">Also allow a website</label>
+        <div class="add"><input id="lqr-allow" type="text" placeholder="investopedia.com" autocomplete="off"><button type="button" class="btn" data-act="addA">Add</button></div>
+        <div class="chips">${RS.allow.map(x => `<span class="chip a">${esc(x)}<button type="button" data-act="rmA" data-v="${esc(x)}" aria-label="Remove ${esc(x)}">×</button></span>`).join("")}</div></div>
+      <div style="display:flex;flex-direction:column;gap:8px"><label for="lqr-block" style="font-size:14px;font-weight:600">Also block an app or website</label>
+        <div class="add"><input id="lqr-block" type="text" placeholder="Spotify, khanacademy.org" autocomplete="off"><button type="button" class="btn" data-act="addB">Add</button></div>
+        <div class="chips">${RS.block.map(x => `<span class="chip b">${esc(x)}<button type="button" data-act="rmB" data-v="${esc(x)}" aria-label="Remove ${esc(x)}">×</button></span>`).join("")}</div></div>
+      <div class="box o"><div class="h">Always open</div>${ROPEN.map(([t, d]) => `<div class="i">${rIco.ok}<div><b>${t}</b><span>${d}</span></div></div>`).join("")}</div>
+      <div class="box k"><div class="h">Always blocked</div>${RALWAYS.map(([t, d]) => `<div class="i">${rIco.lock}<div><b>${t}</b><span>${d}</span></div></div>`).join("")}</div>
+    </div>` : ""}
+    <div id="lqr-foot" style="display:flex;flex-direction:column;gap:18px">${rFoot()}</div></div>`;
+  if ($("lqr-allow")) $("lqr-allow").value = keepA; if ($("lqr-block")) $("lqr-block").value = keepB;
+}
 async function setAssist(cb){
   const box = cb.closest("details"), all = [...box.querySelectorAll("input[data-tool]")];
   all.forEach(i=>i.disabled=true);

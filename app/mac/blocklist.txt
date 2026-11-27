@@ -365,7 +365,7 @@ anakin.ai
 notegpt.io
 perchance.org/ai-chat
 
-# Audit 27 Oct 2026 (Anthony: AI inside other apps + more workarounds). An AI built into another app
+# Audit 27 Oct 2026 (owner: AI inside other apps + more workarounds). An AI built into another app
 # (Claude for Excel, Copilot in Word/Excel/PowerPoint/Outlook, editor assistants, Raycast AI ...) still has
 # to reach its provider over the network: these are the provider / back-end hosts such add-ins call.
 # Microsoft Copilot inside Office (Augmentation Loop service) + Bing's Copilot Search page

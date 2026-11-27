@@ -69,5 +69,26 @@ try {
   const list = await em.evaluate(() => new Promise(r => chrome.management.getAll(l => r(l.map(e => ({ n: e.name, en: e.enabled }))))));
   const t = list.find(e => e.n === "AI helper test");
   t && t.en === false ? ok("an installed unpacked AI extension is disabled during the quiz") : bad("extension state: " + JSON.stringify(list));
+  console.log("T4 exam rules: 'Notes only' (all other websites blocked) loaded by the real Chromium");
+  const ed = mkdtempSync(join(tmpdir(), "lqzexam-"));
+  writeFileSync(join(ed, "rules.json"), JSON.stringify({ quiz_id: "1-2", quiz_host: "usc.brightspace.com", rules: { label: "Notes only",
+    b: ["solvers", "text", "chat", "email", "calls", "youtube", "social", "homework", "writing", "translate", "search", "wiki", "web"], allow: ["investopedia.com"], block: [] } }));
+  execFileSync("python3", [join(APP, "mac/rules.py"), "build", join(ed, "rules.json"), join(APP, "mac/blocklist.txt"), ed, "linux"]);
+  const xp = JSON.parse(execFileSync("python3", ["-c", `
+import importlib.util,json,sys
+spec=importlib.util.spec_from_file_location('bp','${APP}/mac/browser-policy.py'); m=importlib.util.module_from_spec(spec); sys.argv=['x']; spec.loader.exec_module(m)
+p=m.chromium_policy('com.google.Chrome'); p.pop(m.MARK,None)
+p['URLBlocklist']=m._union(p['URLBlocklist'], m.path_entries()+m.host_entries()); m.exam_chromium(p, m.exam())
+print(json.dumps(p))`], { env: { ...process.env, LOCKQZ_BLOCKLIST: join(ed, "exam-blocklist.txt"), LOCKQZ_EXAM: join(ed, "exam.json") } }).toString());
+  delete xp.DeveloperToolsAvailability;
+  writeFileSync(join(ed, "notes.txt"), "my notes");
+  put(xp);
+  const pp = await ctx.newPage(); await pp.goto("chrome://policy"); const rl = pp.getByText("Reload policies"); if (await rl.count()) await rl.first().click(); await pp.waitForTimeout(3500); await pp.close();
+  for (const u of ["https://www.nytimes.com/", "https://en.wikipedia.org/wiki/Bond_duration", "https://www.google.com/search?udm=14&q=bond", "https://m365.cloud.microsoft/chat",
+    "https://chatgpt.com/", "https://www.youtube.com/watch?v=x", "https://www.bing.com/search?q=x", "https://www.chegg.com/"])
+    (await blocked(u)) ? ok("exam blocks: " + u) : bad("exam does NOT block: " + u);
+  for (const u of ["https://usc.brightspace.com/d2l/home", "https://docs.google.com/document/d/1/edit", "https://www.investopedia.com/terms/b/bond.asp", "https://m365.cloud.microsoft/",
+    "https://www.youtube.com/embed/x", "https://accounts.google.com/", "https://www.desmos.com/calculator", "file://" + join(ed, "notes.txt")])
+    (await blocked(u)) ? bad("exam over-blocks: " + u) : ok("exam opens: " + u);
 } finally { put({}); await ctx.close(); }
 console.log(""); console.log(`RESULT: ${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

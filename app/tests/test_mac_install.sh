@@ -99,6 +99,26 @@ sleep 3
 check "daemon reports reach the server (no 403 in log)" "! grep -q '403' \"$DEST/lockqzd.log\""
 check "server reachable with app user agent" "/usr/bin/python3 -c \"import urllib.request,json;r=urllib.request.urlopen(urllib.request.Request('https://lockqz.pages.dev/api/blocklist',headers={'User-Agent':'LOCKqz/0.2.0 (macOS)'}),timeout=10);assert len(json.load(r)['domains'])>=20\""
 
+# Exam rules (27 Nov 2026) on a real Mac: the professor's rules as the helper keeps them (rules.json, root-only) become
+# this exam's lists - a blocked row's site in the hosts file, an allowed row's entries out of the list, Chrome opening
+# only the open sites - and all of it goes at the unlock. The engine is driven by hand: the helper is stopped first.
+sudo launchctl bootout system/com.lockqz.helper 2>/dev/null || true
+sudo /usr/bin/python3 - "$DEST/rules.json" <<'PY'
+import json, os, sys
+r = {"quiz_id": "ci-rules", "quiz_host": "usc.brightspace.com", "rules": {"label": "Notes only", "allow": ["investopedia.com"], "block": ["Spotify"],
+     "b": ["solvers", "text", "chat", "email", "calls", "social", "homework", "writing", "translate", "search", "wiki", "web"]}}
+fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600); os.write(fd, json.dumps(r).encode()); os.close(fd)
+PY
+sudo bash "$DEST/lockqz.sh" lock >/dev/null 2>&1
+check "rules: this exam's lists built" "[ -s \"$DEST/exam.json\" ] && [ -s \"$DEST/exam-blocklist.txt\" ] && [ -s \"$DEST/exam-apps.txt\" ]"
+check "rules: a blocked row's site is in the hosts file (zoom.us)" "grep -q '^0.0.0.0 zoom.us$' /etc/hosts"
+check "rules: an allowed row's entries leave the list (YouTube)" "! grep -qx 'youtube.com/watch' \"$DEST/exam-blocklist.txt\" && grep -qx 'chatgpt.com' \"$DEST/exam-blocklist.txt\""
+check "rules: Chrome blocks every other site, opens Brightspace and the typed site, no translation" "/usr/bin/python3 -c \"import plistlib,sys; p=plistlib.load(open('/Library/Managed Preferences/com.google.Chrome.plist','rb')); sys.exit(0 if p['URLBlocklist'][0]=='*' and 'brightspace.com' in p['URLAllowlist'] and 'investopedia.com' in p['URLAllowlist'] and p.get('TranslateEnabled') is False else 1)\""
+check "rules: status reads this exam's list (still LOCKED)" "sudo bash \"$DEST/lockqz.sh\" status | grep -q LOCKED"
+sudo rm -f "$DEST/rules.json"; sudo bash "$DEST/lockqz.sh" unlock >/dev/null 2>&1
+check "rules: the unlock clears this exam's lists and the hosts block" "[ ! -e \"$DEST/exam.json\" ] && [ ! -e \"$DEST/exam-blocklist.txt\" ] && ! grep -q 'LOCKqz START' /etc/hosts"
+check "rules: rules.py and the catalog installed" "[ -f \"$DEST/rules.py\" ] && [ -f \"$DEST/rules-catalog.json\" ]"
+
 sudo bash uninstall.sh >/dev/null 2>&1 || sudo bash "$DEST/../LOCKqz/uninstall.sh" >/dev/null 2>&1
 check "uninstall removed daemon" "! sudo launchctl print system/com.lockqz.helper"
 check "uninstall removed files" "[ ! -d \"$DEST\" ]"

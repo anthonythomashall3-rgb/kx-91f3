@@ -22,7 +22,7 @@ $env:LOCKQZ_NO_BROWSER = "1"   # the installer ends by opening the pay page; no 
 $p = Start-Process -FilePath $Exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/LOG=install.log' -Wait -PassThru
 Check "installer exit code 0" ($p.ExitCode -eq 0)
 $Dest = "$env:ProgramData\LOCKqz"
-foreach ($f in 'lockqz.ps1','lockqzd.ps1','lockqz-boot.ps1','lockqz-agent.ps1','browser-policy.ps1','blocklist.txt','config.json') { Check "installed $f" (Test-Path "$Dest\$f") }
+foreach ($f in 'lockqz.ps1','lockqzd.ps1','lockqz-boot.ps1','lockqz-agent.ps1','browser-policy.ps1','blocklist.txt','config.json','rules-catalog.json') { Check "installed $f" (Test-Path "$Dest\$f") }
 $cfg = Get-Content "$Dest\config.json" -Raw | ConvertFrom-Json
 Check "config has its own per-PC control token" ([string]$cfg.token -match "^lqz-[0-9a-f]{20}$")
 Check "config device id" ($cfg.device_id -like 'win-*')
@@ -99,6 +99,26 @@ $env:LOCKQZ_TIMING = $null
 Check "the timed lock applied the browser policy (run beside the other steps)" (($timed['lock'] -match 'LOCKqz: LOCKED') -and -not ($timed['lock'] -match 'not applied|FAILED'))
 Check "the timed unlock put every policy back in one go (run beside the other steps)" (($timed['unlock'] -match 'LOCKqz: UNLOCKED') -and -not ($timed['unlock'] -match 'pending|incomplete'))
 Check "no LOCKqz policy mark left in the registry" ($null -eq (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Google\Chrome' -Name 'LOCKqzManaged' -ErrorAction SilentlyContinue))
+# Exam rules (27 Nov 2026) on a real Windows PC (Windows PowerShell 5.1, the helper still stopped): the professor's rules
+# as the helper keeps them (rules.json) become this exam's lists - a blocked row's site in the hosts file, Chrome opening
+# only the open sites, a program the professor typed closed - and all of it goes at the unlock.
+$rj = '{"quiz_id":"ci-rules","quiz_host":"usc.brightspace.com","rules":{"label":"Notes only","allow":["investopedia.com"],"block":["lqtyped"],"b":["solvers","text","chat","email","calls","social","homework","writing","translate","search","wiki","web"]}}'
+[IO.File]::WriteAllText("$Dest\rules.json", $rj, (New-Object Text.UTF8Encoding($false)))
+$tp = $null; try { Copy-Item "$env:WINDIR\System32\PING.EXE" "$env:TEMP\lqtyped.exe" -Force; $tp = Start-Process "$env:TEMP\lqtyped.exe" -ArgumentList "-t", "127.0.0.1" -PassThru -WindowStyle Hidden; Start-Sleep -Seconds 1 } catch { }
+$out = (& powershell -NoProfile -ExecutionPolicy Bypass -File "$Dest\lockqz.ps1" lock 2>&1 | ForEach-Object { "$_" }) -join "`n"
+$hosts = Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw
+$el = @(Get-Content "$Dest\exam-blocklist.txt" -ErrorAction SilentlyContinue)
+Check "rules: locked with this exam's lists ($($el.Count) entries)" (($out -match 'LOCKqz: LOCKED') -and (Test-Path "$Dest\exam.json") -and (Test-Path "$Dest\exam-apps.txt") -and ($el.Count -gt 900))
+Check "rules: a blocked row's site is in the hosts file (zoom.us)" ($hosts -match '(?m)^0\.0\.0\.0 zoom\.us\r?$')
+Check "rules: an allowed row's entries leave the list (YouTube), the AI list stays" ((-not ($el -contains 'youtube.com/watch')) -and ($el -contains 'chatgpt.com'))
+$ck = 'HKLM:\SOFTWARE\Policies\Google\Chrome'
+$cb = @((Get-Item "$ck\URLBlocklist").GetValueNames() | ForEach-Object { (Get-ItemProperty "$ck\URLBlocklist").$_ })
+$ca = @((Get-Item "$ck\URLAllowlist").GetValueNames() | ForEach-Object { (Get-ItemProperty "$ck\URLAllowlist").$_ })
+Check "rules: Chrome blocks every other site, opens Brightspace and the typed site, no translation" (($cb -contains '*') -and ($ca -contains 'brightspace.com') -and ($ca -contains 'investopedia.com') -and ((Get-ItemProperty $ck).TranslateEnabled -eq 0))
+if ($tp) { Start-Sleep -Milliseconds 500; Check "rules: the program the professor typed is closed" ($tp.HasExited) } else { Write-Host "INFO  rules: typed-program check skipped (the test program did not start)" }
+Remove-Item "$Dest\rules.json" -Force -ErrorAction SilentlyContinue
+$out = (& powershell -NoProfile -ExecutionPolicy Bypass -File "$Dest\lockqz.ps1" unlock 2>&1 | ForEach-Object { "$_" }) -join "`n"
+Check "rules: the unlock clears this exam's lists, the policy and the hosts block" (($out -match 'LOCKqz: UNLOCKED') -and (-not (Test-Path "$Dest\exam.json")) -and (-not ((Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw) -match 'LOCKqz START')) -and ($null -eq (Get-ItemProperty -Path $ck -Name 'LOCKqzManaged' -ErrorAction SilentlyContinue)))
 foreach ($t in 'LOCKqz','LOCKqz Agent') { Enable-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue | Out-Null; Start-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 5
 $hosts = Get-Content "$env:WINDIR\System32\drivers\etc\hosts" -Raw

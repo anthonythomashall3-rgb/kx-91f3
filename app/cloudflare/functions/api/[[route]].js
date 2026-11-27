@@ -273,6 +273,53 @@ const GATE_LEAD_MS = 60 * 60000;
 // its own code (never ids from the network). Keep in sync with mac/browser-policy.py + windows/browser-policy.ps1.
 const ASSIST_TOOLS = { readwrite: "Read&Write", equatio: "Equatio", cowriter: "Co:Writer", snapread: "Snap&Read", readaloud: "Read Aloud" };
 const assistList = v => { let a = []; try { a = Array.isArray(v) ? v : JSON.parse(v || "[]"); } catch {} return [...new Set((Array.isArray(a) ? a : []).map(String).filter(k => Object.prototype.hasOwnProperty.call(ASSIST_TOOLS, k)))]; };
+// Exam rules (owner, 27 Nov 2026): what students may use in an exam beside Brightspace, set by the professor row by
+// row. Each row's programs and addresses are LOCKqz's own (mac/rules-catalog.json, shipped in every app); the server
+// keeps only the keys and sends the blocked ones. AI has no row: it is always blocked. Messaging and the rows with AI
+// inside start blocked. RULE_KEYS / RULE_BLOCKED / RULE_NEVER_CLOSE / RULE_BASE follow the catalog (test_rules.mjs).
+const RULE_KEYS = ["word", "excel", "powerpoint", "gdocs", "gsheets", "gslides", "iwork", "gdrive", "onedrive", "icloud", "dropbox", "box", "applenotes", "onenote", "obsidian", "plainnotes", "sticky", "pdf", "ebooks", "calc", "desmos", "geogebra", "solvers", "python", "rstudio", "matlab", "stats", "vscode", "search", "wiki", "web", "text", "chat", "email", "calls", "youtube", "social", "homework", "writing", "translate"];
+const RULE_BLOCKED = ["solvers", "text", "chat", "email", "calls", "youtube", "social", "homework", "writing", "translate"];
+const RULE_PRESET = { open: RULE_BLOCKED, notes: [...RULE_BLOCKED, "search", "wiki", "web"] };
+const RULE_LABEL = { open: "Notes + internet", notes: "Notes only", custom: "Custom" };
+// Program names a professor's "Also block" never closes (the system, browsers, LOCKqz); the apps check again.
+const RULE_NEVER_CLOSE = new Set(["finder", "dock", "loginwindow", "windowserver", "systemuiserver", "controlcenter", "notificationcenter", "launchd", "kernel_task", "cfprefsd", "coreaudiod", "spotlight", "system settings", "system preferences", "voiceover", "screen time", "explorer", "svchost", "csrss", "winlogon", "lsass", "services", "smss", "wininit", "dwm", "system", "idle", "registry", "fontdrvhost", "sihost", "ctfmon", "conhost", "runtimebroker", "taskhostw", "searchhost", "startmenuexperiencehost", "shellexperiencehost", "textinputhost", "audiodg", "spoolsv", "msmpeng", "securityhealthservice", "lockapp", "logonui", "userinit", "narrator", "magnify", "osk", "nvda", "jfw", "zoomtext", "init", "systemd", "xorg", "xwayland", "gnome-shell", "plasmashell", "kwin_x11", "kwin_wayland", "mutter", "gdm", "sddm", "lightdm", "dbus-daemon", "pulseaudio", "pipewire", "wireplumber", "networkmanager", "xfwm4", "xfce4-session", "cinnamon", "orca", "python", "python3", "pythonw", "powershell", "pwsh", "bash", "sh", "zsh", "cmd", "osascript", "wscript", "cscript", "lockqz", "lockqzd", "lockqz-agent", "chrome", "google chrome", "chromium", "msedge", "microsoft edge", "edge", "firefox", "safari", "brave", "brave browser", "arc", "opera", "vivaldi", "librewolf", "waterfox", "floorp", "zen", "brightspace", "pulse"]);
+// Always open in an exam (Brightspace, sign-in, LOCKqz): a professor's "Also block" never takes them away.
+const RULE_BASE = ["brightspace.com", "d2l.com", "lms.usc.edu", "login.usc.edu", "shibboleth.usc.edu", "my.usc.edu", "lockqz.com", "lockqz.pages.dev", "accounts.google.com", "login.microsoftonline.com", "login.live.com", "duosecurity.com", "okta.com", "challenges.cloudflare.com", "youtube.com/embed", "youtube-nocookie.com", "kaltura.com", "panopto.com", "player.vimeo.com"];
+const rulesOn = env => String(env.RULES_ON || "") === "1";
+const underHost = (h, d) => h === d || h.endsWith("." + d);
+// A site the professor typed -> its host ("https://www.investopedia.com/x" -> "investopedia.com"), "" if not a site.
+const ruleHost = v => { let s = String(v || "").trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, "").replace(/[/?#].*$/, "").replace(/:\d+$/, "").replace(/\.$/, "");
+  if (s.startsWith("www.")) s = s.slice(4);
+  return s.length <= 100 && /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z][a-z0-9-]+$/.test(s) ? s : ""; };
+// An AI site (on the AI list, or a part of one): never opened by a professor's "Also allow".
+const aiSite = h => AI_DOMAINS.some(e => !e.includes("/") && underHost(h, e));
+// A stored or posted rule -> { p, b, allow, block } (only known keys and well-formed entries), null if none.
+function ruleOf(v) {
+  let r = v; if (typeof r === "string") { try { r = JSON.parse(r); } catch { return null; } }
+  if (!r || typeof r !== "object") return null;
+  const p = Object.prototype.hasOwnProperty.call(RULE_LABEL, r.p) ? r.p : "custom";
+  if (p !== "custom") return { p, b: [...RULE_PRESET[p]], allow: [], block: [] };
+  const b = RULE_KEYS.filter(k => Array.isArray(r.b) && r.b.includes(k));
+  const allow = [...new Set((Array.isArray(r.allow) ? r.allow : []).map(ruleHost).filter(Boolean))].slice(0, 20);
+  // "Spotify" / "Spotify.app" / "spotify.exe" = a program (kept as typed); anything else that is a site = its host.
+  const block = [...new Set((Array.isArray(r.block) ? r.block : []).map(x => String(x || "").trim()).filter(Boolean)
+    .map(x => !/\.(app|exe)$/i.test(x) && ruleHost(x) || (/^[A-Za-z0-9][A-Za-z0-9 ._&+()'-]{0,59}$/.test(x) ? x : "")).filter(Boolean))].slice(0, 20);
+  // The same switches as a preset, with nothing typed: that preset (its name on the exam's pill).
+  const same = Object.keys(RULE_PRESET).find(k => RULE_PRESET[k].length === b.length && RULE_PRESET[k].every(x => b.includes(x)));
+  if (same && !allow.length && !block.length) return { p: same, b: [...RULE_PRESET[same]], allow, block };
+  return { p, b, allow, block };
+}
+// The professor's typed sites and programs that cannot be used -> what to tell them ("" when all are fine).
+function ruleProblem(r) {
+  for (const h of r.allow) if (aiSite(h)) return `${h} is AI. LOCKqz always blocks it.`;
+  for (const x of r.block) {
+    const prog = /\.(app|exe)$/i.test(x) || !ruleHost(x), h = /\.exe$/i.test(x) ? "" : ruleHost(x);
+    if (h && RULE_BASE.some(e => { const eh = e.split("/")[0]; return underHost(eh, h) || underHost(h, eh); })) return `${x} is needed for the exam or sign-in.`;
+    if (prog && RULE_NEVER_CLOSE.has(x.toLowerCase().replace(/\.(app|exe)$/, ""))) return `${x} cannot be closed.`;
+  }
+  return "";
+}
+const ruleSent = r => ({ v: 1, label: RULE_LABEL[r.p], b: r.b, allow: r.allow, block: r.block });
 const minuteBucket = () => Math.floor(Date.now() / ROT_MS);
 async function rotatingPw(secret, ou, qi, bucket) {
   const h = await hmacHex(String(secret||"lqz-fallback"), `lqz-rot:${ou}:${qi}:${bucket}`);
@@ -2691,8 +2738,10 @@ export async function onRequest(context) {
       // password still waiting to be removed from Brightspace (I-M9). The old course-wide static password
       // (courses.password, set by the retired /course page) is never released: it skipped the gate and
       // rotation rules. Every quiz is protected one by one (Sync's protect-by-default).
-      const q = await db.prepare("SELECT q.password AS password, q.gated AS gated, q.bs_code AS bs_code, q.sa_keep AS sa_keep, b.start_date AS start_date, b.end_date AS end_date, b.over_min AS over_min, (SELECT password FROM pending_clear WHERE ou=? AND qi=?) AS pc, (SELECT tools FROM assist WHERE ou=? AND email=?) AS assist, b.qi AS bq FROM (SELECT 1) one LEFT JOIN quizzes q ON q.ou=? AND q.qi=? LEFT JOIN bs_quizzes b ON b.ou=? AND b.qi=?")
-        .bind(ou, qi, ou, assistWho, ou, qi, ou, qi).first();
+      // Exam rules (RULES_ON): the exam's own rule, else its class's ('*'), in the same read.
+      const rOn = rulesOn(env);
+      const q = await db.prepare("SELECT q.password AS password, q.gated AS gated, q.bs_code AS bs_code, q.sa_keep AS sa_keep, b.start_date AS start_date, b.end_date AS end_date, b.over_min AS over_min, (SELECT password FROM pending_clear WHERE ou=? AND qi=?) AS pc, (SELECT tools FROM assist WHERE ou=? AND email=?) AS assist, " + (rOn ? "(SELECT rules FROM quiz_rules WHERE ou=? AND qi IN (?, '*') ORDER BY qi='*' LIMIT 1) AS rules, " : "") + "b.qi AS bq FROM (SELECT 1) one LEFT JOIN quizzes q ON q.ou=? AND q.qi=? LEFT JOIN bs_quizzes b ON b.ou=? AND b.qi=?")
+        .bind(ou, qi, ou, assistWho, ...(rOn ? [ou, qi] : []), ou, qi, ou, qi).first();
       const gated = Number(q?.gated) === 1;
       // C2: the start check applies only while the quiz is GATED (the gate hides the quiz, so LOCKqz
       // decides who may enter and when). Otherwise Brightspace enforces its own start date and every
@@ -2749,7 +2798,9 @@ export async function onRequest(context) {
       if (rot) { const b = minuteBucket();
         if (rot === await rotatingPw(env.ROT_SECRET || env.TEACHER_KEY || "lqz-fallback", ou, qi, b)) recheck = Math.max(15, Math.ceil(((b + 1) * ROT_MS + 40000 - Date.now()) / 1000)); }
       const assist = given ? assistList(q?.assist) : [];
-      return json({ password: given, lockId, end, ...(recheck ? { recheck } : {}), ...(assist.length ? { assist } : {}) });
+      // What the professor lets students use in this exam (none set: the default, "Notes + internet").
+      const rules = given && rOn ? ruleSent(ruleOf(q?.rules) || ruleOf({ p: "open" })) : null;
+      return json({ password: given, lockId, end, ...(recheck ? { recheck } : {}), ...(assist.length ? { assist } : {}), ...(rules ? { rules } : {}) });
     }
 
     if (p === "/match" && request.method === "POST") {
@@ -4249,6 +4300,21 @@ export async function onRequest(context) {
     }
     // Assistive tools allowed for one student in one course (OSAS accommodation): GET ?ou= lists them,
     // POST {ou, email, tools:[keys]} sets them ([] removes). Only the course's trusted instructor.
+    // Exam rules: what students may use in one exam (its own rule) or in every exam of the class (all: the class's
+    // rule, and the exams' own rules end). The professor of the class or the admin; one or two row writes.
+    if (p === "/rules" && request.method === "POST") {
+      const ou = String(body.ou || ""), qi = String(body.qi || ""), all = body.all === true;
+      if (!/^\d+$/.test(ou) || (!all && !/^\d+$/.test(qi))) return json({ error: "bad exam" }, 400);
+      if (!me.admin && !(await trustedInstructor(ou))) return json({ error: "Only the professor of this course." }, 403);
+      const r = ruleOf(body.rules); if (!r) return json({ error: "bad rules" }, 400);
+      const why = ruleProblem(r); if (why) return json({ error: why }, 400);
+      if (!all && !(await db.prepare("SELECT 1 FROM bs_quizzes WHERE ou=? AND qi=? LIMIT 1").bind(ou, qi).first())) return json({ error: "no such exam" }, 404);
+      const js = JSON.stringify(r), by = String(me.id || "admin"), at = now();
+      const up = "INSERT INTO quiz_rules (ou,qi,rules,by_teacher,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,qi) DO UPDATE SET rules=excluded.rules,by_teacher=excluded.by_teacher,at=excluded.at";
+      if (all) await db.batch([db.prepare(up).bind(ou, "*", js, by, at), db.prepare("DELETE FROM quiz_rules WHERE ou=? AND qi<>'*'").bind(ou)]);
+      else await db.prepare(up).bind(ou, qi, js, by, at).run();
+      return json({ ok: true, ou, qi: all ? "*" : qi, rules: r, label: RULE_LABEL[r.p] });
+    }
     if (p === "/assist") {
       const ou = String((request.method === "POST" ? body.ou : url.searchParams.get("ou")) || "");
       if (!/^\d+$/.test(ou)) return json({ error: "bad course" }, 400);
@@ -4332,7 +4398,12 @@ export async function onRequest(context) {
       // remind_3h: the second reminder (3 hours before) is sent too (EXAM_REMIND_3H). held: the class waits for the professor's
       // own first email before any automatic student email (MAIL_HOLD), so its reminders have not started.
       const held = await heldOus(ownList);
-      return json({ mail_on: mailOn(env), auto_gate: gateRequired(), remind_3h: remind3h(env), courses: cs.map(c => ({ ...c, roster_hidden: !own.has(String(c.ou)), off: offOus.has(String(c.ou)), mailed_at: mailedAt.get(String(c.ou)) || null, reminders: !remOff.has(String(c.ou)), held: held.has(String(c.ou)),
+      // Exam rules: the class's ('*') and each exam's own, for the professor's classes only.
+      const ruleAt = new Map();
+      if (rulesOn(env)) for (const part of chunk(ownList, 98))
+        (await db.prepare(`SELECT ou,qi,rules FROM quiz_rules WHERE ou IN (${placeholders(part.length)})`).bind(...part).all().catch(() => ({ results: [] }))).results
+          .forEach(r => { const v = ruleOf(r.rules); if (v) ruleAt.set(String(r.ou) + "|" + String(r.qi), v); });
+      return json({ mail_on: mailOn(env), auto_gate: gateRequired(), remind_3h: remind3h(env), rules_on: rulesOn(env), courses: cs.map(c => ({ ...c, roster_hidden: !own.has(String(c.ou)), off: offOus.has(String(c.ou)), mailed_at: mailedAt.get(String(c.ou)) || null, reminders: !remOff.has(String(c.ou)), held: held.has(String(c.ou)), rules: ruleAt.get(String(c.ou) + "|*") || null,
         // Everyone LOCKqz locks: Learners AND TAs (any non-instructor role). The admin is the one
         // exempt person (developer mode), so he is never listed as someone who must install.
         students: roster.filter(r => r.ou === c.ou && takesQuizzes(r.role) && !adminEmails.has((r.email||"").toLowerCase())).map(r => {
@@ -4340,7 +4411,7 @@ export async function onRequest(context) {
           const installed = d.length > 0, paid = !paidSet || paidSet.has(String(r.email||"").toLowerCase());
           return { name:r.name, email:r.email, assist: assist.get(String(r.ou) + "|" + String(r.email||"").toLowerCase()) || [], ta: !/learner|student/i.test(r.role||""), installed, paid, ready: installed && paid, platform: d[0]?.platform||null, last_seen: d[0]?.last_seen||null }; }),
         // has_own_password: the professor's own Brightspace password is on it (auto-protect skips it).
-        quizzes: qz.filter(q => q.ou === c.ou).map(q => ({ ...q, has_own_password: Number(q.bs_has_password) === 1 && Number(q.bs_password_is_ours) !== 1 && !q.lock_id })) })) });
+        quizzes: qz.filter(q => q.ou === c.ou).map(q => ({ ...q, rules: ruleAt.get(String(q.ou) + "|" + String(q.qi)) || null, has_own_password: Number(q.bs_has_password) === 1 && Number(q.bs_password_is_ours) !== 1 && !q.lock_id })) })) });
     }
 
     // Which events (events.quiz_id = "<ou>-<qi>") belong to the caller? Those of the courses they

@@ -19,6 +19,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 BLOCKLIST="$HERE/blocklist.txt"
 PFCONF="$HERE/com.lockqz.pf.conf"
 POLICY="$HERE/browser-policy.py"
+# Exam rules (27 Nov 2026): what the professor lets students use in this exam. The helper writes rules.json (root-only)
+# from the server's answer; rules.py turns it into this exam's lists (exam.json, exam-blocklist.txt, exam-apps.txt).
+RULES="${LOCKQZ_RULES:-$STATE/rules.json}"
+EXAM_DIR="${LOCKQZ_EXAM_DIR:-$STATE}"
 PF_ANCHOR="com.lockqz"
 DRYRUN="${LOCKQZ_DRYRUN:-0}"
 DEV_KEY_HASH="4695a520432e105e967dd2703366c24c039fe0a850fe35db03b73b6b9506aecd"
@@ -57,6 +61,26 @@ need_root() {
 }
 
 # Thin wrappers over the shared core (tests/test_engine.sh exercises the core directly).
+# This exam's lists from the professor's rules: BLOCKLIST becomes exam-blocklist.txt and the browser policy reads
+# exam.json. No rules (or rules that cannot be read): LOCKqz locks exactly as without them. Rebuilt on every pass
+# (rules.py rewrites a file only when it changed); status only reads what the last pass built.
+EXAM_APPS=""
+exam_rules() {   # exam_rules [build]
+  local d="$EXAM_DIR" base="$BLOCKLIST"
+  if [ -f "$RULES" ] && [ -f "$HERE/rules.py" ]; then
+    if [ "${1:-}" = build ]; then
+      /usr/bin/python3 "$HERE/rules.py" build "$RULES" "$base" "$d" mac >/dev/null 2>&1 || rm -f "$d/exam.json" "$d/exam-blocklist.txt" "$d/exam-apps.txt" 2>/dev/null || true
+    fi
+    if [ -s "$d/exam.json" ] && [ -s "$d/exam-blocklist.txt" ]; then
+      BLOCKLIST="$d/exam-blocklist.txt"; EXAM_APPS="$d/exam-apps.txt"; export LOCKQZ_EXAM="$d/exam.json"
+    fi
+  elif [ "${1:-}" = build ]; then
+    rm -f "$d/exam.json" "$d/exam-blocklist.txt" "$d/exam-apps.txt" 2>/dev/null || true
+  fi
+  export LOCKQZ_BLOCKLIST="$BLOCKLIST"
+}
+exam_clear() { rm -f "$EXAM_DIR/exam.json" "$EXAM_DIR/exam-blocklist.txt" "$EXAM_DIR/exam-apps.txt" 2>/dev/null || true; }
+
 domains()     { domains_from "$BLOCKLIST"; }
 build_block() { build_block_from "$BLOCKLIST"; }
 is_locked()   { hosts_is_locked "$HOSTS"; }
@@ -102,11 +126,31 @@ kill_named() {
   pkill -if -- "$(app_re "$1")" 2>/dev/null || true
 }
 close_ai_apps() {   # only the ones running now (running_named: one look at the process table)
-  local kind a
-  running_named "${AI_APPS[@]}" | while IFS=$'\t' read -r kind a; do
+  local kind a t keep="|" typed=() close=()
+  # Exam rules: programs the blocked rows close; programs of the list above that an allowed row keeps open (a chat
+  # app the professor allows); programs the professor typed.
+  if [ -n "$EXAM_APPS" ] && [ -f "$EXAM_APPS" ]; then
+    while IFS=$'\t' read -r t a; do
+      [ -n "$a" ] || continue
+      case "$t" in close) close+=("$a") ;; keep) keep="$keep$(printf '%s' "$a" | tr '[:upper:]' '[:lower:]')|" ;; typed) typed+=("$a") ;; esac
+    done < "$EXAM_APPS"
+  fi
+  running_named "${AI_APPS[@]}" ${close[@]+"${close[@]}"} | while IFS=$'\t' read -r kind a; do
+    case "$keep" in *"|$(printf '%s' "$a" | tr '[:upper:]' '[:lower:]')|"*) continue ;; esac
     if [ "$kind" = app ]; then osascript -e "tell application \"$a\" to quit" 2>/dev/null || true; fi
     kill_named "$a"
   done
+  for a in ${typed[@]+"${typed[@]}"}; do close_typed "$a"; done
+}
+# A program the professor typed: only an app launched from "<name>.app", never one of the system's own apps (the
+# server and rules.py already refuse the system, browsers and LOCKqz by name).
+close_typed() {
+  local a="$1"
+  case "$a" in */*|.*) return 0 ;; esac
+  [ -d "/System/Library/CoreServices/$a.app" ] && return 0
+  pgrep -if -- "$(app_re "$a")" >/dev/null 2>&1 || return 0
+  osascript -e "tell application \"$a\" to quit" 2>/dev/null || true
+  pkill -if -- "$(app_re "$a")" 2>/dev/null || true
 }
 
 # LOCKQZ_TIMING=1: one line per step with the clock (the install test prints where a lock spends its time).
@@ -119,11 +163,13 @@ hosts_writable() { chflags nouchg,noschg "$HOSTS" 2>/dev/null || true; }   # a u
 do_lock() {
   need_root
   if [ "$DRYRUN" = "1" ]; then
+    [ -s "$EXAM_DIR/exam.json" ] && exam_rules
     say "[dry-run] would blackhole $(domains | wc -l | tr -d ' ') domains, load pf, flush DNS, close AI apps."
     extra_lock
     build_block | sed 's/^/    /' | head -10 || true; echo "    ..."; return 0
   fi
   local already=0 rc=0 polpid=""; is_locked && already=1
+  exam_rules build   # this exam's lists (the professor's rules), before every layer below reads them
   lap start
   mkdir -p "$STATE"; [ -f "$BACKUP" ] || cp "$HOSTS" "$BACKUP" 2>/dev/null || true
   export LOCKQZ_PREFS_DIRTY="$STATE/prefs.dirty"   # settings changed below: the preferences service restarts once, last
@@ -132,11 +178,12 @@ do_lock() {
   # preferences service restarts.
   policy lock & polpid=$!
   hosts_writable
+  local changed=0; [ "$already" = 1 ] && ! hosts_block_intact "$HOSTS" "$BLOCKLIST" && changed=1   # the exam's rules arrived or changed
   hosts_add_block "$HOSTS" "$BLOCKLIST" || rc=1   # idempotent
   is_locked || rc=1
   lap hosts
   load_pf || rc=1                                 # reasserts the anchor if it was cleared
-  if [ "$already" = 0 ]; then
+  if [ "$already" = 0 ] || [ "$changed" = 1 ]; then
     dscacheutil -flushcache 2>/dev/null || true
     killall -HUP mDNSResponder 2>/dev/null || true
   fi
@@ -177,7 +224,8 @@ do_unlock() {
   lap extra
   wait "$polpid" || { say "browser policy could not be fully restored"; rc=1; }
   lap policy
-  dns_back "$BLOCKLIST" || true   # AI names answer again before the unlock is reported done
+  if [ -s "$EXAM_DIR/exam-blocklist.txt" ]; then dns_back "$EXAM_DIR/exam-blocklist.txt" || true; else dns_back "$BLOCKLIST" || true; fi   # AI names answer again before the unlock is reported done
+  [ "$rc" = 0 ] && exam_clear   # the exam's lists end with it (kept while an unlock still has to finish)
   lap dns_back
   write_status unlocked || true
   prefs_flush || true     # last: the preferences service restarts once
@@ -188,6 +236,7 @@ do_unlock() {
 
 do_status() {
   # LOCKED only when the hosts block is complete: a hand-edited block reads as tamper and is re-applied.
+  exam_rules   # this exam's list, as the last lock pass built it
   if hosts_block_intact "$HOSTS" "$BLOCKLIST"; then echo "LOCKqz: LOCKED"; else echo "LOCKqz: unlocked"; fi
 }
 

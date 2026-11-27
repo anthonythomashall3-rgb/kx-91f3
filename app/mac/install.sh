@@ -89,7 +89,8 @@ if [ -n "${REMOTE:-}" ]; then
   cp "$APP"/* "$DEST/"
 else
   cp "$APP/lockqz.sh" "$APP/lockqz-core.sh" "$APP/extra-block.sh" "$APP/lockqzd.py" "$APP/lockqz-agent.py" "$APP/browser-policy.py" \
-     "$APP/blocklist.txt" "$APP/com.lockqz.pf.conf" "$APP/ensure-python.sh" "$APP/lockqz-boot.sh" "$APP/update.pub" "$APP/install.sh" "$APP/uninstall.sh" "$DEST/"
+     "$APP/blocklist.txt" "$APP/com.lockqz.pf.conf" "$APP/ensure-python.sh" "$APP/lockqz-boot.sh" "$APP/update.pub" "$APP/install.sh" "$APP/uninstall.sh" \
+     "$APP/rules.py" "$APP/rules-catalog.json" "$DEST/"
 fi
 chown -R root:wheel "$DEST"; chmod -R go-w "$DEST"
 chmod 755 "$DEST"/*.sh "$DEST"/*.py 2>/dev/null || true

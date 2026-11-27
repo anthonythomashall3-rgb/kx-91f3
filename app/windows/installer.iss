@@ -37,6 +37,7 @@ Source: "lockqz-agent.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "install.ps1";   DestDir: "{app}"; Flags: ignoreversion
 Source: "uninstall.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "update.pub.xml"; DestDir: "{app}"; Flags: ignoreversion
+Source: "rules-catalog.json"; DestDir: "{app}"; Flags: ignoreversion
 
 [Code]
 // Run the setup script ourselves so a failure is NEVER silent: the student sees an error

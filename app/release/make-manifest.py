@@ -25,14 +25,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.dirname(HERE)
 MAC_FILES = ["lockqz.sh", "lockqz-core.sh", "extra-block.sh", "lockqzd.py", "lockqz-agent.py",
              "browser-policy.py", "blocklist.txt", "com.lockqz.pf.conf", "ensure-python.sh",
-             "lockqz-boot.sh", "install.sh", "uninstall.sh", "update.pub"]
+             "lockqz-boot.sh", "install.sh", "uninstall.sh", "update.pub", "rules.py", "rules-catalog.json"]
 WIN_FILES = ["lockqz.ps1", "lockqzd.ps1", "lockqz-boot.ps1", "blocklist.txt", "browser-policy.ps1", "lockqz-agent.ps1",
-             "install.ps1", "uninstall.ps1", "update.pub.xml"]
+             "install.ps1", "uninstall.ps1", "update.pub.xml", "rules-catalog.json"]
 # Linux (28 Oct 2026): its own engine/agent/policy writer + the shared Mac files under their installed names.
 LINUX_FILES = {"lockqz.sh": "linux/lockqz.sh", "lockqz-agent.py": "linux/lockqz-agent.py", "browser-policy.py": "linux/browser-policy.py",
                "install.sh": "linux/install.sh", "uninstall.sh": "linux/uninstall.sh",
                "lockqzd.py": "mac/lockqzd.py", "agent-mac.py": "mac/lockqz-agent.py", "policy-mac.py": "mac/browser-policy.py",
-               "lockqz-core.sh": "mac/lockqz-core.sh", "blocklist.txt": "mac/blocklist.txt", "update.pub": "mac/update.pub"}
+               "lockqz-core.sh": "mac/lockqz-core.sh", "blocklist.txt": "mac/blocklist.txt", "update.pub": "mac/update.pub",
+               "rules.py": "mac/rules.py", "rules-catalog.json": "mac/rules-catalog.json"}
 LIVE_DEFAULT = "https://lockqz.pages.dev/download/update.json"
 
 def _which(names):

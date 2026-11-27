@@ -193,6 +193,9 @@ CREATE TABLE IF NOT EXISTS pay_slots (term TEXT NOT NULL, cents INTEGER NOT NULL
 -- Assistive tools a professor allows one student during locked quizzes (OSAS accommodation), per
 -- course. tools = JSON list of keys from ASSIST_TOOLS ([[route]].js); a missing row = none.
 CREATE TABLE IF NOT EXISTS assist (ou TEXT NOT NULL, email TEXT NOT NULL, tools TEXT NOT NULL, by_teacher TEXT, at TEXT, PRIMARY KEY (ou, email));
+-- Exam rules (27 Nov 2026): what students may use in an exam, set by its professor. qi '*' = the class's rule (every
+-- exam without its own); rules = JSON {p, b: blocked row keys, allow: sites, block: sites or programs}.
+CREATE TABLE IF NOT EXISTS quiz_rules (ou TEXT NOT NULL, qi TEXT NOT NULL, rules TEXT NOT NULL, by_teacher TEXT, at TEXT, PRIMARY KEY (ou, qi));
 -- D1 row budget (migrate_029). roster_snap: one row per course = the class list exactly as the last
 -- Sync wrote it (hash of the normalized list + the rows as JSON). A repeat Sync with the same list skips
 -- the class-list read; /live and /bs read 1 row per course instead of every student. Any roster write a

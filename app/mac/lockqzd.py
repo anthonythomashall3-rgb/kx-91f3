@@ -36,7 +36,7 @@ KEEPFILE = os.environ.get("LOCKQZ_KEEP_FILE") or os.path.join(os.path.dirname(BL
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.6.49"
+VERSION = "0.6.50"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -151,6 +151,33 @@ def set_assist(qid, tools):
     if isinstance(cur, dict) and cur.get("quiz_id") == qid and cur.get("tools") == tools: return False
     try: _write_private(ASSIST_FILE, json.dumps({"quiz_id": qid, "tools": tools})); return True
     except Exception as e: log("could not save assist record: %s" % e); return False
+
+# Exam rules (27 Nov 2026): what the professor lets students use in this exam (server's /password answer): row keys,
+# the professor's own sites and programs, and the quiz's own site. Root-only; read by the engine (rules.py turns it
+# into this exam's lists), removed at every unlock / new quiz. No rules from the server: LOCKqz locks as before.
+RULES_FILE = os.path.join(os.path.dirname(LOCKFILE), "rules.json")
+
+def set_rules(qid, rules, url=""):
+    """Write (or remove, rules=None) this quiz's rules. True when they changed."""
+    rec = None
+    if isinstance(rules, dict) and isinstance(rules.get("b"), list):
+        strs = lambda v, n, w: [x[:w] for x in (v if isinstance(v, list) else []) if isinstance(x, str)][:n]
+        h = (urllib.parse.urlsplit(url).hostname or "").lower() if url else ""
+        rec = {"quiz_id": qid, "rules": {"label": str(rules.get("label") or "")[:40], "b": [k for k in strs(rules["b"], 60, 20) if re.fullmatch(r"[a-z]{2,20}", k)],
+               "allow": strs(rules.get("allow"), 20, 100), "block": strs(rules.get("block"), 20, 60)},
+               "quiz_host": h if re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", h) else ""}
+    try:
+        with open(RULES_FILE) as f: cur = json.load(f)
+    except Exception: cur = None
+    if rec is None:
+        if cur is None and not os.path.exists(RULES_FILE): return False
+        try: os.remove(RULES_FILE)
+        except FileNotFoundError: pass
+        except Exception as e: log("could not remove exam rules: %s" % e)
+        return True
+    if cur == rec: return False
+    try: _write_private(RULES_FILE, json.dumps(rec)); return True
+    except Exception as e: log("could not save exam rules: %s" % e); return False
 
 # Loopback control token: random per install, never baked into the package. The master copy is
 # root-only (0600). Each console user gets a read-only copy in a root-owned folder (see
@@ -423,6 +450,7 @@ def unlock_now(qid):
     STATE.pop("hold_until", None)
     STATE.pop("ask_fail_since", None)   # the 10-minute "server unreachable" wait starts again for the next quiz
     set_assist(None, [])
+    set_rules(None, None)
     ok = engine("unlock")
     if ok:
         STATE["unlock_pending"] = False; clear_lock()
@@ -1132,7 +1160,7 @@ class H(BaseHTTPRequestHandler):
                                  locked_since=now, cap_at=now + mx * 60, end_known=False, mono_since=steady(),
                                  release_pending=False)
                     for k in ("hold_until", "ask_fail_since"): STATE.pop(k, None)   # another quiz's hold never carries over
-                    set_assist(None, [])   # another quiz's allowance never carries over
+                    set_assist(None, []); set_rules(None, None)   # another quiz's allowance and rules never carry over
                 if STATE["capped_quiz"] == qid: forget_capped()
                 save_lock(); engine("lock")
             report_lock_async(qid)
@@ -1250,6 +1278,8 @@ class H(BaseHTTPRequestHandler):
             out = {"password": pw, "status": code, "pay": pay}
             reason = j.get("reason") if isinstance(j.get("reason"), str) else None
             if isinstance(j.get("recheck"), (int, float)): out["recheck"] = j["recheck"]   # gated: next code change
+            rl = j.get("rules") if isinstance(j.get("rules"), dict) else None
+            if rl and isinstance(rl.get("label"), str): out["exam"] = rl["label"][:40]   # the agent says what stays open
             if code in (0, 502, 503) or j.get("error") == "server_busy": out["error"] = "server_busy"   # agent backs off
             if code == 200 and pw:
                 # C2: the server names the quiz end -> the safety cap becomes end + 15 min (<= 24 h).
@@ -1267,8 +1297,11 @@ class H(BaseHTTPRequestHandler):
                             STATE.update(cap_at=c, end_known=False, max_minutes=int((c - STATE["locked_since"]) // 60))
                             save_lock()
                         # The professor's assistive-tool allowance for this student: the browser policy
-                        # lets just those extensions run (applied now, not at the next watcher cycle).
-                        if set_assist(qid, j.get("assist")) and STATE["state"] == "locked": engine("lock")
+                        # lets just those extensions run; the professor's rules for this exam (applied now,
+                        # not at the next watcher cycle).
+                        ch = set_assist(qid, j.get("assist"))
+                        ch = set_rules(qid, j.get("rules"), url) or ch
+                        if ch and STATE["state"] == "locked": engine("lock")
             elif code == 403 and reason == "not started":
                 st = parse_iso(j.get("start"))
                 out.update(reason=reason, start=j.get("start"),
