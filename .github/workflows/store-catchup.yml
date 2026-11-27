@@ -26,13 +26,18 @@ jobs:
       version: ${{ steps.s.outputs.version }}
     steps:
       - id: s
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           st=$(curl -fsS -m 20 -A "LOCKqz/ci" https://lockqz.pages.dev/api/store || true)
           ver=$(curl -fsS -m 20 -A "LOCKqz/ci" https://lockqz.pages.dev/api/version || true)
           cur=$(printf '%s' "$st" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("current") or "")' 2>/dev/null || true)
           have=$(printf '%s' "$st" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("store_version") or "")' 2>/dev/null || true)
           live=$(printf '%s' "$ver" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("api") or "")' 2>/dev/null || true)
-          echo "live version: $cur (commit $live) - Microsoft Store: ${have:-unknown}"
+          # /api/version names the live commit by its short id; checkout needs the full one.
+          [ -n "$live" ] && live=$(gh api "repos/${{ github.repository }}/commits/$live" --jq .sha 2>/dev/null || true)
+          [[ "$live" =~ ^[0-9a-f]{40}$ ]] || live=""
+          echo "live version: $cur (commit ${live:-unknown}) - Microsoft Store: ${have:-unknown}"
           # Only on a clear answer: both versions known, and they differ.
           if [ -n "$cur" ] && [ -n "$have" ] && [ -n "$live" ] && [ "$cur" != "$have" ] && [ "$cur" != "dev" ]; then
             echo "behind=true" >> "$GITHUB_OUTPUT"; echo "commit=$live" >> "$GITHUB_OUTPUT"; echo "version=$cur" >> "$GITHUB_OUTPUT"

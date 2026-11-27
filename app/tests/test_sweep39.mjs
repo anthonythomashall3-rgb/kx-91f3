@@ -94,6 +94,8 @@ console.log("S Microsoft Store catch-up");
   check("runs on a schedule and by hand", /schedule:\s*\n\s*- cron: "41 \*\/6 \* \* \*"/.test(wf) && /workflow_dispatch:/.test(wf));
   check("looks at /api/store and /api/version; behind only on a clear answer", wf.includes("https://lockqz.pages.dev/api/store") && wf.includes("https://lockqz.pages.dev/api/version")
     && wf.includes('[ -n "$cur" ] && [ -n "$have" ] && [ -n "$live" ] && [ "$cur" != "$have" ]'));
+  check("the live commit's short id from /api/version becomes the full id checkout needs", wf.includes('gh api "repos/${{ github.repository }}/commits/$live" --jq .sha')
+    && wf.includes('[[ "$live" =~ ^[0-9a-f]{40}$ ]] || live=""') && /GH_TOKEN: \$\{\{ github\.token \}\}/.test(wf));
   check("the Windows job runs only when behind, builds the live commit and checks its version", /if: needs\.look\.outputs\.behind == 'true' && vars\.MSIX_NAME != ''/.test(wf)
     && wf.includes('ref: "${{ needs.look.outputs.commit }}"') && wf.includes('if ($v -ne "${{ needs.look.outputs.version }}")'));
   const key = s => (s.match(/key: (store-sent-\$\{\{ hashFiles\('app\/VERSION'\) \}\})/) || [])[1];
