@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-27 12:50 PT — 01UUDg7coV: professors choose what each exam locks (exam rules: server, dashboard, Mac, Linux, Windows engines, one app version). Holds: app/cloudflare (functions, public, schema, migrations, wrangler.toml), app/mac, app/windows, app/linux, app/tests, VERSION files, a new app/rules-catalog.json.
 
 ## Recently finished
 - 2026-11-27 10:50 PT — 01UUDg7coV: bug sweep 39 finished (server + dashboard, 208d83d; workflow 4bdc406). Professor pages say what LOCKqz really sends and needs: one reminder 2 days before each exam when EXAM_REMIND_3H is 0, a MAIL_HOLD class's reminders start after the professor's own first email (/bs remind_3h, held), no "keep your browser open" or gate wording while REQUIRE_GATE is off, same-day exams show their day once, exam rows wrap on a phone, Admin shows free accounts as free (/teachers free), a free co-teacher keeps a shared class protected. New workflow store-catchup.yml: every 6 h sends the live Windows version to the Microsoft Store when the Store is behind and the version was not sent yet (the Release's own marker). test_sweep39.mjs (34; the catch-up checks out the live commit by its full id). run_all green (real Chromium). No files held.
