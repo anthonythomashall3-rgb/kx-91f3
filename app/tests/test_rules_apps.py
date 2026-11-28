@@ -59,9 +59,9 @@ check("chat allowed: Slack and Discord kept open (they are on LOCKqz's own list)
 r, bl, apps, ex = built(OFF + ["search", "wiki", "web"], label="Notes only")
 check("Notes only: web search engines added (google.com/search, bing.com), only the open sites listed",
       "google.com/search" in bl and "bing.com" in bl and isinstance(ex["web"], list) and ex["search"] is False)
-check("Notes only: open = Brightspace, sign-in, LOCKqz, Docs, Drive, OneDrive, textbooks, Desmos, the quiz's site; not Wikipedia, not YouTube",
-      all(x in ex["web"] for x in ("brightspace.com", "accounts.google.com", "lockqz.com", "docs.google.com/document", "docs.google.com", "drive.google.com", "sharepoint.com", "bookshelf.vitalsource.com", "desmos.com"))
-      and not any(x in ex["web"] for x in ("wikipedia.org", "en.wikipedia.org", "youtube.com/watch")), ex["web"])
+check("Notes only: open = Brightspace, sign-in, LOCKqz, Docs, Drive, OneDrive, Desmos, a notebook on this computer, the quiz's site; not Wikipedia, not YouTube, not e-textbooks (AI inside)",
+      all(x in ex["web"] for x in ("brightspace.com", "accounts.google.com", "lockqz.com", "docs.google.com/document", "docs.google.com", "drive.google.com", "sharepoint.com", "desmos.com", "localhost", "127.0.0.1"))
+      and not any(x in ex["web"] for x in ("wikipedia.org", "en.wikipedia.org", "youtube.com/watch", "bookshelf.vitalsource.com", "plus.pearson.com")), ex["web"])
 r, bl, apps, ex = built(OFF + ["web", "excel"], allow=["investopedia.com", "x.com", "m.facebook.com"], block=["Spotify", "khanacademy.org", "Finder", "brightspace.com", "google.com", "Safari.app", "chrome.exe", "Steam.app"])
 check("typed sites: khanacademy.org blocked; brightspace.com and google.com never (exam, sign-in)", "khanacademy.org" in bl and "brightspace.com" not in bl and "google.com" not in bl)
 check("typed programs: Spotify and Steam closed; Finder, Safari, Chrome never", ("typed", "Spotify") in apps and ("typed", "Steam") in apps and not any(a[1].lower() in ("finder", "safari", "chrome") for a in apps if a[0] == "typed"), apps[-6:])

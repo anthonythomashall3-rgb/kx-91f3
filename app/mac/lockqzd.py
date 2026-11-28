@@ -36,7 +36,7 @@ KEEPFILE = os.environ.get("LOCKQZ_KEEP_FILE") or os.path.join(os.path.dirname(BL
 CONF_PATHS = ([os.environ["LOCKQZ_CONFIG"]] if os.environ.get("LOCKQZ_CONFIG") else []) + \
              ["/Library/Application Support/LOCKqz/config.json",
               os.path.join(HERE, "config.json")]
-VERSION = "0.6.50"
+VERSION = "0.6.51"
 # Cloudflare blocks the default "Python-urllib" user agent (403) — always send our own.
 UA = {"User-Agent": "LOCKqz/%s (macOS)" % VERSION}
 
@@ -157,12 +157,13 @@ def set_assist(qid, tools):
 # into this exam's lists), removed at every unlock / new quiz. No rules from the server: LOCKqz locks as before.
 RULES_FILE = os.path.join(os.path.dirname(LOCKFILE), "rules.json")
 
-def set_rules(qid, rules, url=""):
-    """Write (or remove, rules=None) this quiz's rules. True when they changed."""
+def set_rules(qid, rules, url="", host=None):
+    """Write (or remove, rules=None) this quiz's rules. True when they changed. host: the quiz's own site when there
+    is no url (the rules again with a heartbeat keep the site the /password answer was for)."""
     rec = None
     if isinstance(rules, dict) and isinstance(rules.get("b"), list):
         strs = lambda v, n, w: [x[:w] for x in (v if isinstance(v, list) else []) if isinstance(x, str)][:n]
-        h = (urllib.parse.urlsplit(url).hostname or "").lower() if url else ""
+        h = str(host or "").lower() if host is not None else (urllib.parse.urlsplit(url).hostname or "").lower() if url else ""
         rec = {"quiz_id": qid, "rules": {"label": str(rules.get("label") or "")[:40], "b": [k for k in strs(rules["b"], 60, 20) if re.fullmatch(r"[a-z]{2,20}", k)],
                "allow": strs(rules.get("allow"), 20, 100), "block": strs(rules.get("block"), 20, 60)},
                "quiz_host": h if re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", h) else ""}
@@ -178,6 +179,22 @@ def set_rules(qid, rules, url=""):
     if cur == rec: return False
     try: _write_private(RULES_FILE, json.dumps(rec)); return True
     except Exception as e: log("could not save exam rules: %s" % e); return False
+
+def beat_rules(qid, rules):
+    """The professor's rules again with a heartbeat (server, RULES_ON): a change made during the exam reaches a
+    computer already in it within one heartbeat. Only for the quiz this helper holds rules for (given with its
+    password), only while it is locked for it. True when the lock was run again with the new rules."""
+    try:
+        with open(RULES_FILE) as f: cur = json.load(f)
+    except Exception: return False
+    if not isinstance(cur, dict) or not qid or cur.get("quiz_id") != qid: return False
+    if not isinstance(rules, dict) or not isinstance(rules.get("b"), list): return False   # never drops the held rules
+    with LOCK:
+        if STATE["state"] != "locked" or STATE["quiz_id"] != qid: return False
+        if not set_rules(qid, rules, host=str(cur.get("quiz_host") or "")): return False
+        log("the professor changed this exam's rules - applying them")
+        engine("lock")
+    return True
 
 # Loopback control token: random per install, never baked into the package. The master copy is
 # root-only (0600). Each console user gets a read-only copy in a root-owned folder (see
@@ -699,6 +716,8 @@ def report(event, extra=None):
         BEAT_SECS = max(60, min(900, j["beat_s"]))
     if event not in ("unlock", "install", "update") and isinstance(j, dict) and j.get("unlock") is True:
         server_release(body.get("quiz_id"), j.get("reason"))
+    elif event == "heartbeat" and isinstance(j, dict) and isinstance(j.get("rules"), dict):
+        beat_rules(body.get("quiz_id"), j["rules"])
     return code, j
 
 def server_release(qid, reason):

@@ -78,6 +78,8 @@ run "API: every path, every caller, every odd body answers without a crash (fuzz
 run "Sweep 39: the professor's pages say what is really sent and needed (reminders, one password, same-day exams, phone rows, free accounts); Store catch-up" node --no-warnings test_sweep39.mjs
 run "Exam rules: what students may use in each exam (one list of rows everywhere, saving, /bs, /password, the dashboard pill and panel)" node --no-warnings test_rules.mjs
 run "Exam rules on the Mac and Linux: this exam's lists, browser policy, engines, agent (Safari), helper" python3 test_rules_apps.py
+run "Sweep 40: AI inside open apps cut where it has its own address; rows whose AI cannot be turned off start blocked; a class turned off lets go of its past exams; rules with every heartbeat" node --no-warnings test_sweep40.mjs
+run "Sweep 40 (apps): Notes only opens a notebook on this computer and an open row's sign-in pages; never blocks the quiz's own site; rules changed during the exam reach it" python3 test_sweep40.py
 run "26 Oct fixes: one Stripe checkout per code, overpayments carried, unexpected local unlocks red, course password retired" node --no-warnings test_oct26_fixes.mjs
 run "Helper hardening: fast user switching, per-user tokens, Windows monotonic cap, local-model apps" bash test_helper_hardening.sh
 run "Scale guard: no API query reads a whole big table (every statement planned against the real schema)" node --no-warnings test_scale_indexes.mjs

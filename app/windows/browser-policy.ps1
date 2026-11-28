@@ -254,8 +254,9 @@ function Test-KeepProxy {
 function Get-ExamWeb {
   # The sites open when the professor blocked all other websites (lower case hosts and host/paths), $null when not.
   if ((-not $Exam) -or ($null -eq $Exam.web)) { return $null }
+  # localhost and 127.0.0.1: a notebook running on this PC (Jupyter) when its row is open.
   return ,@(@($Exam.web) | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLower() } |
-    Where-Object { ($_ -cmatch '^[a-z0-9-]+(\.[a-z0-9-]+)+$') -or ($_ -cmatch '^[a-z0-9.-]+\.[a-z]{2,}/[a-z0-9._~%/-]*$') })
+    Where-Object { ($_ -cmatch '^[a-z0-9-]+(\.[a-z0-9-]+)+$') -or ($_ -ceq 'localhost') -or ($_ -cmatch '^[a-z0-9.-]+\.[a-z]{2,}/[a-z0-9._~%/-]*$') })
 }
 function Get-FfWebExceptions($web) {
   # Firefox: an exception beats every block, so an open site with a blocked part under it (an AI page, a blocked
@@ -271,7 +272,8 @@ function Get-FfWebExceptions($web) {
       if ((($b[0] -eq $wh) -or $b[0].EndsWith("." + $wh)) -and ((-not $wp) -or (($b[0] -eq $wh) -and ("/" + $b[1]).StartsWith("/" + $wp)))) { $hit = $true; break }
     }
     if ($hit) { continue }
-    if ($i -ge 0) { [void]$out.Add("*://*." + $w + "*") } else { [void]$out.Add("*://*." + $w + "/*") }
+    # localhost and an address: exactly that host, every port (Firefox match patterns ignore the port)
+    if ($i -ge 0) { [void]$out.Add("*://*." + $w + "*") } elseif (($w -ceq 'localhost') -or ($w -cmatch '^\d+(\.\d+){3}$')) { [void]$out.Add("*://" + $w + "/*") } else { [void]$out.Add("*://*." + $w + "/*") }
   }
   return ,@($out)
 }

@@ -106,7 +106,7 @@ $WildDomains = @("openai.azure.com","cognitiveservices.azure.com","services.ai.a
                  "workers.dev","hf.space","modal.run","vercel.app","fly.dev","replit.dev","replit.app","repl.co",
                  "ngrok.io","ngrok-free.app","ngrok.app","ngrok.dev","ngrok-free.dev","trycloudflare.com","loca.lt","serveo.net",
                  "localhost.run","pinggy.link","pinggy.io","zrok.io","learnwise.ai","forethought.ai",
-                 "translate.goog","github.dev","gitpod.io","csb.app","mybinder.org","devtunnels.ms","gradio.live","val.run","streamlit.app")
+                 "translate.goog","github.dev","gitpod.io","csb.app","mybinder.org","devtunnels.ms","gradio.live","val.run","streamlit.app","dash.ai")
 $WildTag = "LOCKqz-wild"
 # Warm connections (28 Oct 2026): an app LOCKqz does not close (Office, a PDF reader ...) that already
 # held an open keep-alive connection to an AI host when the quiz opened could keep using it: the hosts
@@ -168,7 +168,9 @@ function Build-Exam([string]$rulesFile, [string]$blockFile, [string]$catalogFile
   $add = New-Object System.Collections.ArrayList
   foreach ($k in $blocked) { foreach ($e in @(& $row $k "hosts") + @(& $row $k "paths")) { [void]$add.Add($e.ToLower()) } }
   if ($b.ContainsKey("search")) { foreach ($e in @($cat.search_hosts)) { [void]$add.Add(([string]$e).ToLower()) } }
+  # never the exam (its own site too, whatever the Brightspace of the school is called), sign-in or LOCKqz
   $keepSites = @(@($cat.base_allow) | ForEach-Object { ([string]$_).Split("/")[0] })
+  $qh0 = [string]$rec.quiz_host; if ($qh0 -cmatch '^[a-z0-9-]+(\.[a-z0-9-]+)+$') { $keepSites += $qh0 }
   $typedIn = @(@($r.block) | Where-Object { $_ -is [string] } | Select-Object -First 20)
   foreach ($x in $typedIn) {
     $h = ""; if ($x -notmatch '\.exe$') { $h = LQ-Host $x }

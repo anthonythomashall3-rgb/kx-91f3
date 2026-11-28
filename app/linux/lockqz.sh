@@ -318,7 +318,7 @@ WILD_DOMAINS=(openai.azure.com cognitiveservices.azure.com services.ai.azure.com
               workers.dev hf.space modal.run vercel.app fly.dev replit.dev replit.app repl.co \
               ngrok.io ngrok-free.app ngrok.app ngrok.dev ngrok-free.dev trycloudflare.com loca.lt serveo.net \
               localhost.run pinggy.link pinggy.io zrok.io learnwise.ai forethought.ai \
-              translate.goog github.dev gitpod.io csb.app mybinder.org devtunnels.ms gradio.live val.run streamlit.app)
+              translate.goog github.dev gitpod.io csb.app mybinder.org devtunnels.ms gradio.live val.run streamlit.app dash.ai)
 WILD_IF="${LOCKQZ_WILD_IF:-lockqz0}"
 # The same domains on every Linux, with or without systemd-resolved: a DNS question (port 53, any server, the
 # local one included) that asks for a name under one of them is refused by the firewall, so it fails at once.

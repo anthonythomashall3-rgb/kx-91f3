@@ -62,7 +62,7 @@ class DnsVpnService : VpnService() {
             "workers.dev", "hf.space", "modal.run", "vercel.app", "fly.dev", "replit.dev", "replit.app", "repl.co",
             "ngrok.io", "ngrok-free.app", "ngrok.app", "ngrok.dev", "ngrok-free.dev", "trycloudflare.com", "loca.lt", "serveo.net",
             "localhost.run", "pinggy.link", "pinggy.io", "zrok.io", "learnwise.ai", "forethought.ai",
-            "translate.goog", "github.dev", "gitpod.io", "csb.app", "mybinder.org", "devtunnels.ms", "gradio.live", "val.run", "streamlit.app")
+            "translate.goog", "github.dev", "gitpod.io", "csb.app", "mybinder.org", "devtunnels.ms", "gradio.live", "val.run", "streamlit.app", "dash.ai")
         fun setBlocklist(hosts: List<String>) { blocked = (hosts.map { it.lowercase() } + WILD_DOMAINS).toSet() }
         /** Is this name (or a parent domain of it) on the list? */
         fun isBlocked(name: String): Boolean {

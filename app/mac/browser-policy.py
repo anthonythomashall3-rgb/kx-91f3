@@ -107,11 +107,12 @@ def exam():
     except Exception: return {}
 
 def _web(ex):
-    """The sites a browser may open when the professor blocked all other websites ([] = none), None when not."""
+    """The sites a browser may open when the professor blocked all other websites ([] = none), None when not.
+    localhost and 127.0.0.1: a notebook running on this computer (Jupyter) when its row is open."""
     w = ex.get("web") if isinstance(ex, dict) else None
     if not isinstance(w, list): return None
     return [x.lower() for x in w if isinstance(x, str) and (re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", x.lower()) or
-            re.fullmatch(r"[a-z0-9.-]+\.[a-z]{2,}/[a-z0-9._~%/-]*", x.lower()))]
+            x.lower() == "localhost" or re.fullmatch(r"[a-z0-9.-]+\.[a-z]{2,}/[a-z0-9._~%/-]*", x.lower()))]
 
 def exam_chromium(p, ex):
     """The professor's rules on a Chromium policy: no web search (no Google "Web" results either), no translation,
@@ -140,7 +141,9 @@ def exam_firefox(pol, ex, blocked):
     exc = []
     for w in web:
         if any(inside(b, w) for b in blocked): continue
-        exc.append("*://*.%s*" % w if "/" in w else "*://*.%s/*" % w)
+        # localhost and an address: exactly that host, every port (Firefox match patterns ignore the port)
+        local = w == "localhost" or re.fullmatch(r"\d+(\.\d+){3}", w)
+        exc.append("*://*.%s*" % w if "/" in w else "*://%s/*" % w if local else "*://*.%s/*" % w)
     wf["Block"] = _union(["<all_urls>"], wf["Block"])
     wf["Exceptions"] = _union(wf["Exceptions"], exc + ["file:///*"])
 

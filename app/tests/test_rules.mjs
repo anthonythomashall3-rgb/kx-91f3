@@ -57,7 +57,7 @@ const dash = readFileSync(join(PUB, "dashboard.html"), "utf8");
 const dashKeys = [...dash.slice(dash.indexOf("const RG = ["), dash.indexOf("const RKEYS")).matchAll(/\{ k: "([a-z]+)"/g)].map(m => m[1]);
 check("40 rows, the same in the server, the dashboard and the catalog", catKeys.length === 40 && JSON.stringify(srvKeys) === JSON.stringify(catKeys) && JSON.stringify(dashKeys) === JSON.stringify(catKeys), JSON.stringify([srvKeys.length, dashKeys.length]));
 check("start blocked: the messaging rows and the rows with AI inside (and only those)", JSON.stringify(srvOff) === JSON.stringify(catOff)
-  && JSON.stringify(catOff) === JSON.stringify(["solvers", "text", "chat", "email", "calls", "youtube", "social", "homework", "writing", "translate"]), JSON.stringify(catOff));
+  && JSON.stringify(catOff) === JSON.stringify(["dropbox", "box", "ebooks", "solvers", "matlab", "text", "chat", "email", "calls", "youtube", "social", "homework", "writing", "translate"]), JSON.stringify(catOff));
 check("server's never-close names and always-open sites = the catalog's", JSON.stringify([...new Set(JSON.parse(SRC.match(/const RULE_NEVER_CLOSE = new Set\((\[[^\]]*\])\)/)[1]))]) === JSON.stringify(cat.never_close)
   && JSON.stringify(arr("RULE_BASE")) === JSON.stringify(cat.base_allow));
 let winCat = null; try { winCat = readFileSync(join(APP, "windows", "rules-catalog.json"), "utf8"); } catch {}

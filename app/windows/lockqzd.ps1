@@ -10,7 +10,7 @@
 # shipped with the install (update.pub.xml), downloads each listed file, checks its SHA-256, swaps
 # the files in and restarts both tasks. Anything wrong leaves the install exactly as it was.
 $ErrorActionPreference = "SilentlyContinue"
-$Version = "0.6.50"
+$Version = "0.6.51"
 $Here  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Engine = Join-Path $Here "lockqz.ps1"
 $ConfPath = if ($env:LOCKQZ_CONFIG) { $env:LOCKQZ_CONFIG } else { "$env:ProgramData\LOCKqz\config.json" }
@@ -301,6 +301,28 @@ function LQ-RefreshBlocklist([string]$api, [string]$file, [string]$version) {
   if ($null -eq $d) { return 0 }
   try { return (LQ-MergeBlocklist $d $file) } catch { return 0 }
 }
+# Exam rules (27 Nov 2026): the record kept in rules.json for this quiz (keys only, checked shapes, the own site of the quiz).
+function LQ-Cut($list, [int]$n, [int]$w) { @($list) | Where-Object { $_ -is [string] } | ForEach-Object { if ($_.Length -gt $w) { $_.Substring(0, $w) } else { $_ } } | Select-Object -First $n }
+function LQ-RulesRecord($q, $rules, [string]$url) {
+  if (($null -eq $rules) -or ($null -eq $rules.b)) { return $null }
+  $h = ""; try { $h = ([Uri]$url).Host.ToLower() } catch { }
+  if ($h -notmatch '^[a-z0-9-]+(\.[a-z0-9-]+)+$') { $h = "" }
+  $lbl = [string]$rules.label; if ($lbl.Length -gt 40) { $lbl = $lbl.Substring(0, 40) }
+  $b = [object[]]@(@(LQ-Cut $rules.b 60 20) | Where-Object { $_ -cmatch '^[a-z]{2,20}$' })
+  return [ordered]@{ quiz_id = [string]$q; rules = [ordered]@{ label = $lbl; b = $b; allow = [object[]]@(LQ-Cut $rules.allow 20 100); block = [object[]]@(LQ-Cut $rules.block 20 60) }; quiz_host = $h }
+}
+function LQ-BeatRules($q, $rules, [string]$file) {
+  # The rules of the professor again with a heartbeat (server, RULES_ON): only for the quiz this helper already holds rules
+  # for (given with its password), with the own site of that quiz. -> $true when the file changed (the lock then runs again).
+  if ((-not $q) -or ($null -eq $rules) -or ($null -eq $rules.b)) { return $false }
+  $cur = $null; try { $cur = Get-Content -LiteralPath $file -Raw -ErrorAction Stop | ConvertFrom-Json } catch { return $false }
+  if ((-not $cur) -or ([string]$cur.quiz_id -ne [string]$q)) { return $false }
+  $h = [string]$cur.quiz_host; $u = ""; if ($h) { $u = "https://" + $h + "/" }
+  $new = ((LQ-RulesRecord $q $rules $u) | ConvertTo-Json -Compress -Depth 5)
+  $raw = $null; try { $raw = Get-Content -LiteralPath $file -Raw -ErrorAction Stop } catch { }
+  if ($raw -and ($raw.Trim() -eq $new)) { return $false }
+  try { [IO.File]::WriteAllText($file, $new, (New-Object Text.UTF8Encoding($false))); return $true } catch { return $false }
+}
 '@
 . ([ScriptBlock]::Create($SignLib))
 
@@ -466,15 +488,6 @@ function Set-Assist($q, $tools) {
 # into this exam's lists, and removes it at every unlock; a new quiz drops it here. No rules from the server: LOCKqz
 # locks as before.
 $RulesFile = if ($env:LOCKQZ_RULES) { $env:LOCKQZ_RULES } else { "$env:ProgramData\LOCKqz\rules.json" }
-function LQ-Cut($list, [int]$n, [int]$w) { @($list) | Where-Object { $_ -is [string] } | ForEach-Object { if ($_.Length -gt $w) { $_.Substring(0, $w) } else { $_ } } | Select-Object -First $n }
-function LQ-RulesRecord($q, $rules, [string]$url) {
-  if (($null -eq $rules) -or ($null -eq $rules.b)) { return $null }
-  $h = ""; try { $h = ([Uri]$url).Host.ToLower() } catch { }
-  if ($h -notmatch '^[a-z0-9-]+(\.[a-z0-9-]+)+$') { $h = "" }
-  $lbl = [string]$rules.label; if ($lbl.Length -gt 40) { $lbl = $lbl.Substring(0, 40) }
-  $b = [object[]]@(@(LQ-Cut $rules.b 60 20) | Where-Object { $_ -cmatch '^[a-z]{2,20}$' })
-  return [ordered]@{ quiz_id = [string]$q; rules = [ordered]@{ label = $lbl; b = $b; allow = [object[]]@(LQ-Cut $rules.allow 20 100); block = [object[]]@(LQ-Cut $rules.block 20 60) }; quiz_host = $h }
-}
 function Set-Rules($q, $rules, [string]$url = "") {
   # Write (or remove: no rules) this quiz's rules. -> $true when they changed.
   $rec = LQ-RulesRecord $q $rules $url
@@ -535,6 +548,7 @@ $watcher.AddScript({
   $policyBackup = "$env:ProgramData\LOCKqz\policy-backup.json"
   $mx = New-Object System.Threading.Mutex($false, "Global\LOCKqzEngine")
   $lf = if ($env:LOCKQZ_LOCKFILE) { $env:LOCKQZ_LOCKFILE } else { "$env:ProgramData\LOCKqz\active_lock.json" }
+  $rulesFile = if ($env:LOCKQZ_RULES) { $env:LOCKQZ_RULES } else { "$env:ProgramData\LOCKqz\rules.json" }
   function WRelease($q, [string]$reason, $extra) {
     # Unlock now and remember the quiz so the agent never re-locks it while its page stays open:
     # the safety cap, or the server's {unlock:true} (C9). -> $true when it unlocked.
@@ -608,7 +622,16 @@ $watcher.AddScript({
           $hr = WReport "heartbeat" $null "helper"
           $script:BeatSecs = LQ-BeatSecs $hr.data $script:BeatSecs
           $why = LQ-ServerReason $hr.data   # C9: the server says this student's quiz is over
-          if ($why) { WRelease $hq $why $null | Out-Null }
+          if ($why) { WRelease $hq $why $null | Out-Null } elseif ($hr.data -and $hr.data.rules) {
+            # The professor changed the rules during the exam: the lists of this exam, then the browser policy.
+            $got = WLock
+            try {
+              if (($State.state -eq "locked") -and ($State.quiz_id -eq $hq) -and (LQ-BeatRules $hq $hr.data.rules $rulesFile)) {
+                WEngine "lock" | Out-Null
+                & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Here "browser-policy.ps1") lock | Out-Null
+              }
+            } finally { WUnlockMx $got }
+          }
         }
       }
     } elseif ($State.state -eq "test") {

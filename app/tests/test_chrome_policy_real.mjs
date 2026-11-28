@@ -3,6 +3,7 @@
 // Chromium), that AI sites and Google AI search are refused, normal Google Web search and notes sites
 // are not, and that installed (incl. unpacked) extensions are disabled. Skips if no Chromium/xvfb/root.
 import { execFileSync, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import { writeFileSync, mkdirSync, mkdtempSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
@@ -90,5 +91,14 @@ print(json.dumps(p))`], { env: { ...process.env, LOCKQZ_BLOCKLIST: join(ed, "exa
   for (const u of ["https://usc.brightspace.com/d2l/home", "https://docs.google.com/document/d/1/edit", "https://www.investopedia.com/terms/b/bond.asp", "https://m365.cloud.microsoft/",
     "https://www.youtube.com/embed/x", "https://accounts.google.com/", "https://www.desmos.com/calculator", "file://" + join(ed, "notes.txt")])
     (await blocked(u)) ? bad("exam over-blocks: " + u) : ok("exam opens: " + u);
+  // Python and Jupyter open (it is not among the blocked rows): a notebook served on this computer opens, on any port.
+  const nb = createServer((q, s) => { s.writeHead(200, { "Content-Type": "text/html" }); s.end("<title>Jupyter</title>notebook"); });
+  await new Promise(r => nb.listen(0, "127.0.0.1", r));
+  const port = nb.address().port;
+  for (const u of [`http://localhost:${port}/tree?token=x`, `http://127.0.0.1:${port}/lab`]) {
+    const q = await ctx.newPage(); const t = await q.goto(u, { timeout: 8000 }).then(() => q.title()).catch(e => e.message); await q.close();
+    t === "Jupyter" ? ok("exam opens a notebook on this computer: " + u) : bad("notebook on this computer not opened: " + u + " (" + String(t).slice(0, 80) + ")");
+  }
+  nb.close();
 } finally { put({}); await ctx.close(); }
 console.log(""); console.log(`RESULT: ${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

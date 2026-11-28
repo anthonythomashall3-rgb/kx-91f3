@@ -87,10 +87,11 @@ def build(rules, base_lines, cat, plat):
     have = set(out)
     add = [e.lower() for k in blocked for e in rows[k].get("hosts", []) + rows[k].get("paths", [])]
     if "search" in b: add += [e.lower() for e in cat.get("search_hosts", [])]
-    keep_sites = [e.split("/")[0] for e in cat.get("base_allow", [])]
+    # never the exam (its own site too, whatever the school's Brightspace is called), sign-in or LOCKqz (the server
+    # refuses them too)
+    keep_sites = [e.split("/")[0] for e in cat.get("base_allow", [])] + ([rules["quiz_host"]] if rules.get("quiz_host") else [])
     for x in rules["block"]:
         h = "" if re.search(r"\.exe$", x, re.I) else host(x)
-        # never the exam, sign-in or LOCKqz (the server refuses them too)
         if h and not any(under(k, h) or under(h, k) for k in keep_sites): add.append(h)
     for e in add:
         if (HOST_RE.fullmatch(e) or PATH_RE.fullmatch(e)) and e not in have: out.append(e); have.add(e)

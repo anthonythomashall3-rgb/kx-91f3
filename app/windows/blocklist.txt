@@ -1062,3 +1062,29 @@ spokenly.app
 tryvoiceink.com
 monologue.to
 bossai.tech
+
+# 28 Nov sweep 40: AI built into apps that stay open during a quiz, cut where it has its own address: Dropbox Dash (dash.ai,
+# also every name under it), Foxit's AI Assistant, Anaconda Assistant (its API is on anaconda.com; conda's own repo stays open),
+# MATLAB's AI Chat Playground, IBM watsonx.ai (SPSS's AI Output Assistant and the watsonx Prompt Lab)
+dash.ai
+www.dash.ai
+dash.dropbox.com
+ai.foxit.com
+ai-assistant.foxit.com
+anaconda.com
+anaconda.cloud
+auth.anaconda.cloud
+nb.anaconda.cloud
+mathworks.com/matlabcentral/playground
+us-south.ml.cloud.ibm.com
+eu-de.ml.cloud.ibm.com
+eu-gb.ml.cloud.ibm.com
+jp-tok.ml.cloud.ibm.com
+au-syd.ml.cloud.ibm.com
+ca-tor.ml.cloud.ibm.com
+dataplatform.cloud.ibm.com
+eu-de.dataplatform.cloud.ibm.com
+eu-gb.dataplatform.cloud.ibm.com
+jp-tok.dataplatform.cloud.ibm.com
+au-syd.dataplatform.cloud.ibm.com
+ca-tor.dataplatform.cloud.ibm.com

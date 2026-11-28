@@ -314,7 +314,7 @@ def exam_view(ex, quiz_url=""):
         for e in ex["web"]:
             if not isinstance(e, str): continue
             d, _, p = e.lower().partition("/")
-            if re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", d): w.append((d, "/" + p))
+            if re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", d) or d == "localhost": w.append((d, "/" + p))
         q = (urllib.parse.urlsplit(quiz_url).hostname or "").lower() if quiz_url else ""
         if q: w.append((q, "/"))
         out["web"] = w
