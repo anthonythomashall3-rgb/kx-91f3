@@ -725,7 +725,8 @@ const ASSIST = {readwrite:"Read&Write", equatio:"Equatio", cowriter:"Co:Writer",
 const assistBox = (ou, x) => !x.email ? "" : `<details class="as" style="font-size:12px;color:var(--muted,#777)"><summary>Assistive tools${(x.assist||[]).length?": "+esc((x.assist||[]).map(k=>ASSIST[k]||k).join(", ")):""}</summary>${Object.keys(ASSIST).map(k=>`<label style="margin-right:10px;white-space:nowrap"><input type="checkbox" data-ou="${esc(ou)}" data-em="${esc(x.email)}" data-tool="${k}"${(x.assist||[]).includes(k)?" checked":""} onchange="setAssist(this)"> ${esc(ASSIST[k])}</label>`).join("")}</details>`;
 // ---- EXAM RULES ---- What students can use in an exam beside Brightspace (owner, 27 Nov 2026). The professor picks one
 // of three choices or sets each row; AI is always blocked and has no row. Row keys = mac/rules-catalog.json (each app maps
-// a row to its own programs and addresses). Messaging and the rows with AI inside start blocked.
+// a row to its own programs and addresses). Messaging and the rows with AI inside start blocked (an app whose AI LOCKqz
+// cannot turn off on its own is a row with AI inside).
 const RG = [
   { id: "docs", t: "Documents and spreadsheets", rows: [
     { k: "word", t: "Word", d: "Desktop and web · Copilot stays off" }, { k: "excel", t: "Excel", d: "Desktop and web · Copilot stays off" },
@@ -734,18 +735,18 @@ const RG = [
     { k: "iwork", t: "Pages, Numbers, Keynote", d: "Apple Intelligence stays off" } ] },
   { id: "files", t: "Files and cloud storage", rows: [
     { k: "gdrive", t: "Google Drive", d: "Gemini stays off" }, { k: "onedrive", t: "OneDrive and SharePoint", d: "Copilot stays off" },
-    { k: "icloud", t: "iCloud Drive", d: "" }, { k: "dropbox", t: "Dropbox", d: "Dropbox AI stays off" }, { k: "box", t: "Box", d: "Box AI stays off" } ] },
+    { k: "icloud", t: "iCloud Drive", d: "" }, { k: "dropbox", t: "Dropbox", d: "", ai: true }, { k: "box", t: "Box", d: "", ai: true } ] },
   { id: "notes", t: "Notes", rows: [
     { k: "applenotes", t: "Apple Notes", d: "Apple Intelligence stays off" }, { k: "onenote", t: "OneNote", d: "Copilot stays off" },
     { k: "obsidian", t: "Obsidian", d: "" }, { k: "plainnotes", t: "Simplenote, Joplin", d: "" }, { k: "sticky", t: "Sticky notes", d: "Stickies, Sticky Notes" } ] },
   { id: "read", t: "Reading and textbooks", rows: [
     { k: "pdf", t: "PDF readers", d: "Preview, Adobe Acrobat · Acrobat AI stays off" },
-    { k: "ebooks", t: "E-textbooks", d: "VitalSource, RedShelf, Kindle, Pearson, McGraw Hill, Cengage · their AI stays off" } ] },
+    { k: "ebooks", t: "E-textbooks", d: "VitalSource, RedShelf, Kindle, Pearson, McGraw Hill, Cengage", ai: true } ] },
   { id: "math", t: "Math and calculators", rows: [
     { k: "calc", t: "Calculator", d: "The computer's own" }, { k: "desmos", t: "Desmos", d: "Graphing calculator" }, { k: "geogebra", t: "GeoGebra", d: "" },
     { k: "solvers", t: "Math solvers", d: "Wolfram|Alpha, Symbolab, Mathway, Photomath", ai: true } ] },
   { id: "code", t: "Coding and data", rows: [
-    { k: "python", t: "Python and Jupyter", d: "" }, { k: "rstudio", t: "RStudio", d: "" }, { k: "matlab", t: "MATLAB", d: "" },
+    { k: "python", t: "Python and Jupyter", d: "" }, { k: "rstudio", t: "RStudio", d: "" }, { k: "matlab", t: "MATLAB", d: "", ai: true },
     { k: "stats", t: "Stata, SPSS, SAS", d: "" }, { k: "vscode", t: "VS Code", d: "AI add-ons stay off" } ] },
   { id: "web", t: "Websites", rows: [
     { k: "search", t: "Web search", d: "Google, Bing · AI answers stay off" }, { k: "wiki", t: "Wikipedia", d: "" },
@@ -761,7 +762,7 @@ const RKEYS = RG.flatMap(g => g.rows.map(r => r.k));
 const ROFF = RG.flatMap(g => g.rows.filter(r => g.id === "msg" || r.ai).map(r => r.k));
 const RPRE = { open: ROFF, notes: [...ROFF, "search", "wiki", "web"] };
 const RLBL = { open: "Notes + internet", notes: "Notes only", custom: "Custom" };
-const RSUB = { open: "Everything except AI and messaging.", notes: "Brightspace, notes, files and textbooks. No other websites.", custom: "Pick each app and website." };
+const RSUB = { open: "Everything except AI and messaging.", notes: "Brightspace, notes and files. No other websites.", custom: "Pick each app and website." };
 const ROPEN = [["Brightspace", "The exam itself"], ["Files on the computer", "Finder, File Explorer, downloads"], ["Accessibility tools", "Screen readers, the computer's own dictation, zoom"]];
 const RALWAYS = [["AI chat and AI websites", "ChatGPT, Claude, Gemini, Copilot, Perplexity"], ["AI inside apps and browsers", "Copilot in Word, Gemini in Docs, Apple Intelligence"],
   ["AI note apps", "Notion, Evernote, Goodnotes, Otter"], ["Cheating tools", "Hidden screen overlays, remote control, virtual machines, VPNs"]];

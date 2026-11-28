@@ -115,7 +115,11 @@ const AI_DOMAINS = [
   "subcue.ai","accounts.subcue.ai","ctrlpotato.com","clapassist.com","offerinai.com","lastroundai.com","app.lastroundai.com","linkjob.ai","craqly.com","sigmeet.ai","aissence.ai","camcue.app","ghostpilotai.com","pluely.com","wittro.com","api.minimax.chat","api.hunyuan.cloud.tencent.com","upstage.ai","api.upstage.ai","friendli.ai","api.friendli.ai","api.studio.nebius.ai","api.chatanywhere.tech","api.chatanywhere.org",
   "unstuckstudy.com","askcodi.com","monic.ai","revisely.com","docalysis.com","elicit.org","chatthing.ai",
   "wisprflow.ai","api.wisprflow.ai","api-east.wisprflow.ai","wisprflow.com","openwhispr.com","api.openwhispr.com","superwhisper.com","granola.ai","api.granola.ai","app.granola.ai","public-api.granola.ai","limitless.ai","api.limitless.ai","app.limitless.ai","rewind.ai","lobehub.com","lobechat.com",
-  "withaqua.com","aquavoice.com","willowvoice.com","spokenly.app","tryvoiceink.com","monologue.to","bossai.tech"
+  "withaqua.com","aquavoice.com","willowvoice.com","spokenly.app","tryvoiceink.com","monologue.to","bossai.tech",
+  "dash.ai","www.dash.ai","dash.dropbox.com","ai.foxit.com","ai-assistant.foxit.com","anaconda.com","anaconda.cloud","auth.anaconda.cloud",
+  "nb.anaconda.cloud","mathworks.com/matlabcentral/playground","us-south.ml.cloud.ibm.com","eu-de.ml.cloud.ibm.com","eu-gb.ml.cloud.ibm.com",
+  "jp-tok.ml.cloud.ibm.com","au-syd.ml.cloud.ibm.com","ca-tor.ml.cloud.ibm.com","dataplatform.cloud.ibm.com","eu-de.dataplatform.cloud.ibm.com",
+  "eu-gb.dataplatform.cloud.ibm.com","jp-tok.dataplatform.cloud.ibm.com","au-syd.dataplatform.cloud.ibm.com","ca-tor.dataplatform.cloud.ibm.com"
 ];
 // Additions to the apps' own never-close list: during a quiz the apps close any program that hides its windows from
 // screen capture, except Apple's and Windows' own code and the programs people need beside a quiz (their KEEP_APPS).
@@ -276,9 +280,10 @@ const assistList = v => { let a = []; try { a = Array.isArray(v) ? v : JSON.pars
 // Exam rules (owner, 27 Nov 2026): what students may use in an exam beside Brightspace, set by the professor row by
 // row. Each row's programs and addresses are LOCKqz's own (mac/rules-catalog.json, shipped in every app); the server
 // keeps only the keys and sends the blocked ones. AI has no row: it is always blocked. Messaging and the rows with AI
-// inside start blocked. RULE_KEYS / RULE_BLOCKED / RULE_NEVER_CLOSE / RULE_BASE follow the catalog (test_rules.mjs).
+// inside start blocked: a row whose AI LOCKqz cannot turn off on its own (Dropbox, Box, e-textbooks, MATLAB) is a row with AI
+// inside. RULE_KEYS / RULE_BLOCKED / RULE_NEVER_CLOSE / RULE_BASE follow the catalog (test_rules.mjs).
 const RULE_KEYS = ["word", "excel", "powerpoint", "gdocs", "gsheets", "gslides", "iwork", "gdrive", "onedrive", "icloud", "dropbox", "box", "applenotes", "onenote", "obsidian", "plainnotes", "sticky", "pdf", "ebooks", "calc", "desmos", "geogebra", "solvers", "python", "rstudio", "matlab", "stats", "vscode", "search", "wiki", "web", "text", "chat", "email", "calls", "youtube", "social", "homework", "writing", "translate"];
-const RULE_BLOCKED = ["solvers", "text", "chat", "email", "calls", "youtube", "social", "homework", "writing", "translate"];
+const RULE_BLOCKED = ["dropbox", "box", "ebooks", "solvers", "matlab", "text", "chat", "email", "calls", "youtube", "social", "homework", "writing", "translate"];
 const RULE_PRESET = { open: RULE_BLOCKED, notes: [...RULE_BLOCKED, "search", "wiki", "web"] };
 const RULE_LABEL = { open: "Notes + internet", notes: "Notes only", custom: "Custom" };
 // Program names a professor's "Also block" never closes (the system, browsers, LOCKqz); the apps check again.
@@ -310,11 +315,12 @@ function ruleOf(v) {
   return { p, b, allow, block };
 }
 // The professor's typed sites and programs that cannot be used -> what to tell them ("" when all are fine).
-function ruleProblem(r) {
+function ruleProblem(r, keep = []) {
   for (const h of r.allow) if (aiSite(h)) return `${h} is AI. LOCKqz always blocks it.`;
   for (const x of r.block) {
     const prog = /\.(app|exe)$/i.test(x) || !ruleHost(x), h = /\.exe$/i.test(x) ? "" : ruleHost(x);
-    if (h && RULE_BASE.some(e => { const eh = e.split("/")[0]; return underHost(eh, h) || underHost(h, eh); })) return `${x} is needed for the exam or sign-in.`;
+    // keep: the school's own Brightspace sites (BS_HOSTS), as needed as the ones every school has.
+    if (h && [...RULE_BASE, ...keep].some(e => { const eh = e.split("/")[0]; return underHost(eh, h) || underHost(h, eh); })) return `${x} is needed for the exam or sign-in.`;
     if (prog && RULE_NEVER_CLOSE.has(x.toLowerCase().replace(/\.(app|exe)$/, ""))) return `${x} cannot be closed.`;
   }
   return "";
@@ -2642,6 +2648,15 @@ export async function onRequest(context) {
       if (v.ok && qidOk && (ev === "lock" || (ev === "heartbeat" && !agentBeat))) {
         const u = await serverUnlock(dev, device_id, qidOk);
         if (u) return json({ ok: true, unlock: true, reason: u, beat_s: beatSecs(env) });
+        // Exam rules (RULES_ON): what the professor lets students use in this exam, again with every heartbeat of a
+        // locked computer, so a change made during the exam reaches the computers already in it (the /password answer
+        // gave them the rules at the start). Same one read as /password; the helper uses it only for the quiz it holds
+        // rules for.
+        if (ev === "heartbeat" && rulesOn(env)) {
+          const [ro, rq] = qidOk.split("-");
+          const rr = await db.prepare("SELECT rules FROM quiz_rules WHERE ou=? AND qi IN (?, '*') ORDER BY qi='*' LIMIT 1").bind(ro, rq).first();
+          return json({ ok: true, beat_s: beatSecs(env), rules: ruleSent(ruleOf(rr?.rules) || ruleOf({ p: "open" })) });
+        }
         return json({ ok: true, beat_s: beatSecs(env) });
       }
       return json({ ok: true });
@@ -4190,7 +4205,18 @@ export async function onRequest(context) {
       if (!/^\d+$/.test(ou)) return json({ error:"bad class" }, 400);
       if (!me.admin && !(await trustedInstructor(ou))) return json({ error:"Only the professor of this class can change LOCKqz for it." }, 403);
       if (body.on) await db.prepare("DELETE FROM course_off WHERE ou=?").bind(ou).run();
-      else await db.prepare("INSERT INTO course_off (ou,teacher_id,at) VALUES (?,?,?) ON CONFLICT(ou) DO NOTHING").bind(ou, me.id, now()).run();
+      else {
+        // Off: LOCKqz leaves the whole class. Its exams that are not over are turned off one by one by the screen
+        // (/protect); its past exams that still carry LOCKqz's password let it go here, so a make-up through special
+        // access is never stuck behind a password nobody hands out (the next Sync takes it out of Brightspace).
+        // A running gate is left to its own switch. Auto-protect never puts a past exam back.
+        const past = (await db.prepare("SELECT q.qi AS qi, q.password AS password FROM quizzes q JOIN bs_quizzes b ON b.ou=q.ou AND b.qi=q.qi WHERE q.ou=? AND q.qi IS NOT NULL AND COALESCE(q.gated,0)<>1 AND ((COALESCE(b.end_date,'')<>'' AND b.end_date<?) OR (COALESCE(b.end_date,'')='' AND COALESCE(b.due_date,'')<>'' AND b.due_date<?)) LIMIT 500")
+          .bind(ou, now(), new Date(Date.now() - 86400000).toISOString()).all()).results;
+        const st = [db.prepare("INSERT INTO course_off (ou,teacher_id,at) VALUES (?,?,?) ON CONFLICT(ou) DO NOTHING").bind(ou, me.id, now())];
+        for (const q of past) st.push(db.prepare("INSERT OR REPLACE INTO pending_clear (ou,qi,password) VALUES (?,?,?)").bind(ou, String(q.qi), q.password),
+          db.prepare("DELETE FROM quizzes WHERE ou=? AND qi=?").bind(ou, String(q.qi)));
+        await runBatches(db, st);
+      }
       return json({ ou, on: !!body.on });
     }
     if (p === "/protect" && request.method === "POST") {
@@ -4329,7 +4355,7 @@ export async function onRequest(context) {
       if (!/^\d+$/.test(ou) || (!all && !/^\d+$/.test(qi))) return json({ error: "bad exam" }, 400);
       if (!me.admin && !(await trustedInstructor(ou))) return json({ error: "Only the professor of this course." }, 403);
       const r = ruleOf(body.rules); if (!r) return json({ error: "bad rules" }, 400);
-      const why = ruleProblem(r); if (why) return json({ error: why }, 400);
+      const why = ruleProblem(r, bsHosts(env)); if (why) return json({ error: why }, 400);
       if (!all && !(await db.prepare("SELECT 1 FROM bs_quizzes WHERE ou=? AND qi=? LIMIT 1").bind(ou, qi).first())) return json({ error: "no such exam" }, 404);
       const js = JSON.stringify(r), by = String(me.id || "admin"), at = now();
       const up = "INSERT INTO quiz_rules (ou,qi,rules,by_teacher,at) VALUES (?,?,?,?,?) ON CONFLICT(ou,qi) DO UPDATE SET rules=excluded.rules,by_teacher=excluded.by_teacher,at=excluded.at";
