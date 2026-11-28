@@ -7,6 +7,7 @@ when you push the finished work.** Do not edit files another session has claimed
 note under "Requests" instead. Stale claims (older than 3 hours with no commit) may be taken over.
 
 ## Working now
+- 2026-11-27 16:45 PT — 01UUDg7bdP: bug sweep 40 (whole app: server, dashboard, apps, extension). Holds files only as they are changed; will list them here.
 
 ## Recently finished
 - 2026-11-27 15:55 PT — 01UUDg7coV: exam switch status finished (bbf7799, Release 46082929083 green; migrate_050 applied; professor extension 1.0.17 sent to the Chrome Web Store, Firefox signed c9c4cf2). An exam's switch says "Saving…" while the change goes into Brightspace, then Protected / Not protected; "Brightspace refused" (reason on hover, bs_quizzes.sync_err) when Brightspace did not take it; "On/Off · 1 click left" with Sync now (class page too) when no sync can run from that browser. sync.js: asked for, it first writes only what Brightspace lacks (POST /sync-state), then the full read. test_switch_status.mjs (50), test_dashboard_sync_now S7-S8, test_prof_extension E9. No files held.
