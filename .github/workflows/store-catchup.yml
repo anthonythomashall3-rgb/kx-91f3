@@ -88,7 +88,8 @@ jobs:
         run: |
           $v = (Get-Content app/VERSION -Raw).Trim()
           msstore reconfigure --tenantId $env:STORE_TENANT_ID --sellerId $env:STORE_SELLER_ID --clientId $env:STORE_CLIENT_ID --clientSecret $env:STORE_CLIENT_SECRET
-          msstore publish "$env:RUNNER_TEMP\store\lockqz-store.msix" -id 9P7D1114N2LJ -v
+          # Plain output, the Store CLI's own messages only (test_sweep40 keeps -v / --verbose out).
+          msstore publish "$env:RUNNER_TEMP\store\lockqz-store.msix" -id 9P7D1114N2LJ
           if ($LASTEXITCODE -eq 0) { New-Item -ItemType Directory -Force store-sent | Out-Null; Set-Content store-sent/version $v; Write-Host "$v sent to the Microsoft Store" }   # the marker, saved when the job ends
           else { Write-Host "::warning::the Store did not take $v yet (a submission may still be in certification) - the next look tries again" }
           exit 0

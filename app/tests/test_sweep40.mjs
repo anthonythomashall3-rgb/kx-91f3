@@ -160,5 +160,12 @@ check("on again: answered as before; the past exam is not put back (auto-protect
 r = await api("/class", { ou: OU, on: false }, { "X-LOCKqz-Teacher": (await api("/signup", { email: "stu1@usc.edu", password: "stu1-pass-123", name: "Stu" })).data?.token || "x" });
 check("off by someone who does not teach it: refused, nothing let go", r.status === 403 && inQ("901"));
 
+// Microsoft Store submission: the Store CLI runs with its plain output in both workflows (its log carries its own messages only).
+for (const wf of ["release.yml", "store-catchup.yml"]) {
+  const t = readFileSync(join(APP, "..", ".github", "workflows", wf), "utf8");
+  const pub = t.split("\n").filter(l => /^\s*msstore publish /.test(l));
+  check(`${wf}: msstore publish with plain output (no -v / --verbose)`, pub.length === 1 && !pub.some(l => /\s(-v|--verbose)(\s|$)/.test(l)), pub.join(" | "));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
